@@ -1,4 +1,4 @@
-use agent_client_protocol as acp;
+use agent_client_protocol_schema as acp;
 use jsonrpcmsg::Params;
 
 use crate::{

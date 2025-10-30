@@ -1,4 +1,4 @@
-use agent_client_protocol::{self as acp, NewSessionRequest};
+use agent_client_protocol_schema::{self as acp, NewSessionRequest};
 use futures::channel::mpsc;
 use futures::{FutureExt, future::BoxFuture};
 use futures::{SinkExt, StreamExt};
@@ -191,9 +191,9 @@ impl McpServiceRegistry {
 
     async fn handle_connect_request(
         &self,
-        result: Result<SuccessorRequest<McpConnectRequest>, agent_client_protocol::Error>,
+        result: Result<SuccessorRequest<McpConnectRequest>, agent_client_protocol_schema::Error>,
         request_cx: JsonRpcRequestCx<serde_json::Value>,
-    ) -> Result<Handled<JsonRpcRequestCx<serde_json::Value>>, agent_client_protocol::Error> {
+    ) -> Result<Handled<JsonRpcRequestCx<serde_json::Value>>, agent_client_protocol_schema::Error> {
         // Check if we parsed this message successfully.
         let SuccessorRequest { request } = match result {
             Ok(request) => request,
@@ -294,10 +294,10 @@ impl McpServiceRegistry {
         &self,
         result: Result<
             SuccessorRequest<McpOverAcpRequest<UntypedMessage>>,
-            agent_client_protocol::Error,
+            agent_client_protocol_schema::Error,
         >,
         request_cx: JsonRpcRequestCx<serde_json::Value>,
-    ) -> Result<Handled<JsonRpcRequestCx<serde_json::Value>>, agent_client_protocol::Error> {
+    ) -> Result<Handled<JsonRpcRequestCx<serde_json::Value>>, agent_client_protocol_schema::Error> {
         // Check if we parsed this message successfully.
         let SuccessorRequest { request } = match result {
             Ok(request) => request,
@@ -324,10 +324,10 @@ impl McpServiceRegistry {
         &self,
         result: Result<
             SuccessorNotification<McpOverAcpNotification<UntypedMessage>>,
-            agent_client_protocol::Error,
+            agent_client_protocol_schema::Error,
         >,
         notification_cx: JsonRpcConnectionCx,
-    ) -> Result<Handled<JsonRpcConnectionCx>, agent_client_protocol::Error> {
+    ) -> Result<Handled<JsonRpcConnectionCx>, agent_client_protocol_schema::Error> {
         // Check if we parsed this message successfully.
         let SuccessorNotification { notification } = match result {
             Ok(request) => request,
@@ -357,10 +357,10 @@ impl McpServiceRegistry {
         &self,
         result: Result<
             SuccessorNotification<McpDisconnectNotification>,
-            agent_client_protocol::Error,
+            agent_client_protocol_schema::Error,
         >,
         notification_cx: JsonRpcConnectionCx,
-    ) -> Result<Handled<JsonRpcConnectionCx>, agent_client_protocol::Error> {
+    ) -> Result<Handled<JsonRpcConnectionCx>, agent_client_protocol_schema::Error> {
         // Check if we parsed this message successfully.
         let SuccessorNotification { notification } = match result {
             Ok(request) => request,
@@ -380,9 +380,9 @@ impl McpServiceRegistry {
 
     async fn handle_new_session_request(
         &self,
-        result: Result<NewSessionRequest, agent_client_protocol::Error>,
+        result: Result<NewSessionRequest, agent_client_protocol_schema::Error>,
         request_cx: JsonRpcRequestCx<serde_json::Value>,
-    ) -> Result<Handled<JsonRpcRequestCx<serde_json::Value>>, agent_client_protocol::Error> {
+    ) -> Result<Handled<JsonRpcRequestCx<serde_json::Value>>, agent_client_protocol_schema::Error> {
         // Check if we parsed this message successfully.
         let mut request = match result {
             Ok(request) => request,
@@ -419,7 +419,7 @@ impl JsonRpcHandler for McpServiceRegistry {
     async fn handle_message(
         &mut self,
         message: sacp::MessageAndCx,
-    ) -> Result<sacp::Handled<sacp::MessageAndCx>, agent_client_protocol::Error> {
+    ) -> Result<sacp::Handled<sacp::MessageAndCx>, agent_client_protocol_schema::Error> {
         match message {
             sacp::MessageAndCx::Request(msg, mut cx) => {
                 let params = msg.params();

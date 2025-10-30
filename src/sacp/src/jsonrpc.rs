@@ -1,6 +1,6 @@
 //! Core JSON-RPC server support.
 
-use agent_client_protocol as acp;
+use agent_client_protocol_schema as acp;
 use serde::{Deserialize, Serialize};
 use std::fmt::Debug;
 use std::panic::Location;
@@ -748,21 +748,21 @@ impl JsonRpcMessage for UntypedMessage {
         &self.method
     }
 
-    fn into_untyped_message(self) -> Result<UntypedMessage, agent_client_protocol::Error> {
+    fn into_untyped_message(self) -> Result<UntypedMessage, agent_client_protocol_schema::Error> {
         Ok(self)
     }
 
     fn parse_request(
         method: &str,
         params: &impl Serialize,
-    ) -> Option<Result<Self, agent_client_protocol::Error>> {
+    ) -> Option<Result<Self, agent_client_protocol_schema::Error>> {
         Some(UntypedMessage::new(method, params))
     }
 
     fn parse_notification(
         method: &str,
         params: &impl Serialize,
-    ) -> Option<Result<Self, agent_client_protocol::Error>> {
+    ) -> Option<Result<Self, agent_client_protocol_schema::Error>> {
         Some(UntypedMessage::new(method, params))
     }
 }

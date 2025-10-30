@@ -16,14 +16,14 @@ use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
 /// Test helper to block and wait for a JSON-RPC response.
 async fn recv<R: JsonRpcResponsePayload + Send>(
     response: JsonRpcResponse<R>,
-) -> Result<R, agent_client_protocol::Error> {
+) -> Result<R, agent_client_protocol_schema::Error> {
     let (tx, rx) = tokio::sync::oneshot::channel();
     response.await_when_result_received(async move |result| {
         tx.send(result)
-            .map_err(|_| agent_client_protocol::Error::internal_error())
+            .map_err(|_| agent_client_protocol_schema::Error::internal_error())
     })?;
     rx.await
-        .map_err(|_| agent_client_protocol::Error::internal_error())?
+        .map_err(|_| agent_client_protocol_schema::Error::internal_error())?
 }
 
 /// Helper to set up a client-server pair for testing.
@@ -52,7 +52,7 @@ struct PingRequest {
 }
 
 impl JsonRpcMessage for PingRequest {
-    fn into_untyped_message(self) -> Result<sacp::UntypedMessage, agent_client_protocol::Error> {
+    fn into_untyped_message(self) -> Result<sacp::UntypedMessage, agent_client_protocol_schema::Error> {
         let method = self.method().to_string();
         sacp::UntypedMessage::new(&method, self)
     }
@@ -64,7 +64,7 @@ impl JsonRpcMessage for PingRequest {
     fn parse_request(
         method: &str,
         params: &impl serde::Serialize,
-    ) -> Option<Result<Self, agent_client_protocol::Error>> {
+    ) -> Option<Result<Self, agent_client_protocol_schema::Error>> {
         if method != "ping" {
             return None;
         }
@@ -74,7 +74,7 @@ impl JsonRpcMessage for PingRequest {
     fn parse_notification(
         _method: &str,
         _params: &impl serde::Serialize,
-    ) -> Option<Result<Self, agent_client_protocol::Error>> {
+    ) -> Option<Result<Self, agent_client_protocol_schema::Error>> {
         // This is a request, not a notification
         None
     }
@@ -91,14 +91,14 @@ struct PongResponse {
 }
 
 impl JsonRpcResponsePayload for PongResponse {
-    fn into_json(self, _method: &str) -> Result<serde_json::Value, agent_client_protocol::Error> {
-        serde_json::to_value(self).map_err(agent_client_protocol::Error::into_internal_error)
+    fn into_json(self, _method: &str) -> Result<serde_json::Value, agent_client_protocol_schema::Error> {
+        serde_json::to_value(self).map_err(agent_client_protocol_schema::Error::into_internal_error)
     }
 
     fn from_value(
         _method: &str,
         value: serde_json::Value,
-    ) -> Result<Self, agent_client_protocol::Error> {
+    ) -> Result<Self, agent_client_protocol_schema::Error> {
         sacp::util::json_cast(&value)
     }
 }
@@ -134,7 +134,7 @@ async fn test_hello_world() {
             // Use the client to send a ping and wait for a pong
             let result = client
                 .with_client(
-                    async |cx| -> std::result::Result<(), agent_client_protocol::Error> {
+                    async |cx| -> std::result::Result<(), agent_client_protocol_schema::Error> {
                         let request = PingRequest {
                             message: "hello world".to_string(),
                         };
@@ -162,7 +162,7 @@ struct LogNotification {
 }
 
 impl JsonRpcMessage for LogNotification {
-    fn into_untyped_message(self) -> Result<sacp::UntypedMessage, agent_client_protocol::Error> {
+    fn into_untyped_message(self) -> Result<sacp::UntypedMessage, agent_client_protocol_schema::Error> {
         let method = self.method().to_string();
         sacp::UntypedMessage::new(&method, self)
     }
@@ -174,7 +174,7 @@ impl JsonRpcMessage for LogNotification {
     fn parse_request(
         _method: &str,
         _params: &impl serde::Serialize,
-    ) -> Option<Result<Self, agent_client_protocol::Error>> {
+    ) -> Option<Result<Self, agent_client_protocol_schema::Error>> {
         // This is a notification, not a request
         None
     }
@@ -182,7 +182,7 @@ impl JsonRpcMessage for LogNotification {
     fn parse_notification(
         method: &str,
         params: &impl serde::Serialize,
-    ) -> Option<Result<Self, agent_client_protocol::Error>> {
+    ) -> Option<Result<Self, agent_client_protocol_schema::Error>> {
         if method != "log" {
             return None;
         }
@@ -224,7 +224,7 @@ async fn test_notification() {
 
             let result = client
                 .with_client(
-                    async |cx| -> std::result::Result<(), agent_client_protocol::Error> {
+                    async |cx| -> std::result::Result<(), agent_client_protocol_schema::Error> {
                         // Send a notification (no response expected)
                         cx.send_notification(LogNotification {
                             message: "test log 1".to_string(),
@@ -293,7 +293,7 @@ async fn test_multiple_sequential_requests() {
 
             let result = client
                 .with_client(
-                    async |cx| -> std::result::Result<(), agent_client_protocol::Error> {
+                    async |cx| -> std::result::Result<(), agent_client_protocol_schema::Error> {
                         // Send multiple requests sequentially
                         for i in 1..=5 {
                             let request = PingRequest {
@@ -346,7 +346,7 @@ async fn test_concurrent_requests() {
 
             let result = client
                 .with_client(
-                    async |cx| -> std::result::Result<(), agent_client_protocol::Error> {
+                    async |cx| -> std::result::Result<(), agent_client_protocol_schema::Error> {
                         // Send multiple requests concurrently
                         let mut responses = Vec::new();
 

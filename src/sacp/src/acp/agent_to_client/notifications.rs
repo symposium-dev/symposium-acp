@@ -1,4 +1,4 @@
-use agent_client_protocol::{self as acp, SessionNotification};
+use agent_client_protocol_schema::{self as acp, SessionNotification};
 use serde::Serialize;
 
 use crate::jsonrpc::{JsonRpcMessage, JsonRpcNotification};

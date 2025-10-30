@@ -1,9 +1,9 @@
-use agent_client_protocol::{AgentCapabilities, InitializeRequest, InitializeResponse};
+use agent_client_protocol_schema::{AgentCapabilities, InitializeRequest, InitializeResponse};
 use sacp::{JsonRpcConnection, MessageAndCx, UntypedMessage};
 use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
 
 #[tokio::main]
-async fn main() -> Result<(), agent_client_protocol::Error> {
+async fn main() -> Result<(), agent_client_protocol_schema::Error> {
     JsonRpcConnection::new(
         tokio::io::stdout().compat_write(),
         tokio::io::stdin().compat(),

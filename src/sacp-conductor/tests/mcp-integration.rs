@@ -7,7 +7,7 @@
 
 mod mcp_integration;
 
-use agent_client_protocol::{
+use agent_client_protocol_schema::{
     self as acp, ContentBlock, InitializeRequest, NewSessionRequest, PromptRequest,
     SessionNotification, TextContent,
 };
@@ -23,14 +23,14 @@ use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
 /// Test helper to receive a JSON-RPC response
 async fn recv<R: sacp::JsonRpcResponsePayload + Send>(
     response: sacp::JsonRpcResponse<R>,
-) -> Result<R, agent_client_protocol::Error> {
+) -> Result<R, agent_client_protocol_schema::Error> {
     let (tx, rx) = tokio::sync::oneshot::channel();
     response.await_when_result_received(async move |result| {
         tx.send(result)
-            .map_err(|_| agent_client_protocol::Error::internal_error())
+            .map_err(|_| agent_client_protocol_schema::Error::internal_error())
     })?;
     rx.await
-        .map_err(|_| agent_client_protocol::Error::internal_error())?
+        .map_err(|_| agent_client_protocol_schema::Error::internal_error())?
 }
 
 fn conductor_command() -> Vec<String> {

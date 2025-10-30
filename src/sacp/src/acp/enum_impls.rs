@@ -7,7 +7,7 @@
 //! - AgentRequest/ClientResponse (messages clients receive/send)
 //! - AgentNotification (notifications clients receive)
 
-use agent_client_protocol::{AgentNotification, AgentRequest, ClientNotification, ClientRequest};
+use agent_client_protocol_schema::{AgentNotification, AgentRequest, ClientNotification, ClientRequest};
 use serde::Serialize;
 
 use crate::jsonrpc::{JsonRpcMessage, JsonRpcNotification, JsonRpcRequest};
@@ -18,7 +18,7 @@ use crate::util::json_cast;
 // ============================================================================
 
 impl JsonRpcMessage for ClientRequest {
-    fn into_untyped_message(self) -> Result<crate::UntypedMessage, agent_client_protocol::Error> {
+    fn into_untyped_message(self) -> Result<crate::UntypedMessage, agent_client_protocol_schema::Error> {
         let method = self.method().to_string();
         crate::UntypedMessage::new(&method, self)
     }
@@ -38,7 +38,7 @@ impl JsonRpcMessage for ClientRequest {
     fn parse_request(
         method: &str,
         params: &impl Serialize,
-    ) -> Option<Result<Self, agent_client_protocol::Error>> {
+    ) -> Option<Result<Self, agent_client_protocol_schema::Error>> {
         let result = match method {
             "initialize" => json_cast(params).map(ClientRequest::InitializeRequest),
             "authenticate" => json_cast(params).map(ClientRequest::AuthenticateRequest),
@@ -49,8 +49,8 @@ impl JsonRpcMessage for ClientRequest {
             _ => {
                 // Check for extension methods (prefixed with underscore)
                 if let Some(custom_method) = method.strip_prefix('_') {
-                    json_cast(params).map(|ext_req: agent_client_protocol::ExtRequest| {
-                        ClientRequest::ExtMethodRequest(agent_client_protocol::ExtRequest {
+                    json_cast(params).map(|ext_req: agent_client_protocol_schema::ExtRequest| {
+                        ClientRequest::ExtMethodRequest(agent_client_protocol_schema::ExtRequest {
                             method: custom_method.to_string().into(),
                             params: ext_req.params,
                         })
@@ -67,7 +67,7 @@ impl JsonRpcMessage for ClientRequest {
     fn parse_notification(
         _method: &str,
         _params: &impl Serialize,
-    ) -> Option<Result<Self, agent_client_protocol::Error>> {
+    ) -> Option<Result<Self, agent_client_protocol_schema::Error>> {
         // ClientRequest is for requests only, not notifications
         None
     }
@@ -78,7 +78,7 @@ impl JsonRpcRequest for ClientRequest {
 }
 
 impl JsonRpcMessage for ClientNotification {
-    fn into_untyped_message(self) -> Result<crate::UntypedMessage, agent_client_protocol::Error> {
+    fn into_untyped_message(self) -> Result<crate::UntypedMessage, agent_client_protocol_schema::Error> {
         let method = self.method().to_string();
         crate::UntypedMessage::new(&method, self)
     }
@@ -93,7 +93,7 @@ impl JsonRpcMessage for ClientNotification {
     fn parse_request(
         _method: &str,
         _params: &impl Serialize,
-    ) -> Option<Result<Self, agent_client_protocol::Error>> {
+    ) -> Option<Result<Self, agent_client_protocol_schema::Error>> {
         // ClientNotification is for notifications only, not requests
         None
     }
@@ -101,15 +101,15 @@ impl JsonRpcMessage for ClientNotification {
     fn parse_notification(
         method: &str,
         params: &impl Serialize,
-    ) -> Option<Result<Self, agent_client_protocol::Error>> {
+    ) -> Option<Result<Self, agent_client_protocol_schema::Error>> {
         let result = match method {
             "session/cancel" => json_cast(params).map(ClientNotification::CancelNotification),
             _ => {
                 // Check for extension notifications (prefixed with underscore)
                 if let Some(custom_method) = method.strip_prefix('_') {
-                    json_cast(params).map(|ext_notif: agent_client_protocol::ExtNotification| {
+                    json_cast(params).map(|ext_notif: agent_client_protocol_schema::ExtNotification| {
                         ClientNotification::ExtNotification(
-                            agent_client_protocol::ExtNotification {
+                            agent_client_protocol_schema::ExtNotification {
                                 method: custom_method.to_string().into(),
                                 params: ext_notif.params,
                             },
@@ -132,7 +132,7 @@ impl JsonRpcNotification for ClientNotification {}
 // ============================================================================
 
 impl JsonRpcMessage for AgentRequest {
-    fn into_untyped_message(self) -> Result<crate::UntypedMessage, agent_client_protocol::Error> {
+    fn into_untyped_message(self) -> Result<crate::UntypedMessage, agent_client_protocol_schema::Error> {
         let method = self.method().to_string();
         crate::UntypedMessage::new(&method, self)
     }
@@ -154,7 +154,7 @@ impl JsonRpcMessage for AgentRequest {
     fn parse_request(
         method: &str,
         params: &impl Serialize,
-    ) -> Option<Result<Self, agent_client_protocol::Error>> {
+    ) -> Option<Result<Self, agent_client_protocol_schema::Error>> {
         let result = match method {
             "fs/write_text_file" => json_cast(params).map(AgentRequest::WriteTextFileRequest),
             "fs/read_text_file" => json_cast(params).map(AgentRequest::ReadTextFileRequest),
@@ -171,8 +171,8 @@ impl JsonRpcMessage for AgentRequest {
             _ => {
                 // Check for extension methods (prefixed with underscore)
                 if let Some(custom_method) = method.strip_prefix('_') {
-                    json_cast(params).map(|ext_req: agent_client_protocol::ExtRequest| {
-                        AgentRequest::ExtMethodRequest(agent_client_protocol::ExtRequest {
+                    json_cast(params).map(|ext_req: agent_client_protocol_schema::ExtRequest| {
+                        AgentRequest::ExtMethodRequest(agent_client_protocol_schema::ExtRequest {
                             method: custom_method.to_string().into(),
                             params: ext_req.params,
                         })
@@ -189,7 +189,7 @@ impl JsonRpcMessage for AgentRequest {
     fn parse_notification(
         _method: &str,
         _params: &impl Serialize,
-    ) -> Option<Result<Self, agent_client_protocol::Error>> {
+    ) -> Option<Result<Self, agent_client_protocol_schema::Error>> {
         // AgentRequest is for requests only, not notifications
         None
     }
@@ -200,7 +200,7 @@ impl JsonRpcRequest for AgentRequest {
 }
 
 impl JsonRpcMessage for AgentNotification {
-    fn into_untyped_message(self) -> Result<crate::UntypedMessage, agent_client_protocol::Error> {
+    fn into_untyped_message(self) -> Result<crate::UntypedMessage, agent_client_protocol_schema::Error> {
         let method = self.method().to_string();
         crate::UntypedMessage::new(&method, self)
     }
@@ -215,7 +215,7 @@ impl JsonRpcMessage for AgentNotification {
     fn parse_request(
         _method: &str,
         _params: &impl Serialize,
-    ) -> Option<Result<Self, agent_client_protocol::Error>> {
+    ) -> Option<Result<Self, agent_client_protocol_schema::Error>> {
         // AgentNotification is for notifications only, not requests
         None
     }
@@ -223,14 +223,14 @@ impl JsonRpcMessage for AgentNotification {
     fn parse_notification(
         method: &str,
         params: &impl Serialize,
-    ) -> Option<Result<Self, agent_client_protocol::Error>> {
+    ) -> Option<Result<Self, agent_client_protocol_schema::Error>> {
         let result = match method {
             "session/update" => json_cast(params).map(AgentNotification::SessionNotification),
             _ => {
                 // Check for extension notifications (prefixed with underscore)
                 if let Some(custom_method) = method.strip_prefix('_') {
-                    json_cast(params).map(|ext_notif: agent_client_protocol::ExtNotification| {
-                        AgentNotification::ExtNotification(agent_client_protocol::ExtNotification {
+                    json_cast(params).map(|ext_notif: agent_client_protocol_schema::ExtNotification| {
+                        AgentNotification::ExtNotification(agent_client_protocol_schema::ExtNotification {
                             method: custom_method.to_string().into(),
                             params: ext_notif.params,
                         })

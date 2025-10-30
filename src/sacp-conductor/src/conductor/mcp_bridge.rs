@@ -1,8 +1,8 @@
 use std::{collections::HashMap, net::SocketAddr};
 
 use sacp_proxy::McpDisconnectNotification;
-use agent_client_protocol as acp;
-use agent_client_protocol::McpServer;
+use agent_client_protocol_schema as acp;
+use agent_client_protocol_schema::McpServer;
 use futures::{SinkExt, StreamExt as _, channel::mpsc};
 use sacp::{JsonRpcConnection, JsonRpcConnectionCx, MessageAndCx};
 use tokio::net::TcpStream;
@@ -51,7 +51,7 @@ impl McpBridgeListeners {
         conductor_tx: &mpsc::Sender<ConductorMessage>,
         conductor_command: &[String],
     ) -> Result<(), acp::Error> {
-        use agent_client_protocol::McpServer;
+        use agent_client_protocol_schema::McpServer;
 
         let McpServer::Http { name, url, headers } = mcp_server else {
             return Ok(());

@@ -16,14 +16,14 @@ use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
 /// Test helper to block and wait for a JSON-RPC response.
 async fn recv<R: JsonRpcResponsePayload + Send>(
     response: JsonRpcResponse<R>,
-) -> Result<R, agent_client_protocol::Error> {
+) -> Result<R, agent_client_protocol_schema::Error> {
     let (tx, rx) = tokio::sync::oneshot::channel();
     response.await_when_result_received(async move |result| {
         tx.send(result)
-            .map_err(|_| agent_client_protocol::Error::internal_error())
+            .map_err(|_| agent_client_protocol_schema::Error::internal_error())
     })?;
     rx.await
-        .map_err(|_| agent_client_protocol::Error::internal_error())?
+        .map_err(|_| agent_client_protocol_schema::Error::internal_error())?
 }
 
 // ============================================================================
@@ -36,7 +36,7 @@ struct FooRequest {
 }
 
 impl JsonRpcMessage for FooRequest {
-    fn into_untyped_message(self) -> Result<sacp::UntypedMessage, agent_client_protocol::Error> {
+    fn into_untyped_message(self) -> Result<sacp::UntypedMessage, agent_client_protocol_schema::Error> {
         let method = self.method().to_string();
         sacp::UntypedMessage::new(&method, self)
     }
@@ -48,7 +48,7 @@ impl JsonRpcMessage for FooRequest {
     fn parse_request(
         method: &str,
         params: &impl serde::Serialize,
-    ) -> Option<Result<Self, agent_client_protocol::Error>> {
+    ) -> Option<Result<Self, agent_client_protocol_schema::Error>> {
         if method != "foo" {
             return None;
         }
@@ -58,7 +58,7 @@ impl JsonRpcMessage for FooRequest {
     fn parse_notification(
         _method: &str,
         _params: &impl serde::Serialize,
-    ) -> Option<Result<Self, agent_client_protocol::Error>> {
+    ) -> Option<Result<Self, agent_client_protocol_schema::Error>> {
         // This is a request, not a notification
         None
     }
@@ -74,14 +74,14 @@ struct FooResponse {
 }
 
 impl JsonRpcResponsePayload for FooResponse {
-    fn into_json(self, _method: &str) -> Result<serde_json::Value, agent_client_protocol::Error> {
-        serde_json::to_value(self).map_err(agent_client_protocol::Error::into_internal_error)
+    fn into_json(self, _method: &str) -> Result<serde_json::Value, agent_client_protocol_schema::Error> {
+        serde_json::to_value(self).map_err(agent_client_protocol_schema::Error::into_internal_error)
     }
 
     fn from_value(
         _method: &str,
         value: serde_json::Value,
-    ) -> Result<Self, agent_client_protocol::Error> {
+    ) -> Result<Self, agent_client_protocol_schema::Error> {
         sacp::util::json_cast(&value)
     }
 }
@@ -92,7 +92,7 @@ struct BarRequest {
 }
 
 impl JsonRpcMessage for BarRequest {
-    fn into_untyped_message(self) -> Result<sacp::UntypedMessage, agent_client_protocol::Error> {
+    fn into_untyped_message(self) -> Result<sacp::UntypedMessage, agent_client_protocol_schema::Error> {
         let method = self.method().to_string();
         sacp::UntypedMessage::new(&method, self)
     }
@@ -104,7 +104,7 @@ impl JsonRpcMessage for BarRequest {
     fn parse_request(
         method: &str,
         params: &impl serde::Serialize,
-    ) -> Option<Result<Self, agent_client_protocol::Error>> {
+    ) -> Option<Result<Self, agent_client_protocol_schema::Error>> {
         if method != "bar" {
             return None;
         }
@@ -114,7 +114,7 @@ impl JsonRpcMessage for BarRequest {
     fn parse_notification(
         _method: &str,
         _params: &impl serde::Serialize,
-    ) -> Option<Result<Self, agent_client_protocol::Error>> {
+    ) -> Option<Result<Self, agent_client_protocol_schema::Error>> {
         // This is a request, not a notification
         None
     }
@@ -130,14 +130,14 @@ struct BarResponse {
 }
 
 impl JsonRpcResponsePayload for BarResponse {
-    fn into_json(self, _method: &str) -> Result<serde_json::Value, agent_client_protocol::Error> {
-        serde_json::to_value(self).map_err(agent_client_protocol::Error::into_internal_error)
+    fn into_json(self, _method: &str) -> Result<serde_json::Value, agent_client_protocol_schema::Error> {
+        serde_json::to_value(self).map_err(agent_client_protocol_schema::Error::into_internal_error)
     }
 
     fn from_value(
         _method: &str,
         value: serde_json::Value,
-    ) -> Result<Self, agent_client_protocol::Error> {
+    ) -> Result<Self, agent_client_protocol_schema::Error> {
         sacp::util::json_cast(&value)
     }
 }
@@ -184,14 +184,14 @@ async fn test_multiple_handlers_different_methods() {
 
             let result = client
                 .with_client(
-                    async |cx| -> std::result::Result<(), agent_client_protocol::Error> {
+                    async |cx| -> std::result::Result<(), agent_client_protocol_schema::Error> {
                         // Test foo request
                         let foo_response = recv(cx.send_request(FooRequest {
                             value: "test1".to_string(),
                         }))
                         .await
                         .map_err(
-                            |e| -> agent_client_protocol::Error {
+                            |e| -> agent_client_protocol_schema::Error {
                                 sacp::util::internal_error(format!("Foo request failed: {e:?}"))
                             },
                         )?;
@@ -203,7 +203,7 @@ async fn test_multiple_handlers_different_methods() {
                         }))
                         .await
                         .map_err(
-                            |e| -> agent_client_protocol::Error {
+                            |e| -> agent_client_protocol_schema::Error {
                                 sacp::util::internal_error(format!("Bar request failed: {:?}", e))
                             },
                         )?;
@@ -229,7 +229,7 @@ struct TrackRequest {
 }
 
 impl JsonRpcMessage for TrackRequest {
-    fn into_untyped_message(self) -> Result<sacp::UntypedMessage, agent_client_protocol::Error> {
+    fn into_untyped_message(self) -> Result<sacp::UntypedMessage, agent_client_protocol_schema::Error> {
         let method = self.method().to_string();
         sacp::UntypedMessage::new(&method, self)
     }
@@ -241,7 +241,7 @@ impl JsonRpcMessage for TrackRequest {
     fn parse_request(
         method: &str,
         params: &impl serde::Serialize,
-    ) -> Option<Result<Self, agent_client_protocol::Error>> {
+    ) -> Option<Result<Self, agent_client_protocol_schema::Error>> {
         if method != "track" {
             return None;
         }
@@ -251,7 +251,7 @@ impl JsonRpcMessage for TrackRequest {
     fn parse_notification(
         _method: &str,
         _params: &impl serde::Serialize,
-    ) -> Option<Result<Self, agent_client_protocol::Error>> {
+    ) -> Option<Result<Self, agent_client_protocol_schema::Error>> {
         // This is a request, not a notification
         None
     }
@@ -311,7 +311,7 @@ async fn test_handler_priority_ordering() {
 
             let result = client
                 .with_client(
-                    async |cx| -> std::result::Result<(), agent_client_protocol::Error> {
+                    async |cx| -> std::result::Result<(), agent_client_protocol_schema::Error> {
                         let response = recv(cx.send_request(TrackRequest {
                             value: "test".to_string(),
                         }))
@@ -348,7 +348,7 @@ struct Method1Request {
 }
 
 impl JsonRpcMessage for Method1Request {
-    fn into_untyped_message(self) -> Result<sacp::UntypedMessage, agent_client_protocol::Error> {
+    fn into_untyped_message(self) -> Result<sacp::UntypedMessage, agent_client_protocol_schema::Error> {
         let method = self.method().to_string();
         sacp::UntypedMessage::new(&method, self)
     }
@@ -360,7 +360,7 @@ impl JsonRpcMessage for Method1Request {
     fn parse_request(
         method: &str,
         params: &impl serde::Serialize,
-    ) -> Option<Result<Self, agent_client_protocol::Error>> {
+    ) -> Option<Result<Self, agent_client_protocol_schema::Error>> {
         if method != "method1" {
             return None;
         }
@@ -370,7 +370,7 @@ impl JsonRpcMessage for Method1Request {
     fn parse_notification(
         _method: &str,
         _params: &impl serde::Serialize,
-    ) -> Option<Result<Self, agent_client_protocol::Error>> {
+    ) -> Option<Result<Self, agent_client_protocol_schema::Error>> {
         // This is a request, not a notification
         None
     }
@@ -386,7 +386,7 @@ struct Method2Request {
 }
 
 impl JsonRpcMessage for Method2Request {
-    fn into_untyped_message(self) -> Result<sacp::UntypedMessage, agent_client_protocol::Error> {
+    fn into_untyped_message(self) -> Result<sacp::UntypedMessage, agent_client_protocol_schema::Error> {
         let method = self.method().to_string();
         sacp::UntypedMessage::new(&method, self)
     }
@@ -398,7 +398,7 @@ impl JsonRpcMessage for Method2Request {
     fn parse_request(
         method: &str,
         params: &impl serde::Serialize,
-    ) -> Option<Result<Self, agent_client_protocol::Error>> {
+    ) -> Option<Result<Self, agent_client_protocol_schema::Error>> {
         if method != "method2" {
             return None;
         }
@@ -408,7 +408,7 @@ impl JsonRpcMessage for Method2Request {
     fn parse_notification(
         _method: &str,
         _params: &impl serde::Serialize,
-    ) -> Option<Result<Self, agent_client_protocol::Error>> {
+    ) -> Option<Result<Self, agent_client_protocol_schema::Error>> {
         // This is a request, not a notification
         None
     }
@@ -468,7 +468,7 @@ async fn test_fallthrough_behavior() {
 
             let result = client
                 .with_client(
-                    async |cx| -> std::result::Result<(), agent_client_protocol::Error> {
+                    async |cx| -> std::result::Result<(), agent_client_protocol_schema::Error> {
                         // Send method2 - should fallthrough handler1 to handler2
                         let response = recv(cx.send_request(Method2Request {
                             value: "fallthrough".to_string(),
@@ -533,7 +533,7 @@ async fn test_no_handler_claims() {
 
             let result = client
                 .with_client(
-                    async |cx| -> std::result::Result<(), agent_client_protocol::Error> {
+                    async |cx| -> std::result::Result<(), agent_client_protocol_schema::Error> {
                         // Send "bar" request which no handler claims
                         let response_result = recv(cx.send_request(BarRequest {
                             value: "unclaimed".to_string(),
@@ -563,7 +563,7 @@ struct EventNotification {
 }
 
 impl JsonRpcMessage for EventNotification {
-    fn into_untyped_message(self) -> Result<sacp::UntypedMessage, agent_client_protocol::Error> {
+    fn into_untyped_message(self) -> Result<sacp::UntypedMessage, agent_client_protocol_schema::Error> {
         let method = self.method().to_string();
         sacp::UntypedMessage::new(&method, self)
     }
@@ -575,7 +575,7 @@ impl JsonRpcMessage for EventNotification {
     fn parse_request(
         _method: &str,
         _params: &impl serde::Serialize,
-    ) -> Option<Result<Self, agent_client_protocol::Error>> {
+    ) -> Option<Result<Self, agent_client_protocol_schema::Error>> {
         // This is a notification, not a request
         None
     }
@@ -583,7 +583,7 @@ impl JsonRpcMessage for EventNotification {
     fn parse_notification(
         method: &str,
         params: &impl serde::Serialize,
-    ) -> Option<Result<Self, agent_client_protocol::Error>> {
+    ) -> Option<Result<Self, agent_client_protocol_schema::Error>> {
         if method != "event" {
             return None;
         }
@@ -630,7 +630,7 @@ async fn test_handler_claims_notification() {
 
             let result = client
                 .with_client(
-                    async |cx| -> std::result::Result<(), agent_client_protocol::Error> {
+                    async |cx| -> std::result::Result<(), agent_client_protocol_schema::Error> {
                         cx.send_notification(EventNotification {
                             event: "test_event".to_string(),
                         })

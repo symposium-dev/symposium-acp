@@ -1,4 +1,4 @@
-use agent_client_protocol as acp;
+use agent_client_protocol_schema as acp;
 use sacp::{
     JsonRpcMessage, JsonRpcNotification, JsonRpcRequest, JsonRpcResponsePayload, UntypedMessage,
     util::json_cast,
@@ -48,14 +48,14 @@ pub struct McpConnectResponse {
 }
 
 impl JsonRpcResponsePayload for McpConnectResponse {
-    fn into_json(self, _method: &str) -> Result<serde_json::Value, agent_client_protocol::Error> {
+    fn into_json(self, _method: &str) -> Result<serde_json::Value, agent_client_protocol_schema::Error> {
         serde_json::to_value(self).map_err(acp::Error::into_internal_error)
     }
 
     fn from_value(
         _method: &str,
         value: serde_json::Value,
-    ) -> Result<Self, agent_client_protocol::Error> {
+    ) -> Result<Self, agent_client_protocol_schema::Error> {
         serde_json::from_value(value).map_err(|_| acp::Error::invalid_params())
     }
 }

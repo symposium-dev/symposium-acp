@@ -1,4 +1,4 @@
-use agent_client_protocol::{self as acp, InitializeRequest, InitializeResponse};
+use agent_client_protocol_schema::{self as acp, InitializeRequest, InitializeResponse};
 use futures::{AsyncRead, AsyncWrite};
 use sacp::{
     ChainHandler, Handled, JsonRpcConnection, JsonRpcConnectionCx, JsonRpcHandler, JsonRpcMessage,
@@ -269,7 +269,7 @@ where
     async fn handle_message(
         &mut self,
         message: sacp::MessageAndCx,
-    ) -> Result<Handled<sacp::MessageAndCx>, agent_client_protocol::Error> {
+    ) -> Result<Handled<sacp::MessageAndCx>, agent_client_protocol_schema::Error> {
         let MessageAndCx::Request(request, cx) = message else {
             return Ok(Handled::No(message));
         };
@@ -332,7 +332,7 @@ where
     async fn handle_message(
         &mut self,
         message: sacp::MessageAndCx,
-    ) -> Result<Handled<sacp::MessageAndCx>, agent_client_protocol::Error> {
+    ) -> Result<Handled<sacp::MessageAndCx>, agent_client_protocol_schema::Error> {
         let MessageAndCx::Notification(message, cx) = message else {
             return Ok(Handled::No(message));
         };
@@ -376,7 +376,7 @@ impl JsonRpcHandler for ProxyHandler {
     async fn handle_message(
         &mut self,
         message: sacp::MessageAndCx,
-    ) -> Result<Handled<sacp::MessageAndCx>, agent_client_protocol::Error> {
+    ) -> Result<Handled<sacp::MessageAndCx>, agent_client_protocol_schema::Error> {
         tracing::debug!(
             message = ?message.message(),
             "ProxyHandler::handle_request"
@@ -445,7 +445,7 @@ impl ProxyHandler {
         &mut self,
         mut request: InitializeRequest,
         request_cx: JsonRpcRequestCx<InitializeResponse>,
-    ) -> Result<(), agent_client_protocol::Error> {
+    ) -> Result<(), agent_client_protocol_schema::Error> {
         tracing::debug!(
             method = request_cx.method(),
             params = ?request,
@@ -481,7 +481,7 @@ impl ProxyHandler {
 /// ```rust,ignore
 /// // Example using ACP request types
 /// use sacp::proxy::JsonRpcCxExt;
-/// use agent_client_protocol_schema::agent::PromptRequest;
+/// use agent_client_protocol_schema_schema::agent::PromptRequest;
 ///
 /// async fn forward_prompt(cx: &JsonRpcCx, prompt: PromptRequest) {
 ///     let response = cx.send_request_to_successor(prompt).recv().await?;
@@ -504,7 +504,7 @@ pub trait JsonRpcCxExt {
     ///
     /// ```rust,ignore
     /// use sacp::proxy::JsonRpcCxExt;
-    /// use agent_client_protocol_schema::agent::PromptRequest;
+    /// use agent_client_protocol_schema_schema::agent::PromptRequest;
     ///
     /// let prompt = PromptRequest { /* ... */ };
     /// let response = cx.send_request_to_successor(prompt).recv().await?;

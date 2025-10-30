@@ -9,7 +9,7 @@ keywords = ["acp", "agent", "protocol", "ai"]
 categories = ["development-tools"]
 
 [dependencies]
-agent-client-protocol.workspace = true
+agent-client-protocol-schema.workspace = true
 anyhow.workspace = true
 boxfnonce.workspace = true
 futures.workspace = true

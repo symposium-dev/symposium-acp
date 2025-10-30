@@ -7,8 +7,8 @@
 //! 4. Last component (agent) never receives proxy capability offer
 
 use sacp_proxy::JsonRpcCxExt;
-use agent_client_protocol::{self as acp, AgentCapabilities};
-use agent_client_protocol::{InitializeRequest, InitializeResponse};
+use agent_client_protocol_schema::{self as acp, AgentCapabilities};
+use agent_client_protocol_schema::{InitializeRequest, InitializeResponse};
 use sacp_conductor::component::{Cleanup, ComponentProvider};
 use sacp_conductor::conductor::Conductor;
 use futures::{AsyncRead, AsyncWrite};
@@ -23,14 +23,14 @@ use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
 /// Test helper to receive a JSON-RPC response
 async fn recv<R: sacp::JsonRpcResponsePayload + Send>(
     response: sacp::JsonRpcResponse<R>,
-) -> Result<R, agent_client_protocol::Error> {
+) -> Result<R, agent_client_protocol_schema::Error> {
     let (tx, rx) = tokio::sync::oneshot::channel();
     response.await_when_result_received(async move |result| {
         tx.send(result)
-            .map_err(|_| agent_client_protocol::Error::internal_error())
+            .map_err(|_| agent_client_protocol_schema::Error::internal_error())
     })?;
     rx.await
-        .map_err(|_| agent_client_protocol::Error::internal_error())?
+        .map_err(|_| agent_client_protocol_schema::Error::internal_error())?
 }
 
 struct InitConfig {
@@ -175,7 +175,7 @@ async fn test_single_component_no_proxy_offer() -> Result<(), acp::Error> {
                 init_response
             );
 
-            Ok::<(), agent_client_protocol::Error>(())
+            Ok::<(), agent_client_protocol_schema::Error>(())
         },
     )
     .await?;
@@ -219,7 +219,7 @@ async fn test_two_components() -> Result<(), acp::Error> {
                 init_response
             );
 
-            Ok::<(), agent_client_protocol::Error>(())
+            Ok::<(), agent_client_protocol_schema::Error>(())
         },
     )
     .await?;
@@ -264,7 +264,7 @@ async fn test_proxy_component_must_respond_with_proxy() -> Result<(), acp::Error
                 "Initialize should fail when proxy component doesn't respond with proxy capability"
             );
 
-            Ok::<(), agent_client_protocol::Error>(())
+            Ok::<(), agent_client_protocol_schema::Error>(())
         },
     )
     .await;
@@ -318,7 +318,7 @@ async fn test_proxy_component_must_strip_proxy_when_forwarding() -> Result<(), a
                 "Initialize should fail when proxy component forwards request with proxy capability"
             );
 
-            Ok::<(), agent_client_protocol::Error>(())
+            Ok::<(), agent_client_protocol_schema::Error>(())
         },
     )
     .await;

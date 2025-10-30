@@ -1,4 +1,4 @@
-use agent_client_protocol as acp;
+use agent_client_protocol_schema as acp;
 
 /// Cast from `N` to `M` by serializing/deserialization to/from JSON.
 pub fn json_cast<N, M>(params: N) -> Result<M, acp::Error>

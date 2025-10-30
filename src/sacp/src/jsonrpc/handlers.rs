@@ -1,6 +1,6 @@
 use crate::jsonrpc::{Handled, JsonRpcHandler};
 use crate::{JsonRpcConnectionCx, JsonRpcNotification, JsonRpcRequest, MessageAndCx};
-use agent_client_protocol as acp;
+use agent_client_protocol_schema as acp;
 use std::marker::PhantomData;
 use std::ops::AsyncFnMut;
 
@@ -18,7 +18,7 @@ impl JsonRpcHandler for NullHandler {
     async fn handle_message(
         &mut self,
         message: MessageAndCx,
-    ) -> Result<Handled<MessageAndCx>, agent_client_protocol::Error> {
+    ) -> Result<Handled<MessageAndCx>, agent_client_protocol_schema::Error> {
         Ok(Handled::No(message))
     }
 }
@@ -53,7 +53,7 @@ where
     async fn handle_message(
         &mut self,
         message_cx: MessageAndCx,
-    ) -> Result<Handled<MessageAndCx>, agent_client_protocol::Error> {
+    ) -> Result<Handled<MessageAndCx>, agent_client_protocol_schema::Error> {
         match message_cx {
             MessageAndCx::Request(message, request_cx) => {
                 tracing::debug!(
@@ -117,7 +117,7 @@ where
     async fn handle_message(
         &mut self,
         message_cx: MessageAndCx,
-    ) -> Result<Handled<MessageAndCx>, agent_client_protocol::Error> {
+    ) -> Result<Handled<MessageAndCx>, agent_client_protocol_schema::Error> {
         match message_cx {
             MessageAndCx::Notification(message, cx) => {
                 tracing::debug!(
@@ -189,7 +189,7 @@ where
     async fn handle_message(
         &mut self,
         message_cx: MessageAndCx,
-    ) -> Result<Handled<MessageAndCx>, agent_client_protocol::Error> {
+    ) -> Result<Handled<MessageAndCx>, agent_client_protocol_schema::Error> {
         match message_cx {
             MessageAndCx::Request(message, request_cx) => {
                 tracing::debug!(
@@ -299,7 +299,7 @@ where
     async fn handle_message(
         &mut self,
         message: MessageAndCx,
-    ) -> Result<Handled<MessageAndCx>, agent_client_protocol::Error> {
+    ) -> Result<Handled<MessageAndCx>, agent_client_protocol_schema::Error> {
         match self.handler1.handle_message(message).await? {
             Handled::Yes => Ok(Handled::Yes),
             Handled::No(message) => self.handler2.handle_message(message).await,

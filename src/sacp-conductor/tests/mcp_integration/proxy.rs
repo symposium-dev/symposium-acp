@@ -1,7 +1,7 @@
 //! Proxy component that provides MCP tools
 
 use sacp_proxy::{AcpProxyExt, McpServiceRegistry};
-use agent_client_protocol::{self as acp};
+use agent_client_protocol_schema::{self as acp};
 use sacp_conductor::component::{Cleanup, ComponentProvider};
 use futures::{AsyncRead, AsyncWrite};
 use sacp::{JsonRpcConnection, JsonRpcConnectionCx};
