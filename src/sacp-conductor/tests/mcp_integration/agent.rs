@@ -1,13 +1,13 @@
 //! Agent component that verifies MCP server configuration and handles prompts
 
-use agent_client_protocol::{
-    self as acp, AgentCapabilities, ContentBlock, ContentChunk, InitializeRequest,
-    InitializeResponse, McpServer, NewSessionRequest, NewSessionResponse, PromptRequest,
-    PromptResponse, SessionNotification, SessionUpdate, StopReason, TextContent,
-};
 use futures::{AsyncRead, AsyncWrite};
 use rmcp::ServiceExt;
-use sacp::{JsonRpcConnection, JsonRpcConnectionCx, JsonRpcRequestCx};
+use sacp::{
+    AgentCapabilities, ContentBlock, ContentChunk, InitializeRequest, InitializeResponse,
+    McpServer, NewSessionRequest, NewSessionResponse, PromptRequest, PromptResponse,
+    SessionNotification, SessionUpdate, StopReason, TextContent,
+};
+use sacp::{JrConnection, JrConnectionCx, JrRequestCx};
 use sacp_conductor::component::{Cleanup, ComponentProvider};
 use std::{pin::Pin, sync::Arc};
 use tokio::sync::Mutex;
@@ -26,10 +26,10 @@ struct AgentState {
 impl ComponentProvider for AgentComponentProvider {
     fn create(
         &self,
-        cx: &JsonRpcConnectionCx,
+        cx: &JrConnectionCx,
         outgoing_bytes: Pin<Box<dyn AsyncWrite + Send>>,
         incoming_bytes: Pin<Box<dyn AsyncRead + Send>>,
-    ) -> Result<Cleanup, acp::Error> {
+    ) -> Result<Cleanup, sacp::Error> {
         let state = AgentState {
             mcp_servers: Arc::new(Mutex::new(Vec::new())),
         };
@@ -37,7 +37,7 @@ impl ComponentProvider for AgentComponentProvider {
         cx.spawn({
             let state = state.clone();
             async move {
-                JsonRpcConnection::new(outgoing_bytes, incoming_bytes)
+                JrConnection::new(outgoing_bytes, incoming_bytes)
                     .name("agent-component")
                     .on_receive_request(async move |request: InitializeRequest, request_cx| {
                         // Simple initialization response
@@ -118,8 +118,8 @@ impl AgentComponentProvider {
     async fn respond_to_prompt(
         state: AgentState,
         request: PromptRequest,
-        request_cx: JsonRpcRequestCx<PromptResponse>,
-    ) -> Result<(), acp::Error> {
+        request_cx: JrRequestCx<PromptResponse>,
+    ) -> Result<(), sacp::Error> {
         use rmcp::{
             model::CallToolRequestParam,
             transport::{ConfigureCommandExt, TokioChildProcess},
@@ -164,10 +164,10 @@ impl AgentComponentProvider {
                                 cmd.env(&env_var.name, &env_var.value);
                             }
                         }))
-                        .map_err(acp::Error::into_internal_error)?,
+                        .map_err(sacp::Error::into_internal_error)?,
                     )
                     .await
-                    .map_err(acp::Error::into_internal_error)?;
+                    .map_err(sacp::Error::into_internal_error)?;
 
                 tracing::debug!("MCP client connected");
 
@@ -182,7 +182,7 @@ impl AgentComponentProvider {
                         .cloned(),
                     })
                     .await
-                    .map_err(acp::Error::into_internal_error)?;
+                    .map_err(sacp::Error::into_internal_error)?;
 
                 tracing::debug!("Tool call result: {:?}", tool_result);
 
@@ -204,7 +204,7 @@ impl AgentComponentProvider {
                 mcp_client
                     .cancel()
                     .await
-                    .map_err(acp::Error::into_internal_error)?;
+                    .map_err(sacp::Error::into_internal_error)?;
             }
         }
 

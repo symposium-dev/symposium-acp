@@ -1,10 +1,10 @@
-use agent_client_protocol as acp;
+use sacp;
 use std::pin::Pin;
 use tokio_util::compat::{FuturesAsyncReadCompatExt as _, FuturesAsyncWriteCompatExt};
 
 use futures::{AsyncRead, AsyncWrite};
 
-use sacp::JsonRpcConnectionCx;
+use sacp::JrConnectionCx;
 use tokio::process::Child;
 use tracing::debug;
 
@@ -21,10 +21,10 @@ pub trait ComponentProvider: Send {
     /// * `incoming_bytes`: bytes received by the conponent from the conductor.
     fn create(
         &self,
-        cx: &JsonRpcConnectionCx,
+        cx: &JrConnectionCx,
         outgoing_bytes: Pin<Box<dyn AsyncWrite + Send>>,
         incoming_bytes: Pin<Box<dyn AsyncRead + Send>>,
-    ) -> Result<Cleanup, acp::Error>;
+    ) -> Result<Cleanup, sacp::Error>;
 }
 
 /// Cleanup enum returned by component provider.
@@ -60,7 +60,7 @@ pub struct Component {
 
     /// The connection context to the component. This is called `agent_cx` because the
     /// component is acting as the conductor's agent.
-    pub agent_cx: JsonRpcConnectionCx,
+    pub agent_cx: JrConnectionCx,
 }
 
 /// A "command provider" provides a component by running a command and sending ACP messages to/from stdio.
@@ -77,17 +77,17 @@ impl CommandComponentProvider {
 impl ComponentProvider for CommandComponentProvider {
     fn create(
         &self,
-        cx: &JsonRpcConnectionCx,
+        cx: &JrConnectionCx,
         outgoing_bytes: Pin<Box<dyn AsyncWrite + Send>>,
         incoming_bytes: Pin<Box<dyn AsyncRead + Send>>,
-    ) -> Result<Cleanup, acp::Error> {
+    ) -> Result<Cleanup, sacp::Error> {
         debug!(command = self.command, "Spawning command");
 
         let mut child = tokio::process::Command::new(&self.command)
             .stdin(std::process::Stdio::piped())
             .stdout(std::process::Stdio::piped())
             .spawn()
-            .map_err(acp::Error::into_internal_error)?;
+            .map_err(sacp::Error::into_internal_error)?;
 
         // Take ownership of the streams (can only do this once!)
         let mut child_stdin = child.stdin.take().expect("Failed to open stdin");
@@ -96,14 +96,14 @@ impl ComponentProvider for CommandComponentProvider {
         cx.spawn(async move {
             tokio::io::copy(&mut incoming_bytes.compat(), &mut child_stdin)
                 .await
-                .map_err(acp::Error::into_internal_error)?;
+                .map_err(sacp::Error::into_internal_error)?;
             Ok(())
         })?;
 
         cx.spawn(async move {
             tokio::io::copy(&mut child_stdout, &mut outgoing_bytes.compat_write())
                 .await
-                .map_err(acp::Error::into_internal_error)?;
+                .map_err(sacp::Error::into_internal_error)?;
             Ok(())
         })?;
 

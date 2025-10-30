@@ -10,6 +10,9 @@ mod jsonrpc;
 mod typed;
 pub mod util;
 
+// Re-export all ACP types
+pub use agent_client_protocol_schema::*;
+
 pub use acp::*;
 pub use capabilities::*;
 pub use jsonrpc::*;

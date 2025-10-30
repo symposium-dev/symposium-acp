@@ -7,13 +7,13 @@
 
 mod mcp_integration;
 
-use agent_client_protocol::{
-    self as acp, ContentBlock, InitializeRequest, NewSessionRequest, PromptRequest,
-    SessionNotification, TextContent,
-};
 use expect_test::expect;
 use futures::{SinkExt, StreamExt, channel::mpsc};
-use sacp::JsonRpcConnection;
+use sacp::JrConnection;
+use sacp::{
+    ContentBlock, InitializeRequest, NewSessionRequest, PromptRequest, SessionNotification,
+    TextContent,
+};
 use sacp_conductor::component::ComponentProvider;
 use sacp_conductor::conductor::Conductor;
 
@@ -21,16 +21,14 @@ use tokio::io::duplex;
 use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
 
 /// Test helper to receive a JSON-RPC response
-async fn recv<R: sacp::JsonRpcResponsePayload + Send>(
-    response: sacp::JsonRpcResponse<R>,
-) -> Result<R, agent_client_protocol::Error> {
+async fn recv<R: sacp::JrResponsePayload + Send>(
+    response: sacp::JrResponse<R>,
+) -> Result<R, sacp::Error> {
     let (tx, rx) = tokio::sync::oneshot::channel();
     response.await_when_result_received(async move |result| {
-        tx.send(result)
-            .map_err(|_| agent_client_protocol::Error::internal_error())
+        tx.send(result).map_err(|_| sacp::Error::internal_error())
     })?;
-    rx.await
-        .map_err(|_| agent_client_protocol::Error::internal_error())?
+    rx.await.map_err(|_| sacp::Error::internal_error())?
 }
 
 fn conductor_command() -> Vec<String> {
@@ -45,13 +43,13 @@ fn conductor_command() -> Vec<String> {
 
 async fn run_test_with_components(
     components: Vec<Box<dyn ComponentProvider>>,
-    editor_task: impl AsyncFnOnce(sacp::JsonRpcConnectionCx) -> Result<(), acp::Error>,
-) -> Result<(), acp::Error> {
+    editor_task: impl AsyncFnOnce(sacp::JrConnectionCx) -> Result<(), sacp::Error>,
+) -> Result<(), sacp::Error> {
     // Set up editor <-> conductor communication
     let (editor_out, conductor_in) = duplex(1024);
     let (conductor_out, editor_in) = duplex(1024);
 
-    JsonRpcConnection::new(editor_out.compat_write(), editor_in.compat())
+    JrConnection::new(editor_out.compat_write(), editor_in.compat())
         .name("editor-to-connector")
         .with_spawned(async move {
             Conductor::run_with_command(
@@ -67,7 +65,7 @@ async fn run_test_with_components(
 }
 
 #[tokio::test]
-async fn test_proxy_provides_mcp_tools() -> Result<(), acp::Error> {
+async fn test_proxy_provides_mcp_tools() -> Result<(), sacp::Error> {
     let _ = tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::from_default_env()
@@ -123,7 +121,7 @@ async fn test_proxy_provides_mcp_tools() -> Result<(), acp::Error> {
 }
 
 #[tokio::test]
-async fn test_agent_handles_prompt() -> Result<(), acp::Error> {
+async fn test_agent_handles_prompt() -> Result<(), sacp::Error> {
     let _ = tracing_subscriber::fmt()
         .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
         .with_test_writer()
@@ -137,7 +135,7 @@ async fn test_agent_handles_prompt() -> Result<(), acp::Error> {
     let (editor_in, editor_out) = tokio::io::split(editor);
     let (conductor_in, conductor_out) = tokio::io::split(conductor);
 
-    JsonRpcConnection::new(editor_out.compat_write(), editor_in.compat())
+    JrConnection::new(editor_out.compat_write(), editor_in.compat())
         .name("editor-to-connector")
         .on_receive_notification({
             let mut log_tx = log_tx.clone();
@@ -146,7 +144,7 @@ async fn test_agent_handles_prompt() -> Result<(), acp::Error> {
                 log_tx
                     .send(format!("{notification:?}"))
                     .await
-                    .map_err(|_| acp::Error::internal_error())
+                    .map_err(|_| sacp::Error::internal_error())
             }
         })
         .with_spawned(async move {
@@ -197,7 +195,7 @@ async fn test_agent_handles_prompt() -> Result<(), acp::Error> {
             log_tx
                 .send(format!("{prompt_response:?}"))
                 .await
-                .map_err(|_| acp::Error::internal_error())?;
+                .map_err(|_| sacp::Error::internal_error())?;
 
             Ok(())
         })

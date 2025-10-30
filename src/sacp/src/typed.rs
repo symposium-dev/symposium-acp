@@ -1,8 +1,8 @@
-use agent_client_protocol as acp;
+// Types re-exported from crate root
 use jsonrpcmsg::Params;
 
 use crate::{
-    JsonRpcConnectionCx, JsonRpcNotification, JsonRpcRequest, JsonRpcRequestCx, UntypedMessage,
+    JrConnectionCx, JrNotification, JsonRpcRequest, JrRequestCx, UntypedMessage,
     util::json_cast,
 };
 
@@ -13,12 +13,12 @@ pub struct TypeRequest {
 }
 
 enum TypeMessageState {
-    Unhandled(String, Option<Params>, JsonRpcRequestCx<serde_json::Value>),
-    Handled(Result<(), acp::Error>),
+    Unhandled(String, Option<Params>, JrRequestCx<serde_json::Value>),
+    Handled(Result<(), crate::Error>),
 }
 
 impl TypeRequest {
-    pub fn new(request: UntypedMessage, request_cx: JsonRpcRequestCx<serde_json::Value>) -> Self {
+    pub fn new(request: UntypedMessage, request_cx: JrRequestCx<serde_json::Value>) -> Self {
         let UntypedMessage { method, params } = request;
         let params: Option<Params> = json_cast(params).expect("valid params");
         Self {
@@ -28,7 +28,7 @@ impl TypeRequest {
 
     pub async fn handle_if<R: JsonRpcRequest>(
         mut self,
-        op: impl AsyncFnOnce(R, JsonRpcRequestCx<R::Response>) -> Result<(), acp::Error>,
+        op: impl AsyncFnOnce(R, JrRequestCx<R::Response>) -> Result<(), crate::Error>,
     ) -> Self {
         self.state = Some(match self.state.take().expect("valid state") {
             TypeMessageState::Unhandled(method, params, request_cx) => {
@@ -52,9 +52,9 @@ impl TypeRequest {
         mut self,
         op: impl AsyncFnOnce(
             UntypedMessage,
-            JsonRpcRequestCx<serde_json::Value>,
-        ) -> Result<(), acp::Error>,
-    ) -> Result<(), acp::Error> {
+            JrRequestCx<serde_json::Value>,
+        ) -> Result<(), crate::Error>,
+    ) -> Result<(), crate::Error> {
         match self.state.take().expect("valid state") {
             TypeMessageState::Unhandled(method, params, request_cx) => {
                 match UntypedMessage::new(&method, params) {
@@ -70,17 +70,17 @@ impl TypeRequest {
 /// Utility class for handling untyped notifications.
 #[must_use]
 pub struct TypeNotification {
-    cx: JsonRpcConnectionCx,
+    cx: JrConnectionCx,
     state: Option<TypeNotificationState>,
 }
 
 enum TypeNotificationState {
     Unhandled(String, Option<Params>),
-    Handled(Result<(), acp::Error>),
+    Handled(Result<(), crate::Error>),
 }
 
 impl TypeNotification {
-    pub fn new(request: UntypedMessage, cx: &JsonRpcConnectionCx) -> Self {
+    pub fn new(request: UntypedMessage, cx: &JrConnectionCx) -> Self {
         let UntypedMessage { method, params } = request;
         let params: Option<Params> = json_cast(params).expect("valid params");
         Self {
@@ -89,9 +89,9 @@ impl TypeNotification {
         }
     }
 
-    pub async fn handle_if<N: JsonRpcNotification>(
+    pub async fn handle_if<N: JrNotification>(
         mut self,
-        op: impl AsyncFnOnce(N) -> Result<(), acp::Error>,
+        op: impl AsyncFnOnce(N) -> Result<(), crate::Error>,
     ) -> Self {
         self.state = Some(match self.state.take().expect("valid state") {
             TypeNotificationState::Unhandled(method, params) => {
@@ -113,8 +113,8 @@ impl TypeNotification {
 
     pub async fn otherwise(
         mut self,
-        op: impl AsyncFnOnce(UntypedMessage) -> Result<(), acp::Error>,
-    ) -> Result<(), acp::Error> {
+        op: impl AsyncFnOnce(UntypedMessage) -> Result<(), crate::Error>,
+    ) -> Result<(), crate::Error> {
         match self.state.take().expect("valid state") {
             TypeNotificationState::Unhandled(method, params) => {
                 match UntypedMessage::new(&method, params) {

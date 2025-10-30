@@ -6,13 +6,13 @@
 //! 3. Proxy components must accept the capability or initialization fails
 //! 4. Last component (agent) never receives proxy capability offer
 
-use sacp_proxy::JsonRpcCxExt;
-use agent_client_protocol::{self as acp, AgentCapabilities};
-use agent_client_protocol::{InitializeRequest, InitializeResponse};
+use futures::{AsyncRead, AsyncWrite};
+use sacp::AgentCapabilities;
+use sacp::{InitializeRequest, InitializeResponse};
+use sacp::{JrConnection, JrConnectionCx, MetaCapabilityExt, Proxy};
 use sacp_conductor::component::{Cleanup, ComponentProvider};
 use sacp_conductor::conductor::Conductor;
-use futures::{AsyncRead, AsyncWrite};
-use sacp::{JsonRpcConnection, JsonRpcConnectionCx, MetaCapabilityExt, Proxy};
+use sacp_proxy::JrCxExt;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::sync::Mutex;
@@ -21,16 +21,14 @@ use tokio::io::duplex;
 use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
 
 /// Test helper to receive a JSON-RPC response
-async fn recv<R: sacp::JsonRpcResponsePayload + Send>(
-    response: sacp::JsonRpcResponse<R>,
-) -> Result<R, agent_client_protocol::Error> {
+async fn recv<R: sacp::JrResponsePayload + Send>(
+    response: sacp::JrResponse<R>,
+) -> Result<R, sacp::Error> {
     let (tx, rx) = tokio::sync::oneshot::channel();
     response.await_when_result_received(async move |result| {
-        tx.send(result)
-            .map_err(|_| agent_client_protocol::Error::internal_error())
+        tx.send(result).map_err(|_| sacp::Error::internal_error())
     })?;
-    rx.await
-        .map_err(|_| agent_client_protocol::Error::internal_error())?
+    rx.await.map_err(|_| sacp::Error::internal_error())?
 }
 
 struct InitConfig {
@@ -77,13 +75,13 @@ impl InitComponentProvider {
 impl ComponentProvider for InitComponentProvider {
     fn create(
         &self,
-        cx: &JsonRpcConnectionCx,
+        cx: &JrConnectionCx,
         outgoing_bytes: Pin<Box<dyn AsyncWrite + Send>>,
         incoming_bytes: Pin<Box<dyn AsyncRead + Send>>,
-    ) -> Result<Cleanup, acp::Error> {
+    ) -> Result<Cleanup, sacp::Error> {
         let config = Arc::clone(&self.config);
         cx.spawn(async move {
-            JsonRpcConnection::new(outgoing_bytes, incoming_bytes)
+            JrConnection::new(outgoing_bytes, incoming_bytes)
                 .name("init-component-provider")
                 .on_receive_request(async move |mut request: InitializeRequest, request_cx| {
                     let has_proxy_capability = request.has_meta_capability(Proxy);
@@ -125,13 +123,13 @@ impl ComponentProvider for InitComponentProvider {
 
 async fn run_test_with_components(
     components: Vec<Box<dyn ComponentProvider>>,
-    editor_task: impl AsyncFnOnce(JsonRpcConnectionCx) -> Result<(), acp::Error>,
-) -> Result<(), acp::Error> {
+    editor_task: impl AsyncFnOnce(JrConnectionCx) -> Result<(), sacp::Error>,
+) -> Result<(), sacp::Error> {
     // Set up editor <-> conductor communication
     let (editor_out, conductor_in) = duplex(1024);
     let (conductor_out, editor_in) = duplex(1024);
 
-    JsonRpcConnection::new(editor_out.compat_write(), editor_in.compat())
+    JrConnection::new(editor_out.compat_write(), editor_in.compat())
         .name("editor-to-connector")
         .with_spawned(async move {
             Conductor::run(
@@ -146,7 +144,7 @@ async fn run_test_with_components(
 }
 
 #[tokio::test]
-async fn test_single_component_no_proxy_offer() -> Result<(), acp::Error> {
+async fn test_single_component_no_proxy_offer() -> Result<(), sacp::Error> {
     let _ = tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::from_default_env()
@@ -175,7 +173,7 @@ async fn test_single_component_no_proxy_offer() -> Result<(), acp::Error> {
                 init_response
             );
 
-            Ok::<(), agent_client_protocol::Error>(())
+            Ok::<(), sacp::Error>(())
         },
     )
     .await?;
@@ -186,7 +184,7 @@ async fn test_single_component_no_proxy_offer() -> Result<(), acp::Error> {
 }
 
 #[tokio::test]
-async fn test_two_components() -> Result<(), acp::Error> {
+async fn test_two_components() -> Result<(), sacp::Error> {
     let _ = tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::from_default_env()
@@ -219,7 +217,7 @@ async fn test_two_components() -> Result<(), acp::Error> {
                 init_response
             );
 
-            Ok::<(), agent_client_protocol::Error>(())
+            Ok::<(), sacp::Error>(())
         },
     )
     .await?;
@@ -231,7 +229,7 @@ async fn test_two_components() -> Result<(), acp::Error> {
 }
 
 #[tokio::test]
-async fn test_proxy_component_must_respond_with_proxy() -> Result<(), acp::Error> {
+async fn test_proxy_component_must_respond_with_proxy() -> Result<(), sacp::Error> {
     let _ = tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::from_default_env()
@@ -264,7 +262,7 @@ async fn test_proxy_component_must_respond_with_proxy() -> Result<(), acp::Error
                 "Initialize should fail when proxy component doesn't respond with proxy capability"
             );
 
-            Ok::<(), agent_client_protocol::Error>(())
+            Ok::<(), sacp::Error>(())
         },
     )
     .await;
@@ -285,7 +283,7 @@ async fn test_proxy_component_must_respond_with_proxy() -> Result<(), acp::Error
 }
 
 #[tokio::test]
-async fn test_proxy_component_must_strip_proxy_when_forwarding() -> Result<(), acp::Error> {
+async fn test_proxy_component_must_strip_proxy_when_forwarding() -> Result<(), sacp::Error> {
     let _ = tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::from_default_env()
@@ -318,7 +316,7 @@ async fn test_proxy_component_must_strip_proxy_when_forwarding() -> Result<(), a
                 "Initialize should fail when proxy component forwards request with proxy capability"
             );
 
-            Ok::<(), agent_client_protocol::Error>(())
+            Ok::<(), sacp::Error>(())
         },
     )
     .await;

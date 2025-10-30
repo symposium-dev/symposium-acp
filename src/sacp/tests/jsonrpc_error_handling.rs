@@ -9,24 +9,17 @@
 
 use expect_test::expect;
 use futures::{AsyncRead, AsyncWrite};
-use sacp::{
-    JsonRpcConnection, JsonRpcMessage, JsonRpcRequest, JsonRpcRequestCx, JsonRpcResponse,
-    JsonRpcResponsePayload,
-};
+use sacp::{JrConnection, JrMessage, JrRequestCx, JrResponse, JrResponsePayload, JsonRpcRequest};
 use serde::{Deserialize, Serialize};
 use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
 
 /// Test helper to block and wait for a JSON-RPC response.
-async fn recv<R: JsonRpcResponsePayload + Send>(
-    response: JsonRpcResponse<R>,
-) -> Result<R, agent_client_protocol::Error> {
+async fn recv<R: JrResponsePayload + Send>(response: JrResponse<R>) -> Result<R, sacp::Error> {
     let (tx, rx) = tokio::sync::oneshot::channel();
     response.await_when_result_received(async move |result| {
-        tx.send(result)
-            .map_err(|_| agent_client_protocol::Error::internal_error())
+        tx.send(result).map_err(|_| sacp::Error::internal_error())
     })?;
-    rx.await
-        .map_err(|_| agent_client_protocol::Error::internal_error())?
+    rx.await.map_err(|_| sacp::Error::internal_error())?
 }
 
 /// Helper to set up test streams.
@@ -56,8 +49,8 @@ struct SimpleRequest {
     message: String,
 }
 
-impl JsonRpcMessage for SimpleRequest {
-    fn into_untyped_message(self) -> Result<sacp::UntypedMessage, agent_client_protocol::Error> {
+impl JrMessage for SimpleRequest {
+    fn into_untyped_message(self) -> Result<sacp::UntypedMessage, sacp::Error> {
         let method = self.method().to_string();
         sacp::UntypedMessage::new(&method, self)
     }
@@ -69,7 +62,7 @@ impl JsonRpcMessage for SimpleRequest {
     fn parse_request(
         method: &str,
         params: &impl serde::Serialize,
-    ) -> Option<Result<Self, agent_client_protocol::Error>> {
+    ) -> Option<Result<Self, sacp::Error>> {
         if method != "simple_method" {
             return None;
         }
@@ -79,7 +72,7 @@ impl JsonRpcMessage for SimpleRequest {
     fn parse_notification(
         _method: &str,
         _params: &impl serde::Serialize,
-    ) -> Option<Result<Self, agent_client_protocol::Error>> {
+    ) -> Option<Result<Self, sacp::Error>> {
         // This is a request, not a notification
         None
     }
@@ -94,15 +87,12 @@ struct SimpleResponse {
     result: String,
 }
 
-impl JsonRpcResponsePayload for SimpleResponse {
-    fn into_json(self, _method: &str) -> Result<serde_json::Value, agent_client_protocol::Error> {
-        serde_json::to_value(self).map_err(agent_client_protocol::Error::into_internal_error)
+impl JrResponsePayload for SimpleResponse {
+    fn into_json(self, _method: &str) -> Result<serde_json::Value, sacp::Error> {
+        serde_json::to_value(self).map_err(sacp::Error::into_internal_error)
     }
 
-    fn from_value(
-        _method: &str,
-        value: serde_json::Value,
-    ) -> Result<Self, agent_client_protocol::Error> {
+    fn from_value(_method: &str, value: serde_json::Value) -> Result<Self, sacp::Error> {
         sacp::util::json_cast(&value)
     }
 }
@@ -128,7 +118,7 @@ async fn test_invalid_json() {
             let server_writer = server_writer.compat_write();
 
             // No handlers - all requests will return errors
-            let server = JsonRpcConnection::new(server_writer, server_reader);
+            let server = JrConnection::new(server_writer, server_reader);
 
             // Spawn server
             tokio::task::spawn_local(async move {
@@ -177,7 +167,7 @@ async fn test_incomplete_line() {
     let output = Cursor::new(Vec::new());
 
     // No handlers needed for EOF test
-    let connection = JsonRpcConnection::new(output, input);
+    let connection = JrConnection::new(output, input);
 
     // The server should handle EOF mid-message gracefully
     let result = connection.serve().await;
@@ -201,8 +191,8 @@ async fn test_unknown_method() {
             let (server_reader, server_writer, client_reader, client_writer) = setup_test_streams();
 
             // No handlers - all requests will be "method not found"
-            let server = JsonRpcConnection::new(server_writer, server_reader);
-            let client = JsonRpcConnection::new(client_writer, client_reader);
+            let server = JrConnection::new(server_writer, server_reader);
+            let client = JrConnection::new(client_writer, client_reader);
 
             // Spawn server
             tokio::task::spawn_local(async move {
@@ -211,7 +201,7 @@ async fn test_unknown_method() {
 
             // Send request from client
             let result = client
-                .with_client(async |cx| -> Result<(), agent_client_protocol::Error> {
+                .with_client(async |cx| -> Result<(), sacp::Error> {
                     let request = SimpleRequest {
                         message: "test".to_string(),
                     };
@@ -242,8 +232,8 @@ struct ErrorRequest {
     value: String,
 }
 
-impl JsonRpcMessage for ErrorRequest {
-    fn into_untyped_message(self) -> Result<sacp::UntypedMessage, agent_client_protocol::Error> {
+impl JrMessage for ErrorRequest {
+    fn into_untyped_message(self) -> Result<sacp::UntypedMessage, sacp::Error> {
         let method = self.method().to_string();
         sacp::UntypedMessage::new(&method, self)
     }
@@ -255,7 +245,7 @@ impl JsonRpcMessage for ErrorRequest {
     fn parse_request(
         method: &str,
         params: &impl serde::Serialize,
-    ) -> Option<Result<Self, agent_client_protocol::Error>> {
+    ) -> Option<Result<Self, sacp::Error>> {
         if method != "error_method" {
             return None;
         }
@@ -265,7 +255,7 @@ impl JsonRpcMessage for ErrorRequest {
     fn parse_notification(
         _method: &str,
         _params: &impl serde::Serialize,
-    ) -> Option<Result<Self, agent_client_protocol::Error>> {
+    ) -> Option<Result<Self, sacp::Error>> {
         // This is a request, not a notification
         None
     }
@@ -285,24 +275,24 @@ async fn test_handler_returns_error() {
         .run_until(async {
             let (server_reader, server_writer, client_reader, client_writer) = setup_test_streams();
 
-            let server = JsonRpcConnection::new(server_writer, server_reader).on_receive_request(
-                async |_request: ErrorRequest, request_cx: JsonRpcRequestCx<SimpleResponse>| {
+            let server = JrConnection::new(server_writer, server_reader).on_receive_request(
+                async |_request: ErrorRequest, request_cx: JrRequestCx<SimpleResponse>| {
                     // Explicitly return an error
-                    request_cx.respond_with_error(agent_client_protocol::Error::new((
+                    request_cx.respond_with_error(sacp::Error::new((
                         -32000,
                         "This is an intentional error".to_string(),
                     )))
                 },
             );
 
-            let client = JsonRpcConnection::new(client_writer, client_reader);
+            let client = JrConnection::new(client_writer, client_reader);
 
             tokio::task::spawn_local(async move {
                 server.serve().await.ok();
             });
 
             let result = client
-                .with_client(async |cx| -> Result<(), agent_client_protocol::Error> {
+                .with_client(async |cx| -> Result<(), sacp::Error> {
                     let request = ErrorRequest {
                         value: "trigger error".to_string(),
                     };
@@ -331,8 +321,8 @@ async fn test_handler_returns_error() {
 #[derive(Debug, Serialize, Deserialize)]
 struct EmptyRequest;
 
-impl JsonRpcMessage for EmptyRequest {
-    fn into_untyped_message(self) -> Result<sacp::UntypedMessage, agent_client_protocol::Error> {
+impl JrMessage for EmptyRequest {
+    fn into_untyped_message(self) -> Result<sacp::UntypedMessage, sacp::Error> {
         let method = self.method().to_string();
         sacp::UntypedMessage::new(&method, self)
     }
@@ -344,7 +334,7 @@ impl JsonRpcMessage for EmptyRequest {
     fn parse_request(
         method: &str,
         _params: &impl serde::Serialize,
-    ) -> Option<Result<Self, agent_client_protocol::Error>> {
+    ) -> Option<Result<Self, sacp::Error>> {
         if method != "strict_method" {
             return None;
         }
@@ -354,7 +344,7 @@ impl JsonRpcMessage for EmptyRequest {
     fn parse_notification(
         _method: &str,
         _params: &impl serde::Serialize,
-    ) -> Option<Result<Self, agent_client_protocol::Error>> {
+    ) -> Option<Result<Self, sacp::Error>> {
         // This is a request, not a notification
         None
     }
@@ -376,25 +366,25 @@ async fn test_missing_required_params() {
 
             // Handler that validates params - since EmptyRequest has no params but we're checking
             // against SimpleRequest which requires a message field, this will fail
-            let server = JsonRpcConnection::new(server_writer, server_reader).on_receive_request(
-                async |_request: EmptyRequest, request_cx: JsonRpcRequestCx<SimpleResponse>| {
+            let server = JrConnection::new(server_writer, server_reader).on_receive_request(
+                async |_request: EmptyRequest, request_cx: JrRequestCx<SimpleResponse>| {
                     // This will be called, but EmptyRequest parsing already succeeded
                     // The test is actually checking if EmptyRequest (no params) fails to parse as SimpleRequest
                     // But with the new API, EmptyRequest parses successfully since it expects no params
                     // We need to manually check - but actually the parse_request for EmptyRequest
                     // accepts anything for "strict_method", so the error must come from somewhere else
-                    request_cx.respond_with_error(agent_client_protocol::Error::invalid_params())
+                    request_cx.respond_with_error(sacp::Error::invalid_params())
                 },
             );
 
-            let client = JsonRpcConnection::new(client_writer, client_reader);
+            let client = JrConnection::new(client_writer, client_reader);
 
             tokio::task::spawn_local(async move {
                 server.serve().await.ok();
             });
 
             let result = client
-                .with_client(async |cx| -> Result<(), agent_client_protocol::Error> {
+                .with_client(async |cx| -> Result<(), sacp::Error> {
                     // Send request with no params (EmptyRequest has no fields)
                     let request = EmptyRequest;
 

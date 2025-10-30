@@ -6,24 +6,17 @@
 //! - Out-of-order response handling
 
 use futures::{AsyncRead, AsyncWrite};
-use sacp::{
-    JsonRpcConnection, JsonRpcMessage, JsonRpcRequest, JsonRpcRequestCx, JsonRpcResponse,
-    JsonRpcResponsePayload,
-};
+use sacp::{JrConnection, JrMessage, JrRequestCx, JrResponse, JrResponsePayload, JsonRpcRequest};
 use serde::{Deserialize, Serialize};
 use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
 
 /// Test helper to block and wait for a JSON-RPC response.
-async fn recv<R: JsonRpcResponsePayload + Send>(
-    response: JsonRpcResponse<R>,
-) -> Result<R, agent_client_protocol::Error> {
+async fn recv<R: JrResponsePayload + Send>(response: JrResponse<R>) -> Result<R, sacp::Error> {
     let (tx, rx) = tokio::sync::oneshot::channel();
     response.await_when_result_received(async move |result| {
-        tx.send(result)
-            .map_err(|_| agent_client_protocol::Error::internal_error())
+        tx.send(result).map_err(|_| sacp::Error::internal_error())
     })?;
-    rx.await
-        .map_err(|_| agent_client_protocol::Error::internal_error())?
+    rx.await.map_err(|_| sacp::Error::internal_error())?
 }
 
 /// Helper to set up test streams for testing.
@@ -53,8 +46,8 @@ struct PingRequest {
     value: u32,
 }
 
-impl JsonRpcMessage for PingRequest {
-    fn into_untyped_message(self) -> Result<sacp::UntypedMessage, agent_client_protocol::Error> {
+impl JrMessage for PingRequest {
+    fn into_untyped_message(self) -> Result<sacp::UntypedMessage, sacp::Error> {
         let method = self.method().to_string();
         sacp::UntypedMessage::new(&method, self)
     }
@@ -66,7 +59,7 @@ impl JsonRpcMessage for PingRequest {
     fn parse_request(
         method: &str,
         params: &impl serde::Serialize,
-    ) -> Option<Result<Self, agent_client_protocol::Error>> {
+    ) -> Option<Result<Self, sacp::Error>> {
         if method != "ping" {
             return None;
         }
@@ -76,7 +69,7 @@ impl JsonRpcMessage for PingRequest {
     fn parse_notification(
         _method: &str,
         _params: &impl serde::Serialize,
-    ) -> Option<Result<Self, agent_client_protocol::Error>> {
+    ) -> Option<Result<Self, sacp::Error>> {
         // This is a request, not a notification
         None
     }
@@ -91,15 +84,12 @@ struct PongResponse {
     value: u32,
 }
 
-impl JsonRpcResponsePayload for PongResponse {
-    fn into_json(self, _method: &str) -> Result<serde_json::Value, agent_client_protocol::Error> {
-        serde_json::to_value(self).map_err(agent_client_protocol::Error::into_internal_error)
+impl JrResponsePayload for PongResponse {
+    fn into_json(self, _method: &str) -> Result<serde_json::Value, sacp::Error> {
+        serde_json::to_value(self).map_err(sacp::Error::into_internal_error)
     }
 
-    fn from_value(
-        _method: &str,
-        value: serde_json::Value,
-    ) -> Result<Self, agent_client_protocol::Error> {
+    fn from_value(_method: &str, value: serde_json::Value) -> Result<Self, sacp::Error> {
         sacp::util::json_cast(&value)
     }
 }
@@ -110,8 +100,8 @@ struct SlowRequest {
     id: u32,
 }
 
-impl JsonRpcMessage for SlowRequest {
-    fn into_untyped_message(self) -> Result<sacp::UntypedMessage, agent_client_protocol::Error> {
+impl JrMessage for SlowRequest {
+    fn into_untyped_message(self) -> Result<sacp::UntypedMessage, sacp::Error> {
         let method = self.method().to_string();
         sacp::UntypedMessage::new(&method, self)
     }
@@ -123,7 +113,7 @@ impl JsonRpcMessage for SlowRequest {
     fn parse_request(
         method: &str,
         params: &impl serde::Serialize,
-    ) -> Option<Result<Self, agent_client_protocol::Error>> {
+    ) -> Option<Result<Self, sacp::Error>> {
         if method != "slow" {
             return None;
         }
@@ -133,7 +123,7 @@ impl JsonRpcMessage for SlowRequest {
     fn parse_notification(
         _method: &str,
         _params: &impl serde::Serialize,
-    ) -> Option<Result<Self, agent_client_protocol::Error>> {
+    ) -> Option<Result<Self, sacp::Error>> {
         // This is a request, not a notification
         None
     }
@@ -148,15 +138,12 @@ struct SlowResponse {
     id: u32,
 }
 
-impl JsonRpcResponsePayload for SlowResponse {
-    fn into_json(self, _method: &str) -> Result<serde_json::Value, agent_client_protocol::Error> {
-        serde_json::to_value(self).map_err(agent_client_protocol::Error::into_internal_error)
+impl JrResponsePayload for SlowResponse {
+    fn into_json(self, _method: &str) -> Result<serde_json::Value, sacp::Error> {
+        serde_json::to_value(self).map_err(sacp::Error::into_internal_error)
     }
 
-    fn from_value(
-        _method: &str,
-        value: serde_json::Value,
-    ) -> Result<Self, agent_client_protocol::Error> {
+    fn from_value(_method: &str, value: serde_json::Value) -> Result<Self, sacp::Error> {
         sacp::util::json_cast(&value)
     }
 }
@@ -176,15 +163,15 @@ async fn test_bidirectional_communication() {
             // Set up two connections that are symmetric - both can send and receive
             let (server_reader, server_writer, client_reader, client_writer) = setup_test_streams();
 
-            let side_a = JsonRpcConnection::new(server_writer, server_reader).on_receive_request(
-                async |request: PingRequest, request_cx: JsonRpcRequestCx<PongResponse>| {
+            let side_a = JrConnection::new(server_writer, server_reader).on_receive_request(
+                async |request: PingRequest, request_cx: JrRequestCx<PongResponse>| {
                     request_cx.respond(PongResponse {
                         value: request.value + 1,
                     })
                 },
             );
 
-            let side_b = JsonRpcConnection::new(client_writer, client_reader);
+            let side_b = JrConnection::new(client_writer, client_reader);
 
             // Spawn side_a as server
             tokio::task::spawn_local(async move {
@@ -193,7 +180,7 @@ async fn test_bidirectional_communication() {
 
             // Use side_b as client
             let result = side_b
-                .with_client(async |cx| -> Result<(), agent_client_protocol::Error> {
+                .with_client(async |cx| -> Result<(), sacp::Error> {
                     let request = PingRequest { value: 10 };
                     let response_future = recv(cx.send_request(request));
                     let response: Result<PongResponse, _> = response_future.await;
@@ -225,22 +212,22 @@ async fn test_request_ids() {
         .run_until(async {
             let (server_reader, server_writer, client_reader, client_writer) = setup_test_streams();
 
-            let server = JsonRpcConnection::new(server_writer, server_reader).on_receive_request(
-                async |request: PingRequest, request_cx: JsonRpcRequestCx<PongResponse>| {
+            let server = JrConnection::new(server_writer, server_reader).on_receive_request(
+                async |request: PingRequest, request_cx: JrRequestCx<PongResponse>| {
                     request_cx.respond(PongResponse {
                         value: request.value + 1,
                     })
                 },
             );
 
-            let client = JsonRpcConnection::new(client_writer, client_reader);
+            let client = JrConnection::new(client_writer, client_reader);
 
             tokio::task::spawn_local(async move {
                 server.serve().await.ok();
             });
 
             let result = client
-                .with_client(async |cx| -> Result<(), agent_client_protocol::Error> {
+                .with_client(async |cx| -> Result<(), sacp::Error> {
                     // Send multiple requests and verify responses match
                     let req1 = PingRequest { value: 1 };
                     let req2 = PingRequest { value: 2 };
@@ -282,22 +269,22 @@ async fn test_out_of_order_responses() {
         .run_until(async {
             let (server_reader, server_writer, client_reader, client_writer) = setup_test_streams();
 
-            let server = JsonRpcConnection::new(server_writer, server_reader).on_receive_request(
-                async |request: SlowRequest, request_cx: JsonRpcRequestCx<SlowResponse>| {
+            let server = JrConnection::new(server_writer, server_reader).on_receive_request(
+                async |request: SlowRequest, request_cx: JrRequestCx<SlowResponse>| {
                     // Simulate delay
                     tokio::time::sleep(tokio::time::Duration::from_millis(request.delay_ms)).await;
                     request_cx.respond(SlowResponse { id: request.id })
                 },
             );
 
-            let client = JsonRpcConnection::new(client_writer, client_reader);
+            let client = JrConnection::new(client_writer, client_reader);
 
             tokio::task::spawn_local(async move {
                 server.serve().await.ok();
             });
 
             let result = client
-                .with_client(async |cx| -> Result<(), agent_client_protocol::Error> {
+                .with_client(async |cx| -> Result<(), sacp::Error> {
                     // Send requests with different delays
                     // Request 1: 100ms delay
                     // Request 2: 50ms delay

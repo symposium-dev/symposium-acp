@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::panic::Location;
 use std::pin::pin;
 
-use agent_client_protocol as acp;
+// Types re-exported from crate root
 use futures::AsyncBufReadExt as _;
 use futures::AsyncRead;
 use futures::AsyncWrite;
@@ -17,9 +17,9 @@ use uuid::Uuid;
 
 use crate::MessageAndCx;
 use crate::UntypedMessage;
-use crate::jsonrpc::JsonRpcConnectionCx;
-use crate::jsonrpc::JsonRpcHandler;
-use crate::jsonrpc::JsonRpcRequestCx;
+use crate::jsonrpc::JrConnectionCx;
+use crate::jsonrpc::JrHandler;
+use crate::jsonrpc::JrRequestCx;
 use crate::jsonrpc::OutgoingMessage;
 use crate::jsonrpc::ReplyMessage;
 
@@ -27,13 +27,13 @@ use super::Handled;
 
 pub(crate) struct Task {
     pub location: &'static Location<'static>,
-    pub future: BoxFuture<'static, Result<(), acp::Error>>,
+    pub future: BoxFuture<'static, Result<(), crate::Error>>,
 }
 
 /// The "task actor" manages other tasks
 pub(super) async fn task_actor(
     mut task_rx: mpsc::UnboundedReceiver<Task>,
-) -> Result<(), acp::Error> {
+) -> Result<(), crate::Error> {
     let mut futures = FuturesUnordered::new();
 
     loop {
@@ -69,7 +69,7 @@ pub(super) async fn task_actor(
     }
 }
 
-async fn execute_task(task: Task) -> Result<(), agent_client_protocol::Error> {
+async fn execute_task(task: Task) -> Result<(), crate::Error> {
     let Task { location, future } = task;
     future.await.map_err(|err| {
         let data = err.data.clone();
@@ -85,7 +85,7 @@ async fn execute_task(task: Task) -> Result<(), agent_client_protocol::Error> {
 /// The "reply actor" manages a queue of pending replies.
 pub(super) async fn reply_actor(
     mut reply_rx: mpsc::UnboundedReceiver<ReplyMessage>,
-) -> Result<(), agent_client_protocol::Error> {
+) -> Result<(), crate::Error> {
     // Map from the `id` to a oneshot sender where we should send the value.
     let mut map = HashMap::new();
 
@@ -140,19 +140,19 @@ pub(super) async fn reply_actor(
 /// - `layers`: The layers.
 ///
 /// # Returns
-/// - `Result<(), acp::Error>`: an error if something unrecoverable occurred
+/// - `Result<(), crate::Error>`: an error if something unrecoverable occurred
 pub(super) async fn incoming_actor(
     connection_name: &Option<String>,
-    json_rpc_cx: &JsonRpcConnectionCx,
+    json_rpc_cx: &JrConnectionCx,
     incoming_bytes: impl AsyncRead,
     reply_tx: mpsc::UnboundedSender<ReplyMessage>,
-    mut handler: impl JsonRpcHandler,
-) -> Result<(), agent_client_protocol::Error> {
+    mut handler: impl JrHandler,
+) -> Result<(), crate::Error> {
     let incoming_bytes = pin!(incoming_bytes);
     let buffered_incoming_bytes = BufReader::new(incoming_bytes);
     let mut incoming_lines = buffered_incoming_bytes.lines();
     while let Some(line) = incoming_lines.next().await {
-        let line = line.map_err(agent_client_protocol::Error::into_internal_error)?;
+        let line = line.map_err(crate::Error::into_internal_error)?;
         tracing::trace!(message = %line, "Received JSON-RPC message");
         let message: Result<jsonrpcmsg::Message, _> = serde_json::from_str(&line);
         match message {
@@ -167,23 +167,23 @@ pub(super) async fn incoming_actor(
                         if let Some(value) = response.result {
                             reply_tx
                                 .unbounded_send(ReplyMessage::Dispatch(id, Ok(value)))
-                                .map_err(agent_client_protocol::Error::into_internal_error)?;
+                                .map_err(crate::Error::into_internal_error)?;
                         } else if let Some(error) = response.error {
-                            // Convert jsonrpcmsg::Error to agent_client_protocol::Error
-                            let acp_error = agent_client_protocol::Error {
+                            // Convert jsonrpcmsg::Error to crate::Error
+                            let acp_error = crate::Error {
                                 code: error.code,
                                 message: error.message,
                                 data: error.data,
                             };
                             reply_tx
                                 .unbounded_send(ReplyMessage::Dispatch(id, Err(acp_error)))
-                                .map_err(agent_client_protocol::Error::into_internal_error)?;
+                                .map_err(crate::Error::into_internal_error)?;
                         }
                     }
                 }
             },
             Err(_) => {
-                json_rpc_cx.send_error_notification(agent_client_protocol::Error::parse_error())?;
+                json_rpc_cx.send_error_notification(crate::Error::parse_error())?;
             }
         }
     }
@@ -194,10 +194,10 @@ pub(super) async fn incoming_actor(
 /// Report an error back to the server if it does not get handled.
 async fn dispatch_request(
     connection_name: &Option<String>,
-    json_rpc_cx: &JsonRpcConnectionCx,
+    json_rpc_cx: &JrConnectionCx,
     request: jsonrpcmsg::Request,
-    handler: &mut impl JsonRpcHandler,
-) -> Result<(), agent_client_protocol::Error> {
+    handler: &mut impl JrHandler,
+) -> Result<(), crate::Error> {
     tracing::debug!(
         ?request,
         "handler_type" = ?handler.describe_chain(),
@@ -210,7 +210,7 @@ async fn dispatch_request(
     let message_cx = match &request.id {
         Some(id) => MessageAndCx::Request(
             message,
-            JsonRpcRequestCx::new(json_rpc_cx, request.method.clone(), id.clone()),
+            JrRequestCx::new(json_rpc_cx, request.method.clone(), id.clone()),
         ),
         None => MessageAndCx::Notification(message, json_rpc_cx.clone()),
     };
@@ -221,7 +221,7 @@ async fn dispatch_request(
         }
         Handled::No(request_cx) => {
             tracing::debug!(method = ?request.method, ?request.id, "Handler reported: Handled::No, sending method_not_found");
-            request_cx.respond_with_error(agent_client_protocol::Error::method_not_found())?;
+            request_cx.respond_with_error(crate::Error::method_not_found())?;
         }
     }
 
@@ -240,7 +240,7 @@ pub(super) async fn outgoing_actor(
     mut outgoing_rx: mpsc::UnboundedReceiver<OutgoingMessage>,
     reply_tx: mpsc::UnboundedSender<ReplyMessage>,
     outgoing_bytes: impl AsyncWrite,
-) -> Result<(), agent_client_protocol::Error> {
+) -> Result<(), crate::Error> {
     let mut outgoing_bytes = pin!(outgoing_bytes);
 
     while let Some(message) = outgoing_rx.next().await {
@@ -260,7 +260,7 @@ pub(super) async fn outgoing_actor(
                 // Record where the reply should be sent once it arrives.
                 reply_tx
                     .unbounded_send(ReplyMessage::Subscribe(id.clone(), response_rx))
-                    .map_err(agent_client_protocol::Error::into_internal_error)?;
+                    .map_err(crate::Error::into_internal_error)?;
 
                 jsonrpcmsg::Message::Request(jsonrpcmsg::Request::new_v2(method, params, Some(id)))
             }
@@ -279,7 +279,7 @@ pub(super) async fn outgoing_actor(
                 response: Err(error),
             } => {
                 tracing::warn!(?id, ?error, "Sending error response");
-                // Convert agent_client_protocol::Error to jsonrpcmsg::Error
+                // Convert crate::Error to jsonrpcmsg::Error
                 let jsonrpc_error = jsonrpcmsg::Error {
                     code: error.code,
                     message: error.message,
@@ -291,7 +291,7 @@ pub(super) async fn outgoing_actor(
                 ))
             }
             OutgoingMessage::Error { error } => {
-                // Convert agent_client_protocol::Error to jsonrpcmsg::Error
+                // Convert crate::Error to jsonrpcmsg::Error
                 let jsonrpc_error = jsonrpcmsg::Error {
                     code: error.code,
                     message: error.message,
@@ -310,7 +310,7 @@ pub(super) async fn outgoing_actor(
                 outgoing_bytes
                     .write_all(&bytes)
                     .await
-                    .map_err(agent_client_protocol::Error::into_internal_error)?;
+                    .map_err(crate::Error::into_internal_error)?;
             }
 
             Err(serialization_error) => {
@@ -329,8 +329,8 @@ pub(super) async fn outgoing_actor(
                         // If we failed to serialize a *response*,
                         // send an error in response.
                         tracing::error!(?serialization_error, id = ?response.id, "Failed to serialize response, sending internal_error instead");
-                        // Convert agent_client_protocol::Error to jsonrpcmsg::Error
-                        let acp_error = agent_client_protocol::Error::internal_error();
+                        // Convert crate::Error to jsonrpcmsg::Error
+                        let acp_error = crate::Error::internal_error();
                         let jsonrpc_error = jsonrpcmsg::Error {
                             code: acp_error.code,
                             message: acp_error.message,
@@ -345,7 +345,7 @@ pub(super) async fn outgoing_actor(
                                 .unwrap(),
                             )
                             .await
-                            .map_err(agent_client_protocol::Error::into_internal_error)?;
+                            .map_err(crate::Error::into_internal_error)?;
                     }
                 }
             }

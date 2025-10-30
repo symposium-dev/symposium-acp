@@ -7,7 +7,7 @@
 //!
 //! ```rust,no_run
 //! use sacp::{MetaCapabilityExt, Proxy};
-//! # use agent_client_protocol::InitializeRequest;
+//! # use sacp::InitializeRequest;
 //! # let init_request: InitializeRequest = unimplemented!();
 //!
 //! let request = init_request.add_meta_capability(Proxy);
@@ -16,7 +16,7 @@
 //! }
 //! ```
 
-use agent_client_protocol::{InitializeRequest, InitializeResponse};
+use crate::{InitializeRequest, InitializeResponse};
 use serde_json::json;
 
 /// Trait for capabilities stored in the `_meta.symposium` object.
@@ -157,8 +157,8 @@ mod tests {
     #[test]
     fn test_add_proxy_capability() {
         let request = InitializeRequest {
-            protocol_version: agent_client_protocol::VERSION,
-            client_capabilities: agent_client_protocol::ClientCapabilities::default(),
+            protocol_version: crate::VERSION,
+            client_capabilities: crate::ClientCapabilities::default(),
             meta: None,
             client_info: None,
         };
@@ -174,7 +174,7 @@ mod tests {
 
     #[test]
     fn test_remove_proxy_capability() {
-        let mut client_capabilities = agent_client_protocol::ClientCapabilities::default();
+        let mut client_capabilities = crate::ClientCapabilities::default();
         client_capabilities.meta = Some(json!({
             "symposium": {
                 "version": "1.0",
@@ -183,7 +183,7 @@ mod tests {
         }));
 
         let request = InitializeRequest {
-            protocol_version: agent_client_protocol::VERSION,
+            protocol_version: crate::VERSION,
             client_capabilities,
             meta: None,
             client_info: None,
@@ -196,7 +196,7 @@ mod tests {
 
     #[test]
     fn test_has_proxy_capability() {
-        let mut client_capabilities = agent_client_protocol::ClientCapabilities::default();
+        let mut client_capabilities = crate::ClientCapabilities::default();
         client_capabilities.meta = Some(json!({
             "symposium": {
                 "proxy": true
@@ -204,7 +204,7 @@ mod tests {
         }));
 
         let request = InitializeRequest {
-            protocol_version: agent_client_protocol::VERSION,
+            protocol_version: crate::VERSION,
             client_capabilities,
             meta: None,
             client_info: None,
@@ -217,8 +217,8 @@ mod tests {
     #[test]
     fn test_response_capabilities() {
         let response = InitializeResponse {
-            protocol_version: agent_client_protocol::VERSION,
-            agent_capabilities: agent_client_protocol::AgentCapabilities::default(),
+            protocol_version: crate::VERSION,
+            agent_capabilities: crate::AgentCapabilities::default(),
             auth_methods: vec![],
             meta: None,
             agent_info: None,

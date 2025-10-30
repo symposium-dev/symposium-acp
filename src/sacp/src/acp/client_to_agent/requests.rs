@@ -1,19 +1,19 @@
-use agent_client_protocol::{
+use crate::{
     AuthenticateRequest, AuthenticateResponse, InitializeRequest, InitializeResponse,
     LoadSessionRequest, LoadSessionResponse, NewSessionRequest, NewSessionResponse, PromptRequest,
     PromptResponse, SetSessionModeRequest, SetSessionModeResponse,
 };
 use serde::Serialize;
 
-use crate::jsonrpc::{JsonRpcMessage, JsonRpcRequest, JsonRpcResponsePayload};
+use crate::jsonrpc::{JrMessage, JrResponsePayload, JsonRpcRequest};
 use crate::util::json_cast;
 
 // ============================================================================
 // InitializeRequest
 // ============================================================================
 
-impl JsonRpcMessage for InitializeRequest {
-    fn into_untyped_message(self) -> Result<crate::UntypedMessage, agent_client_protocol::Error> {
+impl JrMessage for InitializeRequest {
+    fn into_untyped_message(self) -> Result<crate::UntypedMessage, crate::Error> {
         let method = self.method().to_string();
         crate::UntypedMessage::new(&method, self)
     }
@@ -22,10 +22,7 @@ impl JsonRpcMessage for InitializeRequest {
         "initialize"
     }
 
-    fn parse_request(
-        method: &str,
-        params: &impl Serialize,
-    ) -> Option<Result<Self, agent_client_protocol::Error>> {
+    fn parse_request(method: &str, params: &impl Serialize) -> Option<Result<Self, crate::Error>> {
         if method != "initialize" {
             return None;
         }
@@ -36,7 +33,7 @@ impl JsonRpcMessage for InitializeRequest {
     fn parse_notification(
         _method: &str,
         _params: &impl Serialize,
-    ) -> Option<Result<Self, agent_client_protocol::Error>> {
+    ) -> Option<Result<Self, crate::Error>> {
         // This is a request, not a notification
         None
     }
@@ -46,15 +43,12 @@ impl JsonRpcRequest for InitializeRequest {
     type Response = InitializeResponse;
 }
 
-impl JsonRpcResponsePayload for InitializeResponse {
-    fn into_json(self, _method: &str) -> Result<serde_json::Value, agent_client_protocol::Error> {
-        serde_json::to_value(self).map_err(agent_client_protocol::Error::into_internal_error)
+impl JrResponsePayload for InitializeResponse {
+    fn into_json(self, _method: &str) -> Result<serde_json::Value, crate::Error> {
+        serde_json::to_value(self).map_err(crate::Error::into_internal_error)
     }
 
-    fn from_value(
-        _method: &str,
-        value: serde_json::Value,
-    ) -> Result<Self, agent_client_protocol::Error> {
+    fn from_value(_method: &str, value: serde_json::Value) -> Result<Self, crate::Error> {
         json_cast(&value)
     }
 }
@@ -63,8 +57,8 @@ impl JsonRpcResponsePayload for InitializeResponse {
 // AuthenticateRequest
 // ============================================================================
 
-impl JsonRpcMessage for AuthenticateRequest {
-    fn into_untyped_message(self) -> Result<crate::UntypedMessage, agent_client_protocol::Error> {
+impl JrMessage for AuthenticateRequest {
+    fn into_untyped_message(self) -> Result<crate::UntypedMessage, crate::Error> {
         let method = self.method().to_string();
         crate::UntypedMessage::new(&method, self)
     }
@@ -73,10 +67,7 @@ impl JsonRpcMessage for AuthenticateRequest {
         "authenticate"
     }
 
-    fn parse_request(
-        method: &str,
-        params: &impl Serialize,
-    ) -> Option<Result<Self, agent_client_protocol::Error>> {
+    fn parse_request(method: &str, params: &impl Serialize) -> Option<Result<Self, crate::Error>> {
         if method != "authenticate" {
             return None;
         }
@@ -86,7 +77,7 @@ impl JsonRpcMessage for AuthenticateRequest {
     fn parse_notification(
         _method: &str,
         _params: &impl Serialize,
-    ) -> Option<Result<Self, agent_client_protocol::Error>> {
+    ) -> Option<Result<Self, crate::Error>> {
         // This is a request, not a notification
         None
     }
@@ -96,15 +87,12 @@ impl JsonRpcRequest for AuthenticateRequest {
     type Response = AuthenticateResponse;
 }
 
-impl JsonRpcResponsePayload for AuthenticateResponse {
-    fn into_json(self, _method: &str) -> Result<serde_json::Value, agent_client_protocol::Error> {
-        serde_json::to_value(self).map_err(agent_client_protocol::Error::into_internal_error)
+impl JrResponsePayload for AuthenticateResponse {
+    fn into_json(self, _method: &str) -> Result<serde_json::Value, crate::Error> {
+        serde_json::to_value(self).map_err(crate::Error::into_internal_error)
     }
 
-    fn from_value(
-        _method: &str,
-        value: serde_json::Value,
-    ) -> Result<Self, agent_client_protocol::Error> {
+    fn from_value(_method: &str, value: serde_json::Value) -> Result<Self, crate::Error> {
         json_cast(&value)
     }
 }
@@ -113,8 +101,8 @@ impl JsonRpcResponsePayload for AuthenticateResponse {
 // LoadSessionRequest
 // ============================================================================
 
-impl JsonRpcMessage for LoadSessionRequest {
-    fn into_untyped_message(self) -> Result<crate::UntypedMessage, agent_client_protocol::Error> {
+impl JrMessage for LoadSessionRequest {
+    fn into_untyped_message(self) -> Result<crate::UntypedMessage, crate::Error> {
         let method = self.method().to_string();
         crate::UntypedMessage::new(&method, self)
     }
@@ -123,10 +111,7 @@ impl JsonRpcMessage for LoadSessionRequest {
         "session/load"
     }
 
-    fn parse_request(
-        method: &str,
-        params: &impl Serialize,
-    ) -> Option<Result<Self, agent_client_protocol::Error>> {
+    fn parse_request(method: &str, params: &impl Serialize) -> Option<Result<Self, crate::Error>> {
         if method != "session/load" {
             return None;
         }
@@ -136,7 +121,7 @@ impl JsonRpcMessage for LoadSessionRequest {
     fn parse_notification(
         _method: &str,
         _params: &impl Serialize,
-    ) -> Option<Result<Self, agent_client_protocol::Error>> {
+    ) -> Option<Result<Self, crate::Error>> {
         // This is a request, not a notification
         None
     }
@@ -146,15 +131,12 @@ impl JsonRpcRequest for LoadSessionRequest {
     type Response = LoadSessionResponse;
 }
 
-impl JsonRpcResponsePayload for LoadSessionResponse {
-    fn into_json(self, _method: &str) -> Result<serde_json::Value, agent_client_protocol::Error> {
-        serde_json::to_value(self).map_err(agent_client_protocol::Error::into_internal_error)
+impl JrResponsePayload for LoadSessionResponse {
+    fn into_json(self, _method: &str) -> Result<serde_json::Value, crate::Error> {
+        serde_json::to_value(self).map_err(crate::Error::into_internal_error)
     }
 
-    fn from_value(
-        _method: &str,
-        value: serde_json::Value,
-    ) -> Result<Self, agent_client_protocol::Error> {
+    fn from_value(_method: &str, value: serde_json::Value) -> Result<Self, crate::Error> {
         json_cast(&value)
     }
 }
@@ -163,8 +145,8 @@ impl JsonRpcResponsePayload for LoadSessionResponse {
 // NewSessionRequest
 // ============================================================================
 
-impl JsonRpcMessage for NewSessionRequest {
-    fn into_untyped_message(self) -> Result<crate::UntypedMessage, agent_client_protocol::Error> {
+impl JrMessage for NewSessionRequest {
+    fn into_untyped_message(self) -> Result<crate::UntypedMessage, crate::Error> {
         let method = self.method().to_string();
         crate::UntypedMessage::new(&method, self)
     }
@@ -173,10 +155,7 @@ impl JsonRpcMessage for NewSessionRequest {
         "session/new"
     }
 
-    fn parse_request(
-        method: &str,
-        params: &impl Serialize,
-    ) -> Option<Result<Self, agent_client_protocol::Error>> {
+    fn parse_request(method: &str, params: &impl Serialize) -> Option<Result<Self, crate::Error>> {
         if method != "session/new" {
             return None;
         }
@@ -186,7 +165,7 @@ impl JsonRpcMessage for NewSessionRequest {
     fn parse_notification(
         _method: &str,
         _params: &impl Serialize,
-    ) -> Option<Result<Self, agent_client_protocol::Error>> {
+    ) -> Option<Result<Self, crate::Error>> {
         // This is a request, not a notification
         None
     }
@@ -196,15 +175,12 @@ impl JsonRpcRequest for NewSessionRequest {
     type Response = NewSessionResponse;
 }
 
-impl JsonRpcResponsePayload for NewSessionResponse {
-    fn into_json(self, _method: &str) -> Result<serde_json::Value, agent_client_protocol::Error> {
-        serde_json::to_value(self).map_err(agent_client_protocol::Error::into_internal_error)
+impl JrResponsePayload for NewSessionResponse {
+    fn into_json(self, _method: &str) -> Result<serde_json::Value, crate::Error> {
+        serde_json::to_value(self).map_err(crate::Error::into_internal_error)
     }
 
-    fn from_value(
-        _method: &str,
-        value: serde_json::Value,
-    ) -> Result<Self, agent_client_protocol::Error> {
+    fn from_value(_method: &str, value: serde_json::Value) -> Result<Self, crate::Error> {
         json_cast(&value)
     }
 }
@@ -213,8 +189,8 @@ impl JsonRpcResponsePayload for NewSessionResponse {
 // PromptRequest
 // ============================================================================
 
-impl JsonRpcMessage for PromptRequest {
-    fn into_untyped_message(self) -> Result<crate::UntypedMessage, agent_client_protocol::Error> {
+impl JrMessage for PromptRequest {
+    fn into_untyped_message(self) -> Result<crate::UntypedMessage, crate::Error> {
         let method = self.method().to_string();
         crate::UntypedMessage::new(&method, self)
     }
@@ -223,10 +199,7 @@ impl JsonRpcMessage for PromptRequest {
         "session/prompt"
     }
 
-    fn parse_request(
-        method: &str,
-        params: &impl Serialize,
-    ) -> Option<Result<Self, agent_client_protocol::Error>> {
+    fn parse_request(method: &str, params: &impl Serialize) -> Option<Result<Self, crate::Error>> {
         if method != "session/prompt" {
             return None;
         }
@@ -236,7 +209,7 @@ impl JsonRpcMessage for PromptRequest {
     fn parse_notification(
         _method: &str,
         _params: &impl Serialize,
-    ) -> Option<Result<Self, agent_client_protocol::Error>> {
+    ) -> Option<Result<Self, crate::Error>> {
         // This is a request, not a notification
         None
     }
@@ -246,15 +219,12 @@ impl JsonRpcRequest for PromptRequest {
     type Response = PromptResponse;
 }
 
-impl JsonRpcResponsePayload for PromptResponse {
-    fn into_json(self, _method: &str) -> Result<serde_json::Value, agent_client_protocol::Error> {
-        serde_json::to_value(self).map_err(agent_client_protocol::Error::into_internal_error)
+impl JrResponsePayload for PromptResponse {
+    fn into_json(self, _method: &str) -> Result<serde_json::Value, crate::Error> {
+        serde_json::to_value(self).map_err(crate::Error::into_internal_error)
     }
 
-    fn from_value(
-        _method: &str,
-        value: serde_json::Value,
-    ) -> Result<Self, agent_client_protocol::Error> {
+    fn from_value(_method: &str, value: serde_json::Value) -> Result<Self, crate::Error> {
         json_cast(&value)
     }
 }
@@ -263,8 +233,8 @@ impl JsonRpcResponsePayload for PromptResponse {
 // SetSessionModeRequest
 // ============================================================================
 
-impl JsonRpcMessage for SetSessionModeRequest {
-    fn into_untyped_message(self) -> Result<crate::UntypedMessage, agent_client_protocol::Error> {
+impl JrMessage for SetSessionModeRequest {
+    fn into_untyped_message(self) -> Result<crate::UntypedMessage, crate::Error> {
         let method = self.method().to_string();
         crate::UntypedMessage::new(&method, self)
     }
@@ -273,10 +243,7 @@ impl JsonRpcMessage for SetSessionModeRequest {
         "session/set_mode"
     }
 
-    fn parse_request(
-        method: &str,
-        params: &impl Serialize,
-    ) -> Option<Result<Self, agent_client_protocol::Error>> {
+    fn parse_request(method: &str, params: &impl Serialize) -> Option<Result<Self, crate::Error>> {
         if method != "session/set_mode" {
             return None;
         }
@@ -286,7 +253,7 @@ impl JsonRpcMessage for SetSessionModeRequest {
     fn parse_notification(
         _method: &str,
         _params: &impl Serialize,
-    ) -> Option<Result<Self, agent_client_protocol::Error>> {
+    ) -> Option<Result<Self, crate::Error>> {
         // This is a request, not a notification
         None
     }
@@ -296,15 +263,12 @@ impl JsonRpcRequest for SetSessionModeRequest {
     type Response = SetSessionModeResponse;
 }
 
-impl JsonRpcResponsePayload for SetSessionModeResponse {
-    fn into_json(self, _method: &str) -> Result<serde_json::Value, agent_client_protocol::Error> {
-        serde_json::to_value(self).map_err(agent_client_protocol::Error::into_internal_error)
+impl JrResponsePayload for SetSessionModeResponse {
+    fn into_json(self, _method: &str) -> Result<serde_json::Value, crate::Error> {
+        serde_json::to_value(self).map_err(crate::Error::into_internal_error)
     }
 
-    fn from_value(
-        _method: &str,
-        value: serde_json::Value,
-    ) -> Result<Self, agent_client_protocol::Error> {
+    fn from_value(_method: &str, value: serde_json::Value) -> Result<Self, crate::Error> {
         json_cast(&value)
     }
 }

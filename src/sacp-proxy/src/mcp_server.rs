@@ -1,19 +1,19 @@
-use agent_client_protocol::{self as acp, NewSessionRequest};
 use futures::channel::mpsc;
 use futures::{FutureExt, future::BoxFuture};
 use futures::{SinkExt, StreamExt};
 use fxhash::FxHashMap;
 use rmcp::ServiceExt;
+use sacp::NewSessionRequest;
 use sacp::{
-    Handled, JsonRpcConnection, JsonRpcConnectionCx, JsonRpcHandler, JsonRpcMessage,
-    JsonRpcRequestCx, MessageAndCx, UntypedMessage,
+    Handled, JrConnection, JrConnectionCx, JrHandler, JrMessage, JrRequestCx, MessageAndCx,
+    UntypedMessage,
 };
 use std::pin::Pin;
 use std::sync::{Arc, Mutex};
 use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
 
 use crate::{
-    JsonRpcCxExt, McpConnectRequest, McpConnectResponse, McpDisconnectNotification,
+    JrCxExt, McpConnectRequest, McpConnectResponse, McpDisconnectNotification,
     McpOverAcpNotification, McpOverAcpRequest, SuccessorNotification, SuccessorRequest,
 };
 
@@ -25,7 +25,7 @@ use crate::{
 ///
 /// # Handling requests
 ///
-/// You must add the registery (or a clone of it) to the [`JsonRpcConnection`] so that it can intercept MCP requests.
+/// You must add the registery (or a clone of it) to the [`JrConnection`] so that it can intercept MCP requests.
 /// Typically you do this by providing it as an argument to the [`]
 #[derive(Clone, Default, Debug)]
 pub struct McpServiceRegistry {
@@ -55,7 +55,7 @@ impl McpServiceRegistry {
         self,
         name: impl ToString,
         make_service: impl Fn() -> S + 'static + Send + Sync,
-    ) -> Result<Self, acp::Error>
+    ) -> Result<Self, sacp::Error>
     where
         S: rmcp::Service<rmcp::RoleServer>,
     {
@@ -73,7 +73,7 @@ impl McpServiceRegistry {
         &self,
         name: impl ToString,
         make_service: impl Fn() -> S + 'static + Send + Sync,
-    ) -> Result<(), acp::Error>
+    ) -> Result<(), sacp::Error>
     where
         S: rmcp::Service<rmcp::RoleServer>,
     {
@@ -90,20 +90,20 @@ impl McpServiceRegistry {
                 &self,
                 outgoing_bytes: Pin<Box<dyn tokio::io::AsyncWrite + Send>>,
                 incoming_bytes: Pin<Box<dyn tokio::io::AsyncRead + Send>>,
-            ) -> BoxFuture<'static, Result<(), acp::Error>> {
+            ) -> BoxFuture<'static, Result<(), sacp::Error>> {
                 let server = (self.make_service)();
                 async move {
                     let running_server = server
                         .serve((incoming_bytes, outgoing_bytes))
                         .await
-                        .map_err(acp::Error::into_internal_error)?;
+                        .map_err(sacp::Error::into_internal_error)?;
 
                     // Keep the server alive by waiting for it to finish
                     running_server
                         .waiting()
                         .await
                         .map(|_quit_reason| ())
-                        .map_err(acp::Error::into_internal_error)
+                        .map_err(sacp::Error::into_internal_error)
                 }
                 .boxed()
             }
@@ -118,7 +118,7 @@ impl McpServiceRegistry {
         &self,
         name: String,
         spawn: Arc<dyn DynSpawnMcpServer>,
-    ) -> Result<(), acp::Error> {
+    ) -> Result<(), sacp::Error> {
         let name = name.to_string();
         if let Some(_) = self.get_registered_server_by_name(&name) {
             return Err(sacp::util::internal_error(format!(
@@ -191,9 +191,9 @@ impl McpServiceRegistry {
 
     async fn handle_connect_request(
         &self,
-        result: Result<SuccessorRequest<McpConnectRequest>, agent_client_protocol::Error>,
-        request_cx: JsonRpcRequestCx<serde_json::Value>,
-    ) -> Result<Handled<JsonRpcRequestCx<serde_json::Value>>, agent_client_protocol::Error> {
+        result: Result<SuccessorRequest<McpConnectRequest>, sacp::Error>,
+        request_cx: JrRequestCx<serde_json::Value>,
+    ) -> Result<Handled<JrRequestCx<serde_json::Value>>, sacp::Error> {
         // Check if we parsed this message successfully.
         let SuccessorRequest { request } = match result {
             Ok(request) => request,
@@ -220,7 +220,7 @@ impl McpServiceRegistry {
         let (mcp_server_read, mcp_server_write) = tokio::io::split(mcp_server_stream);
         let (mcp_client_read, mcp_client_write) = tokio::io::split(mcp_client_stream);
 
-        // Create JsonRpcConnection for communicating with the server.
+        // Create JrConnection for communicating with the server.
         //
         // Every request/notification that the server sends up, we will package up
         // as an McpOverAcpRequest/McpOverAcpNotification and send to our agent.
@@ -229,7 +229,7 @@ impl McpServiceRegistry {
         // send to the MCP server.
         let spawn_results = request_cx
             .spawn(
-                JsonRpcConnection::new(mcp_client_write.compat_write(), mcp_client_read.compat())
+                JrConnection::new(mcp_client_write.compat_write(), mcp_client_read.compat())
                     .on_receive_message({
                         let connection_id = connection_id.clone();
                         let outer_cx = request_cx.connection_cx();
@@ -292,12 +292,9 @@ impl McpServiceRegistry {
 
     async fn handle_mcp_over_acp_request(
         &self,
-        result: Result<
-            SuccessorRequest<McpOverAcpRequest<UntypedMessage>>,
-            agent_client_protocol::Error,
-        >,
-        request_cx: JsonRpcRequestCx<serde_json::Value>,
-    ) -> Result<Handled<JsonRpcRequestCx<serde_json::Value>>, agent_client_protocol::Error> {
+        result: Result<SuccessorRequest<McpOverAcpRequest<UntypedMessage>>, sacp::Error>,
+        request_cx: JrRequestCx<serde_json::Value>,
+    ) -> Result<Handled<JrRequestCx<serde_json::Value>>, sacp::Error> {
         // Check if we parsed this message successfully.
         let SuccessorRequest { request } = match result {
             Ok(request) => request,
@@ -315,19 +312,16 @@ impl McpServiceRegistry {
         mcp_server_tx
             .send(MessageAndCx::Request(request.request, request_cx))
             .await
-            .map_err(acp::Error::into_internal_error)?;
+            .map_err(sacp::Error::into_internal_error)?;
 
         Ok(Handled::Yes)
     }
 
     async fn handle_mcp_over_acp_notification(
         &self,
-        result: Result<
-            SuccessorNotification<McpOverAcpNotification<UntypedMessage>>,
-            agent_client_protocol::Error,
-        >,
-        notification_cx: JsonRpcConnectionCx,
-    ) -> Result<Handled<JsonRpcConnectionCx>, agent_client_protocol::Error> {
+        result: Result<SuccessorNotification<McpOverAcpNotification<UntypedMessage>>, sacp::Error>,
+        notification_cx: JrConnectionCx,
+    ) -> Result<Handled<JrConnectionCx>, sacp::Error> {
         // Check if we parsed this message successfully.
         let SuccessorNotification { notification } = match result {
             Ok(request) => request,
@@ -348,19 +342,16 @@ impl McpServiceRegistry {
                 notification_cx.clone(),
             ))
             .await
-            .map_err(acp::Error::into_internal_error)?;
+            .map_err(sacp::Error::into_internal_error)?;
 
         Ok(Handled::Yes)
     }
 
     async fn handle_mcp_disconnect_notification(
         &self,
-        result: Result<
-            SuccessorNotification<McpDisconnectNotification>,
-            agent_client_protocol::Error,
-        >,
-        notification_cx: JsonRpcConnectionCx,
-    ) -> Result<Handled<JsonRpcConnectionCx>, agent_client_protocol::Error> {
+        result: Result<SuccessorNotification<McpDisconnectNotification>, sacp::Error>,
+        notification_cx: JrConnectionCx,
+    ) -> Result<Handled<JrConnectionCx>, sacp::Error> {
         // Check if we parsed this message successfully.
         let SuccessorNotification { notification } = match result {
             Ok(request) => request,
@@ -380,9 +371,9 @@ impl McpServiceRegistry {
 
     async fn handle_new_session_request(
         &self,
-        result: Result<NewSessionRequest, agent_client_protocol::Error>,
-        request_cx: JsonRpcRequestCx<serde_json::Value>,
-    ) -> Result<Handled<JsonRpcRequestCx<serde_json::Value>>, agent_client_protocol::Error> {
+        result: Result<NewSessionRequest, sacp::Error>,
+        request_cx: JrRequestCx<serde_json::Value>,
+    ) -> Result<Handled<JrRequestCx<serde_json::Value>>, sacp::Error> {
         // Check if we parsed this message successfully.
         let mut request = match result {
             Ok(request) => request,
@@ -411,7 +402,7 @@ impl McpServiceRegistry {
     }
 }
 
-impl JsonRpcHandler for McpServiceRegistry {
+impl JrHandler for McpServiceRegistry {
     fn describe_chain(&self) -> impl std::fmt::Debug {
         "McpServiceRegistry"
     }
@@ -419,7 +410,7 @@ impl JsonRpcHandler for McpServiceRegistry {
     async fn handle_message(
         &mut self,
         message: sacp::MessageAndCx,
-    ) -> Result<sacp::Handled<sacp::MessageAndCx>, agent_client_protocol::Error> {
+    ) -> Result<sacp::Handled<sacp::MessageAndCx>, sacp::Error> {
         match message {
             sacp::MessageAndCx::Request(msg, mut cx) => {
                 let params = msg.params();
@@ -495,8 +486,8 @@ struct RegisteredMcpServer {
 }
 
 impl RegisteredMcpServer {
-    fn acp_mcp_server(&self) -> acp::McpServer {
-        acp::McpServer::Http {
+    fn acp_mcp_server(&self) -> sacp::McpServer {
+        sacp::McpServer::Http {
             name: self.name.clone(),
             url: self.url.clone(),
             headers: vec![],
@@ -518,7 +509,7 @@ trait DynSpawnMcpServer: 'static + Send + Sync {
         &self,
         outgoing_bytes: Pin<Box<dyn tokio::io::AsyncWrite + Send>>,
         incoming_bytes: Pin<Box<dyn tokio::io::AsyncRead + Send>>,
-    ) -> BoxFuture<'static, Result<(), acp::Error>>;
+    ) -> BoxFuture<'static, Result<(), sacp::Error>>;
 }
 
 impl AsRef<McpServiceRegistry> for McpServiceRegistry {
