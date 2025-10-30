@@ -10,15 +10,15 @@
 use expect_test::expect;
 use futures::{AsyncRead, AsyncWrite};
 use sacp::{
-    JsonRpcConnection, JsonRpcMessage, JsonRpcRequest, JsonRpcRequestCx, JsonRpcResponse,
-    JsonRpcResponsePayload,
+    JrConnection, JrMessage, JsonRpcRequest, JrRequestCx, JrResponse,
+    JrResponsePayload,
 };
 use serde::{Deserialize, Serialize};
 use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
 
 /// Test helper to block and wait for a JSON-RPC response.
-async fn recv<R: JsonRpcResponsePayload + Send>(
-    response: JsonRpcResponse<R>,
+async fn recv<R: JrResponsePayload + Send>(
+    response: JrResponse<R>,
 ) -> Result<R, agent_client_protocol_schema::Error> {
     let (tx, rx) = tokio::sync::oneshot::channel();
     response.await_when_result_received(async move |result| {
@@ -56,7 +56,7 @@ struct SimpleRequest {
     message: String,
 }
 
-impl JsonRpcMessage for SimpleRequest {
+impl JrMessage for SimpleRequest {
     fn into_untyped_message(self) -> Result<sacp::UntypedMessage, agent_client_protocol_schema::Error> {
         let method = self.method().to_string();
         sacp::UntypedMessage::new(&method, self)
@@ -94,7 +94,7 @@ struct SimpleResponse {
     result: String,
 }
 
-impl JsonRpcResponsePayload for SimpleResponse {
+impl JrResponsePayload for SimpleResponse {
     fn into_json(self, _method: &str) -> Result<serde_json::Value, agent_client_protocol_schema::Error> {
         serde_json::to_value(self).map_err(agent_client_protocol_schema::Error::into_internal_error)
     }
@@ -128,7 +128,7 @@ async fn test_invalid_json() {
             let server_writer = server_writer.compat_write();
 
             // No handlers - all requests will return errors
-            let server = JsonRpcConnection::new(server_writer, server_reader);
+            let server = JrConnection::new(server_writer, server_reader);
 
             // Spawn server
             tokio::task::spawn_local(async move {
@@ -177,7 +177,7 @@ async fn test_incomplete_line() {
     let output = Cursor::new(Vec::new());
 
     // No handlers needed for EOF test
-    let connection = JsonRpcConnection::new(output, input);
+    let connection = JrConnection::new(output, input);
 
     // The server should handle EOF mid-message gracefully
     let result = connection.serve().await;
@@ -201,8 +201,8 @@ async fn test_unknown_method() {
             let (server_reader, server_writer, client_reader, client_writer) = setup_test_streams();
 
             // No handlers - all requests will be "method not found"
-            let server = JsonRpcConnection::new(server_writer, server_reader);
-            let client = JsonRpcConnection::new(client_writer, client_reader);
+            let server = JrConnection::new(server_writer, server_reader);
+            let client = JrConnection::new(client_writer, client_reader);
 
             // Spawn server
             tokio::task::spawn_local(async move {
@@ -242,7 +242,7 @@ struct ErrorRequest {
     value: String,
 }
 
-impl JsonRpcMessage for ErrorRequest {
+impl JrMessage for ErrorRequest {
     fn into_untyped_message(self) -> Result<sacp::UntypedMessage, agent_client_protocol_schema::Error> {
         let method = self.method().to_string();
         sacp::UntypedMessage::new(&method, self)
@@ -285,8 +285,8 @@ async fn test_handler_returns_error() {
         .run_until(async {
             let (server_reader, server_writer, client_reader, client_writer) = setup_test_streams();
 
-            let server = JsonRpcConnection::new(server_writer, server_reader).on_receive_request(
-                async |_request: ErrorRequest, request_cx: JsonRpcRequestCx<SimpleResponse>| {
+            let server = JrConnection::new(server_writer, server_reader).on_receive_request(
+                async |_request: ErrorRequest, request_cx: JrRequestCx<SimpleResponse>| {
                     // Explicitly return an error
                     request_cx.respond_with_error(agent_client_protocol_schema::Error::new((
                         -32000,
@@ -295,7 +295,7 @@ async fn test_handler_returns_error() {
                 },
             );
 
-            let client = JsonRpcConnection::new(client_writer, client_reader);
+            let client = JrConnection::new(client_writer, client_reader);
 
             tokio::task::spawn_local(async move {
                 server.serve().await.ok();
@@ -331,7 +331,7 @@ async fn test_handler_returns_error() {
 #[derive(Debug, Serialize, Deserialize)]
 struct EmptyRequest;
 
-impl JsonRpcMessage for EmptyRequest {
+impl JrMessage for EmptyRequest {
     fn into_untyped_message(self) -> Result<sacp::UntypedMessage, agent_client_protocol_schema::Error> {
         let method = self.method().to_string();
         sacp::UntypedMessage::new(&method, self)
@@ -376,8 +376,8 @@ async fn test_missing_required_params() {
 
             // Handler that validates params - since EmptyRequest has no params but we're checking
             // against SimpleRequest which requires a message field, this will fail
-            let server = JsonRpcConnection::new(server_writer, server_reader).on_receive_request(
-                async |_request: EmptyRequest, request_cx: JsonRpcRequestCx<SimpleResponse>| {
+            let server = JrConnection::new(server_writer, server_reader).on_receive_request(
+                async |_request: EmptyRequest, request_cx: JrRequestCx<SimpleResponse>| {
                     // This will be called, but EmptyRequest parsing already succeeded
                     // The test is actually checking if EmptyRequest (no params) fails to parse as SimpleRequest
                     // But with the new API, EmptyRequest parses successfully since it expects no params
@@ -387,7 +387,7 @@ async fn test_missing_required_params() {
                 },
             );
 
-            let client = JsonRpcConnection::new(client_writer, client_reader);
+            let client = JrConnection::new(client_writer, client_reader);
 
             tokio::task::spawn_local(async move {
                 server.serve().await.ok();

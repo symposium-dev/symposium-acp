@@ -7,15 +7,15 @@
 
 use futures::{AsyncRead, AsyncWrite};
 use sacp::{
-    JsonRpcConnection, JsonRpcMessage, JsonRpcRequest, JsonRpcRequestCx, JsonRpcResponse,
-    JsonRpcResponsePayload,
+    JrConnection, JrMessage, JsonRpcRequest, JrRequestCx, JrResponse,
+    JrResponsePayload,
 };
 use serde::{Deserialize, Serialize};
 use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
 
 /// Test helper to block and wait for a JSON-RPC response.
-async fn recv<R: JsonRpcResponsePayload + Send>(
-    response: JsonRpcResponse<R>,
+async fn recv<R: JrResponsePayload + Send>(
+    response: JrResponse<R>,
 ) -> Result<R, agent_client_protocol_schema::Error> {
     let (tx, rx) = tokio::sync::oneshot::channel();
     response.await_when_result_received(async move |result| {
@@ -53,7 +53,7 @@ struct PingRequest {
     value: u32,
 }
 
-impl JsonRpcMessage for PingRequest {
+impl JrMessage for PingRequest {
     fn into_untyped_message(self) -> Result<sacp::UntypedMessage, agent_client_protocol_schema::Error> {
         let method = self.method().to_string();
         sacp::UntypedMessage::new(&method, self)
@@ -91,7 +91,7 @@ struct PongResponse {
     value: u32,
 }
 
-impl JsonRpcResponsePayload for PongResponse {
+impl JrResponsePayload for PongResponse {
     fn into_json(self, _method: &str) -> Result<serde_json::Value, agent_client_protocol_schema::Error> {
         serde_json::to_value(self).map_err(agent_client_protocol_schema::Error::into_internal_error)
     }
@@ -110,7 +110,7 @@ struct SlowRequest {
     id: u32,
 }
 
-impl JsonRpcMessage for SlowRequest {
+impl JrMessage for SlowRequest {
     fn into_untyped_message(self) -> Result<sacp::UntypedMessage, agent_client_protocol_schema::Error> {
         let method = self.method().to_string();
         sacp::UntypedMessage::new(&method, self)
@@ -148,7 +148,7 @@ struct SlowResponse {
     id: u32,
 }
 
-impl JsonRpcResponsePayload for SlowResponse {
+impl JrResponsePayload for SlowResponse {
     fn into_json(self, _method: &str) -> Result<serde_json::Value, agent_client_protocol_schema::Error> {
         serde_json::to_value(self).map_err(agent_client_protocol_schema::Error::into_internal_error)
     }
@@ -176,15 +176,15 @@ async fn test_bidirectional_communication() {
             // Set up two connections that are symmetric - both can send and receive
             let (server_reader, server_writer, client_reader, client_writer) = setup_test_streams();
 
-            let side_a = JsonRpcConnection::new(server_writer, server_reader).on_receive_request(
-                async |request: PingRequest, request_cx: JsonRpcRequestCx<PongResponse>| {
+            let side_a = JrConnection::new(server_writer, server_reader).on_receive_request(
+                async |request: PingRequest, request_cx: JrRequestCx<PongResponse>| {
                     request_cx.respond(PongResponse {
                         value: request.value + 1,
                     })
                 },
             );
 
-            let side_b = JsonRpcConnection::new(client_writer, client_reader);
+            let side_b = JrConnection::new(client_writer, client_reader);
 
             // Spawn side_a as server
             tokio::task::spawn_local(async move {
@@ -225,15 +225,15 @@ async fn test_request_ids() {
         .run_until(async {
             let (server_reader, server_writer, client_reader, client_writer) = setup_test_streams();
 
-            let server = JsonRpcConnection::new(server_writer, server_reader).on_receive_request(
-                async |request: PingRequest, request_cx: JsonRpcRequestCx<PongResponse>| {
+            let server = JrConnection::new(server_writer, server_reader).on_receive_request(
+                async |request: PingRequest, request_cx: JrRequestCx<PongResponse>| {
                     request_cx.respond(PongResponse {
                         value: request.value + 1,
                     })
                 },
             );
 
-            let client = JsonRpcConnection::new(client_writer, client_reader);
+            let client = JrConnection::new(client_writer, client_reader);
 
             tokio::task::spawn_local(async move {
                 server.serve().await.ok();
@@ -282,15 +282,15 @@ async fn test_out_of_order_responses() {
         .run_until(async {
             let (server_reader, server_writer, client_reader, client_writer) = setup_test_streams();
 
-            let server = JsonRpcConnection::new(server_writer, server_reader).on_receive_request(
-                async |request: SlowRequest, request_cx: JsonRpcRequestCx<SlowResponse>| {
+            let server = JrConnection::new(server_writer, server_reader).on_receive_request(
+                async |request: SlowRequest, request_cx: JrRequestCx<SlowResponse>| {
                     // Simulate delay
                     tokio::time::sleep(tokio::time::Duration::from_millis(request.delay_ms)).await;
                     request_cx.respond(SlowResponse { id: request.id })
                 },
             );
 
-            let client = JsonRpcConnection::new(client_writer, client_reader);
+            let client = JrConnection::new(client_writer, client_reader);
 
             tokio::task::spawn_local(async move {
                 server.serve().await.ok();

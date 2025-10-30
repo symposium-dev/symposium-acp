@@ -13,7 +13,7 @@ use agent_client_protocol_schema::{
 };
 use expect_test::expect;
 use futures::{SinkExt, StreamExt, channel::mpsc};
-use sacp::JsonRpcConnection;
+use sacp::JrConnection;
 use sacp_conductor::component::ComponentProvider;
 use sacp_conductor::conductor::Conductor;
 
@@ -21,8 +21,8 @@ use tokio::io::duplex;
 use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
 
 /// Test helper to receive a JSON-RPC response
-async fn recv<R: sacp::JsonRpcResponsePayload + Send>(
-    response: sacp::JsonRpcResponse<R>,
+async fn recv<R: sacp::JrResponsePayload + Send>(
+    response: sacp::JrResponse<R>,
 ) -> Result<R, agent_client_protocol_schema::Error> {
     let (tx, rx) = tokio::sync::oneshot::channel();
     response.await_when_result_received(async move |result| {
@@ -45,13 +45,13 @@ fn conductor_command() -> Vec<String> {
 
 async fn run_test_with_components(
     components: Vec<Box<dyn ComponentProvider>>,
-    editor_task: impl AsyncFnOnce(sacp::JsonRpcConnectionCx) -> Result<(), acp::Error>,
+    editor_task: impl AsyncFnOnce(sacp::JrConnectionCx) -> Result<(), acp::Error>,
 ) -> Result<(), acp::Error> {
     // Set up editor <-> conductor communication
     let (editor_out, conductor_in) = duplex(1024);
     let (conductor_out, editor_in) = duplex(1024);
 
-    JsonRpcConnection::new(editor_out.compat_write(), editor_in.compat())
+    JrConnection::new(editor_out.compat_write(), editor_in.compat())
         .name("editor-to-connector")
         .with_spawned(async move {
             Conductor::run_with_command(
@@ -137,7 +137,7 @@ async fn test_agent_handles_prompt() -> Result<(), acp::Error> {
     let (editor_in, editor_out) = tokio::io::split(editor);
     let (conductor_in, conductor_out) = tokio::io::split(conductor);
 
-    JsonRpcConnection::new(editor_out.compat_write(), editor_in.compat())
+    JrConnection::new(editor_out.compat_write(), editor_in.compat())
         .name("editor-to-connector")
         .on_receive_notification({
             let mut log_tx = log_tx.clone();

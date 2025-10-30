@@ -1,6 +1,6 @@
 use agent_client_protocol_schema as acp;
 use sacp::{
-    JsonRpcMessage, JsonRpcNotification, JsonRpcRequest, JsonRpcResponsePayload, UntypedMessage,
+    JrMessage, JrNotification, JsonRpcRequest, JrResponsePayload, UntypedMessage,
     util::json_cast,
 };
 use serde::{Deserialize, Serialize};
@@ -13,7 +13,7 @@ pub struct McpConnectRequest {
     pub acp_url: String,
 }
 
-impl JsonRpcMessage for McpConnectRequest {
+impl JrMessage for McpConnectRequest {
     fn into_untyped_message(self) -> Result<UntypedMessage, acp::Error> {
         UntypedMessage::new(METHOD_MCP_CONNECT_REQUEST, self)
     }
@@ -47,7 +47,7 @@ pub struct McpConnectResponse {
     pub connection_id: String,
 }
 
-impl JsonRpcResponsePayload for McpConnectResponse {
+impl JrResponsePayload for McpConnectResponse {
     fn into_json(self, _method: &str) -> Result<serde_json::Value, agent_client_protocol_schema::Error> {
         serde_json::to_value(self).map_err(acp::Error::into_internal_error)
     }
@@ -69,7 +69,7 @@ pub struct McpDisconnectNotification {
     pub connection_id: String,
 }
 
-impl JsonRpcMessage for McpDisconnectNotification {
+impl JrMessage for McpDisconnectNotification {
     fn into_untyped_message(self) -> Result<UntypedMessage, acp::Error> {
         UntypedMessage::new(METHOD_MCP_DISCONNECT_NOTIFICATION, self)
     }
@@ -94,7 +94,7 @@ impl JsonRpcMessage for McpDisconnectNotification {
     }
 }
 
-impl JsonRpcNotification for McpDisconnectNotification {}
+impl JrNotification for McpDisconnectNotification {}
 
 pub const METHOD_MCP_REQUEST: &str = "_mcp/request";
 
@@ -113,7 +113,7 @@ pub struct McpOverAcpRequest<R> {
     pub request: R,
 }
 
-impl<R: JsonRpcRequest> JsonRpcMessage for McpOverAcpRequest<R> {
+impl<R: JsonRpcRequest> JrMessage for McpOverAcpRequest<R> {
     fn into_untyped_message(self) -> Result<UntypedMessage, acp::Error> {
         let message = self.request.into_untyped_message()?;
         UntypedMessage::new(
@@ -177,7 +177,7 @@ pub struct McpOverAcpNotification<R> {
     pub notification: R,
 }
 
-impl<R: JsonRpcMessage> JsonRpcMessage for McpOverAcpNotification<R> {
+impl<R: JrMessage> JrMessage for McpOverAcpNotification<R> {
     fn into_untyped_message(self) -> Result<UntypedMessage, acp::Error> {
         let params = self.notification.into_untyped_message()?;
         UntypedMessage::new(
@@ -222,4 +222,4 @@ impl<R: JsonRpcMessage> JsonRpcMessage for McpOverAcpNotification<R> {
     }
 }
 
-impl<R: JsonRpcMessage> JsonRpcNotification for McpOverAcpNotification<R> {}
+impl<R: JrMessage> JrNotification for McpOverAcpNotification<R> {}

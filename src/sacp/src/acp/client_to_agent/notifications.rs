@@ -1,10 +1,10 @@
 use agent_client_protocol_schema::CancelNotification;
 use serde::Serialize;
 
-use crate::jsonrpc::{JsonRpcMessage, JsonRpcNotification};
+use crate::jsonrpc::{JrMessage, JrNotification};
 use crate::util::json_cast;
 
-impl JsonRpcMessage for CancelNotification {
+impl JrMessage for CancelNotification {
     fn into_untyped_message(self) -> Result<crate::UntypedMessage, agent_client_protocol_schema::Error> {
         let method = self.method().to_string();
         crate::UntypedMessage::new(&method, self)
@@ -34,4 +34,4 @@ impl JsonRpcMessage for CancelNotification {
     }
 }
 
-impl JsonRpcNotification for CancelNotification {}
+impl JrNotification for CancelNotification {}

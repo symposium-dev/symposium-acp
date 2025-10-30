@@ -1,4 +1,4 @@
-//! JsonRpcRequest and JsonRpcNotification implementations for ACP enum types.
+//! JsonRpcRequest and JrNotification implementations for ACP enum types.
 //!
 //! This module implements the JSON-RPC traits for the enum types from
 //! agent-client-protocol-schema that represent all possible messages:
@@ -10,14 +10,14 @@
 use agent_client_protocol_schema::{AgentNotification, AgentRequest, ClientNotification, ClientRequest};
 use serde::Serialize;
 
-use crate::jsonrpc::{JsonRpcMessage, JsonRpcNotification, JsonRpcRequest};
+use crate::jsonrpc::{JrMessage, JrNotification, JsonRpcRequest};
 use crate::util::json_cast;
 
 // ============================================================================
 // Agent side (messages that agents receive)
 // ============================================================================
 
-impl JsonRpcMessage for ClientRequest {
+impl JrMessage for ClientRequest {
     fn into_untyped_message(self) -> Result<crate::UntypedMessage, agent_client_protocol_schema::Error> {
         let method = self.method().to_string();
         crate::UntypedMessage::new(&method, self)
@@ -77,7 +77,7 @@ impl JsonRpcRequest for ClientRequest {
     type Response = serde_json::Value;
 }
 
-impl JsonRpcMessage for ClientNotification {
+impl JrMessage for ClientNotification {
     fn into_untyped_message(self) -> Result<crate::UntypedMessage, agent_client_protocol_schema::Error> {
         let method = self.method().to_string();
         crate::UntypedMessage::new(&method, self)
@@ -125,13 +125,13 @@ impl JsonRpcMessage for ClientNotification {
     }
 }
 
-impl JsonRpcNotification for ClientNotification {}
+impl JrNotification for ClientNotification {}
 
 // ============================================================================
 // Client side (messages that clients/editors receive)
 // ============================================================================
 
-impl JsonRpcMessage for AgentRequest {
+impl JrMessage for AgentRequest {
     fn into_untyped_message(self) -> Result<crate::UntypedMessage, agent_client_protocol_schema::Error> {
         let method = self.method().to_string();
         crate::UntypedMessage::new(&method, self)
@@ -199,7 +199,7 @@ impl JsonRpcRequest for AgentRequest {
     type Response = serde_json::Value;
 }
 
-impl JsonRpcMessage for AgentNotification {
+impl JrMessage for AgentNotification {
     fn into_untyped_message(self) -> Result<crate::UntypedMessage, agent_client_protocol_schema::Error> {
         let method = self.method().to_string();
         crate::UntypedMessage::new(&method, self)
@@ -245,4 +245,4 @@ impl JsonRpcMessage for AgentNotification {
     }
 }
 
-impl JsonRpcNotification for AgentNotification {}
+impl JrNotification for AgentNotification {}

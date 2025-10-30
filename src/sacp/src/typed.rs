@@ -2,7 +2,7 @@ use agent_client_protocol_schema as acp;
 use jsonrpcmsg::Params;
 
 use crate::{
-    JsonRpcConnectionCx, JsonRpcNotification, JsonRpcRequest, JsonRpcRequestCx, UntypedMessage,
+    JrConnectionCx, JrNotification, JsonRpcRequest, JrRequestCx, UntypedMessage,
     util::json_cast,
 };
 
@@ -13,12 +13,12 @@ pub struct TypeRequest {
 }
 
 enum TypeMessageState {
-    Unhandled(String, Option<Params>, JsonRpcRequestCx<serde_json::Value>),
+    Unhandled(String, Option<Params>, JrRequestCx<serde_json::Value>),
     Handled(Result<(), acp::Error>),
 }
 
 impl TypeRequest {
-    pub fn new(request: UntypedMessage, request_cx: JsonRpcRequestCx<serde_json::Value>) -> Self {
+    pub fn new(request: UntypedMessage, request_cx: JrRequestCx<serde_json::Value>) -> Self {
         let UntypedMessage { method, params } = request;
         let params: Option<Params> = json_cast(params).expect("valid params");
         Self {
@@ -28,7 +28,7 @@ impl TypeRequest {
 
     pub async fn handle_if<R: JsonRpcRequest>(
         mut self,
-        op: impl AsyncFnOnce(R, JsonRpcRequestCx<R::Response>) -> Result<(), acp::Error>,
+        op: impl AsyncFnOnce(R, JrRequestCx<R::Response>) -> Result<(), acp::Error>,
     ) -> Self {
         self.state = Some(match self.state.take().expect("valid state") {
             TypeMessageState::Unhandled(method, params, request_cx) => {
@@ -52,7 +52,7 @@ impl TypeRequest {
         mut self,
         op: impl AsyncFnOnce(
             UntypedMessage,
-            JsonRpcRequestCx<serde_json::Value>,
+            JrRequestCx<serde_json::Value>,
         ) -> Result<(), acp::Error>,
     ) -> Result<(), acp::Error> {
         match self.state.take().expect("valid state") {
@@ -70,7 +70,7 @@ impl TypeRequest {
 /// Utility class for handling untyped notifications.
 #[must_use]
 pub struct TypeNotification {
-    cx: JsonRpcConnectionCx,
+    cx: JrConnectionCx,
     state: Option<TypeNotificationState>,
 }
 
@@ -80,7 +80,7 @@ enum TypeNotificationState {
 }
 
 impl TypeNotification {
-    pub fn new(request: UntypedMessage, cx: &JsonRpcConnectionCx) -> Self {
+    pub fn new(request: UntypedMessage, cx: &JrConnectionCx) -> Self {
         let UntypedMessage { method, params } = request;
         let params: Option<Params> = json_cast(params).expect("valid params");
         Self {
@@ -89,7 +89,7 @@ impl TypeNotification {
         }
     }
 
-    pub async fn handle_if<N: JsonRpcNotification>(
+    pub async fn handle_if<N: JrNotification>(
         mut self,
         op: impl AsyncFnOnce(N) -> Result<(), acp::Error>,
     ) -> Self {

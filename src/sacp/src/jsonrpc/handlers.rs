@@ -1,16 +1,16 @@
-use crate::jsonrpc::{Handled, JsonRpcHandler};
-use crate::{JsonRpcConnectionCx, JsonRpcNotification, JsonRpcRequest, MessageAndCx};
+use crate::jsonrpc::{Handled, JrHandler};
+use crate::{JrConnectionCx, JrNotification, JsonRpcRequest, MessageAndCx};
 use agent_client_protocol_schema as acp;
 use std::marker::PhantomData;
 use std::ops::AsyncFnMut;
 
-use super::JsonRpcRequestCx;
+use super::JrRequestCx;
 
 /// Null handler that accepts no messages.
 #[derive(Default)]
 pub struct NullHandler {}
 
-impl JsonRpcHandler for NullHandler {
+impl JrHandler for NullHandler {
     fn describe_chain(&self) -> impl std::fmt::Debug {
         "(null)"
     }
@@ -26,7 +26,7 @@ impl JsonRpcHandler for NullHandler {
 pub struct RequestHandler<R, F>
 where
     R: JsonRpcRequest,
-    F: AsyncFnMut(R, JsonRpcRequestCx<R::Response>) -> Result<(), acp::Error>,
+    F: AsyncFnMut(R, JrRequestCx<R::Response>) -> Result<(), acp::Error>,
 {
     handler: F,
     phantom: PhantomData<fn(R)>,
@@ -35,7 +35,7 @@ where
 impl<R, F> RequestHandler<R, F>
 where
     R: JsonRpcRequest,
-    F: AsyncFnMut(R, JsonRpcRequestCx<R::Response>) -> Result<(), acp::Error>,
+    F: AsyncFnMut(R, JrRequestCx<R::Response>) -> Result<(), acp::Error>,
 {
     pub fn new(handler: F) -> Self {
         Self {
@@ -45,10 +45,10 @@ where
     }
 }
 
-impl<R, F> JsonRpcHandler for RequestHandler<R, F>
+impl<R, F> JrHandler for RequestHandler<R, F>
 where
     R: JsonRpcRequest,
-    F: AsyncFnMut(R, JsonRpcRequestCx<R::Response>) -> Result<(), acp::Error>,
+    F: AsyncFnMut(R, JrRequestCx<R::Response>) -> Result<(), acp::Error>,
 {
     async fn handle_message(
         &mut self,
@@ -89,8 +89,8 @@ where
 
 pub struct NotificationHandler<N, F>
 where
-    N: JsonRpcNotification,
-    F: AsyncFnMut(N, JsonRpcConnectionCx) -> Result<(), acp::Error>,
+    N: JrNotification,
+    F: AsyncFnMut(N, JrConnectionCx) -> Result<(), acp::Error>,
 {
     handler: F,
     phantom: PhantomData<fn(N)>,
@@ -98,8 +98,8 @@ where
 
 impl<R, F> NotificationHandler<R, F>
 where
-    R: JsonRpcNotification,
-    F: AsyncFnMut(R, JsonRpcConnectionCx) -> Result<(), acp::Error>,
+    R: JrNotification,
+    F: AsyncFnMut(R, JrConnectionCx) -> Result<(), acp::Error>,
 {
     pub fn new(handler: F) -> Self {
         Self {
@@ -109,10 +109,10 @@ where
     }
 }
 
-impl<R, F> JsonRpcHandler for NotificationHandler<R, F>
+impl<R, F> JrHandler for NotificationHandler<R, F>
 where
-    R: JsonRpcNotification,
-    F: AsyncFnMut(R, JsonRpcConnectionCx) -> Result<(), acp::Error>,
+    R: JrNotification,
+    F: AsyncFnMut(R, JrConnectionCx) -> Result<(), acp::Error>,
 {
     async fn handle_message(
         &mut self,
@@ -159,7 +159,7 @@ where
 pub struct MessageHandler<R, N, F>
 where
     R: JsonRpcRequest,
-    N: JsonRpcNotification,
+    N: JrNotification,
     F: AsyncFnMut(MessageAndCx<R, N>) -> Result<(), acp::Error>,
 {
     handler: F,
@@ -169,7 +169,7 @@ where
 impl<R, N, F> MessageHandler<R, N, F>
 where
     R: JsonRpcRequest,
-    N: JsonRpcNotification,
+    N: JrNotification,
     F: AsyncFnMut(MessageAndCx<R, N>) -> Result<(), acp::Error>,
 {
     pub fn new(handler: F) -> Self {
@@ -180,10 +180,10 @@ where
     }
 }
 
-impl<R, N, F> JsonRpcHandler for MessageHandler<R, N, F>
+impl<R, N, F> JrHandler for MessageHandler<R, N, F>
 where
     R: JsonRpcRequest,
-    N: JsonRpcNotification,
+    N: JrNotification,
     F: AsyncFnMut(MessageAndCx<R, N>) -> Result<(), acp::Error>,
 {
     async fn handle_message(
@@ -251,8 +251,8 @@ where
 
 pub struct ChainHandler<H1, H2>
 where
-    H1: JsonRpcHandler,
-    H2: JsonRpcHandler,
+    H1: JrHandler,
+    H2: JrHandler,
 {
     handler1: H1,
     handler2: H2,
@@ -260,18 +260,18 @@ where
 
 impl<H1, H2> ChainHandler<H1, H2>
 where
-    H1: JsonRpcHandler,
-    H2: JsonRpcHandler,
+    H1: JrHandler,
+    H2: JrHandler,
 {
     pub fn new(handler1: H1, handler2: H2) -> Self {
         Self { handler1, handler2 }
     }
 }
 
-impl<H1, H2> JsonRpcHandler for ChainHandler<H1, H2>
+impl<H1, H2> JrHandler for ChainHandler<H1, H2>
 where
-    H1: JsonRpcHandler,
-    H2: JsonRpcHandler,
+    H1: JrHandler,
+    H2: JrHandler,
 {
     fn describe_chain(&self) -> impl std::fmt::Debug {
         return DebugImpl {
@@ -284,7 +284,7 @@ where
             handler2: &'h H2,
         }
 
-        impl<H1: JsonRpcHandler, H2: JsonRpcHandler> std::fmt::Debug for DebugImpl<'_, H1, H2> {
+        impl<H1: JrHandler, H2: JrHandler> std::fmt::Debug for DebugImpl<'_, H1, H2> {
             fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
                 write!(
                     f,

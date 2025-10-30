@@ -72,8 +72,8 @@ use agent_client_protocol_schema::{
 use futures::{AsyncRead, AsyncWrite, SinkExt, StreamExt, channel::mpsc};
 
 use sacp::{
-    JsonRpcConnection, JsonRpcConnectionCx, JsonRpcNotification, JsonRpcRequest, JsonRpcRequestCx,
-    JsonRpcResponse, MessageAndCx, MetaCapabilityExt, NullHandler, Proxy, TypeNotification,
+    JrConnection, JrConnectionCx, JrNotification, JsonRpcRequest, JrRequestCx,
+    JrResponse, MessageAndCx, MetaCapabilityExt, NullHandler, Proxy, TypeNotification,
     TypeRequest, UntypedMessage,
 };
 use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
@@ -90,7 +90,7 @@ mod mcp_bridge;
 ///
 /// These are kept separate from the Conductor struct to avoid partial move issues.
 struct ServeArgs<OB: AsyncWrite, IB: AsyncRead> {
-    connection: JsonRpcConnection<OB, IB, NullHandler>,
+    connection: JrConnection<OB, IB, NullHandler>,
     conductor_tx: mpsc::Sender<ConductorMessage>,
 }
 
@@ -163,7 +163,7 @@ impl Conductor {
         let (conductor_tx, conductor_rx) = mpsc::channel(128 /* chosen arbitrarily */);
 
         let connection =
-            JsonRpcConnection::new(outgoing_bytes, incoming_bytes).name("client-to-conductor");
+            JrConnection::new(outgoing_bytes, incoming_bytes).name("client-to-conductor");
 
         let serve_args = ServeArgs {
             connection,
@@ -237,7 +237,7 @@ impl Conductor {
                 "Component created, setting up JSON-RPC connection"
             );
 
-            JsonRpcConnection::new(conductor_write.compat_write(), conductor_read.compat())
+            JrConnection::new(conductor_write.compat_write(), conductor_read.compat())
                 .name(format!("conductor-to-component({})", component_index))
                 // Intercept messages sent by a proxy component (acting as ACP client) to its successor agent.
                 .on_receive_message({
@@ -361,7 +361,7 @@ impl Conductor {
     ///   through a stdio server that runs on localhost and bridges messages.
     async fn handle_conductor_message(
         &mut self,
-        client: &JsonRpcConnectionCx,
+        client: &JrConnectionCx,
         message: ConductorMessage,
         conductor_tx: &mut mpsc::Sender<ConductorMessage>,
     ) -> Result<(), agent_client_protocol_schema::Error> {
@@ -482,9 +482,9 @@ impl Conductor {
     /// * If the message is going to a proxy component, then we have to wrap
     ///   it in a "from successor" wrapper, because the conductor is the
     ///   proxy's client.
-    fn send_message_to_predecessor_of<Req: JsonRpcRequest, N: JsonRpcNotification>(
+    fn send_message_to_predecessor_of<Req: JsonRpcRequest, N: JrNotification>(
         &mut self,
-        client: &JsonRpcConnectionCx,
+        client: &JrConnectionCx,
         source_component_index: usize,
         message: MessageAndCx<Req, N>,
     ) -> Result<(), acp::Error>
@@ -508,10 +508,10 @@ impl Conductor {
 
     fn send_request_to_predecessor_of<Req: JsonRpcRequest>(
         &mut self,
-        client: &JsonRpcConnectionCx,
+        client: &JrConnectionCx,
         source_component_index: usize,
         request: Req,
-    ) -> JsonRpcResponse<Req::Response> {
+    ) -> JrResponse<Req::Response> {
         if source_component_index == 0 {
             client.send_request(request)
         } else {
@@ -531,9 +531,9 @@ impl Conductor {
     /// * If the notification is going to a proxy component, then we have to wrap
     ///   it in a "from successor" wrapper, because the conductor is the
     ///   proxy's client.
-    fn send_notification_to_predecessor_of<N: JsonRpcNotification>(
+    fn send_notification_to_predecessor_of<N: JrNotification>(
         &mut self,
-        client: &JsonRpcConnectionCx,
+        client: &JrConnectionCx,
         component_index: usize,
         notification: N,
     ) -> Result<(), acp::Error> {
@@ -555,7 +555,7 @@ impl Conductor {
         conductor_tx: &mut mpsc::Sender<ConductorMessage>,
         target_component_index: usize,
         message: MessageAndCx,
-        client: &JsonRpcConnectionCx,
+        client: &JrConnectionCx,
     ) -> Result<(), agent_client_protocol_schema::Error> {
         match message {
             MessageAndCx::Request(request, request_cx) => {
@@ -584,7 +584,7 @@ impl Conductor {
         conductor_tx: &mut mpsc::Sender<ConductorMessage>,
         target_component_index: usize,
         request: UntypedMessage,
-        request_cx: JsonRpcRequestCx<serde_json::Value>,
+        request_cx: JrRequestCx<serde_json::Value>,
     ) -> Result<(), agent_client_protocol_schema::Error> {
         TypeRequest::new(request, request_cx)
             .handle_if(async |request: InitializeRequest, request_cx| {
@@ -641,7 +641,7 @@ impl Conductor {
         &mut self,
         target_component_index: usize,
         notification: UntypedMessage,
-        cx: &JsonRpcConnectionCx,
+        cx: &JrConnectionCx,
     ) -> Result<(), agent_client_protocol_schema::Error> {
         let cx_clone = cx.clone();
         TypeNotification::new(notification, cx)
@@ -683,7 +683,7 @@ impl Conductor {
         &self,
         target_component_index: usize,
         mut initialize_req: InitializeRequest,
-        request_cx: JsonRpcRequestCx<InitializeResponse>,
+        request_cx: JrRequestCx<InitializeResponse>,
     ) -> Result<(), agent_client_protocol_schema::Error> {
         // The conductor does not accept proxy capabilities.
         if initialize_req.has_meta_capability(Proxy) {
@@ -736,7 +736,7 @@ impl Conductor {
         target_component_index: usize,
         mut request: acp::NewSessionRequest,
         conductor_tx: &mpsc::Sender<ConductorMessage>,
-        request_cx: JsonRpcRequestCx<NewSessionResponse>,
+        request_cx: JrRequestCx<NewSessionResponse>,
     ) -> Result<(), acp::Error> {
         // Before forwarding the ACP request to the agent, replace ACP servers with stdio-based servers.
         if self.is_agent_component(target_component_index) {

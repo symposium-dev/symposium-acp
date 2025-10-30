@@ -5,8 +5,8 @@
 //! handler claims them.
 
 use sacp::{
-    JsonRpcConnection, JsonRpcMessage, JsonRpcNotification, JsonRpcRequest, JsonRpcRequestCx,
-    JsonRpcResponse, JsonRpcResponsePayload,
+    JrConnection, JrMessage, JrNotification, JsonRpcRequest, JrRequestCx,
+    JrResponse, JrResponsePayload,
 };
 use serde::{Deserialize, Serialize};
 use std::sync::{Arc, Mutex};
@@ -14,8 +14,8 @@ use std::time::Duration;
 use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
 
 /// Test helper to block and wait for a JSON-RPC response.
-async fn recv<R: JsonRpcResponsePayload + Send>(
-    response: JsonRpcResponse<R>,
+async fn recv<R: JrResponsePayload + Send>(
+    response: JrResponse<R>,
 ) -> Result<R, agent_client_protocol_schema::Error> {
     let (tx, rx) = tokio::sync::oneshot::channel();
     response.await_when_result_received(async move |result| {
@@ -35,7 +35,7 @@ struct FooRequest {
     value: String,
 }
 
-impl JsonRpcMessage for FooRequest {
+impl JrMessage for FooRequest {
     fn into_untyped_message(self) -> Result<sacp::UntypedMessage, agent_client_protocol_schema::Error> {
         let method = self.method().to_string();
         sacp::UntypedMessage::new(&method, self)
@@ -73,7 +73,7 @@ struct FooResponse {
     result: String,
 }
 
-impl JsonRpcResponsePayload for FooResponse {
+impl JrResponsePayload for FooResponse {
     fn into_json(self, _method: &str) -> Result<serde_json::Value, agent_client_protocol_schema::Error> {
         serde_json::to_value(self).map_err(agent_client_protocol_schema::Error::into_internal_error)
     }
@@ -91,7 +91,7 @@ struct BarRequest {
     value: String,
 }
 
-impl JsonRpcMessage for BarRequest {
+impl JrMessage for BarRequest {
     fn into_untyped_message(self) -> Result<sacp::UntypedMessage, agent_client_protocol_schema::Error> {
         let method = self.method().to_string();
         sacp::UntypedMessage::new(&method, self)
@@ -129,7 +129,7 @@ struct BarResponse {
     result: String,
 }
 
-impl JsonRpcResponsePayload for BarResponse {
+impl JrResponsePayload for BarResponse {
     fn into_json(self, _method: &str) -> Result<serde_json::Value, agent_client_protocol_schema::Error> {
         serde_json::to_value(self).map_err(agent_client_protocol_schema::Error::into_internal_error)
     }
@@ -159,22 +159,22 @@ async fn test_multiple_handlers_different_methods() {
             let client_writer = client_writer.compat_write();
 
             // Chain both handlers
-            let server = JsonRpcConnection::new(server_writer, server_reader)
+            let server = JrConnection::new(server_writer, server_reader)
                 .on_receive_request(
-                    async |request: FooRequest, request_cx: JsonRpcRequestCx<FooResponse>| {
+                    async |request: FooRequest, request_cx: JrRequestCx<FooResponse>| {
                         request_cx.respond(FooResponse {
                             result: format!("foo: {}", request.value),
                         })
                     },
                 )
                 .on_receive_request(
-                    async |request: BarRequest, request_cx: JsonRpcRequestCx<BarResponse>| {
+                    async |request: BarRequest, request_cx: JrRequestCx<BarResponse>| {
                         request_cx.respond(BarResponse {
                             result: format!("bar: {}", request.value),
                         })
                     },
                 );
-            let client = JsonRpcConnection::new(client_writer, client_reader);
+            let client = JrConnection::new(client_writer, client_reader);
 
             tokio::task::spawn_local(async move {
                 if let Err(e) = server.serve().await {
@@ -228,7 +228,7 @@ struct TrackRequest {
     value: String,
 }
 
-impl JsonRpcMessage for TrackRequest {
+impl JrMessage for TrackRequest {
     fn into_untyped_message(self) -> Result<sacp::UntypedMessage, agent_client_protocol_schema::Error> {
         let method = self.method().to_string();
         sacp::UntypedMessage::new(&method, self)
@@ -282,10 +282,10 @@ async fn test_handler_priority_ordering() {
             // First handler in chain should get first chance
             let handled_clone1 = handled.clone();
             let handled_clone2 = handled.clone();
-            let server = JsonRpcConnection::new(server_writer, server_reader)
+            let server = JrConnection::new(server_writer, server_reader)
                 .on_receive_request(
                     async move |request: TrackRequest,
-                                request_cx: JsonRpcRequestCx<FooResponse>| {
+                                request_cx: JrRequestCx<FooResponse>| {
                         handled_clone1.lock().unwrap().push("handler1".to_string());
                         request_cx.respond(FooResponse {
                             result: format!("handler1: {}", request.value),
@@ -294,14 +294,14 @@ async fn test_handler_priority_ordering() {
                 )
                 .on_receive_request(
                     async move |request: TrackRequest,
-                                request_cx: JsonRpcRequestCx<FooResponse>| {
+                                request_cx: JrRequestCx<FooResponse>| {
                         handled_clone2.lock().unwrap().push("handler2".to_string());
                         request_cx.respond(FooResponse {
                             result: format!("handler2: {}", request.value),
                         })
                     },
                 );
-            let client = JsonRpcConnection::new(client_writer, client_reader);
+            let client = JrConnection::new(client_writer, client_reader);
 
             tokio::task::spawn_local(async move {
                 if let Err(e) = server.serve().await {
@@ -347,7 +347,7 @@ struct Method1Request {
     value: String,
 }
 
-impl JsonRpcMessage for Method1Request {
+impl JrMessage for Method1Request {
     fn into_untyped_message(self) -> Result<sacp::UntypedMessage, agent_client_protocol_schema::Error> {
         let method = self.method().to_string();
         sacp::UntypedMessage::new(&method, self)
@@ -385,7 +385,7 @@ struct Method2Request {
     value: String,
 }
 
-impl JsonRpcMessage for Method2Request {
+impl JrMessage for Method2Request {
     fn into_untyped_message(self) -> Result<sacp::UntypedMessage, agent_client_protocol_schema::Error> {
         let method = self.method().to_string();
         sacp::UntypedMessage::new(&method, self)
@@ -439,10 +439,10 @@ async fn test_fallthrough_behavior() {
             // Handler1 only handles "method1", Handler2 only handles "method2"
             let handled_clone1 = handled.clone();
             let handled_clone2 = handled.clone();
-            let server = JsonRpcConnection::new(server_writer, server_reader)
+            let server = JrConnection::new(server_writer, server_reader)
                 .on_receive_request(
                     async move |request: Method1Request,
-                                request_cx: JsonRpcRequestCx<FooResponse>| {
+                                request_cx: JrRequestCx<FooResponse>| {
                         handled_clone1.lock().unwrap().push("method1".to_string());
                         request_cx.respond(FooResponse {
                             result: format!("method1: {}", request.value),
@@ -451,14 +451,14 @@ async fn test_fallthrough_behavior() {
                 )
                 .on_receive_request(
                     async move |request: Method2Request,
-                                request_cx: JsonRpcRequestCx<FooResponse>| {
+                                request_cx: JrRequestCx<FooResponse>| {
                         handled_clone2.lock().unwrap().push("method2".to_string());
                         request_cx.respond(FooResponse {
                             result: format!("method2: {}", request.value),
                         })
                     },
                 );
-            let client = JsonRpcConnection::new(client_writer, client_reader);
+            let client = JrConnection::new(client_writer, client_reader);
 
             tokio::task::spawn_local(async move {
                 if let Err(e) = server.serve().await {
@@ -516,14 +516,14 @@ async fn test_no_handler_claims() {
             let client_writer = client_writer.compat_write();
 
             // Handler that only handles "foo"
-            let server = JsonRpcConnection::new(server_writer, server_reader).on_receive_request(
-                async |request: FooRequest, request_cx: JsonRpcRequestCx<FooResponse>| {
+            let server = JrConnection::new(server_writer, server_reader).on_receive_request(
+                async |request: FooRequest, request_cx: JrRequestCx<FooResponse>| {
                     request_cx.respond(FooResponse {
                         result: format!("foo: {}", request.value),
                     })
                 },
             );
-            let client = JsonRpcConnection::new(client_writer, client_reader);
+            let client = JrConnection::new(client_writer, client_reader);
 
             tokio::task::spawn_local(async move {
                 if let Err(e) = server.serve().await {
@@ -562,7 +562,7 @@ struct EventNotification {
     event: String,
 }
 
-impl JsonRpcMessage for EventNotification {
+impl JrMessage for EventNotification {
     fn into_untyped_message(self) -> Result<sacp::UntypedMessage, agent_client_protocol_schema::Error> {
         let method = self.method().to_string();
         sacp::UntypedMessage::new(&method, self)
@@ -591,7 +591,7 @@ impl JsonRpcMessage for EventNotification {
     }
 }
 
-impl JsonRpcNotification for EventNotification {}
+impl JrNotification for EventNotification {}
 
 #[tokio::test(flavor = "current_thread")]
 async fn test_handler_claims_notification() {
@@ -613,14 +613,14 @@ async fn test_handler_claims_notification() {
 
             // EventHandler claims notifications
             let events_clone = events.clone();
-            let server = JsonRpcConnection::new(server_writer, server_reader)
+            let server = JrConnection::new(server_writer, server_reader)
                 .on_receive_notification(
                     async move |notification: EventNotification, _notification_cx| {
                         events_clone.lock().unwrap().push(notification.event);
                         Ok(())
                     },
                 );
-            let client = JsonRpcConnection::new(client_writer, client_reader);
+            let client = JrConnection::new(client_writer, client_reader);
 
             tokio::task::spawn_local(async move {
                 if let Err(e) = server.serve().await {

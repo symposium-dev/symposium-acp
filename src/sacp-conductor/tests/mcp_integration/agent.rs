@@ -7,7 +7,7 @@ use agent_client_protocol_schema::{
 };
 use futures::{AsyncRead, AsyncWrite};
 use rmcp::ServiceExt;
-use sacp::{JsonRpcConnection, JsonRpcConnectionCx, JsonRpcRequestCx};
+use sacp::{JrConnection, JrConnectionCx, JrRequestCx};
 use sacp_conductor::component::{Cleanup, ComponentProvider};
 use std::{pin::Pin, sync::Arc};
 use tokio::sync::Mutex;
@@ -26,7 +26,7 @@ struct AgentState {
 impl ComponentProvider for AgentComponentProvider {
     fn create(
         &self,
-        cx: &JsonRpcConnectionCx,
+        cx: &JrConnectionCx,
         outgoing_bytes: Pin<Box<dyn AsyncWrite + Send>>,
         incoming_bytes: Pin<Box<dyn AsyncRead + Send>>,
     ) -> Result<Cleanup, acp::Error> {
@@ -37,7 +37,7 @@ impl ComponentProvider for AgentComponentProvider {
         cx.spawn({
             let state = state.clone();
             async move {
-                JsonRpcConnection::new(outgoing_bytes, incoming_bytes)
+                JrConnection::new(outgoing_bytes, incoming_bytes)
                     .name("agent-component")
                     .on_receive_request(async move |request: InitializeRequest, request_cx| {
                         // Simple initialization response
@@ -118,7 +118,7 @@ impl AgentComponentProvider {
     async fn respond_to_prompt(
         state: AgentState,
         request: PromptRequest,
-        request_cx: JsonRpcRequestCx<PromptResponse>,
+        request_cx: JrRequestCx<PromptResponse>,
     ) -> Result<(), acp::Error> {
         use rmcp::{
             model::CallToolRequestParam,

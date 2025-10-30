@@ -1,12 +1,12 @@
 use agent_client_protocol_schema::{self as acp, SessionNotification};
 use serde::Serialize;
 
-use crate::jsonrpc::{JsonRpcMessage, JsonRpcNotification};
+use crate::jsonrpc::{JrMessage, JrNotification};
 
 // Agent -> Client notifications
 // These are one-way messages that agents send to clients/editors
 
-impl JsonRpcMessage for SessionNotification {
+impl JrMessage for SessionNotification {
     fn into_untyped_message(self) -> Result<crate::UntypedMessage, acp::Error> {
         let method = self.method().to_string();
         crate::UntypedMessage::new(&method, self)
@@ -32,4 +32,4 @@ impl JsonRpcMessage for SessionNotification {
     }
 }
 
-impl JsonRpcNotification for SessionNotification {}
+impl JrNotification for SessionNotification {}

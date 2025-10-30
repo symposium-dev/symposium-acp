@@ -14,7 +14,7 @@ use rmcp::{
     model::*,
     tool, tool_handler, tool_router,
 };
-use sacp::JsonRpcConnection;
+use sacp::JrConnection;
 use sacp_proxy::{AcpProxyExt, McpServiceRegistry};
 use serde::{Deserialize, Serialize};
 use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
@@ -88,7 +88,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let stdout = tokio::io::stdout().compat_write();
 
     // Set up the proxy connection with our MCP server
-    JsonRpcConnection::new(stdout, stdin)
+    JrConnection::new(stdout, stdin)
         .name("mcp-server-proxy")
         // Register the MCP server named "example"
         .provide_mcp(

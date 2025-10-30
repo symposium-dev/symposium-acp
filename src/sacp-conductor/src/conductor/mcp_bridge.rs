@@ -4,7 +4,7 @@ use sacp_proxy::McpDisconnectNotification;
 use agent_client_protocol_schema as acp;
 use agent_client_protocol_schema::McpServer;
 use futures::{SinkExt, StreamExt as _, channel::mpsc};
-use sacp::{JsonRpcConnection, JsonRpcConnectionCx, MessageAndCx};
+use sacp::{JrConnection, JrConnectionCx, MessageAndCx};
 use tokio::net::TcpStream;
 use tokio_util::compat::{TokioAsyncReadCompatExt as _, TokioAsyncWriteCompatExt as _};
 use tracing::info;
@@ -46,7 +46,7 @@ impl McpBridgeListeners {
     /// Returns the modified NewSessionRequest with transformed MCP servers.
     pub async fn transform_mcp_servers(
         &mut self,
-        cx: &JsonRpcConnectionCx,
+        cx: &JrConnectionCx,
         mcp_server: &mut McpServer,
         conductor_tx: &mpsc::Sender<ConductorMessage>,
         conductor_command: &[String],
@@ -113,7 +113,7 @@ impl McpBridgeListeners {
     /// Returns the bound port number.
     async fn spawn_tcp_listener(
         &mut self,
-        cx: &JsonRpcConnectionCx,
+        cx: &JrConnectionCx,
         acp_url: &String,
         conductor_tx: mpsc::Sender<ConductorMessage>,
     ) -> anyhow::Result<McpPort> {
@@ -211,7 +211,7 @@ impl McpBridgeConnectionActor {
         // Establish bidirectional JSON-RPC connection
         // The bridge will send MCP requests (tools/call, etc.) to the conductor
         // The conductor can also send responses back
-        let result = JsonRpcConnection::new(write_half.compat_write(), read_half.compat())
+        let result = JrConnection::new(write_half.compat_write(), read_half.compat())
             .name(format!("mpc-client-to-conductor({connection_id})"))
             // When we receive a message from the MCP client, forward it to the conductor
             .on_receive_message({

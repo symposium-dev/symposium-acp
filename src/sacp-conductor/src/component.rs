@@ -4,7 +4,7 @@ use tokio_util::compat::{FuturesAsyncReadCompatExt as _, FuturesAsyncWriteCompat
 
 use futures::{AsyncRead, AsyncWrite};
 
-use sacp::JsonRpcConnectionCx;
+use sacp::JrConnectionCx;
 use tokio::process::Child;
 use tracing::debug;
 
@@ -21,7 +21,7 @@ pub trait ComponentProvider: Send {
     /// * `incoming_bytes`: bytes received by the conponent from the conductor.
     fn create(
         &self,
-        cx: &JsonRpcConnectionCx,
+        cx: &JrConnectionCx,
         outgoing_bytes: Pin<Box<dyn AsyncWrite + Send>>,
         incoming_bytes: Pin<Box<dyn AsyncRead + Send>>,
     ) -> Result<Cleanup, acp::Error>;
@@ -60,7 +60,7 @@ pub struct Component {
 
     /// The connection context to the component. This is called `agent_cx` because the
     /// component is acting as the conductor's agent.
-    pub agent_cx: JsonRpcConnectionCx,
+    pub agent_cx: JrConnectionCx,
 }
 
 /// A "command provider" provides a component by running a command and sending ACP messages to/from stdio.
@@ -77,7 +77,7 @@ impl CommandComponentProvider {
 impl ComponentProvider for CommandComponentProvider {
     fn create(
         &self,
-        cx: &JsonRpcConnectionCx,
+        cx: &JrConnectionCx,
         outgoing_bytes: Pin<Box<dyn AsyncWrite + Send>>,
         incoming_bytes: Pin<Box<dyn AsyncRead + Send>>,
     ) -> Result<Cleanup, acp::Error> {

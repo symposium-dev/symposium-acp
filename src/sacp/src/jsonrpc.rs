@@ -16,9 +16,9 @@ pub use handlers::*;
 
 use crate::jsonrpc::actors::Task;
 
-/// Create a JsonRpcConnection. This can be the basis for either a server or a client.
+/// Create a JrConnection. This can be the basis for either a server or a client.
 #[must_use]
-pub struct JsonRpcConnection<OB: AsyncWrite, IB: AsyncRead, H: JsonRpcHandler> {
+pub struct JrConnection<OB: AsyncWrite, IB: AsyncRead, H: JrHandler> {
     name: Option<String>,
 
     /// Where to send bytes to communicate to the other side
@@ -43,8 +43,8 @@ pub struct JsonRpcConnection<OB: AsyncWrite, IB: AsyncRead, H: JsonRpcHandler> {
     new_task_tx: mpsc::UnboundedSender<Task>,
 }
 
-impl<OB: AsyncWrite, IB: AsyncRead> JsonRpcConnection<OB, IB, NullHandler> {
-    /// Create a new JsonRpcConnection that will read and write from the given streams.
+impl<OB: AsyncWrite, IB: AsyncRead> JrConnection<OB, IB, NullHandler> {
+    /// Create a new JrConnection that will read and write from the given streams.
     /// This type follows a builder pattern; use other methods to configure and then invoke
     /// [`Self:serve`] (to use as a server) or [`Self::with_client`] to use as a client.
     pub fn new(outgoing_bytes: OB, incoming_bytes: IB) -> Self {
@@ -63,22 +63,22 @@ impl<OB: AsyncWrite, IB: AsyncRead> JsonRpcConnection<OB, IB, NullHandler> {
     }
 }
 
-impl<OB: AsyncWrite, IB: AsyncRead, H: JsonRpcHandler> JsonRpcConnection<OB, IB, H> {
+impl<OB: AsyncWrite, IB: AsyncRead, H: JrHandler> JrConnection<OB, IB, H> {
     /// Set the "name" of this connection -- used only for debugging logs.
     pub fn name(mut self, name: impl ToString) -> Self {
         self.name = Some(name.to_string());
         self
     }
 
-    /// Add a new [`JsonRpcHandler`] to the chain.
+    /// Add a new [`JrHandler`] to the chain.
     ///
     /// Prefer [`Self::on_receive_request`] or [`Self::on_receive_notification`].
     /// This is a low-level method that is not intended for general use.
-    pub fn chain_handler<H1: JsonRpcHandler>(
+    pub fn chain_handler<H1: JrHandler>(
         self,
         handler: H1,
-    ) -> JsonRpcConnection<OB, IB, ChainHandler<H, H1>> {
-        JsonRpcConnection {
+    ) -> JrConnection<OB, IB, ChainHandler<H, H1>> {
+        JrConnection {
             name: self.name,
             handler: ChainHandler::new(self.handler, handler),
             outgoing_bytes: self.outgoing_bytes,
@@ -94,13 +94,13 @@ impl<OB: AsyncWrite, IB: AsyncRead, H: JsonRpcHandler> JsonRpcConnection<OB, IB,
     pub fn on_receive_message<R, N, F>(
         self,
         op: F,
-    ) -> JsonRpcConnection<OB, IB, ChainHandler<H, MessageHandler<R, N, F>>>
+    ) -> JrConnection<OB, IB, ChainHandler<H, MessageHandler<R, N, F>>>
     where
         R: JsonRpcRequest,
-        N: JsonRpcNotification,
+        N: JrNotification,
         F: AsyncFnMut(MessageAndCx<R, N>) -> Result<(), acp::Error>,
     {
-        JsonRpcConnection {
+        JrConnection {
             name: self.name,
             handler: ChainHandler::new(self.handler, MessageHandler::new(op)),
             outgoing_bytes: self.outgoing_bytes,
@@ -116,12 +116,12 @@ impl<OB: AsyncWrite, IB: AsyncRead, H: JsonRpcHandler> JsonRpcConnection<OB, IB,
     pub fn on_receive_request<R, F>(
         self,
         op: F,
-    ) -> JsonRpcConnection<OB, IB, ChainHandler<H, RequestHandler<R, F>>>
+    ) -> JrConnection<OB, IB, ChainHandler<H, RequestHandler<R, F>>>
     where
         R: JsonRpcRequest,
-        F: AsyncFnMut(R, JsonRpcRequestCx<R::Response>) -> Result<(), acp::Error>,
+        F: AsyncFnMut(R, JrRequestCx<R::Response>) -> Result<(), acp::Error>,
     {
-        JsonRpcConnection {
+        JrConnection {
             name: self.name,
             handler: ChainHandler::new(self.handler, RequestHandler::new(op)),
             outgoing_bytes: self.outgoing_bytes,
@@ -137,12 +137,12 @@ impl<OB: AsyncWrite, IB: AsyncRead, H: JsonRpcHandler> JsonRpcConnection<OB, IB,
     pub fn on_receive_notification<N, F>(
         self,
         op: F,
-    ) -> JsonRpcConnection<OB, IB, ChainHandler<H, NotificationHandler<N, F>>>
+    ) -> JrConnection<OB, IB, ChainHandler<H, NotificationHandler<N, F>>>
     where
-        N: JsonRpcNotification,
-        F: AsyncFnMut(N, JsonRpcConnectionCx) -> Result<(), acp::Error>,
+        N: JrNotification,
+        F: AsyncFnMut(N, JrConnectionCx) -> Result<(), acp::Error>,
     {
-        JsonRpcConnection {
+        JrConnection {
             name: self.name,
             handler: ChainHandler::new(self.handler, NotificationHandler::new(op)),
             outgoing_bytes: self.outgoing_bytes,
@@ -158,11 +158,11 @@ impl<OB: AsyncWrite, IB: AsyncRead, H: JsonRpcHandler> JsonRpcConnection<OB, IB,
     /// and receive responses.
     ///
     /// **Warning:** This method is provided for use during setup and construction.
-    /// It returns a [`JsonRpcConnectionCx`] that you can use later to send requests
+    /// It returns a [`JrConnectionCx`] that you can use later to send requests
     /// or to spawn tasks. But if you do not invoke [`Self::serve`] or [`Self::with_client`],
     /// the server will not be running, and those messages will not be received.
-    pub fn json_rpc_cx(&self) -> JsonRpcConnectionCx {
-        JsonRpcConnectionCx::new(self.outgoing_tx.clone(), self.new_task_tx.clone())
+    pub fn json_rpc_cx(&self) -> JrConnectionCx {
+        JrConnectionCx::new(self.outgoing_tx.clone(), self.new_task_tx.clone())
     }
 
     /// With a task that will be spawned on the server's executor when it is active.
@@ -179,7 +179,7 @@ impl<OB: AsyncWrite, IB: AsyncRead, H: JsonRpcHandler> JsonRpcConnection<OB, IB,
     /// Runs a server that listens for incoming requests and handles them according to the added handlers.
     pub async fn serve(self) -> Result<(), acp::Error> {
         let (reply_tx, reply_rx) = mpsc::unbounded();
-        let json_rpc_cx = JsonRpcConnectionCx::new(self.outgoing_tx, self.new_task_tx);
+        let json_rpc_cx = JrConnectionCx::new(self.outgoing_tx, self.new_task_tx);
         futures::select!(
             r = actors::outgoing_actor(
                 &self.name,
@@ -221,7 +221,7 @@ impl<OB: AsyncWrite, IB: AsyncRead, H: JsonRpcHandler> JsonRpcConnection<OB, IB,
     /// Errors if the server terminates before `main_fn` returns.
     pub async fn with_client(
         self,
-        main_fn: impl AsyncFnOnce(JsonRpcConnectionCx) -> Result<(), acp::Error>,
+        main_fn: impl AsyncFnOnce(JrConnectionCx) -> Result<(), acp::Error>,
     ) -> Result<(), acp::Error> {
         let cx = self.json_rpc_cx();
 
@@ -283,18 +283,18 @@ enum OutgoingMessage {
     Error { error: acp::Error },
 }
 
-/// Handlers are invoked when new messages arrive at the [`JsonRpcServer`].
+/// Handlers are invoked when new messages arrive at the [`JrServer`].
 /// They have a chance to inspect the method and parameters and decide whether to "claim" the request
 /// (i.e., handle it). If they do not claim it, the request will be passed to the next handler.
 #[allow(async_fn_in_trait)]
-pub trait JsonRpcHandler {
+pub trait JrHandler {
     /// Attempt to claim an incoming message (request or notification).
     ///
     /// # Important: do not block
     ///
     /// The server will not process new messages until this handler returns.
     /// You should avoid blocking in this callback unless you wish to block the server (e.g., for rate limiting).
-    /// The recommended approach to manage expensive operations is to the [`JsonRpcConnectionCx::spawn`] method available on the message context.
+    /// The recommended approach to manage expensive operations is to the [`JrConnectionCx::spawn`] method available on the message context.
     ///
     /// # Parameters
     ///
@@ -314,7 +314,7 @@ pub trait JsonRpcHandler {
     fn describe_chain(&self) -> impl std::fmt::Debug;
 }
 
-/// Return type from JsonRpcHandler; indicates whether the request was handled or not.
+/// Return type from JrHandler; indicates whether the request was handled or not.
 #[must_use]
 pub enum Handled<T> {
     Yes,
@@ -323,12 +323,12 @@ pub enum Handled<T> {
 
 /// Connection context used to send requests/notifications of the other side.
 #[derive(Clone, Debug)]
-pub struct JsonRpcConnectionCx {
+pub struct JrConnectionCx {
     message_tx: mpsc::UnboundedSender<OutgoingMessage>,
     task_tx: mpsc::UnboundedSender<Task>,
 }
 
-impl JsonRpcConnectionCx {
+impl JrConnectionCx {
     fn new(
         tx: mpsc::UnboundedSender<OutgoingMessage>,
         task_tx: mpsc::UnboundedSender<Task>,
@@ -361,7 +361,7 @@ impl JsonRpcConnectionCx {
     pub fn send_proxied_message<R, N>(&self, message: MessageAndCx<R, N>) -> Result<(), acp::Error>
     where
         R: JsonRpcRequest<Response: Send>,
-        N: JsonRpcNotification,
+        N: JrNotification,
     {
         match message {
             MessageAndCx::Request(request, request_cx) => {
@@ -375,7 +375,7 @@ impl JsonRpcConnectionCx {
     pub fn send_request<Req: JsonRpcRequest>(
         &self,
         request: Req,
-    ) -> JsonRpcResponse<Req::Response> {
+    ) -> JrResponse<Req::Response> {
         let method = request.method().to_string();
         let (response_tx, response_rx) = oneshot::channel();
         match request.into_untyped_message() {
@@ -417,12 +417,12 @@ impl JsonRpcConnectionCx {
             }
         }
 
-        JsonRpcResponse::new(method.clone(), self.clone(), response_rx)
+        JrResponse::new(method.clone(), self.clone(), response_rx)
             .map(move |json| <Req::Response>::from_value(&method, json))
     }
 
     /// Send an outgoing notification (no reply expected).)
-    pub fn send_notification<N: JsonRpcNotification>(
+    pub fn send_notification<N: JrNotification>(
         &self,
         notification: N,
     ) -> Result<(), acp::Error> {
@@ -456,9 +456,9 @@ impl JsonRpcConnectionCx {
 /// The context to respond to an incoming request.
 /// Derefs to a [`JsonRpcCx`] which can be used to send other requests and notification.
 #[must_use]
-pub struct JsonRpcRequestCx<T: JsonRpcResponsePayload> {
+pub struct JrRequestCx<T: JrResponsePayload> {
     /// The context to use to send outgoing messages and replies.
-    cx: JsonRpcConnectionCx,
+    cx: JrConnectionCx,
 
     /// The method of the request.
     method: String,
@@ -474,9 +474,9 @@ pub struct JsonRpcRequestCx<T: JsonRpcResponsePayload> {
     >,
 }
 
-impl<T: JsonRpcResponsePayload> std::fmt::Debug for JsonRpcRequestCx<T> {
+impl<T: JrResponsePayload> std::fmt::Debug for JrRequestCx<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("JsonRpcRequestCx")
+        f.debug_struct("JrRequestCx")
             .field("cx", &self.cx)
             .field("method", &self.method)
             .field("id", &self.id)
@@ -485,17 +485,17 @@ impl<T: JsonRpcResponsePayload> std::fmt::Debug for JsonRpcRequestCx<T> {
     }
 }
 
-impl<T: JsonRpcResponsePayload> std::ops::Deref for JsonRpcRequestCx<T> {
-    type Target = JsonRpcConnectionCx;
+impl<T: JrResponsePayload> std::ops::Deref for JrRequestCx<T> {
+    type Target = JrConnectionCx;
 
     fn deref(&self) -> &Self::Target {
         &self.cx
     }
 }
 
-impl JsonRpcRequestCx<serde_json::Value> {
+impl JrRequestCx<serde_json::Value> {
     /// Create a new method context.
-    fn new(cx: &JsonRpcConnectionCx, method: String, id: jsonrpcmsg::Id) -> Self {
+    fn new(cx: &JrConnectionCx, method: String, id: jsonrpcmsg::Id) -> Self {
         Self {
             cx: cx.clone(),
             method,
@@ -504,7 +504,7 @@ impl JsonRpcRequestCx<serde_json::Value> {
         }
     }
 
-    pub fn cast<T: JsonRpcResponsePayload>(self) -> JsonRpcRequestCx<T> {
+    pub fn cast<T: JrResponsePayload>(self) -> JrRequestCx<T> {
         self.wrap_params(move |method, value| match value {
             Ok(value) => T::into_json(value, &method),
             Err(e) => Err(e),
@@ -512,22 +512,22 @@ impl JsonRpcRequestCx<serde_json::Value> {
     }
 }
 
-impl<T: JsonRpcResponsePayload> JsonRpcRequestCx<T> {
+impl<T: JrResponsePayload> JrRequestCx<T> {
     /// Method of the incoming request
     pub fn method(&self) -> &str {
         &self.method
     }
 
-    /// Convert to a `JsonRpcRequestCx` that expects a JSON value
+    /// Convert to a `JrRequestCx` that expects a JSON value
     /// and which checks (dynamically) that the JSON value it receives
     /// can be converted to `T`.
-    pub fn erase_to_json(self) -> JsonRpcRequestCx<serde_json::Value> {
+    pub fn erase_to_json(self) -> JrRequestCx<serde_json::Value> {
         self.wrap_params(|method, value| T::from_value(&method, value?))
     }
 
-    /// Return a new JsonRpcResponse that expects a response of type U and serializes it.
-    pub fn wrap_method(self, method: String) -> JsonRpcRequestCx<T> {
-        JsonRpcRequestCx {
+    /// Return a new JrResponse that expects a response of type U and serializes it.
+    pub fn wrap_method(self, method: String) -> JrRequestCx<T> {
+        JrRequestCx {
             cx: self.cx,
             method,
             id: self.id,
@@ -535,14 +535,14 @@ impl<T: JsonRpcResponsePayload> JsonRpcRequestCx<T> {
         }
     }
 
-    /// Return a new JsonRpcResponse that expects a response of type U and serializes it.
+    /// Return a new JrResponse that expects a response of type U and serializes it.
     ///
     /// `wrap_fn` will be invoked with the method name and the result of the wrapped function.
-    pub fn wrap_params<U: JsonRpcResponsePayload>(
+    pub fn wrap_params<U: JrResponsePayload>(
         self,
         wrap_fn: impl FnOnce(&str, Result<U, acp::Error>) -> Result<T, acp::Error> + Send + 'static,
-    ) -> JsonRpcRequestCx<U> {
-        JsonRpcRequestCx {
+    ) -> JrRequestCx<U> {
+        JrRequestCx {
             cx: self.cx,
             method: self.method,
             id: self.id,
@@ -554,7 +554,7 @@ impl<T: JsonRpcResponsePayload> JsonRpcRequestCx<T> {
     }
 
     /// Get the underlying JSON RPC context.
-    pub fn connection_cx(&self) -> JsonRpcConnectionCx {
+    pub fn connection_cx(&self) -> JrConnectionCx {
         self.cx.clone()
     }
 
@@ -586,7 +586,7 @@ impl<T: JsonRpcResponsePayload> JsonRpcRequestCx<T> {
 }
 
 /// Common bounds for any JSON-RPC message.
-pub trait JsonRpcMessage: 'static + Debug + Sized {
+pub trait JrMessage: 'static + Debug + Sized {
     /// The parameters for the request.
     fn into_untyped_message(self) -> Result<UntypedMessage, acp::Error>;
 
@@ -614,7 +614,7 @@ pub trait JsonRpcMessage: 'static + Debug + Sized {
 }
 
 /// Defines the "payload" of a successful response to a JSON-RPC request.
-pub trait JsonRpcResponsePayload: 'static + Debug + Sized {
+pub trait JrResponsePayload: 'static + Debug + Sized {
     /// Convert this message into a JSON value.
     fn into_json(self, method: &str) -> Result<serde_json::Value, acp::Error>;
 
@@ -622,7 +622,7 @@ pub trait JsonRpcResponsePayload: 'static + Debug + Sized {
     fn from_value(method: &str, value: serde_json::Value) -> Result<Self, acp::Error>;
 }
 
-impl JsonRpcResponsePayload for serde_json::Value {
+impl JrResponsePayload for serde_json::Value {
     fn from_value(_method: &str, value: serde_json::Value) -> Result<Self, acp::Error> {
         Ok(value)
     }
@@ -633,12 +633,12 @@ impl JsonRpcResponsePayload for serde_json::Value {
 }
 
 /// A struct that represents a notification (JSON-RPC message that does not expect a response).
-pub trait JsonRpcNotification: JsonRpcMessage {}
+pub trait JrNotification: JrMessage {}
 
 /// A struct that represents a request (JSON-RPC message expecting a response).
-pub trait JsonRpcRequest: JsonRpcMessage {
+pub trait JsonRpcRequest: JrMessage {
     /// The type of data expected in response.
-    type Response: JsonRpcResponsePayload;
+    type Response: JrResponsePayload;
 }
 
 /// An enum capturing an in-flight request or notification.
@@ -648,27 +648,27 @@ pub trait JsonRpcRequest: JsonRpcMessage {
 /// By default, both are `UntypedMessage` for dynamic dispatch.
 /// The request context's response type matches the request's response type.
 #[derive(Debug)]
-pub enum MessageAndCx<R: JsonRpcRequest = UntypedMessage, N: JsonRpcMessage = UntypedMessage> {
+pub enum MessageAndCx<R: JsonRpcRequest = UntypedMessage, N: JrMessage = UntypedMessage> {
     /// Incoming request and the context where the response should be sent.
-    Request(R, JsonRpcRequestCx<R::Response>),
+    Request(R, JrRequestCx<R::Response>),
 
     /// Incoming notification.
-    Notification(N, JsonRpcConnectionCx),
+    Notification(N, JrConnectionCx),
 }
 
-impl<R: JsonRpcRequest, N: JsonRpcMessage> MessageAndCx<R, N> {
+impl<R: JsonRpcRequest, N: JrMessage> MessageAndCx<R, N> {
     /// Map the request and notification types to new types.
     pub fn map<R1, N1>(
         self,
         map_request: impl FnOnce(
             R,
-            JsonRpcRequestCx<R::Response>,
-        ) -> (R1, JsonRpcRequestCx<R1::Response>),
-        map_notification: impl FnOnce(N, JsonRpcConnectionCx) -> (N1, JsonRpcConnectionCx),
+            JrRequestCx<R::Response>,
+        ) -> (R1, JrRequestCx<R1::Response>),
+        map_notification: impl FnOnce(N, JrConnectionCx) -> (N1, JrConnectionCx),
     ) -> MessageAndCx<R1, N1>
     where
         R1: JsonRpcRequest<Response: Send>,
-        N1: JsonRpcMessage,
+        N1: JrMessage,
     {
         match self {
             MessageAndCx::Request(request, cx) => {
@@ -743,7 +743,7 @@ impl UntypedMessage {
     }
 }
 
-impl JsonRpcMessage for UntypedMessage {
+impl JrMessage for UntypedMessage {
     fn method(&self) -> &str {
         &self.method
     }
@@ -771,20 +771,20 @@ impl JsonRpcRequest for UntypedMessage {
     type Response = serde_json::Value;
 }
 
-impl JsonRpcNotification for UntypedMessage {}
+impl JrNotification for UntypedMessage {}
 
 /// Represents a pending response of type `R` from an outgoing request.
-pub struct JsonRpcResponse<R> {
+pub struct JrResponse<R> {
     method: String,
-    connection_cx: JsonRpcConnectionCx,
+    connection_cx: JrConnectionCx,
     response_rx: oneshot::Receiver<Result<serde_json::Value, acp::Error>>,
     to_result: Box<dyn Fn(serde_json::Value) -> Result<R, acp::Error> + Send>,
 }
 
-impl JsonRpcResponse<serde_json::Value> {
+impl JrResponse<serde_json::Value> {
     fn new(
         method: String,
-        connection_cx: JsonRpcConnectionCx,
+        connection_cx: JrConnectionCx,
         response_rx: oneshot::Receiver<Result<serde_json::Value, acp::Error>>,
     ) -> Self {
         Self {
@@ -796,16 +796,16 @@ impl JsonRpcResponse<serde_json::Value> {
     }
 }
 
-impl<R: JsonRpcResponsePayload> JsonRpcResponse<R> {
+impl<R: JrResponsePayload> JrResponse<R> {
     /// Create a new response that maps the result of the response to a new type.
     pub fn map<U>(
         self,
         map_fn: impl Fn(R) -> Result<U, acp::Error> + 'static + Send,
-    ) -> JsonRpcResponse<U>
+    ) -> JrResponse<U>
     where
-        U: JsonRpcResponsePayload,
+        U: JrResponsePayload,
     {
-        JsonRpcResponse {
+        JrResponse {
             method: self.method,
             response_rx: self.response_rx,
             connection_cx: self.connection_cx,
@@ -815,7 +815,7 @@ impl<R: JsonRpcResponsePayload> JsonRpcResponse<R> {
 
     /// Schedule an async task that will forward the respond to `response_cx` when it arrives.
     /// Useful when proxying messages around.
-    pub fn forward_to_request_cx(self, request_cx: JsonRpcRequestCx<R>) -> Result<(), acp::Error>
+    pub fn forward_to_request_cx(self, request_cx: JrRequestCx<R>) -> Result<(), acp::Error>
     where
         R: Send,
     {
@@ -825,7 +825,7 @@ impl<R: JsonRpcResponsePayload> JsonRpcResponse<R> {
     /// Block the current task until the response is received.
     ///
     /// This is useful in spawned tasks. It should *not* be used
-    /// in callbacks like [`JsonRpcConnection::on_receive_message`]
+    /// in callbacks like [`JrConnection::on_receive_message`]
     /// as that will prevent the event loop from running.
     ///
     /// In a callback setting, prefer [`Self::await_when_response_received`].
@@ -851,8 +851,8 @@ impl<R: JsonRpcResponsePayload> JsonRpcResponse<R> {
     #[track_caller]
     pub fn await_when_ok_response_received<F>(
         self,
-        request_cx: JsonRpcRequestCx<R>,
-        task: impl FnOnce(R, JsonRpcRequestCx<R>) -> F + 'static + Send,
+        request_cx: JrRequestCx<R>,
+        task: impl FnOnce(R, JrRequestCx<R>) -> F + 'static + Send,
     ) -> Result<(), acp::Error>
     where
         F: Future<Output = Result<(), acp::Error>> + 'static + Send,

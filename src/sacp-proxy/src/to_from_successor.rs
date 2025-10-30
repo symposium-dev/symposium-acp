@@ -1,8 +1,8 @@
 use agent_client_protocol_schema::{self as acp, InitializeRequest, InitializeResponse};
 use futures::{AsyncRead, AsyncWrite};
 use sacp::{
-    ChainHandler, Handled, JsonRpcConnection, JsonRpcConnectionCx, JsonRpcHandler, JsonRpcMessage,
-    JsonRpcNotification, JsonRpcRequest, JsonRpcRequestCx, MessageAndCx, MetaCapabilityExt, Proxy,
+    ChainHandler, Handled, JrConnection, JrConnectionCx, JrHandler, JrMessage,
+    JrNotification, JsonRpcRequest, JrRequestCx, MessageAndCx, MetaCapabilityExt, Proxy,
     UntypedMessage,
 };
 use serde::{Deserialize, Serialize};
@@ -25,7 +25,7 @@ pub struct SuccessorRequest<Req: JsonRpcRequest> {
     pub request: Req,
 }
 
-impl<Req: JsonRpcRequest> JsonRpcMessage for SuccessorRequest<Req> {
+impl<Req: JsonRpcRequest> JrMessage for SuccessorRequest<Req> {
     fn into_untyped_message(self) -> Result<sacp::UntypedMessage, acp::Error> {
         sacp::UntypedMessage::new(
             SUCCESSOR_REQUEST_METHOD,
@@ -73,13 +73,13 @@ const SUCCESSOR_NOTIFICATION_METHOD: &str = "_proxy/successor/notification";
 ///
 /// Used in `_proxy/successor/send` when the proxy wants to forward a notification downstream.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SuccessorNotification<Req: JsonRpcNotification> {
+pub struct SuccessorNotification<Req: JrNotification> {
     /// The message to be sent to the successor component.
     #[serde(flatten)]
     pub notification: Req,
 }
 
-impl<Req: JsonRpcNotification> JsonRpcMessage for SuccessorNotification<Req> {
+impl<Req: JrNotification> JrMessage for SuccessorNotification<Req> {
     fn into_untyped_message(self) -> Result<sacp::UntypedMessage, acp::Error> {
         sacp::UntypedMessage::new(
             SUCCESSOR_NOTIFICATION_METHOD,
@@ -119,12 +119,12 @@ impl<Req: JsonRpcNotification> JsonRpcMessage for SuccessorNotification<Req> {
     }
 }
 
-impl<Req: JsonRpcNotification> JsonRpcNotification for SuccessorNotification<Req> {}
+impl<Req: JrNotification> JrNotification for SuccessorNotification<Req> {}
 
 // Proxy methods
 // ============================================================
 
-pub trait AcpProxyExt<OB: AsyncWrite, IB: AsyncRead, H: JsonRpcHandler> {
+pub trait AcpProxyExt<OB: AsyncWrite, IB: AsyncRead, H: JrHandler> {
     /// Adds a handler for requests received from the successor component.
     ///
     /// The provided handler will receive unwrapped ACP messages - the
@@ -135,12 +135,12 @@ pub trait AcpProxyExt<OB: AsyncWrite, IB: AsyncRead, H: JsonRpcHandler> {
     /// # Example
     ///
     /// ```rust,ignore
-    /// # use sacp::proxy::JsonRpcConnectionExt;
-    /// # use sacp::{JsonRpcConnection, JsonRpcHandler};
+    /// # use sacp::proxy::JrConnectionExt;
+    /// # use sacp::{JrConnection, JrHandler};
     /// # struct MyHandler;
-    /// # impl JsonRpcHandler for MyHandler {}
+    /// # impl JrHandler for MyHandler {}
     /// # async fn example() -> Result<(), acp::Error> {
-    /// JsonRpcConnection::new(tokio::io::stdin(), tokio::io::stdout())
+    /// JrConnection::new(tokio::io::stdin(), tokio::io::stdout())
     ///     .on_receive_from_successor(MyHandler)
     ///     .serve()
     ///     .await?;
@@ -150,10 +150,10 @@ pub trait AcpProxyExt<OB: AsyncWrite, IB: AsyncRead, H: JsonRpcHandler> {
     fn on_receive_request_from_successor<R, F>(
         self,
         op: F,
-    ) -> JsonRpcConnection<OB, IB, ChainHandler<H, RequestFromSuccessorHandler<R, F>>>
+    ) -> JrConnection<OB, IB, ChainHandler<H, RequestFromSuccessorHandler<R, F>>>
     where
         R: JsonRpcRequest,
-        F: AsyncFnMut(R, JsonRpcRequestCx<R::Response>) -> Result<(), acp::Error>;
+        F: AsyncFnMut(R, JrRequestCx<R::Response>) -> Result<(), acp::Error>;
 
     /// Adds a handler for messages received from the successor component.
     ///
@@ -165,12 +165,12 @@ pub trait AcpProxyExt<OB: AsyncWrite, IB: AsyncRead, H: JsonRpcHandler> {
     /// # Example
     ///
     /// ```rust,ignore
-    /// # use sacp::proxy::JsonRpcConnectionExt;
-    /// # use sacp::{JsonRpcConnection, JsonRpcHandler};
+    /// # use sacp::proxy::JrConnectionExt;
+    /// # use sacp::{JrConnection, JrHandler};
     /// # struct MyHandler;
-    /// # impl JsonRpcHandler for MyHandler {}
+    /// # impl JrHandler for MyHandler {}
     /// # async fn example() -> Result<(), acp::Error> {
-    /// JsonRpcConnection::new(tokio::io::stdin(), tokio::io::stdout())
+    /// JrConnection::new(tokio::io::stdin(), tokio::io::stdout())
     ///     .on_receive_from_successor(MyHandler)
     ///     .serve()
     ///     .await?;
@@ -180,14 +180,14 @@ pub trait AcpProxyExt<OB: AsyncWrite, IB: AsyncRead, H: JsonRpcHandler> {
     fn on_receive_notification_from_successor<N, F>(
         self,
         op: F,
-    ) -> JsonRpcConnection<OB, IB, ChainHandler<H, NotificationFromSuccessorHandler<N, F>>>
+    ) -> JrConnection<OB, IB, ChainHandler<H, NotificationFromSuccessorHandler<N, F>>>
     where
-        N: JsonRpcNotification,
-        F: AsyncFnMut(N, JsonRpcConnectionCx) -> Result<(), acp::Error>;
+        N: JrNotification,
+        F: AsyncFnMut(N, JrConnectionCx) -> Result<(), acp::Error>;
 
     /// Installs a proxy layer that proxies all requests/notifications to/from the successor.
     /// This is typically the last component in the chain.
-    fn proxy(self) -> JsonRpcConnection<OB, IB, ChainHandler<H, ProxyHandler>>;
+    fn proxy(self) -> JrConnection<OB, IB, ChainHandler<H, ProxyHandler>>;
 
     /// Provide MCP servers to downstream successors.
     /// This layer will modify `session/new` requests to include those MCP servers
@@ -195,22 +195,22 @@ pub trait AcpProxyExt<OB: AsyncWrite, IB: AsyncRead, H: JsonRpcHandler> {
     fn provide_mcp(
         self,
         registry: impl AsRef<McpServiceRegistry>,
-    ) -> JsonRpcConnection<OB, IB, ChainHandler<H, McpServiceRegistry>>;
+    ) -> JrConnection<OB, IB, ChainHandler<H, McpServiceRegistry>>;
 }
 
-impl<OB, IB, H> AcpProxyExt<OB, IB, H> for JsonRpcConnection<OB, IB, H>
+impl<OB, IB, H> AcpProxyExt<OB, IB, H> for JrConnection<OB, IB, H>
 where
     OB: AsyncWrite,
     IB: AsyncRead,
-    H: JsonRpcHandler,
+    H: JrHandler,
 {
     fn on_receive_request_from_successor<R, F>(
         self,
         op: F,
-    ) -> JsonRpcConnection<OB, IB, ChainHandler<H, RequestFromSuccessorHandler<R, F>>>
+    ) -> JrConnection<OB, IB, ChainHandler<H, RequestFromSuccessorHandler<R, F>>>
     where
         R: JsonRpcRequest,
-        F: AsyncFnMut(R, JsonRpcRequestCx<R::Response>) -> Result<(), acp::Error>,
+        F: AsyncFnMut(R, JrRequestCx<R::Response>) -> Result<(), acp::Error>,
     {
         self.chain_handler(RequestFromSuccessorHandler::new(op))
     }
@@ -218,22 +218,22 @@ where
     fn on_receive_notification_from_successor<N, F>(
         self,
         op: F,
-    ) -> JsonRpcConnection<OB, IB, ChainHandler<H, NotificationFromSuccessorHandler<N, F>>>
+    ) -> JrConnection<OB, IB, ChainHandler<H, NotificationFromSuccessorHandler<N, F>>>
     where
-        N: JsonRpcNotification,
-        F: AsyncFnMut(N, JsonRpcConnectionCx) -> Result<(), acp::Error>,
+        N: JrNotification,
+        F: AsyncFnMut(N, JrConnectionCx) -> Result<(), acp::Error>,
     {
         self.chain_handler(NotificationFromSuccessorHandler::new(op))
     }
 
-    fn proxy(self) -> JsonRpcConnection<OB, IB, ChainHandler<H, ProxyHandler>> {
+    fn proxy(self) -> JrConnection<OB, IB, ChainHandler<H, ProxyHandler>> {
         self.chain_handler(ProxyHandler {})
     }
 
     fn provide_mcp(
         self,
         registry: impl AsRef<McpServiceRegistry>,
-    ) -> JsonRpcConnection<OB, IB, ChainHandler<H, McpServiceRegistry>> {
+    ) -> JrConnection<OB, IB, ChainHandler<H, McpServiceRegistry>> {
         self.chain_handler(registry.as_ref().clone())
     }
 }
@@ -242,7 +242,7 @@ where
 pub struct RequestFromSuccessorHandler<R, F>
 where
     R: JsonRpcRequest,
-    F: AsyncFnMut(R, JsonRpcRequestCx<R::Response>) -> Result<(), acp::Error>,
+    F: AsyncFnMut(R, JrRequestCx<R::Response>) -> Result<(), acp::Error>,
 {
     handler: F,
     phantom: PhantomData<fn(R)>,
@@ -251,7 +251,7 @@ where
 impl<R, F> RequestFromSuccessorHandler<R, F>
 where
     R: JsonRpcRequest,
-    F: AsyncFnMut(R, JsonRpcRequestCx<R::Response>) -> Result<(), acp::Error>,
+    F: AsyncFnMut(R, JrRequestCx<R::Response>) -> Result<(), acp::Error>,
 {
     pub fn new(handler: F) -> Self {
         Self {
@@ -261,10 +261,10 @@ where
     }
 }
 
-impl<R, F> JsonRpcHandler for RequestFromSuccessorHandler<R, F>
+impl<R, F> JrHandler for RequestFromSuccessorHandler<R, F>
 where
     R: JsonRpcRequest,
-    F: AsyncFnMut(R, JsonRpcRequestCx<R::Response>) -> Result<(), acp::Error>,
+    F: AsyncFnMut(R, JrRequestCx<R::Response>) -> Result<(), acp::Error>,
 {
     async fn handle_message(
         &mut self,
@@ -304,8 +304,8 @@ where
 /// Handler to process a notification of type `N` coming from the successor component.
 pub struct NotificationFromSuccessorHandler<N, F>
 where
-    N: JsonRpcNotification,
-    F: AsyncFnMut(N, JsonRpcConnectionCx) -> Result<(), acp::Error>,
+    N: JrNotification,
+    F: AsyncFnMut(N, JrConnectionCx) -> Result<(), acp::Error>,
 {
     handler: F,
     phantom: PhantomData<fn(N)>,
@@ -313,8 +313,8 @@ where
 
 impl<N, F> NotificationFromSuccessorHandler<N, F>
 where
-    N: JsonRpcNotification,
-    F: AsyncFnMut(N, JsonRpcConnectionCx) -> Result<(), acp::Error>,
+    N: JrNotification,
+    F: AsyncFnMut(N, JrConnectionCx) -> Result<(), acp::Error>,
 {
     pub fn new(handler: F) -> Self {
         Self {
@@ -324,10 +324,10 @@ where
     }
 }
 
-impl<N, F> JsonRpcHandler for NotificationFromSuccessorHandler<N, F>
+impl<N, F> JrHandler for NotificationFromSuccessorHandler<N, F>
 where
-    N: JsonRpcNotification,
-    F: AsyncFnMut(N, JsonRpcConnectionCx) -> Result<(), acp::Error>,
+    N: JrNotification,
+    F: AsyncFnMut(N, JrConnectionCx) -> Result<(), acp::Error>,
 {
     async fn handle_message(
         &mut self,
@@ -368,7 +368,7 @@ where
 /// Handler for the "default proxy" behavior.
 pub struct ProxyHandler {}
 
-impl JsonRpcHandler for ProxyHandler {
+impl JrHandler for ProxyHandler {
     fn describe_chain(&self) -> impl std::fmt::Debug {
         "proxy"
     }
@@ -444,7 +444,7 @@ impl ProxyHandler {
     async fn forward_initialize(
         &mut self,
         mut request: InitializeRequest,
-        request_cx: JsonRpcRequestCx<InitializeResponse>,
+        request_cx: JrRequestCx<InitializeResponse>,
     ) -> Result<(), agent_client_protocol_schema::Error> {
         tracing::debug!(
             method = request_cx.method(),
@@ -480,7 +480,7 @@ impl ProxyHandler {
 ///
 /// ```rust,ignore
 /// // Example using ACP request types
-/// use sacp::proxy::JsonRpcCxExt;
+/// use sacp::proxy::JrCxExt;
 /// use agent_client_protocol_schema_schema::agent::PromptRequest;
 ///
 /// async fn forward_prompt(cx: &JsonRpcCx, prompt: PromptRequest) {
@@ -488,7 +488,7 @@ impl ProxyHandler {
 ///     // response is the typed response from the successor
 /// }
 /// ```
-pub trait JsonRpcCxExt {
+pub trait JrCxExt {
     /// Send a request to the successor component.
     ///
     /// The request is automatically wrapped in a `ToSuccessorRequest` and sent
@@ -497,13 +497,13 @@ pub trait JsonRpcCxExt {
     ///
     /// # Returns
     ///
-    /// Returns a [`JsonRpcResponse`] that can be awaited to get the successor's
+    /// Returns a [`JrResponse`] that can be awaited to get the successor's
     /// response.
     ///
     /// # Example
     ///
     /// ```rust,ignore
-    /// use sacp::proxy::JsonRpcCxExt;
+    /// use sacp::proxy::JrCxExt;
     /// use agent_client_protocol_schema_schema::agent::PromptRequest;
     ///
     /// let prompt = PromptRequest { /* ... */ };
@@ -513,7 +513,7 @@ pub trait JsonRpcCxExt {
     fn send_request_to_successor<Req: JsonRpcRequest>(
         &self,
         request: Req,
-    ) -> sacp::JsonRpcResponse<Req::Response>;
+    ) -> sacp::JrResponse<Req::Response>;
 
     /// Send a notification to the successor component.
     ///
@@ -526,22 +526,22 @@ pub trait JsonRpcCxExt {
     /// # Errors
     ///
     /// Returns an error if the notification fails to send.
-    fn send_notification_to_successor<Req: JsonRpcNotification>(
+    fn send_notification_to_successor<Req: JrNotification>(
         &self,
         notification: Req,
     ) -> Result<(), acp::Error>;
 }
 
-impl JsonRpcCxExt for JsonRpcConnectionCx {
+impl JrCxExt for JrConnectionCx {
     fn send_request_to_successor<Req: JsonRpcRequest>(
         &self,
         request: Req,
-    ) -> sacp::JsonRpcResponse<Req::Response> {
+    ) -> sacp::JrResponse<Req::Response> {
         let wrapper = SuccessorRequest { request };
         self.send_request(wrapper)
     }
 
-    fn send_notification_to_successor<Req: JsonRpcNotification>(
+    fn send_notification_to_successor<Req: JrNotification>(
         &self,
         notification: Req,
     ) -> Result<(), acp::Error> {

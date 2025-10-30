@@ -8,7 +8,7 @@
 //! cargo run --example minimal
 //! ```
 
-use sacp::JsonRpcConnection;
+use sacp::JrConnection;
 use sacp_proxy::{AcpProxyExt, McpServiceRegistry};
 use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
 
@@ -27,7 +27,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let stdout = tokio::io::stdout().compat_write();
 
     // Set up the proxy connection
-    JsonRpcConnection::new(stdout, stdin)
+    JrConnection::new(stdout, stdin)
         .name("minimal-proxy")
         // Empty MCP registry - no tools provided
         .provide_mcp(McpServiceRegistry::default())

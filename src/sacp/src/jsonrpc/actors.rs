@@ -17,9 +17,9 @@ use uuid::Uuid;
 
 use crate::MessageAndCx;
 use crate::UntypedMessage;
-use crate::jsonrpc::JsonRpcConnectionCx;
-use crate::jsonrpc::JsonRpcHandler;
-use crate::jsonrpc::JsonRpcRequestCx;
+use crate::jsonrpc::JrConnectionCx;
+use crate::jsonrpc::JrHandler;
+use crate::jsonrpc::JrRequestCx;
 use crate::jsonrpc::OutgoingMessage;
 use crate::jsonrpc::ReplyMessage;
 
@@ -143,10 +143,10 @@ pub(super) async fn reply_actor(
 /// - `Result<(), acp::Error>`: an error if something unrecoverable occurred
 pub(super) async fn incoming_actor(
     connection_name: &Option<String>,
-    json_rpc_cx: &JsonRpcConnectionCx,
+    json_rpc_cx: &JrConnectionCx,
     incoming_bytes: impl AsyncRead,
     reply_tx: mpsc::UnboundedSender<ReplyMessage>,
-    mut handler: impl JsonRpcHandler,
+    mut handler: impl JrHandler,
 ) -> Result<(), agent_client_protocol_schema::Error> {
     let incoming_bytes = pin!(incoming_bytes);
     let buffered_incoming_bytes = BufReader::new(incoming_bytes);
@@ -194,9 +194,9 @@ pub(super) async fn incoming_actor(
 /// Report an error back to the server if it does not get handled.
 async fn dispatch_request(
     connection_name: &Option<String>,
-    json_rpc_cx: &JsonRpcConnectionCx,
+    json_rpc_cx: &JrConnectionCx,
     request: jsonrpcmsg::Request,
-    handler: &mut impl JsonRpcHandler,
+    handler: &mut impl JrHandler,
 ) -> Result<(), agent_client_protocol_schema::Error> {
     tracing::debug!(
         ?request,
@@ -210,7 +210,7 @@ async fn dispatch_request(
     let message_cx = match &request.id {
         Some(id) => MessageAndCx::Request(
             message,
-            JsonRpcRequestCx::new(json_rpc_cx, request.method.clone(), id.clone()),
+            JrRequestCx::new(json_rpc_cx, request.method.clone(), id.clone()),
         ),
         None => MessageAndCx::Notification(message, json_rpc_cx.clone()),
     };

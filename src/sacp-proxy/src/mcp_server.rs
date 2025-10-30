@@ -5,15 +5,15 @@ use futures::{SinkExt, StreamExt};
 use fxhash::FxHashMap;
 use rmcp::ServiceExt;
 use sacp::{
-    Handled, JsonRpcConnection, JsonRpcConnectionCx, JsonRpcHandler, JsonRpcMessage,
-    JsonRpcRequestCx, MessageAndCx, UntypedMessage,
+    Handled, JrConnection, JrConnectionCx, JrHandler, JrMessage,
+    JrRequestCx, MessageAndCx, UntypedMessage,
 };
 use std::pin::Pin;
 use std::sync::{Arc, Mutex};
 use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
 
 use crate::{
-    JsonRpcCxExt, McpConnectRequest, McpConnectResponse, McpDisconnectNotification,
+    JrCxExt, McpConnectRequest, McpConnectResponse, McpDisconnectNotification,
     McpOverAcpNotification, McpOverAcpRequest, SuccessorNotification, SuccessorRequest,
 };
 
@@ -25,7 +25,7 @@ use crate::{
 ///
 /// # Handling requests
 ///
-/// You must add the registery (or a clone of it) to the [`JsonRpcConnection`] so that it can intercept MCP requests.
+/// You must add the registery (or a clone of it) to the [`JrConnection`] so that it can intercept MCP requests.
 /// Typically you do this by providing it as an argument to the [`]
 #[derive(Clone, Default, Debug)]
 pub struct McpServiceRegistry {
@@ -192,8 +192,8 @@ impl McpServiceRegistry {
     async fn handle_connect_request(
         &self,
         result: Result<SuccessorRequest<McpConnectRequest>, agent_client_protocol_schema::Error>,
-        request_cx: JsonRpcRequestCx<serde_json::Value>,
-    ) -> Result<Handled<JsonRpcRequestCx<serde_json::Value>>, agent_client_protocol_schema::Error> {
+        request_cx: JrRequestCx<serde_json::Value>,
+    ) -> Result<Handled<JrRequestCx<serde_json::Value>>, agent_client_protocol_schema::Error> {
         // Check if we parsed this message successfully.
         let SuccessorRequest { request } = match result {
             Ok(request) => request,
@@ -220,7 +220,7 @@ impl McpServiceRegistry {
         let (mcp_server_read, mcp_server_write) = tokio::io::split(mcp_server_stream);
         let (mcp_client_read, mcp_client_write) = tokio::io::split(mcp_client_stream);
 
-        // Create JsonRpcConnection for communicating with the server.
+        // Create JrConnection for communicating with the server.
         //
         // Every request/notification that the server sends up, we will package up
         // as an McpOverAcpRequest/McpOverAcpNotification and send to our agent.
@@ -229,7 +229,7 @@ impl McpServiceRegistry {
         // send to the MCP server.
         let spawn_results = request_cx
             .spawn(
-                JsonRpcConnection::new(mcp_client_write.compat_write(), mcp_client_read.compat())
+                JrConnection::new(mcp_client_write.compat_write(), mcp_client_read.compat())
                     .on_receive_message({
                         let connection_id = connection_id.clone();
                         let outer_cx = request_cx.connection_cx();
@@ -296,8 +296,8 @@ impl McpServiceRegistry {
             SuccessorRequest<McpOverAcpRequest<UntypedMessage>>,
             agent_client_protocol_schema::Error,
         >,
-        request_cx: JsonRpcRequestCx<serde_json::Value>,
-    ) -> Result<Handled<JsonRpcRequestCx<serde_json::Value>>, agent_client_protocol_schema::Error> {
+        request_cx: JrRequestCx<serde_json::Value>,
+    ) -> Result<Handled<JrRequestCx<serde_json::Value>>, agent_client_protocol_schema::Error> {
         // Check if we parsed this message successfully.
         let SuccessorRequest { request } = match result {
             Ok(request) => request,
@@ -326,8 +326,8 @@ impl McpServiceRegistry {
             SuccessorNotification<McpOverAcpNotification<UntypedMessage>>,
             agent_client_protocol_schema::Error,
         >,
-        notification_cx: JsonRpcConnectionCx,
-    ) -> Result<Handled<JsonRpcConnectionCx>, agent_client_protocol_schema::Error> {
+        notification_cx: JrConnectionCx,
+    ) -> Result<Handled<JrConnectionCx>, agent_client_protocol_schema::Error> {
         // Check if we parsed this message successfully.
         let SuccessorNotification { notification } = match result {
             Ok(request) => request,
@@ -359,8 +359,8 @@ impl McpServiceRegistry {
             SuccessorNotification<McpDisconnectNotification>,
             agent_client_protocol_schema::Error,
         >,
-        notification_cx: JsonRpcConnectionCx,
-    ) -> Result<Handled<JsonRpcConnectionCx>, agent_client_protocol_schema::Error> {
+        notification_cx: JrConnectionCx,
+    ) -> Result<Handled<JrConnectionCx>, agent_client_protocol_schema::Error> {
         // Check if we parsed this message successfully.
         let SuccessorNotification { notification } = match result {
             Ok(request) => request,
@@ -381,8 +381,8 @@ impl McpServiceRegistry {
     async fn handle_new_session_request(
         &self,
         result: Result<NewSessionRequest, agent_client_protocol_schema::Error>,
-        request_cx: JsonRpcRequestCx<serde_json::Value>,
-    ) -> Result<Handled<JsonRpcRequestCx<serde_json::Value>>, agent_client_protocol_schema::Error> {
+        request_cx: JrRequestCx<serde_json::Value>,
+    ) -> Result<Handled<JrRequestCx<serde_json::Value>>, agent_client_protocol_schema::Error> {
         // Check if we parsed this message successfully.
         let mut request = match result {
             Ok(request) => request,
@@ -411,7 +411,7 @@ impl McpServiceRegistry {
     }
 }
 
-impl JsonRpcHandler for McpServiceRegistry {
+impl JrHandler for McpServiceRegistry {
     fn describe_chain(&self) -> impl std::fmt::Debug {
         "McpServiceRegistry"
     }
