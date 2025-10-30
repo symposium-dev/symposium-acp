@@ -1,0 +1,29 @@
+[package]
+name = "conductor"
+version = "0.1.0"
+edition = "2024"
+
+[features]
+test-support = []
+
+[dependencies]
+scp = { path = "../scp" }
+agent-client-protocol.workspace = true
+anyhow.workspace = true
+clap = { version = "4.5", features = ["derive"] }
+futures = "0.3.31"
+jsonrpcmsg = "0.1.2"
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tokio-util = { version = "0.7.16", features = ["compat"] }
+uuid.workspace = true
+tokio.workspace = true
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+acp-proxy = { version = "0.1.0", path = "../acp-proxy" }
+
+[dev-dependencies]
+rmcp = { workspace = true, features = ["client", "server", "transport-io", "transport-child-process"] }
+schemars = { workspace = true }
+expect-test = "1.5"

@@ -1,0 +1,43 @@
+[workspace]
+members = [
+    "src/acp-proxy",
+    "src/conductor",
+    "src/scp",
+]
+resolver = "2"
+
+[workspace.dependencies]
+# Core async runtime
+tokio = { version = "1.0", features = ["full"] }
+tokio-util = { version = "0.7", features = ["compat"] }
+agent-client-protocol = "0.7"
+
+# Serialization
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+schemars = { version = "1.0", features = ["derive"] }
+
+# UUID generation
+uuid = { version = "1.0", features = ["v4"] }
+
+# Error handling
+anyhow = "1.0"
+thiserror = "1.0"
+
+# Logging
+tracing = "0.1"
+tracing-appender = "0.2"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# MCP SDK
+rmcp = { version = "0.8.3", features = ["server", "transport-io", "schemars"] }
+
+# CLI parsing
+clap = { version = "4.0", features = ["derive"] }
+
+# Setup tool dependencies
+which = "6.0"
+home = "0.5"
+
+# Testing
+tokio-test = "0.4"
