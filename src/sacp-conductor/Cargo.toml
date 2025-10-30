@@ -12,7 +12,7 @@ categories = ["development-tools"]
 test-support = []
 
 [dependencies]
-sacp = { path = "../sacp" }
+sacp = { version = "0.1.0", path = "../sacp" }
 sacp-proxy = { version = "0.1.0", path = "../sacp-proxy" }
 agent-client-protocol.workspace = true
 anyhow.workspace = true
