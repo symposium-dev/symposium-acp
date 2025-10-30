@@ -3,24 +3,6 @@
 version = 4
 
 [[package]]
-name = "acp-proxy"
-version = "0.1.0"
-dependencies = [
- "agent-client-protocol",
- "futures",
- "fxhash",
- "jsonrpcmsg",
- "rmcp",
- "scp",
- "serde",
- "serde_json",
- "tokio",
- "tokio-util",
- "tracing",
- "uuid",
-]
-
-[[package]]
 name = "agent-client-protocol"
 version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -279,30 +261,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4ca0197aee26d1ae37445ee532fefce43251d24cc7c166799f4d46817f1d3973"
 dependencies = [
  "crossbeam-utils",
-]
-
-[[package]]
-name = "conductor"
-version = "0.1.0"
-dependencies = [
- "acp-proxy",
- "agent-client-protocol",
- "anyhow",
- "clap",
- "expect-test",
- "futures",
- "jsonrpcmsg",
- "rmcp",
- "schemars",
- "scp",
- "serde",
- "serde_json",
- "thiserror 1.0.69",
- "tokio",
- "tokio-util",
- "tracing",
- "tracing-subscriber",
- "uuid",
 ]
 
 [[package]]
@@ -903,6 +861,67 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "28d3b2b1366ec20994f1fd18c3c594f05c5dd4bc44d8bb0c1c632c8d6829481f"
 
 [[package]]
+name = "sacp"
+version = "0.1.0"
+dependencies = [
+ "agent-client-protocol",
+ "anyhow",
+ "boxfnonce",
+ "expect-test",
+ "futures",
+ "jsonrpcmsg",
+ "serde",
+ "serde_json",
+ "thiserror 1.0.69",
+ "tokio",
+ "tokio-util",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
+name = "sacp-conductor"
+version = "0.1.0"
+dependencies = [
+ "agent-client-protocol",
+ "anyhow",
+ "clap",
+ "expect-test",
+ "futures",
+ "jsonrpcmsg",
+ "rmcp",
+ "sacp",
+ "sacp-proxy",
+ "schemars",
+ "serde",
+ "serde_json",
+ "thiserror 1.0.69",
+ "tokio",
+ "tokio-util",
+ "tracing",
+ "tracing-subscriber",
+ "uuid",
+]
+
+[[package]]
+name = "sacp-proxy"
+version = "0.1.0"
+dependencies = [
+ "agent-client-protocol",
+ "futures",
+ "fxhash",
+ "jsonrpcmsg",
+ "rmcp",
+ "sacp",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tokio-util",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
 name = "schemars"
 version = "1.0.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -933,25 +952,6 @@ name = "scopeguard"
 version = "1.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "94143f37725109f92c262ed2cf5e59bce7498c01bcc1502d7b9afe439a4e9f49"
-
-[[package]]
-name = "scp"
-version = "0.1.0"
-dependencies = [
- "agent-client-protocol",
- "anyhow",
- "boxfnonce",
- "expect-test",
- "futures",
- "jsonrpcmsg",
- "serde",
- "serde_json",
- "thiserror 1.0.69",
- "tokio",
- "tokio-util",
- "tracing",
- "uuid",
-]
 
 [[package]]
 name = "serde"

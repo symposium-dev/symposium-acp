@@ -1,8 +1,8 @@
 [workspace]
 members = [
-    "src/acp-proxy",
-    "src/conductor",
-    "src/scp",
+    "src/sacp-proxy",
+    "src/sacp-conductor",
+    "src/sacp",
 ]
 resolver = "2"
 

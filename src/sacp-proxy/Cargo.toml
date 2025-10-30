@@ -1,0 +1,23 @@
+[package]
+name = "sacp-proxy"
+version = "0.1.0"
+edition = "2024"
+description = "Framework for building SACP proxy components"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/agent-client-protocol/symposium-acp"
+keywords = ["acp", "agent", "proxy", "ai"]
+categories = ["development-tools"]
+
+[dependencies]
+agent-client-protocol.workspace = true
+futures = "0.3.31"
+fxhash = "0.2.1"
+jsonrpcmsg = "0.1.2"
+rmcp.workspace = true
+sacp = { version = "0.1.0", path = "../sacp" }
+serde.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+tokio-util = { version = "0.7.16", features = ["compat"] }
+tracing.workspace = true
+uuid.workspace = true

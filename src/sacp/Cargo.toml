@@ -1,0 +1,26 @@
+[package]
+name = "sacp"
+version = "0.1.0"
+edition = "2024"
+description = "Core protocol types and traits for SACP (Symposium's extensions to ACP)"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/agent-client-protocol/symposium-acp"
+keywords = ["acp", "agent", "protocol", "ai"]
+categories = ["development-tools"]
+
+[dependencies]
+agent-client-protocol.workspace = true
+anyhow.workspace = true
+boxfnonce = "0.1.1"
+futures = "0.3.31"
+jsonrpcmsg = "0.1.2"
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+uuid.workspace = true
+
+[dev-dependencies]
+expect-test = "1.5"
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "io-util", "time"] }
+tokio-util = { version = "0.7", features = ["compat"] }

@@ -2,4 +2,4 @@
 authors = ["Niko Matsakis"]
 language = "en"
 src = "md"
-title = "Symposium's Agent Client Protocol SDK"
+title = "SACP: Symposium's Extensions to ACP"
