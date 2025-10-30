@@ -908,16 +908,19 @@ name = "sacp-proxy"
 version = "0.1.0"
 dependencies = [
  "agent-client-protocol",
+ "chrono",
  "futures",
  "fxhash",
  "jsonrpcmsg",
  "rmcp",
  "sacp",
+ "schemars",
  "serde",
  "serde_json",
  "tokio",
  "tokio-util",
  "tracing",
+ "tracing-subscriber",
  "uuid",
 ]
 
