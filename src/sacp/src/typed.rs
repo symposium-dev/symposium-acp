@@ -1,4 +1,4 @@
-use agent_client_protocol_schema as acp;
+// Types re-exported from crate root
 use jsonrpcmsg::Params;
 
 use crate::{
@@ -14,7 +14,7 @@ pub struct TypeRequest {
 
 enum TypeMessageState {
     Unhandled(String, Option<Params>, JrRequestCx<serde_json::Value>),
-    Handled(Result<(), acp::Error>),
+    Handled(Result<(), crate::Error>),
 }
 
 impl TypeRequest {
@@ -28,7 +28,7 @@ impl TypeRequest {
 
     pub async fn handle_if<R: JsonRpcRequest>(
         mut self,
-        op: impl AsyncFnOnce(R, JrRequestCx<R::Response>) -> Result<(), acp::Error>,
+        op: impl AsyncFnOnce(R, JrRequestCx<R::Response>) -> Result<(), crate::Error>,
     ) -> Self {
         self.state = Some(match self.state.take().expect("valid state") {
             TypeMessageState::Unhandled(method, params, request_cx) => {
@@ -53,8 +53,8 @@ impl TypeRequest {
         op: impl AsyncFnOnce(
             UntypedMessage,
             JrRequestCx<serde_json::Value>,
-        ) -> Result<(), acp::Error>,
-    ) -> Result<(), acp::Error> {
+        ) -> Result<(), crate::Error>,
+    ) -> Result<(), crate::Error> {
         match self.state.take().expect("valid state") {
             TypeMessageState::Unhandled(method, params, request_cx) => {
                 match UntypedMessage::new(&method, params) {
@@ -76,7 +76,7 @@ pub struct TypeNotification {
 
 enum TypeNotificationState {
     Unhandled(String, Option<Params>),
-    Handled(Result<(), acp::Error>),
+    Handled(Result<(), crate::Error>),
 }
 
 impl TypeNotification {
@@ -91,7 +91,7 @@ impl TypeNotification {
 
     pub async fn handle_if<N: JrNotification>(
         mut self,
-        op: impl AsyncFnOnce(N) -> Result<(), acp::Error>,
+        op: impl AsyncFnOnce(N) -> Result<(), crate::Error>,
     ) -> Self {
         self.state = Some(match self.state.take().expect("valid state") {
             TypeNotificationState::Unhandled(method, params) => {
@@ -113,8 +113,8 @@ impl TypeNotification {
 
     pub async fn otherwise(
         mut self,
-        op: impl AsyncFnOnce(UntypedMessage) -> Result<(), acp::Error>,
-    ) -> Result<(), acp::Error> {
+        op: impl AsyncFnOnce(UntypedMessage) -> Result<(), crate::Error>,
+    ) -> Result<(), crate::Error> {
         match self.state.take().expect("valid state") {
             TypeNotificationState::Unhandled(method, params) => {
                 match UntypedMessage::new(&method, params) {

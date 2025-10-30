@@ -80,7 +80,7 @@ impl ComponentProvider for InitComponentProvider {
         cx: &JrConnectionCx,
         outgoing_bytes: Pin<Box<dyn AsyncWrite + Send>>,
         incoming_bytes: Pin<Box<dyn AsyncRead + Send>>,
-    ) -> Result<Cleanup, acp::Error> {
+    ) -> Result<Cleanup, sacp::Error> {
         let config = Arc::clone(&self.config);
         cx.spawn(async move {
             JrConnection::new(outgoing_bytes, incoming_bytes)
@@ -125,8 +125,8 @@ impl ComponentProvider for InitComponentProvider {
 
 async fn run_test_with_components(
     components: Vec<Box<dyn ComponentProvider>>,
-    editor_task: impl AsyncFnOnce(JrConnectionCx) -> Result<(), acp::Error>,
-) -> Result<(), acp::Error> {
+    editor_task: impl AsyncFnOnce(JrConnectionCx) -> Result<(), sacp::Error>,
+) -> Result<(), sacp::Error> {
     // Set up editor <-> conductor communication
     let (editor_out, conductor_in) = duplex(1024);
     let (conductor_out, editor_in) = duplex(1024);
@@ -146,7 +146,7 @@ async fn run_test_with_components(
 }
 
 #[tokio::test]
-async fn test_single_component_no_proxy_offer() -> Result<(), acp::Error> {
+async fn test_single_component_no_proxy_offer() -> Result<(), sacp::Error> {
     let _ = tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::from_default_env()
@@ -186,7 +186,7 @@ async fn test_single_component_no_proxy_offer() -> Result<(), acp::Error> {
 }
 
 #[tokio::test]
-async fn test_two_components() -> Result<(), acp::Error> {
+async fn test_two_components() -> Result<(), sacp::Error> {
     let _ = tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::from_default_env()
@@ -231,7 +231,7 @@ async fn test_two_components() -> Result<(), acp::Error> {
 }
 
 #[tokio::test]
-async fn test_proxy_component_must_respond_with_proxy() -> Result<(), acp::Error> {
+async fn test_proxy_component_must_respond_with_proxy() -> Result<(), sacp::Error> {
     let _ = tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::from_default_env()
@@ -285,7 +285,7 @@ async fn test_proxy_component_must_respond_with_proxy() -> Result<(), acp::Error
 }
 
 #[tokio::test]
-async fn test_proxy_component_must_strip_proxy_when_forwarding() -> Result<(), acp::Error> {
+async fn test_proxy_component_must_strip_proxy_when_forwarding() -> Result<(), sacp::Error> {
     let _ = tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::from_default_env()

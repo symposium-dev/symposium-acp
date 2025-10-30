@@ -1,4 +1,4 @@
-use agent_client_protocol_schema as acp;
+use sacp;
 use sacp::{
     JrMessage, JrNotification, JsonRpcRequest, JrResponsePayload, UntypedMessage,
     util::json_cast,
@@ -14,7 +14,7 @@ pub struct McpConnectRequest {
 }
 
 impl JrMessage for McpConnectRequest {
-    fn into_untyped_message(self) -> Result<UntypedMessage, acp::Error> {
+    fn into_untyped_message(self) -> Result<UntypedMessage, sacp::Error> {
         UntypedMessage::new(METHOD_MCP_CONNECT_REQUEST, self)
     }
 
@@ -22,7 +22,7 @@ impl JrMessage for McpConnectRequest {
         METHOD_MCP_CONNECT_REQUEST
     }
 
-    fn parse_request(method: &str, params: &impl Serialize) -> Option<Result<Self, acp::Error>> {
+    fn parse_request(method: &str, params: &impl Serialize) -> Option<Result<Self, sacp::Error>> {
         if method != METHOD_MCP_CONNECT_REQUEST {
             return None;
         }
@@ -32,7 +32,7 @@ impl JrMessage for McpConnectRequest {
     fn parse_notification(
         _method: &str,
         _params: &impl Serialize,
-    ) -> Option<Result<Self, acp::Error>> {
+    ) -> Option<Result<Self, sacp::Error>> {
         // This is a request, not a notification
         None
     }
@@ -49,14 +49,14 @@ pub struct McpConnectResponse {
 
 impl JrResponsePayload for McpConnectResponse {
     fn into_json(self, _method: &str) -> Result<serde_json::Value, agent_client_protocol_schema::Error> {
-        serde_json::to_value(self).map_err(acp::Error::into_internal_error)
+        serde_json::to_value(self).map_err(sacp::Error::into_internal_error)
     }
 
     fn from_value(
         _method: &str,
         value: serde_json::Value,
     ) -> Result<Self, agent_client_protocol_schema::Error> {
-        serde_json::from_value(value).map_err(|_| acp::Error::invalid_params())
+        serde_json::from_value(value).map_err(|_| sacp::Error::invalid_params())
     }
 }
 
@@ -70,7 +70,7 @@ pub struct McpDisconnectNotification {
 }
 
 impl JrMessage for McpDisconnectNotification {
-    fn into_untyped_message(self) -> Result<UntypedMessage, acp::Error> {
+    fn into_untyped_message(self) -> Result<UntypedMessage, sacp::Error> {
         UntypedMessage::new(METHOD_MCP_DISCONNECT_NOTIFICATION, self)
     }
 
@@ -78,7 +78,7 @@ impl JrMessage for McpDisconnectNotification {
         METHOD_MCP_DISCONNECT_NOTIFICATION
     }
 
-    fn parse_request(_method: &str, _params: &impl Serialize) -> Option<Result<Self, acp::Error>> {
+    fn parse_request(_method: &str, _params: &impl Serialize) -> Option<Result<Self, sacp::Error>> {
         // This is a notification, not a request
         None
     }
@@ -86,7 +86,7 @@ impl JrMessage for McpDisconnectNotification {
     fn parse_notification(
         method: &str,
         params: &impl Serialize,
-    ) -> Option<Result<Self, acp::Error>> {
+    ) -> Option<Result<Self, sacp::Error>> {
         if method != METHOD_MCP_DISCONNECT_NOTIFICATION {
             return None;
         }
@@ -114,7 +114,7 @@ pub struct McpOverAcpRequest<R> {
 }
 
 impl<R: JsonRpcRequest> JrMessage for McpOverAcpRequest<R> {
-    fn into_untyped_message(self) -> Result<UntypedMessage, acp::Error> {
+    fn into_untyped_message(self) -> Result<UntypedMessage, sacp::Error> {
         let message = self.request.into_untyped_message()?;
         UntypedMessage::new(
             METHOD_MCP_REQUEST,
@@ -129,7 +129,7 @@ impl<R: JsonRpcRequest> JrMessage for McpOverAcpRequest<R> {
         METHOD_MCP_REQUEST
     }
 
-    fn parse_request(method: &str, params: &impl Serialize) -> Option<Result<Self, acp::Error>> {
+    fn parse_request(method: &str, params: &impl Serialize) -> Option<Result<Self, sacp::Error>> {
         if method == METHOD_MCP_REQUEST {
             match json_cast::<_, McpOverAcpRequest<UntypedMessage>>(params) {
                 Ok(outer) => match R::parse_request(&outer.request.method, &outer.request.params) {
@@ -150,7 +150,7 @@ impl<R: JsonRpcRequest> JrMessage for McpOverAcpRequest<R> {
     fn parse_notification(
         _method: &str,
         _params: &impl Serialize,
-    ) -> Option<Result<Self, acp::Error>> {
+    ) -> Option<Result<Self, sacp::Error>> {
         None // Request, not notification
     }
 }
@@ -178,7 +178,7 @@ pub struct McpOverAcpNotification<R> {
 }
 
 impl<R: JrMessage> JrMessage for McpOverAcpNotification<R> {
-    fn into_untyped_message(self) -> Result<UntypedMessage, acp::Error> {
+    fn into_untyped_message(self) -> Result<UntypedMessage, sacp::Error> {
         let params = self.notification.into_untyped_message()?;
         UntypedMessage::new(
             METHOD_MCP_NOTIFICATION,
@@ -193,14 +193,14 @@ impl<R: JrMessage> JrMessage for McpOverAcpNotification<R> {
         METHOD_MCP_NOTIFICATION
     }
 
-    fn parse_request(_method: &str, _params: &impl Serialize) -> Option<Result<Self, acp::Error>> {
+    fn parse_request(_method: &str, _params: &impl Serialize) -> Option<Result<Self, sacp::Error>> {
         None // Notification, not request
     }
 
     fn parse_notification(
         method: &str,
         params: &impl Serialize,
-    ) -> Option<Result<Self, acp::Error>> {
+    ) -> Option<Result<Self, sacp::Error>> {
         if method == METHOD_MCP_NOTIFICATION {
             match json_cast::<_, McpOverAcpNotification<UntypedMessage>>(params) {
                 Ok(outer) => match R::parse_notification(

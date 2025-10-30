@@ -29,7 +29,7 @@ impl ComponentProvider for AgentComponentProvider {
         cx: &JrConnectionCx,
         outgoing_bytes: Pin<Box<dyn AsyncWrite + Send>>,
         incoming_bytes: Pin<Box<dyn AsyncRead + Send>>,
-    ) -> Result<Cleanup, acp::Error> {
+    ) -> Result<Cleanup, sacp::Error> {
         let state = AgentState {
             mcp_servers: Arc::new(Mutex::new(Vec::new())),
         };
@@ -119,7 +119,7 @@ impl AgentComponentProvider {
         state: AgentState,
         request: PromptRequest,
         request_cx: JrRequestCx<PromptResponse>,
-    ) -> Result<(), acp::Error> {
+    ) -> Result<(), sacp::Error> {
         use rmcp::{
             model::CallToolRequestParam,
             transport::{ConfigureCommandExt, TokioChildProcess},
@@ -164,10 +164,10 @@ impl AgentComponentProvider {
                                 cmd.env(&env_var.name, &env_var.value);
                             }
                         }))
-                        .map_err(acp::Error::into_internal_error)?,
+                        .map_err(sacp::Error::into_internal_error)?,
                     )
                     .await
-                    .map_err(acp::Error::into_internal_error)?;
+                    .map_err(sacp::Error::into_internal_error)?;
 
                 tracing::debug!("MCP client connected");
 
@@ -182,7 +182,7 @@ impl AgentComponentProvider {
                         .cloned(),
                     })
                     .await
-                    .map_err(acp::Error::into_internal_error)?;
+                    .map_err(sacp::Error::into_internal_error)?;
 
                 tracing::debug!("Tool call result: {:?}", tool_result);
 
@@ -204,7 +204,7 @@ impl AgentComponentProvider {
                 mcp_client
                     .cancel()
                     .await
-                    .map_err(acp::Error::into_internal_error)?;
+                    .map_err(sacp::Error::into_internal_error)?;
             }
         }
 

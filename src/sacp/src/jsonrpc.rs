@@ -1,6 +1,6 @@
 //! Core JSON-RPC server support.
 
-use agent_client_protocol_schema as acp;
+// Types re-exported from crate root
 use serde::{Deserialize, Serialize};
 use std::fmt::Debug;
 use std::panic::Location;
@@ -98,7 +98,7 @@ impl<OB: AsyncWrite, IB: AsyncRead, H: JrHandler> JrConnection<OB, IB, H> {
     where
         R: JsonRpcRequest,
         N: JrNotification,
-        F: AsyncFnMut(MessageAndCx<R, N>) -> Result<(), acp::Error>,
+        F: AsyncFnMut(MessageAndCx<R, N>) -> Result<(), crate::Error>,
     {
         JrConnection {
             name: self.name,
@@ -119,7 +119,7 @@ impl<OB: AsyncWrite, IB: AsyncRead, H: JrHandler> JrConnection<OB, IB, H> {
     ) -> JrConnection<OB, IB, ChainHandler<H, RequestHandler<R, F>>>
     where
         R: JsonRpcRequest,
-        F: AsyncFnMut(R, JrRequestCx<R::Response>) -> Result<(), acp::Error>,
+        F: AsyncFnMut(R, JrRequestCx<R::Response>) -> Result<(), crate::Error>,
     {
         JrConnection {
             name: self.name,
@@ -140,7 +140,7 @@ impl<OB: AsyncWrite, IB: AsyncRead, H: JrHandler> JrConnection<OB, IB, H> {
     ) -> JrConnection<OB, IB, ChainHandler<H, NotificationHandler<N, F>>>
     where
         N: JrNotification,
-        F: AsyncFnMut(N, JrConnectionCx) -> Result<(), acp::Error>,
+        F: AsyncFnMut(N, JrConnectionCx) -> Result<(), crate::Error>,
     {
         JrConnection {
             name: self.name,
@@ -169,7 +169,7 @@ impl<OB: AsyncWrite, IB: AsyncRead, H: JrHandler> JrConnection<OB, IB, H> {
     #[track_caller]
     pub fn with_spawned(
         self,
-        task: impl Future<Output = Result<(), acp::Error>> + Send + 'static,
+        task: impl Future<Output = Result<(), crate::Error>> + Send + 'static,
     ) -> Self {
         let json_rpc_cx = self.json_rpc_cx();
         json_rpc_cx.spawn(task).expect("spawning failed");
@@ -177,7 +177,7 @@ impl<OB: AsyncWrite, IB: AsyncRead, H: JrHandler> JrConnection<OB, IB, H> {
     }
 
     /// Runs a server that listens for incoming requests and handles them according to the added handlers.
-    pub async fn serve(self) -> Result<(), acp::Error> {
+    pub async fn serve(self) -> Result<(), crate::Error> {
         let (reply_tx, reply_rx) = mpsc::unbounded();
         let json_rpc_cx = JrConnectionCx::new(self.outgoing_tx, self.new_task_tx);
         futures::select!(
@@ -221,8 +221,8 @@ impl<OB: AsyncWrite, IB: AsyncRead, H: JrHandler> JrConnection<OB, IB, H> {
     /// Errors if the server terminates before `main_fn` returns.
     pub async fn with_client(
         self,
-        main_fn: impl AsyncFnOnce(JrConnectionCx) -> Result<(), acp::Error>,
-    ) -> Result<(), acp::Error> {
+        main_fn: impl AsyncFnOnce(JrConnectionCx) -> Result<(), crate::Error>,
+    ) -> Result<(), crate::Error> {
         let cx = self.json_rpc_cx();
 
         // Run the server + the main function until one terminates.
@@ -241,11 +241,11 @@ enum ReplyMessage {
     /// Wait for a response to the given id and then send it to the given receiver
     Subscribe(
         jsonrpcmsg::Id,
-        oneshot::Sender<Result<serde_json::Value, acp::Error>>,
+        oneshot::Sender<Result<serde_json::Value, crate::Error>>,
     ),
 
     /// Dispatch a response to the given id and value
-    Dispatch(jsonrpcmsg::Id, Result<serde_json::Value, acp::Error>),
+    Dispatch(jsonrpcmsg::Id, Result<serde_json::Value, crate::Error>),
 }
 
 /// Messages send to be serialized over the transport.
@@ -260,7 +260,7 @@ enum OutgoingMessage {
         params: Option<jsonrpcmsg::Params>,
 
         /// where to send the response when it arrives
-        response_tx: oneshot::Sender<Result<serde_json::Value, acp::Error>>,
+        response_tx: oneshot::Sender<Result<serde_json::Value, crate::Error>>,
     },
 
     /// Send a notification to the server.
@@ -276,11 +276,11 @@ enum OutgoingMessage {
     Response {
         id: jsonrpcmsg::Id,
 
-        response: Result<serde_json::Value, acp::Error>,
+        response: Result<serde_json::Value, crate::Error>,
     },
 
     /// Send a generalized error message
-    Error { error: acp::Error },
+    Error { error: crate::Error },
 }
 
 /// Handlers are invoked when new messages arrive at the [`JrServer`].
@@ -309,7 +309,7 @@ pub trait JrHandler {
     async fn handle_message(
         &mut self,
         message: MessageAndCx,
-    ) -> Result<Handled<MessageAndCx>, acp::Error>;
+    ) -> Result<Handled<MessageAndCx>, crate::Error>;
 
     fn describe_chain(&self) -> impl std::fmt::Debug;
 }
@@ -344,21 +344,21 @@ impl JrConnectionCx {
     #[track_caller]
     pub fn spawn(
         &self,
-        future: impl Future<Output = Result<(), acp::Error>> + Send + 'static,
-    ) -> Result<(), acp::Error> {
+        future: impl Future<Output = Result<(), crate::Error>> + Send + 'static,
+    ) -> Result<(), crate::Error> {
         self.task_tx
             .unbounded_send(Task {
                 location: Location::caller(),
                 future: Box::pin(future),
             })
-            .map_err(acp::Error::into_internal_error)
+            .map_err(crate::Error::into_internal_error)
     }
 
     /// Send a request/notification and forward the response appropriately.
     ///
     /// The request context's response type matches the request's response type,
     /// enabling type-safe message forwarding.
-    pub fn send_proxied_message<R, N>(&self, message: MessageAndCx<R, N>) -> Result<(), acp::Error>
+    pub fn send_proxied_message<R, N>(&self, message: MessageAndCx<R, N>) -> Result<(), crate::Error>
     where
         R: JsonRpcRequest<Response: Send>,
         N: JrNotification,
@@ -425,7 +425,7 @@ impl JrConnectionCx {
     pub fn send_notification<N: JrNotification>(
         &self,
         notification: N,
-    ) -> Result<(), acp::Error> {
+    ) -> Result<(), crate::Error> {
         let untyped = notification.into_untyped_message()?;
         let params = crate::util::json_cast(untyped.params).ok();
         self.send_raw_message(OutgoingMessage::Notification {
@@ -435,11 +435,11 @@ impl JrConnectionCx {
     }
 
     /// Send an error notification (no reply expected).
-    pub fn send_error_notification(&self, error: acp::Error) -> Result<(), acp::Error> {
+    pub fn send_error_notification(&self, error: crate::Error) -> Result<(), crate::Error> {
         self.send_raw_message(OutgoingMessage::Error { error })
     }
 
-    fn send_raw_message(&self, message: OutgoingMessage) -> Result<(), acp::Error> {
+    fn send_raw_message(&self, message: OutgoingMessage) -> Result<(), crate::Error> {
         match &message {
             OutgoingMessage::Response { id, response } => match response {
                 Ok(_) => tracing::debug!(?id, "send_raw_message: queuing success response"),
@@ -469,8 +469,8 @@ pub struct JrRequestCx<T: JrResponsePayload> {
     /// Function to send the response `T` to a request with the given method and id.
     make_json: SendBoxFnOnce<
         'static,
-        (String, Result<T, acp::Error>),
-        Result<serde_json::Value, acp::Error>,
+        (String, Result<T, crate::Error>),
+        Result<serde_json::Value, crate::Error>,
     >,
 }
 
@@ -540,13 +540,13 @@ impl<T: JrResponsePayload> JrRequestCx<T> {
     /// `wrap_fn` will be invoked with the method name and the result of the wrapped function.
     pub fn wrap_params<U: JrResponsePayload>(
         self,
-        wrap_fn: impl FnOnce(&str, Result<U, acp::Error>) -> Result<T, acp::Error> + Send + 'static,
+        wrap_fn: impl FnOnce(&str, Result<U, crate::Error>) -> Result<T, crate::Error> + Send + 'static,
     ) -> JrRequestCx<U> {
         JrRequestCx {
             cx: self.cx,
             method: self.method,
             id: self.id,
-            make_json: SendBoxFnOnce::new(move |method: String, input: Result<U, acp::Error>| {
+            make_json: SendBoxFnOnce::new(move |method: String, input: Result<U, crate::Error>| {
                 let t_value = wrap_fn(&method, input);
                 self.make_json.call(method, t_value)
             }),
@@ -559,7 +559,7 @@ impl<T: JrResponsePayload> JrRequestCx<T> {
     }
 
     /// Respond to the JSON-RPC request with either a value (`Ok`) or an error (`Err`).
-    pub fn respond_with_result(self, response: Result<T, acp::Error>) -> Result<(), acp::Error> {
+    pub fn respond_with_result(self, response: Result<T, crate::Error>) -> Result<(), crate::Error> {
         tracing::debug!(id = ?self.id, "respond called");
         let json = self.make_json.call_tuple((self.method.clone(), response));
         self.cx.send_raw_message(OutgoingMessage::Response {
@@ -569,17 +569,17 @@ impl<T: JrResponsePayload> JrRequestCx<T> {
     }
 
     /// Respond to the JSON-RPC request with a value.
-    pub fn respond(self, response: T) -> Result<(), acp::Error> {
+    pub fn respond(self, response: T) -> Result<(), crate::Error> {
         self.respond_with_result(Ok(response))
     }
 
     /// Respond to the JSON-RPC request with an internal error containing a message.
-    pub fn respond_with_internal_error(self, message: impl ToString) -> Result<(), acp::Error> {
+    pub fn respond_with_internal_error(self, message: impl ToString) -> Result<(), crate::Error> {
         self.respond_with_error(crate::util::internal_error(message))
     }
 
     /// Respond to the JSON-RPC request with an error.
-    pub fn respond_with_error(self, error: acp::Error) -> Result<(), acp::Error> {
+    pub fn respond_with_error(self, error: crate::Error) -> Result<(), crate::Error> {
         tracing::debug!(id = ?self.id, ?error, "respond_with_error called");
         self.respond_with_result(Err(error))
     }
@@ -588,7 +588,7 @@ impl<T: JrResponsePayload> JrRequestCx<T> {
 /// Common bounds for any JSON-RPC message.
 pub trait JrMessage: 'static + Debug + Sized {
     /// The parameters for the request.
-    fn into_untyped_message(self) -> Result<UntypedMessage, acp::Error>;
+    fn into_untyped_message(self) -> Result<UntypedMessage, crate::Error>;
 
     /// The method name for the request.
     fn method(&self) -> &str;
@@ -599,7 +599,7 @@ pub trait JrMessage: 'static + Debug + Sized {
     /// - `None` if this type does not recognize the method name or recognizes it as a notification
     /// - `Some(Ok(value))` if the method is recognized as a request and deserialization succeeds
     /// - `Some(Err(error))` if the method is recognized as a request but deserialization fails
-    fn parse_request(_method: &str, _params: &impl Serialize) -> Option<Result<Self, acp::Error>>;
+    fn parse_request(_method: &str, _params: &impl Serialize) -> Option<Result<Self, crate::Error>>;
 
     /// Attempt to parse this type from a JSON-RPC notification.
     ///
@@ -610,24 +610,24 @@ pub trait JrMessage: 'static + Debug + Sized {
     fn parse_notification(
         _method: &str,
         _params: &impl Serialize,
-    ) -> Option<Result<Self, acp::Error>>;
+    ) -> Option<Result<Self, crate::Error>>;
 }
 
 /// Defines the "payload" of a successful response to a JSON-RPC request.
 pub trait JrResponsePayload: 'static + Debug + Sized {
     /// Convert this message into a JSON value.
-    fn into_json(self, method: &str) -> Result<serde_json::Value, acp::Error>;
+    fn into_json(self, method: &str) -> Result<serde_json::Value, crate::Error>;
 
     /// Parse a JSON value into the response type.
-    fn from_value(method: &str, value: serde_json::Value) -> Result<Self, acp::Error>;
+    fn from_value(method: &str, value: serde_json::Value) -> Result<Self, crate::Error>;
 }
 
 impl JrResponsePayload for serde_json::Value {
-    fn from_value(_method: &str, value: serde_json::Value) -> Result<Self, acp::Error> {
+    fn from_value(_method: &str, value: serde_json::Value) -> Result<Self, crate::Error> {
         Ok(value)
     }
 
-    fn into_json(self, _method: &str) -> Result<serde_json::Value, acp::Error> {
+    fn into_json(self, _method: &str) -> Result<serde_json::Value, crate::Error> {
         Ok(self)
     }
 }
@@ -687,7 +687,7 @@ impl<R: JsonRpcRequest, N: JrMessage> MessageAndCx<R, N> {
     /// If this message is a request, this error becomes the reply to the request.
     ///
     /// If this message is a notification, the error is sent as a notification.
-    pub fn respond_with_error(self, error: acp::Error) -> Result<(), acp::Error> {
+    pub fn respond_with_error(self, error: crate::Error) -> Result<(), crate::Error> {
         match self {
             MessageAndCx::Request(_, cx) => cx.respond_with_error(error),
             MessageAndCx::Notification(_, cx) => cx.send_error_notification(error),
@@ -722,7 +722,7 @@ pub struct UntypedMessage {
 
 impl UntypedMessage {
     /// Returns an untyped message with the given method and parameters.
-    pub fn new(method: &str, params: impl Serialize) -> Result<Self, acp::Error> {
+    pub fn new(method: &str, params: impl Serialize) -> Result<Self, crate::Error> {
         let params = serde_json::to_value(params)?;
         Ok(Self {
             method: method.to_string(),
@@ -777,15 +777,15 @@ impl JrNotification for UntypedMessage {}
 pub struct JrResponse<R> {
     method: String,
     connection_cx: JrConnectionCx,
-    response_rx: oneshot::Receiver<Result<serde_json::Value, acp::Error>>,
-    to_result: Box<dyn Fn(serde_json::Value) -> Result<R, acp::Error> + Send>,
+    response_rx: oneshot::Receiver<Result<serde_json::Value, crate::Error>>,
+    to_result: Box<dyn Fn(serde_json::Value) -> Result<R, crate::Error> + Send>,
 }
 
 impl JrResponse<serde_json::Value> {
     fn new(
         method: String,
         connection_cx: JrConnectionCx,
-        response_rx: oneshot::Receiver<Result<serde_json::Value, acp::Error>>,
+        response_rx: oneshot::Receiver<Result<serde_json::Value, crate::Error>>,
     ) -> Self {
         Self {
             method,
@@ -800,7 +800,7 @@ impl<R: JrResponsePayload> JrResponse<R> {
     /// Create a new response that maps the result of the response to a new type.
     pub fn map<U>(
         self,
-        map_fn: impl Fn(R) -> Result<U, acp::Error> + 'static + Send,
+        map_fn: impl Fn(R) -> Result<U, crate::Error> + 'static + Send,
     ) -> JrResponse<U>
     where
         U: JrResponsePayload,
@@ -815,7 +815,7 @@ impl<R: JrResponsePayload> JrResponse<R> {
 
     /// Schedule an async task that will forward the respond to `response_cx` when it arrives.
     /// Useful when proxying messages around.
-    pub fn forward_to_request_cx(self, request_cx: JrRequestCx<R>) -> Result<(), acp::Error>
+    pub fn forward_to_request_cx(self, request_cx: JrRequestCx<R>) -> Result<(), crate::Error>
     where
         R: Send,
     {
@@ -829,7 +829,7 @@ impl<R: JrResponsePayload> JrResponse<R> {
     /// as that will prevent the event loop from running.
     ///
     /// In a callback setting, prefer [`Self::await_when_response_received`].
-    pub async fn block_task(self) -> Result<R, acp::Error>
+    pub async fn block_task(self) -> Result<R, crate::Error>
     where
         R: Send,
     {
@@ -853,9 +853,9 @@ impl<R: JrResponsePayload> JrResponse<R> {
         self,
         request_cx: JrRequestCx<R>,
         task: impl FnOnce(R, JrRequestCx<R>) -> F + 'static + Send,
-    ) -> Result<(), acp::Error>
+    ) -> Result<(), crate::Error>
     where
-        F: Future<Output = Result<(), acp::Error>> + 'static + Send,
+        F: Future<Output = Result<(), crate::Error>> + 'static + Send,
         R: Send,
     {
         self.await_when_result_received(async move |result| match result {
@@ -873,10 +873,10 @@ impl<R: JrResponsePayload> JrResponse<R> {
     #[track_caller]
     pub fn await_when_result_received<F>(
         self,
-        task: impl FnOnce(Result<R, acp::Error>) -> F + 'static + Send,
-    ) -> Result<(), acp::Error>
+        task: impl FnOnce(Result<R, crate::Error>) -> F + 'static + Send,
+    ) -> Result<(), crate::Error>
     where
-        F: Future<Output = Result<(), acp::Error>> + 'static + Send,
+        F: Future<Output = Result<(), crate::Error>> + 'static + Send,
         R: Send,
     {
         let connection_cx = self.connection_cx.clone();
@@ -887,6 +887,6 @@ impl<R: JrResponsePayload> JrResponse<R> {
 
 const COMMUNICATION_FAILURE: i32 = -32000;
 
-fn communication_failure(err: impl ToString) -> acp::Error {
-    acp::Error::new((COMMUNICATION_FAILURE, err.to_string()))
+fn communication_failure(err: impl ToString) -> crate::Error {
+    crate::Error::new((COMMUNICATION_FAILURE, err.to_string()))
 }

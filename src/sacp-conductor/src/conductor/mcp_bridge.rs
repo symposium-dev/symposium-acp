@@ -1,7 +1,7 @@
 use std::{collections::HashMap, net::SocketAddr};
 
 use sacp_proxy::McpDisconnectNotification;
-use agent_client_protocol_schema as acp;
+use sacp;
 use agent_client_protocol_schema::McpServer;
 use futures::{SinkExt, StreamExt as _, channel::mpsc};
 use sacp::{JrConnection, JrConnectionCx, MessageAndCx};
@@ -50,7 +50,7 @@ impl McpBridgeListeners {
         mcp_server: &mut McpServer,
         conductor_tx: &mpsc::Sender<ConductorMessage>,
         conductor_command: &[String],
-    ) -> Result<(), acp::Error> {
+    ) -> Result<(), sacp::Error> {
         use agent_client_protocol_schema::McpServer;
 
         let McpServer::Http { name, url, headers } = mcp_server else {
@@ -62,7 +62,7 @@ impl McpBridgeListeners {
         }
 
         if !headers.is_empty() {
-            return Err(acp::Error::internal_error());
+            return Err(sacp::Error::internal_error());
         }
 
         info!(
@@ -154,7 +154,7 @@ impl McpBridgeListeners {
                     let (stream, addr) = listener
                         .accept()
                         .await
-                        .map_err(acp::Error::into_internal_error)?;
+                        .map_err(sacp::Error::into_internal_error)?;
 
                     let (to_mcp_client_tx, to_mcp_client_rx) = mpsc::channel(128);
 
@@ -170,7 +170,7 @@ impl McpBridgeListeners {
                             connection: McpBridgeConnection { to_mcp_client_tx },
                         })
                         .await
-                        .map_err(|_| acp::Error::internal_error())?;
+                        .map_err(|_| sacp::Error::internal_error())?;
                 }
             }
         })?;
@@ -203,7 +203,7 @@ pub struct McpBridgeConnectionActor {
 impl McpBridgeConnectionActor {
     /// Run the actor, forwarding incoming messages from the MCP client to the conductor
     /// and outgoing messages from the conductor to the MCP client.
-    pub async fn run(mut self, connection_id: String) -> Result<(), acp::Error> {
+    pub async fn run(mut self, connection_id: String) -> Result<(), sacp::Error> {
         info!(connection_id, "Bridge connected");
 
         let (read_half, write_half) = self.stream.into_split();
@@ -224,7 +224,7 @@ impl McpBridgeConnectionActor {
                             message,
                         })
                         .await
-                        .map_err(|_| acp::Error::internal_error())
+                        .map_err(|_| sacp::Error::internal_error())
                 }
             })
             // When we receive messages from the conductor, forward them to the MCP client
@@ -241,7 +241,7 @@ impl McpBridgeConnectionActor {
                 notification: McpDisconnectNotification { connection_id },
             })
             .await
-            .map_err(|_| acp::Error::internal_error())?;
+            .map_err(|_| sacp::Error::internal_error())?;
 
         result
     }
@@ -259,10 +259,10 @@ pub struct McpBridgeConnection {
 }
 
 impl McpBridgeConnection {
-    pub async fn send(&mut self, message: MessageAndCx) -> Result<(), acp::Error> {
+    pub async fn send(&mut self, message: MessageAndCx) -> Result<(), sacp::Error> {
         self.to_mcp_client_tx
             .send(message)
             .await
-            .map_err(|_| acp::Error::internal_error())
+            .map_err(|_| sacp::Error::internal_error())
     }
 }

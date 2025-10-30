@@ -17,7 +17,7 @@ impl ComponentProvider for ProxyComponentProvider {
         cx: &JrConnectionCx,
         outgoing_bytes: Pin<Box<dyn AsyncWrite + Send>>,
         incoming_bytes: Pin<Box<dyn AsyncRead + Send>>,
-    ) -> Result<Cleanup, acp::Error> {
+    ) -> Result<Cleanup, sacp::Error> {
         cx.spawn(
             JrConnection::new(outgoing_bytes, incoming_bytes)
                 .name("proxy-component")

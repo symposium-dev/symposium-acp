@@ -45,8 +45,8 @@ fn conductor_command() -> Vec<String> {
 
 async fn run_test_with_components(
     components: Vec<Box<dyn ComponentProvider>>,
-    editor_task: impl AsyncFnOnce(sacp::JrConnectionCx) -> Result<(), acp::Error>,
-) -> Result<(), acp::Error> {
+    editor_task: impl AsyncFnOnce(sacp::JrConnectionCx) -> Result<(), sacp::Error>,
+) -> Result<(), sacp::Error> {
     // Set up editor <-> conductor communication
     let (editor_out, conductor_in) = duplex(1024);
     let (conductor_out, editor_in) = duplex(1024);
@@ -67,7 +67,7 @@ async fn run_test_with_components(
 }
 
 #[tokio::test]
-async fn test_proxy_provides_mcp_tools() -> Result<(), acp::Error> {
+async fn test_proxy_provides_mcp_tools() -> Result<(), sacp::Error> {
     let _ = tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::from_default_env()
@@ -123,7 +123,7 @@ async fn test_proxy_provides_mcp_tools() -> Result<(), acp::Error> {
 }
 
 #[tokio::test]
-async fn test_agent_handles_prompt() -> Result<(), acp::Error> {
+async fn test_agent_handles_prompt() -> Result<(), sacp::Error> {
     let _ = tracing_subscriber::fmt()
         .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
         .with_test_writer()
@@ -146,7 +146,7 @@ async fn test_agent_handles_prompt() -> Result<(), acp::Error> {
                 log_tx
                     .send(format!("{notification:?}"))
                     .await
-                    .map_err(|_| acp::Error::internal_error())
+                    .map_err(|_| sacp::Error::internal_error())
             }
         })
         .with_spawned(async move {
@@ -197,7 +197,7 @@ async fn test_agent_handles_prompt() -> Result<(), acp::Error> {
             log_tx
                 .send(format!("{prompt_response:?}"))
                 .await
-                .map_err(|_| acp::Error::internal_error())?;
+                .map_err(|_| sacp::Error::internal_error())?;
 
             Ok(())
         })

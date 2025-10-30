@@ -1,6 +1,6 @@
 use crate::jsonrpc::{Handled, JrHandler};
 use crate::{JrConnectionCx, JrNotification, JsonRpcRequest, MessageAndCx};
-use agent_client_protocol_schema as acp;
+// Types re-exported from crate root
 use std::marker::PhantomData;
 use std::ops::AsyncFnMut;
 
@@ -26,7 +26,7 @@ impl JrHandler for NullHandler {
 pub struct RequestHandler<R, F>
 where
     R: JsonRpcRequest,
-    F: AsyncFnMut(R, JrRequestCx<R::Response>) -> Result<(), acp::Error>,
+    F: AsyncFnMut(R, JrRequestCx<R::Response>) -> Result<(), crate::Error>,
 {
     handler: F,
     phantom: PhantomData<fn(R)>,
@@ -35,7 +35,7 @@ where
 impl<R, F> RequestHandler<R, F>
 where
     R: JsonRpcRequest,
-    F: AsyncFnMut(R, JrRequestCx<R::Response>) -> Result<(), acp::Error>,
+    F: AsyncFnMut(R, JrRequestCx<R::Response>) -> Result<(), crate::Error>,
 {
     pub fn new(handler: F) -> Self {
         Self {
@@ -48,7 +48,7 @@ where
 impl<R, F> JrHandler for RequestHandler<R, F>
 where
     R: JsonRpcRequest,
-    F: AsyncFnMut(R, JrRequestCx<R::Response>) -> Result<(), acp::Error>,
+    F: AsyncFnMut(R, JrRequestCx<R::Response>) -> Result<(), crate::Error>,
 {
     async fn handle_message(
         &mut self,
@@ -90,7 +90,7 @@ where
 pub struct NotificationHandler<N, F>
 where
     N: JrNotification,
-    F: AsyncFnMut(N, JrConnectionCx) -> Result<(), acp::Error>,
+    F: AsyncFnMut(N, JrConnectionCx) -> Result<(), crate::Error>,
 {
     handler: F,
     phantom: PhantomData<fn(N)>,
@@ -99,7 +99,7 @@ where
 impl<R, F> NotificationHandler<R, F>
 where
     R: JrNotification,
-    F: AsyncFnMut(R, JrConnectionCx) -> Result<(), acp::Error>,
+    F: AsyncFnMut(R, JrConnectionCx) -> Result<(), crate::Error>,
 {
     pub fn new(handler: F) -> Self {
         Self {
@@ -112,7 +112,7 @@ where
 impl<R, F> JrHandler for NotificationHandler<R, F>
 where
     R: JrNotification,
-    F: AsyncFnMut(R, JrConnectionCx) -> Result<(), acp::Error>,
+    F: AsyncFnMut(R, JrConnectionCx) -> Result<(), crate::Error>,
 {
     async fn handle_message(
         &mut self,
@@ -160,7 +160,7 @@ pub struct MessageHandler<R, N, F>
 where
     R: JsonRpcRequest,
     N: JrNotification,
-    F: AsyncFnMut(MessageAndCx<R, N>) -> Result<(), acp::Error>,
+    F: AsyncFnMut(MessageAndCx<R, N>) -> Result<(), crate::Error>,
 {
     handler: F,
     phantom: PhantomData<fn(R, N)>,
@@ -170,7 +170,7 @@ impl<R, N, F> MessageHandler<R, N, F>
 where
     R: JsonRpcRequest,
     N: JrNotification,
-    F: AsyncFnMut(MessageAndCx<R, N>) -> Result<(), acp::Error>,
+    F: AsyncFnMut(MessageAndCx<R, N>) -> Result<(), crate::Error>,
 {
     pub fn new(handler: F) -> Self {
         Self {
@@ -184,7 +184,7 @@ impl<R, N, F> JrHandler for MessageHandler<R, N, F>
 where
     R: JsonRpcRequest,
     N: JrNotification,
-    F: AsyncFnMut(MessageAndCx<R, N>) -> Result<(), acp::Error>,
+    F: AsyncFnMut(MessageAndCx<R, N>) -> Result<(), crate::Error>,
 {
     async fn handle_message(
         &mut self,

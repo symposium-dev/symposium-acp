@@ -122,7 +122,7 @@ impl Conductor {
         outgoing_bytes: OB,
         incoming_bytes: IB,
         providers: Vec<Box<dyn ComponentProvider>>,
-    ) -> Result<(), acp::Error> {
+    ) -> Result<(), sacp::Error> {
         Self::run_with_command(outgoing_bytes, incoming_bytes, providers, None).await
     }
 
@@ -131,7 +131,7 @@ impl Conductor {
         incoming_bytes: IB,
         mut providers: Vec<Box<dyn ComponentProvider>>,
         conductor_command: Option<Vec<String>>,
-    ) -> Result<(), acp::Error> {
+    ) -> Result<(), sacp::Error> {
         tracing::debug!(
             incoming_conductor_command = ?conductor_command,
             "run_with_command called"
@@ -201,7 +201,7 @@ impl Conductor {
         mut self,
         mut providers: Vec<Box<dyn ComponentProvider>>,
         serve_args: ServeArgs<OB, IB>,
-    ) -> Pin<Box<impl Future<Output = Result<(), acp::Error>>>> {
+    ) -> Pin<Box<impl Future<Output = Result<(), sacp::Error>>>> {
         Box::pin(async move {
             let Some(next_provider) = providers.pop() else {
                 info!("All components spawned, starting message routing");
@@ -307,7 +307,7 @@ impl Conductor {
     async fn serve<OB: AsyncWrite, IB: AsyncRead>(
         mut self,
         serve_args: ServeArgs<OB, IB>,
-    ) -> Result<(), acp::Error> {
+    ) -> Result<(), sacp::Error> {
         let ServeArgs {
             connection,
             mut conductor_tx,
@@ -410,7 +410,7 @@ impl Conductor {
                                     connection,
                                 })
                                 .await
-                                .map_err(|_| acp::Error::internal_error()),
+                                .map_err(|_| sacp::Error::internal_error()),
                             Err(_) => {
                                 // Error occurred, just drop the connection.
                                 Ok(())
@@ -487,7 +487,7 @@ impl Conductor {
         client: &JrConnectionCx,
         source_component_index: usize,
         message: MessageAndCx<Req, N>,
-    ) -> Result<(), acp::Error>
+    ) -> Result<(), sacp::Error>
     where
         Req::Response: Send,
     {
@@ -536,7 +536,7 @@ impl Conductor {
         client: &JrConnectionCx,
         component_index: usize,
         notification: N,
-    ) -> Result<(), acp::Error> {
+    ) -> Result<(), sacp::Error> {
         if component_index == 0 {
             client.send_notification(notification)
         } else {
@@ -734,10 +734,10 @@ impl Conductor {
     async fn forward_session_new_request(
         &mut self,
         target_component_index: usize,
-        mut request: acp::NewSessionRequest,
+        mut request: sacp::NewSessionRequest,
         conductor_tx: &mpsc::Sender<ConductorMessage>,
         request_cx: JrRequestCx<NewSessionResponse>,
-    ) -> Result<(), acp::Error> {
+    ) -> Result<(), sacp::Error> {
         // Before forwarding the ACP request to the agent, replace ACP servers with stdio-based servers.
         if self.is_agent_component(target_component_index) {
             for mcp_server in &mut request.mcp_servers {

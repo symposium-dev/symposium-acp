@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::panic::Location;
 use std::pin::pin;
 
-use agent_client_protocol_schema as acp;
+// Types re-exported from crate root
 use futures::AsyncBufReadExt as _;
 use futures::AsyncRead;
 use futures::AsyncWrite;
@@ -27,13 +27,13 @@ use super::Handled;
 
 pub(crate) struct Task {
     pub location: &'static Location<'static>,
-    pub future: BoxFuture<'static, Result<(), acp::Error>>,
+    pub future: BoxFuture<'static, Result<(), crate::Error>>,
 }
 
 /// The "task actor" manages other tasks
 pub(super) async fn task_actor(
     mut task_rx: mpsc::UnboundedReceiver<Task>,
-) -> Result<(), acp::Error> {
+) -> Result<(), crate::Error> {
     let mut futures = FuturesUnordered::new();
 
     loop {
@@ -140,7 +140,7 @@ pub(super) async fn reply_actor(
 /// - `layers`: The layers.
 ///
 /// # Returns
-/// - `Result<(), acp::Error>`: an error if something unrecoverable occurred
+/// - `Result<(), crate::Error>`: an error if something unrecoverable occurred
 pub(super) async fn incoming_actor(
     connection_name: &Option<String>,
     json_rpc_cx: &JrConnectionCx,

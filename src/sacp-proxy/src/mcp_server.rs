@@ -55,7 +55,7 @@ impl McpServiceRegistry {
         self,
         name: impl ToString,
         make_service: impl Fn() -> S + 'static + Send + Sync,
-    ) -> Result<Self, acp::Error>
+    ) -> Result<Self, sacp::Error>
     where
         S: rmcp::Service<rmcp::RoleServer>,
     {
@@ -73,7 +73,7 @@ impl McpServiceRegistry {
         &self,
         name: impl ToString,
         make_service: impl Fn() -> S + 'static + Send + Sync,
-    ) -> Result<(), acp::Error>
+    ) -> Result<(), sacp::Error>
     where
         S: rmcp::Service<rmcp::RoleServer>,
     {
@@ -90,20 +90,20 @@ impl McpServiceRegistry {
                 &self,
                 outgoing_bytes: Pin<Box<dyn tokio::io::AsyncWrite + Send>>,
                 incoming_bytes: Pin<Box<dyn tokio::io::AsyncRead + Send>>,
-            ) -> BoxFuture<'static, Result<(), acp::Error>> {
+            ) -> BoxFuture<'static, Result<(), sacp::Error>> {
                 let server = (self.make_service)();
                 async move {
                     let running_server = server
                         .serve((incoming_bytes, outgoing_bytes))
                         .await
-                        .map_err(acp::Error::into_internal_error)?;
+                        .map_err(sacp::Error::into_internal_error)?;
 
                     // Keep the server alive by waiting for it to finish
                     running_server
                         .waiting()
                         .await
                         .map(|_quit_reason| ())
-                        .map_err(acp::Error::into_internal_error)
+                        .map_err(sacp::Error::into_internal_error)
                 }
                 .boxed()
             }
@@ -118,7 +118,7 @@ impl McpServiceRegistry {
         &self,
         name: String,
         spawn: Arc<dyn DynSpawnMcpServer>,
-    ) -> Result<(), acp::Error> {
+    ) -> Result<(), sacp::Error> {
         let name = name.to_string();
         if let Some(_) = self.get_registered_server_by_name(&name) {
             return Err(sacp::util::internal_error(format!(
@@ -315,7 +315,7 @@ impl McpServiceRegistry {
         mcp_server_tx
             .send(MessageAndCx::Request(request.request, request_cx))
             .await
-            .map_err(acp::Error::into_internal_error)?;
+            .map_err(sacp::Error::into_internal_error)?;
 
         Ok(Handled::Yes)
     }
@@ -348,7 +348,7 @@ impl McpServiceRegistry {
                 notification_cx.clone(),
             ))
             .await
-            .map_err(acp::Error::into_internal_error)?;
+            .map_err(sacp::Error::into_internal_error)?;
 
         Ok(Handled::Yes)
     }
@@ -495,8 +495,8 @@ struct RegisteredMcpServer {
 }
 
 impl RegisteredMcpServer {
-    fn acp_mcp_server(&self) -> acp::McpServer {
-        acp::McpServer::Http {
+    fn acp_mcp_server(&self) -> sacp::McpServer {
+        sacp::McpServer::Http {
             name: self.name.clone(),
             url: self.url.clone(),
             headers: vec![],
@@ -518,7 +518,7 @@ trait DynSpawnMcpServer: 'static + Send + Sync {
         &self,
         outgoing_bytes: Pin<Box<dyn tokio::io::AsyncWrite + Send>>,
         incoming_bytes: Pin<Box<dyn tokio::io::AsyncRead + Send>>,
-    ) -> BoxFuture<'static, Result<(), acp::Error>>;
+    ) -> BoxFuture<'static, Result<(), sacp::Error>>;
 }
 
 impl AsRef<McpServiceRegistry> for McpServiceRegistry {
