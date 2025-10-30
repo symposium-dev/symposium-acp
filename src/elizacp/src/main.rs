@@ -42,8 +42,10 @@ impl ElizaAgent {
     }
 
     fn get_response(&self, session_id: &SessionId, input: &str) -> Option<String> {
-        let sessions = self.sessions.lock().unwrap();
-        sessions.get(session_id).map(|eliza| eliza.respond(input))
+        let mut sessions = self.sessions.lock().unwrap();
+        sessions
+            .get_mut(session_id)
+            .map(|eliza| eliza.respond(input))
     }
 
     fn _end_session(&self, session_id: &SessionId) {

@@ -3,6 +3,8 @@
 //! This module implements the pattern-matching conversational system
 //! originally created by Joseph Weizenbaum in 1966.
 
+use rand::rngs::StdRng;
+use rand::{Rng, SeedableRng};
 use regex::Regex;
 use std::collections::HashMap;
 
@@ -21,14 +23,22 @@ struct Pattern {
 pub struct Eliza {
     patterns: Vec<Pattern>,
     reflections: HashMap<String, String>,
+    rng: StdRng,
 }
 
 impl Eliza {
     /// Create a new Eliza instance with classic patterns.
+    /// Uses a fixed seed for deterministic testing.
     pub fn new() -> Self {
+        Self::with_seed(42)
+    }
+
+    /// Create a new Eliza instance with a specific seed.
+    pub fn with_seed(seed: u64) -> Self {
         let mut eliza = Self {
             patterns: Vec::new(),
             reflections: Self::build_reflections(),
+            rng: StdRng::seed_from_u64(seed),
         };
         eliza.load_patterns();
         eliza
@@ -222,7 +232,7 @@ impl Eliza {
     }
 
     /// Generate a response to user input.
-    pub fn respond(&self, input: &str) -> String {
+    pub fn respond(&mut self, input: &str) -> String {
         let input = input.trim();
 
         // Sort patterns by priority (highest first)
@@ -232,9 +242,9 @@ impl Eliza {
         // Find first matching pattern
         for pattern in &sorted_patterns {
             if let Some(captures) = pattern.pattern.captures(input) {
-                // Choose a random response
-                let response_template =
-                    &pattern.responses[rand::random::<usize>() % pattern.responses.len()];
+                // Choose a response using the seeded RNG
+                let response_index = self.rng.gen_range(0..pattern.responses.len());
+                let response_template = &pattern.responses[response_index];
 
                 // Fill in captures with reflection
                 let mut response = response_template.clone();
@@ -266,7 +276,7 @@ mod tests {
 
     #[test]
     fn test_basic_responses() {
-        let eliza = Eliza::new();
+        let mut eliza = Eliza::new();
 
         let response = eliza.respond("Hello");
         assert!(!response.is_empty());
@@ -288,7 +298,7 @@ mod tests {
 
     #[test]
     fn test_pattern_priority() {
-        let eliza = Eliza::new();
+        let mut eliza = Eliza::new();
 
         // "sorry" should match high priority pattern
         let response = eliza.respond("I am sorry");
@@ -296,6 +306,46 @@ mod tests {
             response.contains("apologize")
                 || response.contains("Apologies")
                 || response.contains("feelings")
+        );
+    }
+
+    #[test]
+    fn test_deterministic_responses() {
+        // Two Eliza instances with the same seed should produce identical responses
+        let mut eliza1 = Eliza::with_seed(42);
+        let mut eliza2 = Eliza::with_seed(42);
+
+        let inputs = vec![
+            "Hello",
+            "I am sad",
+            "I feel worried",
+            "Why don't you help me",
+            "I need assistance",
+        ];
+
+        for input in inputs {
+            let response1 = eliza1.respond(input);
+            let response2 = eliza2.respond(input);
+            assert_eq!(
+                response1, response2,
+                "Responses should be identical for input: {}",
+                input
+            );
+        }
+
+        // Different seeds should (likely) produce different responses
+        let mut eliza3 = Eliza::with_seed(123);
+        let response_different = eliza3.respond("Hello");
+
+        // Reset eliza1 to test against same input
+        let mut eliza1 = Eliza::with_seed(42);
+        let response_same = eliza1.respond("Hello");
+
+        // Note: This might occasionally fail if both seeds happen to pick the same response
+        // but it's very unlikely given the pattern database size
+        assert_ne!(
+            response_same, response_different,
+            "Different seeds should likely produce different responses"
         );
     }
 }
