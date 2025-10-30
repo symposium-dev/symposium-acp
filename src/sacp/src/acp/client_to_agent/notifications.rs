@@ -1,4 +1,4 @@
-use agent_client_protocol_schema::CancelNotification;
+use crate::CancelNotification;
 use serde::Serialize;
 
 use crate::jsonrpc::{JrMessage, JrNotification};

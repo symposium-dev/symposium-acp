@@ -7,13 +7,13 @@
 
 mod mcp_integration;
 
-use agent_client_protocol_schema::{
-    ContentBlock, InitializeRequest, NewSessionRequest, PromptRequest, SessionNotification,
-    TextContent,
-};
 use expect_test::expect;
 use futures::{SinkExt, StreamExt, channel::mpsc};
 use sacp::JrConnection;
+use sacp::{
+    ContentBlock, InitializeRequest, NewSessionRequest, PromptRequest, SessionNotification,
+    TextContent,
+};
 use sacp_conductor::component::ComponentProvider;
 use sacp_conductor::conductor::Conductor;
 

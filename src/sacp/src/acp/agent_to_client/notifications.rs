@@ -1,4 +1,4 @@
-use agent_client_protocol_schema::SessionNotification;
+use crate::SessionNotification;
 use serde::Serialize;
 
 use crate::jsonrpc::{JrMessage, JrNotification};

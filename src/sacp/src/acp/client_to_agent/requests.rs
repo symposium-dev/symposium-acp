@@ -1,4 +1,4 @@
-use agent_client_protocol_schema::{
+use crate::{
     AuthenticateRequest, AuthenticateResponse, InitializeRequest, InitializeResponse,
     LoadSessionRequest, LoadSessionResponse, NewSessionRequest, NewSessionResponse, PromptRequest,
     PromptResponse, SetSessionModeRequest, SetSessionModeResponse,

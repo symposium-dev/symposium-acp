@@ -6,9 +6,9 @@
 //! 3. Proxy components must accept the capability or initialization fails
 //! 4. Last component (agent) never receives proxy capability offer
 
-use agent_client_protocol_schema::AgentCapabilities;
-use agent_client_protocol_schema::{InitializeRequest, InitializeResponse};
 use futures::{AsyncRead, AsyncWrite};
+use sacp::AgentCapabilities;
+use sacp::{InitializeRequest, InitializeResponse};
 use sacp::{JrConnection, JrConnectionCx, MetaCapabilityExt, Proxy};
 use sacp_conductor::component::{Cleanup, ComponentProvider};
 use sacp_conductor::conductor::Conductor;

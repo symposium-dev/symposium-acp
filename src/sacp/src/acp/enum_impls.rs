@@ -7,9 +7,7 @@
 //! - AgentRequest/ClientResponse (messages clients receive/send)
 //! - AgentNotification (notifications clients receive)
 
-use agent_client_protocol_schema::{
-    AgentNotification, AgentRequest, ClientNotification, ClientRequest,
-};
+use crate::{AgentNotification, AgentRequest, ClientNotification, ClientRequest};
 use serde::Serialize;
 
 use crate::jsonrpc::{JrMessage, JrNotification, JsonRpcRequest};
@@ -48,8 +46,8 @@ impl JrMessage for ClientRequest {
             _ => {
                 // Check for extension methods (prefixed with underscore)
                 if let Some(custom_method) = method.strip_prefix('_') {
-                    json_cast(params).map(|ext_req: agent_client_protocol_schema::ExtRequest| {
-                        ClientRequest::ExtMethodRequest(agent_client_protocol_schema::ExtRequest {
+                    json_cast(params).map(|ext_req: crate::ExtRequest| {
+                        ClientRequest::ExtMethodRequest(crate::ExtRequest {
                             method: custom_method.to_string().into(),
                             params: ext_req.params,
                         })
@@ -106,16 +104,12 @@ impl JrMessage for ClientNotification {
             _ => {
                 // Check for extension notifications (prefixed with underscore)
                 if let Some(custom_method) = method.strip_prefix('_') {
-                    json_cast(params).map(
-                        |ext_notif: agent_client_protocol_schema::ExtNotification| {
-                            ClientNotification::ExtNotification(
-                                agent_client_protocol_schema::ExtNotification {
-                                    method: custom_method.to_string().into(),
-                                    params: ext_notif.params,
-                                },
-                            )
-                        },
-                    )
+                    json_cast(params).map(|ext_notif: crate::ExtNotification| {
+                        ClientNotification::ExtNotification(crate::ExtNotification {
+                            method: custom_method.to_string().into(),
+                            params: ext_notif.params,
+                        })
+                    })
                 } else {
                     return None;
                 }
@@ -169,8 +163,8 @@ impl JrMessage for AgentRequest {
             _ => {
                 // Check for extension methods (prefixed with underscore)
                 if let Some(custom_method) = method.strip_prefix('_') {
-                    json_cast(params).map(|ext_req: agent_client_protocol_schema::ExtRequest| {
-                        AgentRequest::ExtMethodRequest(agent_client_protocol_schema::ExtRequest {
+                    json_cast(params).map(|ext_req: crate::ExtRequest| {
+                        AgentRequest::ExtMethodRequest(crate::ExtRequest {
                             method: custom_method.to_string().into(),
                             params: ext_req.params,
                         })
@@ -227,16 +221,12 @@ impl JrMessage for AgentNotification {
             _ => {
                 // Check for extension notifications (prefixed with underscore)
                 if let Some(custom_method) = method.strip_prefix('_') {
-                    json_cast(params).map(
-                        |ext_notif: agent_client_protocol_schema::ExtNotification| {
-                            AgentNotification::ExtNotification(
-                                agent_client_protocol_schema::ExtNotification {
-                                    method: custom_method.to_string().into(),
-                                    params: ext_notif.params,
-                                },
-                            )
-                        },
-                    )
+                    json_cast(params).map(|ext_notif: crate::ExtNotification| {
+                        AgentNotification::ExtNotification(crate::ExtNotification {
+                            method: custom_method.to_string().into(),
+                            params: ext_notif.params,
+                        })
+                    })
                 } else {
                     return None;
                 }

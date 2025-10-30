@@ -1,10 +1,10 @@
 use std::{collections::HashMap, net::SocketAddr};
 
-use sacp_proxy::McpDisconnectNotification;
-use sacp;
-use agent_client_protocol_schema::McpServer;
 use futures::{SinkExt, StreamExt as _, channel::mpsc};
+use sacp;
+use sacp::McpServer;
 use sacp::{JrConnection, JrConnectionCx, MessageAndCx};
+use sacp_proxy::McpDisconnectNotification;
 use tokio::net::TcpStream;
 use tokio_util::compat::{TokioAsyncReadCompatExt as _, TokioAsyncWriteCompatExt as _};
 use tracing::info;
@@ -51,7 +51,7 @@ impl McpBridgeListeners {
         conductor_tx: &mpsc::Sender<ConductorMessage>,
         conductor_command: &[String],
     ) -> Result<(), sacp::Error> {
-        use agent_client_protocol_schema::McpServer;
+        use sacp::McpServer;
 
         let McpServer::Http { name, url, headers } = mcp_server else {
             return Ok(());

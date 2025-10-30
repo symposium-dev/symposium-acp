@@ -1,12 +1,12 @@
 //! Agent component that verifies MCP server configuration and handles prompts
 
-use agent_client_protocol_schema::{
+use futures::{AsyncRead, AsyncWrite};
+use rmcp::ServiceExt;
+use sacp::{
     AgentCapabilities, ContentBlock, ContentChunk, InitializeRequest, InitializeResponse,
     McpServer, NewSessionRequest, NewSessionResponse, PromptRequest, PromptResponse,
     SessionNotification, SessionUpdate, StopReason, TextContent,
 };
-use futures::{AsyncRead, AsyncWrite};
-use rmcp::ServiceExt;
 use sacp::{JrConnection, JrConnectionCx, JrRequestCx};
 use sacp_conductor::component::{Cleanup, ComponentProvider};
 use std::{pin::Pin, sync::Arc};

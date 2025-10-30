@@ -62,10 +62,8 @@
 
 use std::{collections::HashMap, pin::Pin};
 
-use agent_client_protocol_schema::{
-    InitializeRequest, InitializeResponse, NewSessionRequest, NewSessionResponse,
-};
 use futures::{AsyncRead, AsyncWrite, SinkExt, StreamExt, channel::mpsc};
+use sacp::{InitializeRequest, InitializeResponse, NewSessionRequest, NewSessionResponse};
 use sacp_proxy::{
     McpConnectRequest, McpConnectResponse, McpDisconnectNotification, McpOverAcpNotification,
     McpOverAcpRequest, SuccessorNotification, SuccessorRequest,

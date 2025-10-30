@@ -1,9 +1,9 @@
-use agent_client_protocol_schema::NewSessionRequest;
 use futures::channel::mpsc;
 use futures::{FutureExt, future::BoxFuture};
 use futures::{SinkExt, StreamExt};
 use fxhash::FxHashMap;
 use rmcp::ServiceExt;
+use sacp::NewSessionRequest;
 use sacp::{
     Handled, JrConnection, JrConnectionCx, JrHandler, JrMessage, JrRequestCx, MessageAndCx,
     UntypedMessage,
