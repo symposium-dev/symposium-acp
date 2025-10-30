@@ -11,9 +11,9 @@ categories = ["development-tools"]
 [dependencies]
 agent-client-protocol.workspace = true
 anyhow.workspace = true
-boxfnonce = "0.1.1"
-futures = "0.3.31"
-jsonrpcmsg = "0.1.2"
+boxfnonce.workspace = true
+futures.workspace = true
+jsonrpcmsg.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
@@ -21,6 +21,6 @@ tracing.workspace = true
 uuid.workspace = true
 
 [dev-dependencies]
-expect-test = "1.5"
-tokio = { version = "1", features = ["macros", "rt-multi-thread", "io-util", "time"] }
-tokio-util = { version = "0.7", features = ["compat"] }
+expect-test.workspace = true
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "io-util", "time"] }
+tokio-util.workspace = true

@@ -10,6 +10,8 @@ resolver = "2"
 # Core async runtime
 tokio = { version = "1.0", features = ["full"] }
 tokio-util = { version = "0.7", features = ["compat"] }
+
+# Protocol
 agent-client-protocol = "0.7"
 
 # Serialization
@@ -27,17 +29,20 @@ thiserror = "1.0"
 # Logging
 tracing = "0.1"
 tracing-appender = "0.2"
-tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 
 # MCP SDK
 rmcp = { version = "0.8.3", features = ["server", "transport-io", "schemars"] }
 
 # CLI parsing
-clap = { version = "4.0", features = ["derive"] }
+clap = { version = "4.5", features = ["derive"] }
 
-# Setup tool dependencies
-which = "6.0"
-home = "0.5"
+# Other dependencies
+boxfnonce = "0.1.1"
+futures = "0.3.31"
+fxhash = "0.2.1"
+jsonrpcmsg = "0.1.2"
 
 # Testing
+expect-test = "1.5"
 tokio-test = "0.4"

@@ -10,14 +10,14 @@ categories = ["development-tools"]
 
 [dependencies]
 agent-client-protocol.workspace = true
-futures = "0.3.31"
-fxhash = "0.2.1"
-jsonrpcmsg = "0.1.2"
+futures.workspace = true
+fxhash.workspace = true
+jsonrpcmsg.workspace = true
 rmcp.workspace = true
 sacp = { version = "0.1.0", path = "../sacp" }
 serde.workspace = true
 serde_json.workspace = true
 tokio.workspace = true
-tokio-util = { version = "0.7.16", features = ["compat"] }
+tokio-util.workspace = true
 tracing.workspace = true
 uuid.workspace = true

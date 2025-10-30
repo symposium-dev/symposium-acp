@@ -13,22 +13,22 @@ test-support = []
 
 [dependencies]
 sacp = { path = "../sacp" }
+sacp-proxy = { version = "0.1.0", path = "../sacp-proxy" }
 agent-client-protocol.workspace = true
 anyhow.workspace = true
-clap = { version = "4.5", features = ["derive"] }
-futures = "0.3.31"
-jsonrpcmsg = "0.1.2"
+clap.workspace = true
+futures.workspace = true
+jsonrpcmsg.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
-tokio-util = { version = "0.7.16", features = ["compat"] }
-uuid.workspace = true
 tokio.workspace = true
-tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
-sacp-proxy = { version = "0.1.0", path = "../sacp-proxy" }
+tokio-util.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+uuid.workspace = true
 
 [dev-dependencies]
+expect-test.workspace = true
 rmcp = { workspace = true, features = ["client", "server", "transport-io", "transport-child-process"] }
-schemars = { workspace = true }
-expect-test = "1.5"
+schemars.workspace = true
