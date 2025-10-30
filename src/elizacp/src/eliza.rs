@@ -1,0 +1,301 @@
+//! Classic Eliza pattern matching implementation.
+//!
+//! This module implements the pattern-matching conversational system
+//! originally created by Joseph Weizenbaum in 1966.
+
+use regex::Regex;
+use std::collections::HashMap;
+
+/// A pattern-response pair for Eliza's conversation system.
+#[derive(Debug, Clone)]
+struct Pattern {
+    /// Regular expression pattern to match user input
+    pattern: Regex,
+    /// Possible responses (one chosen at random)
+    responses: Vec<String>,
+    /// Priority for this pattern (higher = checked first)
+    priority: usize,
+}
+
+/// The Eliza chatbot engine.
+pub struct Eliza {
+    patterns: Vec<Pattern>,
+    reflections: HashMap<String, String>,
+}
+
+impl Eliza {
+    /// Create a new Eliza instance with classic patterns.
+    pub fn new() -> Self {
+        let mut eliza = Self {
+            patterns: Vec::new(),
+            reflections: Self::build_reflections(),
+        };
+        eliza.load_patterns();
+        eliza
+    }
+
+    /// Build the word reflection map for pronoun swapping.
+    fn build_reflections() -> HashMap<String, String> {
+        let mut map = HashMap::new();
+        map.insert("i".to_string(), "you".to_string());
+        map.insert("me".to_string(), "you".to_string());
+        map.insert("my".to_string(), "your".to_string());
+        map.insert("mine".to_string(), "yours".to_string());
+        map.insert("am".to_string(), "are".to_string());
+        map.insert("i'm".to_string(), "you're".to_string());
+        map.insert("you".to_string(), "I".to_string());
+        map.insert("your".to_string(), "my".to_string());
+        map.insert("yours".to_string(), "mine".to_string());
+        map.insert("are".to_string(), "am".to_string());
+        map.insert("you're".to_string(), "I'm".to_string());
+        map
+    }
+
+    /// Load the classic Eliza pattern database.
+    fn load_patterns(&mut self) {
+        // High priority patterns for specific psychological keywords
+        self.add_pattern(
+            r"(?i).*\b(father|dad|mother|mom|parent|family)\b.*",
+            vec![
+                "Tell me more about your family.",
+                "How do you feel about your family?",
+                "Your family seems to be important to you.",
+            ],
+            10,
+        );
+
+        self.add_pattern(
+            r"(?i).*\b(dream|nightmare)\b.*",
+            vec![
+                "What does that dream suggest to you?",
+                "Do you dream often?",
+                "What persons appear in your dreams?",
+                "Do you believe that dreams have something to do with your problem?",
+            ],
+            9,
+        );
+
+        self.add_pattern(
+            r"(?i).*\bsorry\b.*",
+            vec![
+                "Please don't apologize.",
+                "Apologies are not necessary.",
+                "What feelings do you have when you apologize?",
+            ],
+            8,
+        );
+
+        // Medium priority patterns with capture groups
+        self.add_pattern(
+            r"(?i).*\bi am (.*)",
+            vec![
+                "How long have you been {}?",
+                "Do you believe it is normal to be {}?",
+                "Do you enjoy being {}?",
+            ],
+            7,
+        );
+
+        self.add_pattern(
+            r"(?i).*\bi feel (.*)",
+            vec![
+                "Do you often feel {}?",
+                "What makes you feel {}?",
+                "When do you usually feel {}?",
+            ],
+            7,
+        );
+
+        self.add_pattern(
+            r"(?i).*\bi (want|need) (.*)",
+            vec![
+                "Why do you {} {}?",
+                "Would it really help you to {} {}?",
+                "Are you sure you {} {}?",
+            ],
+            7,
+        );
+
+        self.add_pattern(
+            r"(?i).*\bwhy don'?t you (.*)",
+            vec![
+                "Do you really think I don't {}?",
+                "Perhaps eventually I will {}.",
+                "Do you really want me to {}?",
+            ],
+            6,
+        );
+
+        self.add_pattern(
+            r"(?i).*\bwhy can'?t i (.*)",
+            vec![
+                "Do you think you should be able to {}?",
+                "If you could {}, what would you do?",
+                "I don't know -- why can't you {}?",
+            ],
+            6,
+        );
+
+        self.add_pattern(
+            r"(?i).*\byes\b.*",
+            vec!["You seem quite sure.", "I see.", "I understand."],
+            3,
+        );
+
+        self.add_pattern(
+            r"(?i).*\bno\b.*",
+            vec![
+                "Why not?",
+                "You are being a bit negative.",
+                "Are you saying 'no' just to be negative?",
+            ],
+            3,
+        );
+
+        // Low priority catch-all patterns
+        self.add_pattern(
+            r"(?i).*(hello|hi|hey).*",
+            vec![
+                "Hello. How are you feeling today?",
+                "Hi there. What brings you here today?",
+            ],
+            2,
+        );
+
+        self.add_pattern(
+            r"(?i).*(bye|goodbye|exit|quit).*",
+            vec![
+                "Goodbye. Thank you for talking to me.",
+                "Goodbye. This was really a nice talk.",
+            ],
+            2,
+        );
+
+        // Default fallback patterns (lowest priority)
+        self.add_pattern(
+            r"(?i).*\?",
+            vec![
+                "Why do you ask that?",
+                "Please consider whether you can answer your own question.",
+                "Perhaps the answer lies within yourself?",
+            ],
+            1,
+        );
+
+        self.add_pattern(
+            r".*",
+            vec![
+                "Please tell me more.",
+                "I see. Go on.",
+                "That's interesting. Can you elaborate?",
+                "How does that make you feel?",
+                "Why do you say that?",
+            ],
+            0,
+        );
+    }
+
+    /// Add a pattern to the database.
+    fn add_pattern(&mut self, pattern: &str, responses: Vec<&str>, priority: usize) {
+        let regex = Regex::new(pattern).expect("Invalid regex pattern");
+        self.patterns.push(Pattern {
+            pattern: regex,
+            responses: responses.into_iter().map(|s| s.to_string()).collect(),
+            priority,
+        });
+    }
+
+    /// Reflect pronouns in the captured text.
+    fn reflect(&self, text: &str) -> String {
+        let words: Vec<&str> = text.split_whitespace().collect();
+        let reflected: Vec<String> = words
+            .iter()
+            .map(|word| {
+                let lower = word.to_lowercase();
+                self.reflections
+                    .get(&lower)
+                    .map(|r| r.clone())
+                    .unwrap_or_else(|| word.to_string())
+            })
+            .collect();
+        reflected.join(" ")
+    }
+
+    /// Generate a response to user input.
+    pub fn respond(&self, input: &str) -> String {
+        let input = input.trim();
+
+        // Sort patterns by priority (highest first)
+        let mut sorted_patterns = self.patterns.clone();
+        sorted_patterns.sort_by(|a, b| b.priority.cmp(&a.priority));
+
+        // Find first matching pattern
+        for pattern in &sorted_patterns {
+            if let Some(captures) = pattern.pattern.captures(input) {
+                // Choose a random response
+                let response_template =
+                    &pattern.responses[rand::random::<usize>() % pattern.responses.len()];
+
+                // Fill in captures with reflection
+                let mut response = response_template.clone();
+                for i in 1..captures.len() {
+                    if let Some(capture) = captures.get(i) {
+                        let reflected = self.reflect(capture.as_str());
+                        response = response.replacen("{}", &reflected, 1);
+                    }
+                }
+
+                return response;
+            }
+        }
+
+        // This should never happen due to catch-all pattern
+        "I'm not sure I understand.".to_string()
+    }
+}
+
+impl Default for Eliza {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_basic_responses() {
+        let eliza = Eliza::new();
+
+        let response = eliza.respond("Hello");
+        assert!(!response.is_empty());
+
+        let response = eliza.respond("I am sad");
+        assert!(!response.is_empty());
+    }
+
+    #[test]
+    fn test_reflection() {
+        let eliza = Eliza::new();
+
+        let reflected = eliza.reflect("I am happy");
+        assert!(reflected.contains("you are happy"));
+
+        let reflected = eliza.reflect("my mother");
+        assert!(reflected.contains("your mother"));
+    }
+
+    #[test]
+    fn test_pattern_priority() {
+        let eliza = Eliza::new();
+
+        // "sorry" should match high priority pattern
+        let response = eliza.respond("I am sorry");
+        assert!(
+            response.contains("apologize")
+                || response.contains("Apologies")
+                || response.contains("feelings")
+        );
+    }
+}

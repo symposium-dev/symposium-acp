@@ -3,6 +3,7 @@ members = [
     "src/sacp-proxy",
     "src/sacp-conductor",
     "src/sacp",
+    "src/elizacp",
 ]
 resolver = "2"
 
