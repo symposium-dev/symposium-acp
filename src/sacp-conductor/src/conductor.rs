@@ -62,19 +62,19 @@
 
 use std::{collections::HashMap, pin::Pin};
 
+use agent_client_protocol_schema::{
+    InitializeRequest, InitializeResponse, NewSessionRequest, NewSessionResponse,
+};
+use futures::{AsyncRead, AsyncWrite, SinkExt, StreamExt, channel::mpsc};
 use sacp_proxy::{
     McpConnectRequest, McpConnectResponse, McpDisconnectNotification, McpOverAcpNotification,
     McpOverAcpRequest, SuccessorNotification, SuccessorRequest,
 };
-use agent_client_protocol_schema::{
-    self as acp, InitializeRequest, InitializeResponse, NewSessionRequest, NewSessionResponse,
-};
-use futures::{AsyncRead, AsyncWrite, SinkExt, StreamExt, channel::mpsc};
 
 use sacp::{
-    JrConnection, JrConnectionCx, JrNotification, JsonRpcRequest, JrRequestCx,
-    JrResponse, MessageAndCx, MetaCapabilityExt, NullHandler, Proxy, TypeNotification,
-    TypeRequest, UntypedMessage,
+    JrConnection, JrConnectionCx, JrNotification, JrRequestCx, JrResponse, JsonRpcRequest,
+    MessageAndCx, MetaCapabilityExt, NullHandler, Proxy, TypeNotification, TypeRequest,
+    UntypedMessage,
 };
 use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
 use tracing::{debug, info};
@@ -364,7 +364,7 @@ impl Conductor {
         client: &JrConnectionCx,
         message: ConductorMessage,
         conductor_tx: &mut mpsc::Sender<ConductorMessage>,
-    ) -> Result<(), agent_client_protocol_schema::Error> {
+    ) -> Result<(), sacp::Error> {
         tracing::debug!(?message, "handle_conductor_message");
 
         match message {
@@ -556,7 +556,7 @@ impl Conductor {
         target_component_index: usize,
         message: MessageAndCx,
         client: &JrConnectionCx,
-    ) -> Result<(), agent_client_protocol_schema::Error> {
+    ) -> Result<(), sacp::Error> {
         match message {
             MessageAndCx::Request(request, request_cx) => {
                 self.forward_client_to_agent_request(
@@ -585,7 +585,7 @@ impl Conductor {
         target_component_index: usize,
         request: UntypedMessage,
         request_cx: JrRequestCx<serde_json::Value>,
-    ) -> Result<(), agent_client_protocol_schema::Error> {
+    ) -> Result<(), sacp::Error> {
         TypeRequest::new(request, request_cx)
             .handle_if(async |request: InitializeRequest, request_cx| {
                 // When forwarding "initialize", we either add or remove the proxy capability,
@@ -642,7 +642,7 @@ impl Conductor {
         target_component_index: usize,
         notification: UntypedMessage,
         cx: &JrConnectionCx,
-    ) -> Result<(), agent_client_protocol_schema::Error> {
+    ) -> Result<(), sacp::Error> {
         let cx_clone = cx.clone();
         TypeNotification::new(notification, cx)
             .handle_if(
@@ -684,7 +684,7 @@ impl Conductor {
         target_component_index: usize,
         mut initialize_req: InitializeRequest,
         request_cx: JrRequestCx<InitializeResponse>,
-    ) -> Result<(), agent_client_protocol_schema::Error> {
+    ) -> Result<(), sacp::Error> {
         // The conductor does not accept proxy capabilities.
         if initialize_req.has_meta_capability(Proxy) {
             return Err(sacp::util::internal_error(

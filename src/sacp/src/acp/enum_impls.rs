@@ -7,7 +7,9 @@
 //! - AgentRequest/ClientResponse (messages clients receive/send)
 //! - AgentNotification (notifications clients receive)
 
-use agent_client_protocol_schema::{AgentNotification, AgentRequest, ClientNotification, ClientRequest};
+use agent_client_protocol_schema::{
+    AgentNotification, AgentRequest, ClientNotification, ClientRequest,
+};
 use serde::Serialize;
 
 use crate::jsonrpc::{JrMessage, JrNotification, JsonRpcRequest};
@@ -18,7 +20,7 @@ use crate::util::json_cast;
 // ============================================================================
 
 impl JrMessage for ClientRequest {
-    fn into_untyped_message(self) -> Result<crate::UntypedMessage, agent_client_protocol_schema::Error> {
+    fn into_untyped_message(self) -> Result<crate::UntypedMessage, crate::Error> {
         let method = self.method().to_string();
         crate::UntypedMessage::new(&method, self)
     }
@@ -35,10 +37,7 @@ impl JrMessage for ClientRequest {
         }
     }
 
-    fn parse_request(
-        method: &str,
-        params: &impl Serialize,
-    ) -> Option<Result<Self, agent_client_protocol_schema::Error>> {
+    fn parse_request(method: &str, params: &impl Serialize) -> Option<Result<Self, crate::Error>> {
         let result = match method {
             "initialize" => json_cast(params).map(ClientRequest::InitializeRequest),
             "authenticate" => json_cast(params).map(ClientRequest::AuthenticateRequest),
@@ -67,7 +66,7 @@ impl JrMessage for ClientRequest {
     fn parse_notification(
         _method: &str,
         _params: &impl Serialize,
-    ) -> Option<Result<Self, agent_client_protocol_schema::Error>> {
+    ) -> Option<Result<Self, crate::Error>> {
         // ClientRequest is for requests only, not notifications
         None
     }
@@ -78,7 +77,7 @@ impl JsonRpcRequest for ClientRequest {
 }
 
 impl JrMessage for ClientNotification {
-    fn into_untyped_message(self) -> Result<crate::UntypedMessage, agent_client_protocol_schema::Error> {
+    fn into_untyped_message(self) -> Result<crate::UntypedMessage, crate::Error> {
         let method = self.method().to_string();
         crate::UntypedMessage::new(&method, self)
     }
@@ -93,7 +92,7 @@ impl JrMessage for ClientNotification {
     fn parse_request(
         _method: &str,
         _params: &impl Serialize,
-    ) -> Option<Result<Self, agent_client_protocol_schema::Error>> {
+    ) -> Option<Result<Self, crate::Error>> {
         // ClientNotification is for notifications only, not requests
         None
     }
@@ -101,20 +100,22 @@ impl JrMessage for ClientNotification {
     fn parse_notification(
         method: &str,
         params: &impl Serialize,
-    ) -> Option<Result<Self, agent_client_protocol_schema::Error>> {
+    ) -> Option<Result<Self, crate::Error>> {
         let result = match method {
             "session/cancel" => json_cast(params).map(ClientNotification::CancelNotification),
             _ => {
                 // Check for extension notifications (prefixed with underscore)
                 if let Some(custom_method) = method.strip_prefix('_') {
-                    json_cast(params).map(|ext_notif: agent_client_protocol_schema::ExtNotification| {
-                        ClientNotification::ExtNotification(
-                            agent_client_protocol_schema::ExtNotification {
-                                method: custom_method.to_string().into(),
-                                params: ext_notif.params,
-                            },
-                        )
-                    })
+                    json_cast(params).map(
+                        |ext_notif: agent_client_protocol_schema::ExtNotification| {
+                            ClientNotification::ExtNotification(
+                                agent_client_protocol_schema::ExtNotification {
+                                    method: custom_method.to_string().into(),
+                                    params: ext_notif.params,
+                                },
+                            )
+                        },
+                    )
                 } else {
                     return None;
                 }
@@ -132,7 +133,7 @@ impl JrNotification for ClientNotification {}
 // ============================================================================
 
 impl JrMessage for AgentRequest {
-    fn into_untyped_message(self) -> Result<crate::UntypedMessage, agent_client_protocol_schema::Error> {
+    fn into_untyped_message(self) -> Result<crate::UntypedMessage, crate::Error> {
         let method = self.method().to_string();
         crate::UntypedMessage::new(&method, self)
     }
@@ -151,10 +152,7 @@ impl JrMessage for AgentRequest {
         }
     }
 
-    fn parse_request(
-        method: &str,
-        params: &impl Serialize,
-    ) -> Option<Result<Self, agent_client_protocol_schema::Error>> {
+    fn parse_request(method: &str, params: &impl Serialize) -> Option<Result<Self, crate::Error>> {
         let result = match method {
             "fs/write_text_file" => json_cast(params).map(AgentRequest::WriteTextFileRequest),
             "fs/read_text_file" => json_cast(params).map(AgentRequest::ReadTextFileRequest),
@@ -189,7 +187,7 @@ impl JrMessage for AgentRequest {
     fn parse_notification(
         _method: &str,
         _params: &impl Serialize,
-    ) -> Option<Result<Self, agent_client_protocol_schema::Error>> {
+    ) -> Option<Result<Self, crate::Error>> {
         // AgentRequest is for requests only, not notifications
         None
     }
@@ -200,7 +198,7 @@ impl JsonRpcRequest for AgentRequest {
 }
 
 impl JrMessage for AgentNotification {
-    fn into_untyped_message(self) -> Result<crate::UntypedMessage, agent_client_protocol_schema::Error> {
+    fn into_untyped_message(self) -> Result<crate::UntypedMessage, crate::Error> {
         let method = self.method().to_string();
         crate::UntypedMessage::new(&method, self)
     }
@@ -215,7 +213,7 @@ impl JrMessage for AgentNotification {
     fn parse_request(
         _method: &str,
         _params: &impl Serialize,
-    ) -> Option<Result<Self, agent_client_protocol_schema::Error>> {
+    ) -> Option<Result<Self, crate::Error>> {
         // AgentNotification is for notifications only, not requests
         None
     }
@@ -223,18 +221,22 @@ impl JrMessage for AgentNotification {
     fn parse_notification(
         method: &str,
         params: &impl Serialize,
-    ) -> Option<Result<Self, agent_client_protocol_schema::Error>> {
+    ) -> Option<Result<Self, crate::Error>> {
         let result = match method {
             "session/update" => json_cast(params).map(AgentNotification::SessionNotification),
             _ => {
                 // Check for extension notifications (prefixed with underscore)
                 if let Some(custom_method) = method.strip_prefix('_') {
-                    json_cast(params).map(|ext_notif: agent_client_protocol_schema::ExtNotification| {
-                        AgentNotification::ExtNotification(agent_client_protocol_schema::ExtNotification {
-                            method: custom_method.to_string().into(),
-                            params: ext_notif.params,
-                        })
-                    })
+                    json_cast(params).map(
+                        |ext_notif: agent_client_protocol_schema::ExtNotification| {
+                            AgentNotification::ExtNotification(
+                                agent_client_protocol_schema::ExtNotification {
+                                    method: custom_method.to_string().into(),
+                                    params: ext_notif.params,
+                                },
+                            )
+                        },
+                    )
                 } else {
                     return None;
                 }

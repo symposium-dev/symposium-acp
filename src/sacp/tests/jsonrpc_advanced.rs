@@ -6,24 +6,17 @@
 //! - Out-of-order response handling
 
 use futures::{AsyncRead, AsyncWrite};
-use sacp::{
-    JrConnection, JrMessage, JsonRpcRequest, JrRequestCx, JrResponse,
-    JrResponsePayload,
-};
+use sacp::{JrConnection, JrMessage, JrRequestCx, JrResponse, JrResponsePayload, JsonRpcRequest};
 use serde::{Deserialize, Serialize};
 use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
 
 /// Test helper to block and wait for a JSON-RPC response.
-async fn recv<R: JrResponsePayload + Send>(
-    response: JrResponse<R>,
-) -> Result<R, agent_client_protocol_schema::Error> {
+async fn recv<R: JrResponsePayload + Send>(response: JrResponse<R>) -> Result<R, sacp::Error> {
     let (tx, rx) = tokio::sync::oneshot::channel();
     response.await_when_result_received(async move |result| {
-        tx.send(result)
-            .map_err(|_| agent_client_protocol_schema::Error::internal_error())
+        tx.send(result).map_err(|_| sacp::Error::internal_error())
     })?;
-    rx.await
-        .map_err(|_| agent_client_protocol_schema::Error::internal_error())?
+    rx.await.map_err(|_| sacp::Error::internal_error())?
 }
 
 /// Helper to set up test streams for testing.
@@ -54,7 +47,7 @@ struct PingRequest {
 }
 
 impl JrMessage for PingRequest {
-    fn into_untyped_message(self) -> Result<sacp::UntypedMessage, agent_client_protocol_schema::Error> {
+    fn into_untyped_message(self) -> Result<sacp::UntypedMessage, sacp::Error> {
         let method = self.method().to_string();
         sacp::UntypedMessage::new(&method, self)
     }
@@ -66,7 +59,7 @@ impl JrMessage for PingRequest {
     fn parse_request(
         method: &str,
         params: &impl serde::Serialize,
-    ) -> Option<Result<Self, agent_client_protocol_schema::Error>> {
+    ) -> Option<Result<Self, sacp::Error>> {
         if method != "ping" {
             return None;
         }
@@ -76,7 +69,7 @@ impl JrMessage for PingRequest {
     fn parse_notification(
         _method: &str,
         _params: &impl serde::Serialize,
-    ) -> Option<Result<Self, agent_client_protocol_schema::Error>> {
+    ) -> Option<Result<Self, sacp::Error>> {
         // This is a request, not a notification
         None
     }
@@ -92,14 +85,11 @@ struct PongResponse {
 }
 
 impl JrResponsePayload for PongResponse {
-    fn into_json(self, _method: &str) -> Result<serde_json::Value, agent_client_protocol_schema::Error> {
-        serde_json::to_value(self).map_err(agent_client_protocol_schema::Error::into_internal_error)
+    fn into_json(self, _method: &str) -> Result<serde_json::Value, sacp::Error> {
+        serde_json::to_value(self).map_err(sacp::Error::into_internal_error)
     }
 
-    fn from_value(
-        _method: &str,
-        value: serde_json::Value,
-    ) -> Result<Self, agent_client_protocol_schema::Error> {
+    fn from_value(_method: &str, value: serde_json::Value) -> Result<Self, sacp::Error> {
         sacp::util::json_cast(&value)
     }
 }
@@ -111,7 +101,7 @@ struct SlowRequest {
 }
 
 impl JrMessage for SlowRequest {
-    fn into_untyped_message(self) -> Result<sacp::UntypedMessage, agent_client_protocol_schema::Error> {
+    fn into_untyped_message(self) -> Result<sacp::UntypedMessage, sacp::Error> {
         let method = self.method().to_string();
         sacp::UntypedMessage::new(&method, self)
     }
@@ -123,7 +113,7 @@ impl JrMessage for SlowRequest {
     fn parse_request(
         method: &str,
         params: &impl serde::Serialize,
-    ) -> Option<Result<Self, agent_client_protocol_schema::Error>> {
+    ) -> Option<Result<Self, sacp::Error>> {
         if method != "slow" {
             return None;
         }
@@ -133,7 +123,7 @@ impl JrMessage for SlowRequest {
     fn parse_notification(
         _method: &str,
         _params: &impl serde::Serialize,
-    ) -> Option<Result<Self, agent_client_protocol_schema::Error>> {
+    ) -> Option<Result<Self, sacp::Error>> {
         // This is a request, not a notification
         None
     }
@@ -149,14 +139,11 @@ struct SlowResponse {
 }
 
 impl JrResponsePayload for SlowResponse {
-    fn into_json(self, _method: &str) -> Result<serde_json::Value, agent_client_protocol_schema::Error> {
-        serde_json::to_value(self).map_err(agent_client_protocol_schema::Error::into_internal_error)
+    fn into_json(self, _method: &str) -> Result<serde_json::Value, sacp::Error> {
+        serde_json::to_value(self).map_err(sacp::Error::into_internal_error)
     }
 
-    fn from_value(
-        _method: &str,
-        value: serde_json::Value,
-    ) -> Result<Self, agent_client_protocol_schema::Error> {
+    fn from_value(_method: &str, value: serde_json::Value) -> Result<Self, sacp::Error> {
         sacp::util::json_cast(&value)
     }
 }
@@ -193,7 +180,7 @@ async fn test_bidirectional_communication() {
 
             // Use side_b as client
             let result = side_b
-                .with_client(async |cx| -> Result<(), agent_client_protocol_schema::Error> {
+                .with_client(async |cx| -> Result<(), sacp::Error> {
                     let request = PingRequest { value: 10 };
                     let response_future = recv(cx.send_request(request));
                     let response: Result<PongResponse, _> = response_future.await;
@@ -240,7 +227,7 @@ async fn test_request_ids() {
             });
 
             let result = client
-                .with_client(async |cx| -> Result<(), agent_client_protocol_schema::Error> {
+                .with_client(async |cx| -> Result<(), sacp::Error> {
                     // Send multiple requests and verify responses match
                     let req1 = PingRequest { value: 1 };
                     let req2 = PingRequest { value: 2 };
@@ -297,7 +284,7 @@ async fn test_out_of_order_responses() {
             });
 
             let result = client
-                .with_client(async |cx| -> Result<(), agent_client_protocol_schema::Error> {
+                .with_client(async |cx| -> Result<(), sacp::Error> {
                     // Send requests with different delays
                     // Request 1: 100ms delay
                     // Request 2: 50ms delay

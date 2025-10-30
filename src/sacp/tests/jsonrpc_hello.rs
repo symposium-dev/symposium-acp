@@ -5,8 +5,8 @@
 
 use futures::{AsyncRead, AsyncWrite};
 use sacp::{
-    JrConnection, JrMessage, JrNotification, JsonRpcRequest, JrRequestCx,
-    JrResponse, JrResponsePayload,
+    JrConnection, JrMessage, JrNotification, JrRequestCx, JrResponse, JrResponsePayload,
+    JsonRpcRequest,
 };
 use serde::{Deserialize, Serialize};
 use std::sync::{Arc, Mutex};
@@ -14,16 +14,12 @@ use std::time::Duration;
 use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
 
 /// Test helper to block and wait for a JSON-RPC response.
-async fn recv<R: JrResponsePayload + Send>(
-    response: JrResponse<R>,
-) -> Result<R, agent_client_protocol_schema::Error> {
+async fn recv<R: JrResponsePayload + Send>(response: JrResponse<R>) -> Result<R, sacp::Error> {
     let (tx, rx) = tokio::sync::oneshot::channel();
     response.await_when_result_received(async move |result| {
-        tx.send(result)
-            .map_err(|_| agent_client_protocol_schema::Error::internal_error())
+        tx.send(result).map_err(|_| sacp::Error::internal_error())
     })?;
-    rx.await
-        .map_err(|_| agent_client_protocol_schema::Error::internal_error())?
+    rx.await.map_err(|_| sacp::Error::internal_error())?
 }
 
 /// Helper to set up a client-server pair for testing.
@@ -52,7 +48,7 @@ struct PingRequest {
 }
 
 impl JrMessage for PingRequest {
-    fn into_untyped_message(self) -> Result<sacp::UntypedMessage, agent_client_protocol_schema::Error> {
+    fn into_untyped_message(self) -> Result<sacp::UntypedMessage, sacp::Error> {
         let method = self.method().to_string();
         sacp::UntypedMessage::new(&method, self)
     }
@@ -64,7 +60,7 @@ impl JrMessage for PingRequest {
     fn parse_request(
         method: &str,
         params: &impl serde::Serialize,
-    ) -> Option<Result<Self, agent_client_protocol_schema::Error>> {
+    ) -> Option<Result<Self, sacp::Error>> {
         if method != "ping" {
             return None;
         }
@@ -74,7 +70,7 @@ impl JrMessage for PingRequest {
     fn parse_notification(
         _method: &str,
         _params: &impl serde::Serialize,
-    ) -> Option<Result<Self, agent_client_protocol_schema::Error>> {
+    ) -> Option<Result<Self, sacp::Error>> {
         // This is a request, not a notification
         None
     }
@@ -91,14 +87,11 @@ struct PongResponse {
 }
 
 impl JrResponsePayload for PongResponse {
-    fn into_json(self, _method: &str) -> Result<serde_json::Value, agent_client_protocol_schema::Error> {
-        serde_json::to_value(self).map_err(agent_client_protocol_schema::Error::into_internal_error)
+    fn into_json(self, _method: &str) -> Result<serde_json::Value, sacp::Error> {
+        serde_json::to_value(self).map_err(sacp::Error::into_internal_error)
     }
 
-    fn from_value(
-        _method: &str,
-        value: serde_json::Value,
-    ) -> Result<Self, agent_client_protocol_schema::Error> {
+    fn from_value(_method: &str, value: serde_json::Value) -> Result<Self, sacp::Error> {
         sacp::util::json_cast(&value)
     }
 }
@@ -133,21 +126,19 @@ async fn test_hello_world() {
 
             // Use the client to send a ping and wait for a pong
             let result = client
-                .with_client(
-                    async |cx| -> std::result::Result<(), agent_client_protocol_schema::Error> {
-                        let request = PingRequest {
-                            message: "hello world".to_string(),
-                        };
+                .with_client(async |cx| -> std::result::Result<(), sacp::Error> {
+                    let request = PingRequest {
+                        message: "hello world".to_string(),
+                    };
 
-                        let response = recv(cx.send_request(request)).await.map_err(|e| {
-                            sacp::util::internal_error(format!("Request failed: {:?}", e))
-                        })?;
+                    let response = recv(cx.send_request(request)).await.map_err(|e| {
+                        sacp::util::internal_error(format!("Request failed: {:?}", e))
+                    })?;
 
-                        assert_eq!(response.echo, "pong: hello world");
+                    assert_eq!(response.echo, "pong: hello world");
 
-                        Ok(())
-                    },
-                )
+                    Ok(())
+                })
                 .await;
 
             assert!(result.is_ok(), "Test failed: {:?}", result);
@@ -162,7 +153,7 @@ struct LogNotification {
 }
 
 impl JrMessage for LogNotification {
-    fn into_untyped_message(self) -> Result<sacp::UntypedMessage, agent_client_protocol_schema::Error> {
+    fn into_untyped_message(self) -> Result<sacp::UntypedMessage, sacp::Error> {
         let method = self.method().to_string();
         sacp::UntypedMessage::new(&method, self)
     }
@@ -174,7 +165,7 @@ impl JrMessage for LogNotification {
     fn parse_request(
         _method: &str,
         _params: &impl serde::Serialize,
-    ) -> Option<Result<Self, agent_client_protocol_schema::Error>> {
+    ) -> Option<Result<Self, sacp::Error>> {
         // This is a notification, not a request
         None
     }
@@ -182,7 +173,7 @@ impl JrMessage for LogNotification {
     fn parse_notification(
         method: &str,
         params: &impl serde::Serialize,
-    ) -> Option<Result<Self, agent_client_protocol_schema::Error>> {
+    ) -> Option<Result<Self, sacp::Error>> {
         if method != "log" {
             return None;
         }
@@ -205,14 +196,13 @@ async fn test_notification() {
 
             let (server_reader, server_writer, client_reader, client_writer) = setup_test_streams();
 
-            let server = JrConnection::new(server_writer, server_reader)
-                .on_receive_notification({
-                    let logs = logs_clone.clone();
-                    async move |notification: LogNotification, _cx| {
-                        logs.lock().unwrap().push(notification.message);
-                        Ok(())
-                    }
-                });
+            let server = JrConnection::new(server_writer, server_reader).on_receive_notification({
+                let logs = logs_clone.clone();
+                async move |notification: LogNotification, _cx| {
+                    logs.lock().unwrap().push(notification.message);
+                    Ok(())
+                }
+            });
 
             let client = JrConnection::new(client_writer, client_reader);
 
@@ -223,35 +213,27 @@ async fn test_notification() {
             });
 
             let result = client
-                .with_client(
-                    async |cx| -> std::result::Result<(), agent_client_protocol_schema::Error> {
-                        // Send a notification (no response expected)
-                        cx.send_notification(LogNotification {
-                            message: "test log 1".to_string(),
-                        })
-                        .map_err(|e| {
-                            sacp::util::internal_error(format!(
-                                "Failed to send notification: {:?}",
-                                e
-                            ))
-                        })?;
+                .with_client(async |cx| -> std::result::Result<(), sacp::Error> {
+                    // Send a notification (no response expected)
+                    cx.send_notification(LogNotification {
+                        message: "test log 1".to_string(),
+                    })
+                    .map_err(|e| {
+                        sacp::util::internal_error(format!("Failed to send notification: {:?}", e))
+                    })?;
 
-                        cx.send_notification(LogNotification {
-                            message: "test log 2".to_string(),
-                        })
-                        .map_err(|e| {
-                            sacp::util::internal_error(format!(
-                                "Failed to send notification: {:?}",
-                                e
-                            ))
-                        })?;
+                    cx.send_notification(LogNotification {
+                        message: "test log 2".to_string(),
+                    })
+                    .map_err(|e| {
+                        sacp::util::internal_error(format!("Failed to send notification: {:?}", e))
+                    })?;
 
-                        // Give the server time to process notifications
-                        tokio::time::sleep(Duration::from_millis(100)).await;
+                    // Give the server time to process notifications
+                    tokio::time::sleep(Duration::from_millis(100)).await;
 
-                        Ok(())
-                    },
-                )
+                    Ok(())
+                })
                 .await;
 
             assert!(result.is_ok(), "Test failed: {:?}", result);
@@ -292,24 +274,22 @@ async fn test_multiple_sequential_requests() {
             });
 
             let result = client
-                .with_client(
-                    async |cx| -> std::result::Result<(), agent_client_protocol_schema::Error> {
-                        // Send multiple requests sequentially
-                        for i in 1..=5 {
-                            let request = PingRequest {
-                                message: format!("message {}", i),
-                            };
+                .with_client(async |cx| -> std::result::Result<(), sacp::Error> {
+                    // Send multiple requests sequentially
+                    for i in 1..=5 {
+                        let request = PingRequest {
+                            message: format!("message {}", i),
+                        };
 
-                            let response = recv(cx.send_request(request)).await.map_err(|e| {
-                                sacp::util::internal_error(format!("Request {} failed: {:?}", i, e))
-                            })?;
+                        let response = recv(cx.send_request(request)).await.map_err(|e| {
+                            sacp::util::internal_error(format!("Request {} failed: {:?}", i, e))
+                        })?;
 
-                            assert_eq!(response.echo, format!("pong: message {}", i));
-                        }
+                        assert_eq!(response.echo, format!("pong: message {}", i));
+                    }
 
-                        Ok(())
-                    },
-                )
+                    Ok(())
+                })
                 .await;
 
             assert!(result.is_ok(), "Test failed: {:?}", result);
@@ -345,32 +325,30 @@ async fn test_concurrent_requests() {
             });
 
             let result = client
-                .with_client(
-                    async |cx| -> std::result::Result<(), agent_client_protocol_schema::Error> {
-                        // Send multiple requests concurrently
-                        let mut responses = Vec::new();
+                .with_client(async |cx| -> std::result::Result<(), sacp::Error> {
+                    // Send multiple requests concurrently
+                    let mut responses = Vec::new();
 
-                        for i in 1..=5 {
-                            let request = PingRequest {
-                                message: format!("concurrent message {}", i),
-                            };
+                    for i in 1..=5 {
+                        let request = PingRequest {
+                            message: format!("concurrent message {}", i),
+                        };
 
-                            // Start all requests without awaiting
-                            responses.push((i, cx.send_request(request)));
-                        }
+                        // Start all requests without awaiting
+                        responses.push((i, cx.send_request(request)));
+                    }
 
-                        // Now await all responses
-                        for (i, response_future) in responses {
-                            let response = recv(response_future).await.map_err(|e| {
-                                sacp::util::internal_error(format!("Request {} failed: {:?}", i, e))
-                            })?;
+                    // Now await all responses
+                    for (i, response_future) in responses {
+                        let response = recv(response_future).await.map_err(|e| {
+                            sacp::util::internal_error(format!("Request {} failed: {:?}", i, e))
+                        })?;
 
-                            assert_eq!(response.echo, format!("pong: concurrent message {}", i));
-                        }
+                        assert_eq!(response.echo, format!("pong: concurrent message {}", i));
+                    }
 
-                        Ok(())
-                    },
-                )
+                    Ok(())
+                })
                 .await;
 
             assert!(result.is_ok(), "Test failed: {:?}", result);

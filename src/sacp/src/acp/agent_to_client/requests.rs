@@ -1,14 +1,14 @@
-use agent_client_protocol_schema::{
-    self as acp, CreateTerminalRequest, CreateTerminalResponse, KillTerminalCommandRequest,
+use serde::Serialize;
+
+use crate::jsonrpc::{JrMessage, JrResponsePayload, JsonRpcRequest};
+use crate::util::json_cast;
+use crate::{
+    CreateTerminalRequest, CreateTerminalResponse, KillTerminalCommandRequest,
     KillTerminalCommandResponse, ReadTextFileRequest, ReadTextFileResponse, ReleaseTerminalRequest,
     ReleaseTerminalResponse, RequestPermissionRequest, RequestPermissionResponse,
     TerminalOutputRequest, TerminalOutputResponse, WaitForTerminalExitRequest,
     WaitForTerminalExitResponse, WriteTextFileRequest, WriteTextFileResponse,
 };
-use serde::Serialize;
-
-use crate::jsonrpc::{JrMessage, JsonRpcRequest, JrResponsePayload};
-use crate::util::json_cast;
 
 // Agent -> Client requests
 // These are messages that agents send to clients/editors
@@ -18,7 +18,7 @@ use crate::util::json_cast;
 // ============================================================================
 
 impl JrMessage for RequestPermissionRequest {
-    fn into_untyped_message(self) -> Result<crate::UntypedMessage, agent_client_protocol_schema::Error> {
+    fn into_untyped_message(self) -> Result<crate::UntypedMessage, crate::Error> {
         let method = self.method().to_string();
         crate::UntypedMessage::new(&method, self)
     }
@@ -49,7 +49,7 @@ impl JsonRpcRequest for RequestPermissionRequest {
 
 impl JrResponsePayload for RequestPermissionResponse {
     fn into_json(self, _method: &str) -> Result<serde_json::Value, crate::Error> {
-        serde_json::to_value(self).map_err(agent_client_protocol_schema::Error::into_internal_error)
+        serde_json::to_value(self).map_err(crate::Error::into_internal_error)
     }
 
     fn from_value(_method: &str, value: serde_json::Value) -> Result<Self, crate::Error> {
@@ -62,7 +62,7 @@ impl JrResponsePayload for RequestPermissionResponse {
 // ============================================================================
 
 impl JrMessage for WriteTextFileRequest {
-    fn into_untyped_message(self) -> Result<crate::UntypedMessage, agent_client_protocol_schema::Error> {
+    fn into_untyped_message(self) -> Result<crate::UntypedMessage, crate::Error> {
         let method = self.method().to_string();
         crate::UntypedMessage::new(&method, self)
     }
@@ -93,7 +93,7 @@ impl JsonRpcRequest for WriteTextFileRequest {
 
 impl JrResponsePayload for WriteTextFileResponse {
     fn into_json(self, _method: &str) -> Result<serde_json::Value, crate::Error> {
-        serde_json::to_value(self).map_err(agent_client_protocol_schema::Error::into_internal_error)
+        serde_json::to_value(self).map_err(crate::Error::into_internal_error)
     }
 
     fn from_value(_method: &str, value: serde_json::Value) -> Result<Self, crate::Error> {
@@ -106,7 +106,7 @@ impl JrResponsePayload for WriteTextFileResponse {
 // ============================================================================
 
 impl JrMessage for ReadTextFileRequest {
-    fn into_untyped_message(self) -> Result<crate::UntypedMessage, agent_client_protocol_schema::Error> {
+    fn into_untyped_message(self) -> Result<crate::UntypedMessage, crate::Error> {
         let method = self.method().to_string();
         crate::UntypedMessage::new(&method, self)
     }
@@ -137,7 +137,7 @@ impl JsonRpcRequest for ReadTextFileRequest {
 
 impl JrResponsePayload for ReadTextFileResponse {
     fn into_json(self, _method: &str) -> Result<serde_json::Value, crate::Error> {
-        serde_json::to_value(self).map_err(agent_client_protocol_schema::Error::into_internal_error)
+        serde_json::to_value(self).map_err(crate::Error::into_internal_error)
     }
 
     fn from_value(_method: &str, value: serde_json::Value) -> Result<Self, crate::Error> {
@@ -150,7 +150,7 @@ impl JrResponsePayload for ReadTextFileResponse {
 // ============================================================================
 
 impl JrMessage for CreateTerminalRequest {
-    fn into_untyped_message(self) -> Result<crate::UntypedMessage, agent_client_protocol_schema::Error> {
+    fn into_untyped_message(self) -> Result<crate::UntypedMessage, crate::Error> {
         let method = self.method().to_string();
         crate::UntypedMessage::new(&method, self)
     }
@@ -181,7 +181,7 @@ impl JsonRpcRequest for CreateTerminalRequest {
 
 impl JrResponsePayload for CreateTerminalResponse {
     fn into_json(self, _method: &str) -> Result<serde_json::Value, crate::Error> {
-        serde_json::to_value(self).map_err(agent_client_protocol_schema::Error::into_internal_error)
+        serde_json::to_value(self).map_err(crate::Error::into_internal_error)
     }
 
     fn from_value(_method: &str, value: serde_json::Value) -> Result<Self, crate::Error> {
@@ -194,7 +194,7 @@ impl JrResponsePayload for CreateTerminalResponse {
 // ============================================================================
 
 impl JrMessage for TerminalOutputRequest {
-    fn into_untyped_message(self) -> Result<crate::UntypedMessage, agent_client_protocol_schema::Error> {
+    fn into_untyped_message(self) -> Result<crate::UntypedMessage, crate::Error> {
         let method = self.method().to_string();
         crate::UntypedMessage::new(&method, self)
     }
@@ -225,7 +225,7 @@ impl JsonRpcRequest for TerminalOutputRequest {
 
 impl JrResponsePayload for TerminalOutputResponse {
     fn into_json(self, _method: &str) -> Result<serde_json::Value, crate::Error> {
-        serde_json::to_value(self).map_err(agent_client_protocol_schema::Error::into_internal_error)
+        serde_json::to_value(self).map_err(crate::Error::into_internal_error)
     }
 
     fn from_value(_method: &str, value: serde_json::Value) -> Result<Self, crate::Error> {
@@ -238,7 +238,7 @@ impl JrResponsePayload for TerminalOutputResponse {
 // ============================================================================
 
 impl JrMessage for ReleaseTerminalRequest {
-    fn into_untyped_message(self) -> Result<crate::UntypedMessage, agent_client_protocol_schema::Error> {
+    fn into_untyped_message(self) -> Result<crate::UntypedMessage, crate::Error> {
         let method = self.method().to_string();
         crate::UntypedMessage::new(&method, self)
     }
@@ -269,7 +269,7 @@ impl JsonRpcRequest for ReleaseTerminalRequest {
 
 impl JrResponsePayload for ReleaseTerminalResponse {
     fn into_json(self, _method: &str) -> Result<serde_json::Value, crate::Error> {
-        serde_json::to_value(self).map_err(agent_client_protocol_schema::Error::into_internal_error)
+        serde_json::to_value(self).map_err(crate::Error::into_internal_error)
     }
 
     fn from_value(_method: &str, value: serde_json::Value) -> Result<Self, crate::Error> {
@@ -282,7 +282,7 @@ impl JrResponsePayload for ReleaseTerminalResponse {
 // ============================================================================
 
 impl JrMessage for WaitForTerminalExitRequest {
-    fn into_untyped_message(self) -> Result<crate::UntypedMessage, agent_client_protocol_schema::Error> {
+    fn into_untyped_message(self) -> Result<crate::UntypedMessage, crate::Error> {
         let method = self.method().to_string();
         crate::UntypedMessage::new(&method, self)
     }
@@ -313,7 +313,7 @@ impl JsonRpcRequest for WaitForTerminalExitRequest {
 
 impl JrResponsePayload for WaitForTerminalExitResponse {
     fn into_json(self, _method: &str) -> Result<serde_json::Value, crate::Error> {
-        serde_json::to_value(self).map_err(agent_client_protocol_schema::Error::into_internal_error)
+        serde_json::to_value(self).map_err(crate::Error::into_internal_error)
     }
 
     fn from_value(_method: &str, value: serde_json::Value) -> Result<Self, crate::Error> {
@@ -326,7 +326,7 @@ impl JrResponsePayload for WaitForTerminalExitResponse {
 // ============================================================================
 
 impl JrMessage for KillTerminalCommandRequest {
-    fn into_untyped_message(self) -> Result<crate::UntypedMessage, agent_client_protocol_schema::Error> {
+    fn into_untyped_message(self) -> Result<crate::UntypedMessage, crate::Error> {
         let method = self.method().to_string();
         crate::UntypedMessage::new(&method, self)
     }
@@ -357,7 +357,7 @@ impl JsonRpcRequest for KillTerminalCommandRequest {
 
 impl JrResponsePayload for KillTerminalCommandResponse {
     fn into_json(self, _method: &str) -> Result<serde_json::Value, crate::Error> {
-        serde_json::to_value(self).map_err(agent_client_protocol_schema::Error::into_internal_error)
+        serde_json::to_value(self).map_err(crate::Error::into_internal_error)
     }
 
     fn from_value(_method: &str, value: serde_json::Value) -> Result<Self, crate::Error> {

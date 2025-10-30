@@ -18,7 +18,7 @@ impl JrHandler for NullHandler {
     async fn handle_message(
         &mut self,
         message: MessageAndCx,
-    ) -> Result<Handled<MessageAndCx>, agent_client_protocol_schema::Error> {
+    ) -> Result<Handled<MessageAndCx>, crate::Error> {
         Ok(Handled::No(message))
     }
 }
@@ -53,7 +53,7 @@ where
     async fn handle_message(
         &mut self,
         message_cx: MessageAndCx,
-    ) -> Result<Handled<MessageAndCx>, agent_client_protocol_schema::Error> {
+    ) -> Result<Handled<MessageAndCx>, crate::Error> {
         match message_cx {
             MessageAndCx::Request(message, request_cx) => {
                 tracing::debug!(
@@ -117,7 +117,7 @@ where
     async fn handle_message(
         &mut self,
         message_cx: MessageAndCx,
-    ) -> Result<Handled<MessageAndCx>, agent_client_protocol_schema::Error> {
+    ) -> Result<Handled<MessageAndCx>, crate::Error> {
         match message_cx {
             MessageAndCx::Notification(message, cx) => {
                 tracing::debug!(
@@ -189,7 +189,7 @@ where
     async fn handle_message(
         &mut self,
         message_cx: MessageAndCx,
-    ) -> Result<Handled<MessageAndCx>, agent_client_protocol_schema::Error> {
+    ) -> Result<Handled<MessageAndCx>, crate::Error> {
         match message_cx {
             MessageAndCx::Request(message, request_cx) => {
                 tracing::debug!(
@@ -245,7 +245,11 @@ where
     }
 
     fn describe_chain(&self) -> impl std::fmt::Debug {
-        format!("({}, {})", std::any::type_name::<R>(), std::any::type_name::<N>())
+        format!(
+            "({}, {})",
+            std::any::type_name::<R>(),
+            std::any::type_name::<N>()
+        )
     }
 }
 
@@ -299,7 +303,7 @@ where
     async fn handle_message(
         &mut self,
         message: MessageAndCx,
-    ) -> Result<Handled<MessageAndCx>, agent_client_protocol_schema::Error> {
+    ) -> Result<Handled<MessageAndCx>, crate::Error> {
         match self.handler1.handle_message(message).await? {
             Handled::Yes => Ok(Handled::Yes),
             Handled::No(message) => self.handler2.handle_message(message).await,

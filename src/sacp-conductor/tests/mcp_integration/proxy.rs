@@ -1,10 +1,9 @@
 //! Proxy component that provides MCP tools
 
-use sacp_proxy::{AcpProxyExt, McpServiceRegistry};
-use agent_client_protocol_schema::{self as acp};
-use sacp_conductor::component::{Cleanup, ComponentProvider};
 use futures::{AsyncRead, AsyncWrite};
 use sacp::{JrConnection, JrConnectionCx};
+use sacp_conductor::component::{Cleanup, ComponentProvider};
+use sacp_proxy::{AcpProxyExt, McpServiceRegistry};
 use std::pin::Pin;
 
 use crate::mcp_integration::mcp_server::TestMcpServer;

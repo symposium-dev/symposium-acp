@@ -30,7 +30,7 @@ pub enum ConductorCommand {
 }
 
 impl ConductorArgs {
-    pub async fn run(self) -> Result<(), agent_client_protocol_schema::Error> {
+    pub async fn run(self) -> Result<(), sacp::Error> {
         match self.command {
             ConductorCommand::Agent { proxies } => {
                 let providers = proxies

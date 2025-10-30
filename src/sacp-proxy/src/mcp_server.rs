@@ -1,12 +1,12 @@
-use agent_client_protocol_schema::{self as acp, NewSessionRequest};
+use agent_client_protocol_schema::NewSessionRequest;
 use futures::channel::mpsc;
 use futures::{FutureExt, future::BoxFuture};
 use futures::{SinkExt, StreamExt};
 use fxhash::FxHashMap;
 use rmcp::ServiceExt;
 use sacp::{
-    Handled, JrConnection, JrConnectionCx, JrHandler, JrMessage,
-    JrRequestCx, MessageAndCx, UntypedMessage,
+    Handled, JrConnection, JrConnectionCx, JrHandler, JrMessage, JrRequestCx, MessageAndCx,
+    UntypedMessage,
 };
 use std::pin::Pin;
 use std::sync::{Arc, Mutex};
@@ -191,9 +191,9 @@ impl McpServiceRegistry {
 
     async fn handle_connect_request(
         &self,
-        result: Result<SuccessorRequest<McpConnectRequest>, agent_client_protocol_schema::Error>,
+        result: Result<SuccessorRequest<McpConnectRequest>, sacp::Error>,
         request_cx: JrRequestCx<serde_json::Value>,
-    ) -> Result<Handled<JrRequestCx<serde_json::Value>>, agent_client_protocol_schema::Error> {
+    ) -> Result<Handled<JrRequestCx<serde_json::Value>>, sacp::Error> {
         // Check if we parsed this message successfully.
         let SuccessorRequest { request } = match result {
             Ok(request) => request,
@@ -292,12 +292,9 @@ impl McpServiceRegistry {
 
     async fn handle_mcp_over_acp_request(
         &self,
-        result: Result<
-            SuccessorRequest<McpOverAcpRequest<UntypedMessage>>,
-            agent_client_protocol_schema::Error,
-        >,
+        result: Result<SuccessorRequest<McpOverAcpRequest<UntypedMessage>>, sacp::Error>,
         request_cx: JrRequestCx<serde_json::Value>,
-    ) -> Result<Handled<JrRequestCx<serde_json::Value>>, agent_client_protocol_schema::Error> {
+    ) -> Result<Handled<JrRequestCx<serde_json::Value>>, sacp::Error> {
         // Check if we parsed this message successfully.
         let SuccessorRequest { request } = match result {
             Ok(request) => request,
@@ -322,12 +319,9 @@ impl McpServiceRegistry {
 
     async fn handle_mcp_over_acp_notification(
         &self,
-        result: Result<
-            SuccessorNotification<McpOverAcpNotification<UntypedMessage>>,
-            agent_client_protocol_schema::Error,
-        >,
+        result: Result<SuccessorNotification<McpOverAcpNotification<UntypedMessage>>, sacp::Error>,
         notification_cx: JrConnectionCx,
-    ) -> Result<Handled<JrConnectionCx>, agent_client_protocol_schema::Error> {
+    ) -> Result<Handled<JrConnectionCx>, sacp::Error> {
         // Check if we parsed this message successfully.
         let SuccessorNotification { notification } = match result {
             Ok(request) => request,
@@ -355,12 +349,9 @@ impl McpServiceRegistry {
 
     async fn handle_mcp_disconnect_notification(
         &self,
-        result: Result<
-            SuccessorNotification<McpDisconnectNotification>,
-            agent_client_protocol_schema::Error,
-        >,
+        result: Result<SuccessorNotification<McpDisconnectNotification>, sacp::Error>,
         notification_cx: JrConnectionCx,
-    ) -> Result<Handled<JrConnectionCx>, agent_client_protocol_schema::Error> {
+    ) -> Result<Handled<JrConnectionCx>, sacp::Error> {
         // Check if we parsed this message successfully.
         let SuccessorNotification { notification } = match result {
             Ok(request) => request,
@@ -380,9 +371,9 @@ impl McpServiceRegistry {
 
     async fn handle_new_session_request(
         &self,
-        result: Result<NewSessionRequest, agent_client_protocol_schema::Error>,
+        result: Result<NewSessionRequest, sacp::Error>,
         request_cx: JrRequestCx<serde_json::Value>,
-    ) -> Result<Handled<JrRequestCx<serde_json::Value>>, agent_client_protocol_schema::Error> {
+    ) -> Result<Handled<JrRequestCx<serde_json::Value>>, sacp::Error> {
         // Check if we parsed this message successfully.
         let mut request = match result {
             Ok(request) => request,
@@ -419,7 +410,7 @@ impl JrHandler for McpServiceRegistry {
     async fn handle_message(
         &mut self,
         message: sacp::MessageAndCx,
-    ) -> Result<sacp::Handled<sacp::MessageAndCx>, agent_client_protocol_schema::Error> {
+    ) -> Result<sacp::Handled<sacp::MessageAndCx>, sacp::Error> {
         match message {
             sacp::MessageAndCx::Request(msg, mut cx) => {
                 let params = msg.params();

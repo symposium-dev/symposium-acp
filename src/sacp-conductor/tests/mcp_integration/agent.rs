@@ -1,9 +1,9 @@
 //! Agent component that verifies MCP server configuration and handles prompts
 
 use agent_client_protocol_schema::{
-    self as acp, AgentCapabilities, ContentBlock, ContentChunk, InitializeRequest,
-    InitializeResponse, McpServer, NewSessionRequest, NewSessionResponse, PromptRequest,
-    PromptResponse, SessionNotification, SessionUpdate, StopReason, TextContent,
+    AgentCapabilities, ContentBlock, ContentChunk, InitializeRequest, InitializeResponse,
+    McpServer, NewSessionRequest, NewSessionResponse, PromptRequest, PromptResponse,
+    SessionNotification, SessionUpdate, StopReason, TextContent,
 };
 use futures::{AsyncRead, AsyncWrite};
 use rmcp::ServiceExt;

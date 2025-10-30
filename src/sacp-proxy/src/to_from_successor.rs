@@ -1,9 +1,8 @@
-use agent_client_protocol_schema::{self as acp, InitializeRequest, InitializeResponse};
 use futures::{AsyncRead, AsyncWrite};
 use sacp::{
-    ChainHandler, Handled, JrConnection, JrConnectionCx, JrHandler, JrMessage,
-    JrNotification, JsonRpcRequest, JrRequestCx, MessageAndCx, MetaCapabilityExt, Proxy,
-    UntypedMessage,
+    ChainHandler, Handled, InitializeRequest, InitializeResponse, JrConnection, JrConnectionCx,
+    JrHandler, JrMessage, JrNotification, JrRequestCx, JsonRpcRequest, MessageAndCx,
+    MetaCapabilityExt, Proxy, UntypedMessage,
 };
 use serde::{Deserialize, Serialize};
 use std::marker::PhantomData;
@@ -269,7 +268,7 @@ where
     async fn handle_message(
         &mut self,
         message: sacp::MessageAndCx,
-    ) -> Result<Handled<sacp::MessageAndCx>, agent_client_protocol_schema::Error> {
+    ) -> Result<Handled<sacp::MessageAndCx>, sacp::Error> {
         let MessageAndCx::Request(request, cx) = message else {
             return Ok(Handled::No(message));
         };
@@ -332,7 +331,7 @@ where
     async fn handle_message(
         &mut self,
         message: sacp::MessageAndCx,
-    ) -> Result<Handled<sacp::MessageAndCx>, agent_client_protocol_schema::Error> {
+    ) -> Result<Handled<sacp::MessageAndCx>, sacp::Error> {
         let MessageAndCx::Notification(message, cx) = message else {
             return Ok(Handled::No(message));
         };
@@ -376,7 +375,7 @@ impl JrHandler for ProxyHandler {
     async fn handle_message(
         &mut self,
         message: sacp::MessageAndCx,
-    ) -> Result<Handled<sacp::MessageAndCx>, agent_client_protocol_schema::Error> {
+    ) -> Result<Handled<sacp::MessageAndCx>, sacp::Error> {
         tracing::debug!(
             message = ?message.message(),
             "ProxyHandler::handle_request"
@@ -445,7 +444,7 @@ impl ProxyHandler {
         &mut self,
         mut request: InitializeRequest,
         request_cx: JrRequestCx<InitializeResponse>,
-    ) -> Result<(), agent_client_protocol_schema::Error> {
+    ) -> Result<(), sacp::Error> {
         tracing::debug!(
             method = request_cx.method(),
             params = ?request,

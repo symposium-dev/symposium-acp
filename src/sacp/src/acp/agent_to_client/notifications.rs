@@ -1,4 +1,4 @@
-use agent_client_protocol_schema::{self as acp, SessionNotification};
+use agent_client_protocol_schema::SessionNotification;
 use serde::Serialize;
 
 use crate::jsonrpc::{JrMessage, JrNotification};
@@ -16,7 +16,10 @@ impl JrMessage for SessionNotification {
         "session/update"
     }
 
-    fn parse_request(_method: &str, _params: &impl Serialize) -> Option<Result<Self, crate::Error>> {
+    fn parse_request(
+        _method: &str,
+        _params: &impl Serialize,
+    ) -> Option<Result<Self, crate::Error>> {
         // This is a notification, not a request
         None
     }

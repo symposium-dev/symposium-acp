@@ -7,24 +7,17 @@
 //! - Client disconnect handling
 
 use futures::{AsyncRead, AsyncWrite};
-use sacp::{
-    JrConnection, JrMessage, JsonRpcRequest, JrRequestCx, JrResponse,
-    JrResponsePayload,
-};
+use sacp::{JrConnection, JrMessage, JrRequestCx, JrResponse, JrResponsePayload, JsonRpcRequest};
 use serde::{Deserialize, Serialize};
 use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
 
 /// Test helper to block and wait for a JSON-RPC response.
-async fn recv<R: JrResponsePayload + Send>(
-    response: JrResponse<R>,
-) -> Result<R, agent_client_protocol_schema::Error> {
+async fn recv<R: JrResponsePayload + Send>(response: JrResponse<R>) -> Result<R, sacp::Error> {
     let (tx, rx) = tokio::sync::oneshot::channel();
     response.await_when_result_received(async move |result| {
-        tx.send(result)
-            .map_err(|_| agent_client_protocol_schema::Error::internal_error())
+        tx.send(result).map_err(|_| sacp::Error::internal_error())
     })?;
-    rx.await
-        .map_err(|_| agent_client_protocol_schema::Error::internal_error())?
+    rx.await.map_err(|_| sacp::Error::internal_error())?
 }
 
 /// Helper to set up test streams.
@@ -53,7 +46,7 @@ fn setup_test_streams() -> (
 struct EmptyRequest;
 
 impl JrMessage for EmptyRequest {
-    fn into_untyped_message(self) -> Result<sacp::UntypedMessage, agent_client_protocol_schema::Error> {
+    fn into_untyped_message(self) -> Result<sacp::UntypedMessage, sacp::Error> {
         let method = self.method().to_string();
         sacp::UntypedMessage::new(&method, self)
     }
@@ -65,7 +58,7 @@ impl JrMessage for EmptyRequest {
     fn parse_request(
         method: &str,
         _params: &impl serde::Serialize,
-    ) -> Option<Result<Self, agent_client_protocol_schema::Error>> {
+    ) -> Option<Result<Self, sacp::Error>> {
         if method != "empty_method" {
             return None;
         }
@@ -75,7 +68,7 @@ impl JrMessage for EmptyRequest {
     fn parse_notification(
         _method: &str,
         _params: &impl serde::Serialize,
-    ) -> Option<Result<Self, agent_client_protocol_schema::Error>> {
+    ) -> Option<Result<Self, sacp::Error>> {
         // This is a request, not a notification
         None
     }
@@ -92,7 +85,7 @@ struct OptionalParamsRequest {
 }
 
 impl JrMessage for OptionalParamsRequest {
-    fn into_untyped_message(self) -> Result<sacp::UntypedMessage, agent_client_protocol_schema::Error> {
+    fn into_untyped_message(self) -> Result<sacp::UntypedMessage, sacp::Error> {
         let method = self.method().to_string();
         sacp::UntypedMessage::new(&method, self)
     }
@@ -104,7 +97,7 @@ impl JrMessage for OptionalParamsRequest {
     fn parse_request(
         method: &str,
         params: &impl serde::Serialize,
-    ) -> Option<Result<Self, agent_client_protocol_schema::Error>> {
+    ) -> Option<Result<Self, sacp::Error>> {
         if method != "optional_params_method" {
             return None;
         }
@@ -114,7 +107,7 @@ impl JrMessage for OptionalParamsRequest {
     fn parse_notification(
         _method: &str,
         _params: &impl serde::Serialize,
-    ) -> Option<Result<Self, agent_client_protocol_schema::Error>> {
+    ) -> Option<Result<Self, sacp::Error>> {
         // This is a request, not a notification
         None
     }
@@ -130,14 +123,11 @@ struct SimpleResponse {
 }
 
 impl JrResponsePayload for SimpleResponse {
-    fn into_json(self, _method: &str) -> Result<serde_json::Value, agent_client_protocol_schema::Error> {
-        serde_json::to_value(self).map_err(agent_client_protocol_schema::Error::into_internal_error)
+    fn into_json(self, _method: &str) -> Result<serde_json::Value, sacp::Error> {
+        serde_json::to_value(self).map_err(sacp::Error::into_internal_error)
     }
 
-    fn from_value(
-        _method: &str,
-        value: serde_json::Value,
-    ) -> Result<Self, agent_client_protocol_schema::Error> {
+    fn from_value(_method: &str, value: serde_json::Value) -> Result<Self, sacp::Error> {
         sacp::util::json_cast(&value)
     }
 }
@@ -171,7 +161,7 @@ async fn test_empty_request() {
             });
 
             let result = client
-                .with_client(async |cx| -> Result<(), agent_client_protocol_schema::Error> {
+                .with_client(async |cx| -> Result<(), sacp::Error> {
                     let request = EmptyRequest;
 
                     let result: Result<SimpleResponse, _> = recv(cx.send_request(request)).await;
@@ -205,8 +195,7 @@ async fn test_null_params() {
             let (server_reader, server_writer, client_reader, client_writer) = setup_test_streams();
 
             let server = JrConnection::new(server_writer, server_reader).on_receive_request(
-                async |_request: OptionalParamsRequest,
-                       request_cx: JrRequestCx<SimpleResponse>| {
+                async |_request: OptionalParamsRequest, request_cx: JrRequestCx<SimpleResponse>| {
                     request_cx.respond(SimpleResponse {
                         result: "Has params: true".to_string(),
                     })
@@ -220,7 +209,7 @@ async fn test_null_params() {
             });
 
             let result = client
-                .with_client(async |cx| -> Result<(), agent_client_protocol_schema::Error> {
+                .with_client(async |cx| -> Result<(), sacp::Error> {
                     let request = OptionalParamsRequest { value: None };
 
                     let result: Result<SimpleResponse, _> = recv(cx.send_request(request)).await;
@@ -266,7 +255,7 @@ async fn test_server_shutdown() {
 
             let client_result = tokio::task::spawn_local(async move {
                 client
-                    .with_client(async |cx| -> Result<(), agent_client_protocol_schema::Error> {
+                    .with_client(async |cx| -> Result<(), sacp::Error> {
                         let request = EmptyRequest;
 
                         // Send request and get future for response

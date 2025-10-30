@@ -358,7 +358,10 @@ impl JrConnectionCx {
     ///
     /// The request context's response type matches the request's response type,
     /// enabling type-safe message forwarding.
-    pub fn send_proxied_message<R, N>(&self, message: MessageAndCx<R, N>) -> Result<(), crate::Error>
+    pub fn send_proxied_message<R, N>(
+        &self,
+        message: MessageAndCx<R, N>,
+    ) -> Result<(), crate::Error>
     where
         R: JsonRpcRequest<Response: Send>,
         N: JrNotification,
@@ -372,10 +375,7 @@ impl JrConnectionCx {
     }
 
     /// Send an outgoing request and await the reply.
-    pub fn send_request<Req: JsonRpcRequest>(
-        &self,
-        request: Req,
-    ) -> JrResponse<Req::Response> {
+    pub fn send_request<Req: JsonRpcRequest>(&self, request: Req) -> JrResponse<Req::Response> {
         let method = request.method().to_string();
         let (response_tx, response_rx) = oneshot::channel();
         match request.into_untyped_message() {
@@ -559,7 +559,10 @@ impl<T: JrResponsePayload> JrRequestCx<T> {
     }
 
     /// Respond to the JSON-RPC request with either a value (`Ok`) or an error (`Err`).
-    pub fn respond_with_result(self, response: Result<T, crate::Error>) -> Result<(), crate::Error> {
+    pub fn respond_with_result(
+        self,
+        response: Result<T, crate::Error>,
+    ) -> Result<(), crate::Error> {
         tracing::debug!(id = ?self.id, "respond called");
         let json = self.make_json.call_tuple((self.method.clone(), response));
         self.cx.send_raw_message(OutgoingMessage::Response {
@@ -599,7 +602,8 @@ pub trait JrMessage: 'static + Debug + Sized {
     /// - `None` if this type does not recognize the method name or recognizes it as a notification
     /// - `Some(Ok(value))` if the method is recognized as a request and deserialization succeeds
     /// - `Some(Err(error))` if the method is recognized as a request but deserialization fails
-    fn parse_request(_method: &str, _params: &impl Serialize) -> Option<Result<Self, crate::Error>>;
+    fn parse_request(_method: &str, _params: &impl Serialize)
+    -> Option<Result<Self, crate::Error>>;
 
     /// Attempt to parse this type from a JSON-RPC notification.
     ///
@@ -660,10 +664,7 @@ impl<R: JsonRpcRequest, N: JrMessage> MessageAndCx<R, N> {
     /// Map the request and notification types to new types.
     pub fn map<R1, N1>(
         self,
-        map_request: impl FnOnce(
-            R,
-            JrRequestCx<R::Response>,
-        ) -> (R1, JrRequestCx<R1::Response>),
+        map_request: impl FnOnce(R, JrRequestCx<R::Response>) -> (R1, JrRequestCx<R1::Response>),
         map_notification: impl FnOnce(N, JrConnectionCx) -> (N1, JrConnectionCx),
     ) -> MessageAndCx<R1, N1>
     where
@@ -748,21 +749,18 @@ impl JrMessage for UntypedMessage {
         &self.method
     }
 
-    fn into_untyped_message(self) -> Result<UntypedMessage, agent_client_protocol_schema::Error> {
+    fn into_untyped_message(self) -> Result<UntypedMessage, crate::Error> {
         Ok(self)
     }
 
-    fn parse_request(
-        method: &str,
-        params: &impl Serialize,
-    ) -> Option<Result<Self, agent_client_protocol_schema::Error>> {
+    fn parse_request(method: &str, params: &impl Serialize) -> Option<Result<Self, crate::Error>> {
         Some(UntypedMessage::new(method, params))
     }
 
     fn parse_notification(
         method: &str,
         params: &impl Serialize,
-    ) -> Option<Result<Self, agent_client_protocol_schema::Error>> {
+    ) -> Option<Result<Self, crate::Error>> {
         Some(UntypedMessage::new(method, params))
     }
 }

@@ -8,8 +8,8 @@
 mod mcp_integration;
 
 use agent_client_protocol_schema::{
-    self as acp, ContentBlock, InitializeRequest, NewSessionRequest, PromptRequest,
-    SessionNotification, TextContent,
+    ContentBlock, InitializeRequest, NewSessionRequest, PromptRequest, SessionNotification,
+    TextContent,
 };
 use expect_test::expect;
 use futures::{SinkExt, StreamExt, channel::mpsc};
@@ -23,14 +23,12 @@ use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
 /// Test helper to receive a JSON-RPC response
 async fn recv<R: sacp::JrResponsePayload + Send>(
     response: sacp::JrResponse<R>,
-) -> Result<R, agent_client_protocol_schema::Error> {
+) -> Result<R, sacp::Error> {
     let (tx, rx) = tokio::sync::oneshot::channel();
     response.await_when_result_received(async move |result| {
-        tx.send(result)
-            .map_err(|_| agent_client_protocol_schema::Error::internal_error())
+        tx.send(result).map_err(|_| sacp::Error::internal_error())
     })?;
-    rx.await
-        .map_err(|_| agent_client_protocol_schema::Error::internal_error())?
+    rx.await.map_err(|_| sacp::Error::internal_error())?
 }
 
 fn conductor_command() -> Vec<String> {

@@ -1,7 +1,6 @@
 use sacp;
 use sacp::{
-    JrMessage, JrNotification, JsonRpcRequest, JrResponsePayload, UntypedMessage,
-    util::json_cast,
+    JrMessage, JrNotification, JrResponsePayload, JsonRpcRequest, UntypedMessage, util::json_cast,
 };
 use serde::{Deserialize, Serialize};
 
@@ -48,14 +47,11 @@ pub struct McpConnectResponse {
 }
 
 impl JrResponsePayload for McpConnectResponse {
-    fn into_json(self, _method: &str) -> Result<serde_json::Value, agent_client_protocol_schema::Error> {
+    fn into_json(self, _method: &str) -> Result<serde_json::Value, sacp::Error> {
         serde_json::to_value(self).map_err(sacp::Error::into_internal_error)
     }
 
-    fn from_value(
-        _method: &str,
-        value: serde_json::Value,
-    ) -> Result<Self, agent_client_protocol_schema::Error> {
+    fn from_value(_method: &str, value: serde_json::Value) -> Result<Self, sacp::Error> {
         serde_json::from_value(value).map_err(|_| sacp::Error::invalid_params())
     }
 }
