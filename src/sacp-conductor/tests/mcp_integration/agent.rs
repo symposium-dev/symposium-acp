@@ -12,6 +12,8 @@ use sacp_conductor::component::{Cleanup, ComponentProvider};
 use std::{pin::Pin, sync::Arc};
 use tokio::sync::Mutex;
 
+use crate::conductor_command;
+
 pub struct AgentComponentProvider;
 
 /// Shared state for the agent component
@@ -70,18 +72,11 @@ impl ComponentProvider for AgentComponentProvider {
                             } = mcp_server
                             {
                                 assert_eq!(name, "test");
-                                assert_eq!(command.to_str().unwrap(), "cargo");
-                                // Should be: ["run", "-p", "conductor", "--", "mcp", "<port>"]
-                                assert_eq!(args[0], "run");
-                                assert_eq!(args[1], "-p");
-                                assert_eq!(args[2], "sacp-conductor");
-                                assert_eq!(args[3], "--");
-                                assert_eq!(args[4], "mcp");
-                                // args[5] is the port number, which varies
-                                tracing::debug!(
-                                    port = %args[5],
-                                    "MCP server correctly configured: cargo run -p sacp-conductor -- mcp"
-                                );
+                                let conductor_command = conductor_command();
+                                assert_eq!(command.to_str().unwrap(), &conductor_command[0]);
+                                for (arg, expected) in args.iter().zip(&conductor_command[1..]) {
+                                    assert_eq!(arg, expected);
+                                }
                             }
 
                             // Store MCP servers for later use

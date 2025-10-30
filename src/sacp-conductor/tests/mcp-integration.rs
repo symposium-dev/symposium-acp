@@ -33,6 +33,16 @@ async fn recv<R: sacp::JsonRpcResponsePayload + Send>(
         .map_err(|_| agent_client_protocol::Error::internal_error())?
 }
 
+fn conductor_command() -> Vec<String> {
+    vec![
+        "cargo".to_string(),
+        "run".to_string(),
+        "-p".to_string(),
+        "sacp-conductor".to_string(),
+        "--".to_string(),
+    ]
+}
+
 async fn run_test_with_components(
     components: Vec<Box<dyn ComponentProvider>>,
     editor_task: impl AsyncFnOnce(sacp::JsonRpcConnectionCx) -> Result<(), acp::Error>,
@@ -48,13 +58,7 @@ async fn run_test_with_components(
                 conductor_out.compat_write(),
                 conductor_in.compat(),
                 components,
-                Some(vec![
-                    "cargo".to_string(),
-                    "run".to_string(),
-                    "-p".to_string(),
-                    "conductor".to_string(),
-                    "--".to_string(),
-                ]),
+                Some(conductor_command()),
             )
             .await
         })
@@ -153,13 +157,7 @@ async fn test_agent_handles_prompt() -> Result<(), acp::Error> {
                     mcp_integration::proxy::create(),
                     mcp_integration::agent::create(),
                 ],
-                Some(vec![
-                    "cargo".to_string(),
-                    "run".to_string(),
-                    "-p".to_string(),
-                    "sacp-conductor".to_string(),
-                    "--".to_string(),
-                ]),
+                Some(conductor_command()),
             )
             .await
         })
