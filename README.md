@@ -103,7 +103,7 @@ The `md/` directory contains detailed design documentation extracted from the Sy
 
 - [proxying-acp.md](./md/proxying-acp.md) - Complete RFD with protocol specification
 - [pacp-components.md](./md/pacp-components.md) - Component architecture overview
-- [fiedler-conductor.md](./md/fiedler-conductor.md) - Conductor implementation details
+- [conductor.md](./md/conductor.md) - Conductor implementation details
 
 ## Relationship to ACP
 

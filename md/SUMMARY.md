@@ -13,4 +13,4 @@
 
 - [SACP RFD](./proxying-acp.md)
 - [Component Architecture](./pacp-components.md)
-- [Conductor Implementation](./fiedler-conductor.md)
+- [Conductor Implementation](./conductor.md)

@@ -2,20 +2,18 @@
 
 {{#rfd: proxying-acp}}
 
-The **Conductor** (binary name: `conductor`) is the orchestrator for P/ACP proxy chains. Named after Arthur Fiedler, conductor of the Boston Pops, it coordinates the flow of ACP messages through a chain of proxy components.
-
-**Note:** This binary was previously called "Fiedler" and you may see that name in older documentation or code.
+The **Conductor** (binary name: `conductor`) is the orchestrator for P/ACP proxy chains. It coordinates the flow of ACP messages through a chain of proxy components.
 
 ## Overview
 
-Fiedler sits between an ACP editor and a chain of components, presenting itself as a normal ACP agent to the editor while managing the proxy chain internally.
+Conductor sits between an ACP editor and a chain of components, presenting itself as a normal ACP agent to the editor while managing the proxy chain internally.
 
 ```mermaid
 flowchart LR
     Editor[ACP Editor]
     
-    subgraph Fiedler[Fiedler Process]
-        F[Fiedler Orchestrator]
+    subgraph Conductor[Conductor Process]
+        F[Conductor Orchestrator]
     end
     
     subgraph Chain[Component Chain]
@@ -29,7 +27,7 @@ flowchart LR
     F <-->|ACP via stdio| C1
 ```
 
-**From the editor's perspective**: Fiedler is a normal ACP agent communicating over stdio.
+**From the editor's perspective**: Conductor is a normal ACP agent communicating over stdio.
 
 **From the component's perspective**: Each component is initialized by its predecessor and communicates via `_proxy/successor/*` protocol with its successor.
 
@@ -61,13 +59,13 @@ conductor mcp 54321
 Routes messages between editor and components:
 
 **Editor → Component messages:**
-- Messages from editor to Fiedler are forwarded to the first component
+- Messages from editor to Conductor are forwarded to the first component
 - Preserves original message ID
 - First component initializes subsequent components via `_proxy/successor/*`
 
 **Component → Component messages:**
 - Components use `_proxy/successor/request` to send to their successors
-- Fiedler doesn't need to route these—components talk directly via stdio pipes
+- Conductor doesn't need to route these—components talk directly via stdio pipes
 
 **Response messages:**
 - Flow back through the chain automatically via stdio
@@ -113,42 +111,42 @@ See [MCP Bridge](./mcp-bridge.md) for full implementation details.
 ```mermaid
 sequenceDiagram
     participant Editor
-    participant Fiedler
+    participant Conductor
     participant Sparkle as Component1<br/>(Sparkle)
     participant Agent as Component2<br/>(Agent)
 
-    Note over Fiedler: Spawns both components at startup<br/>from CLI args
+    Note over Conductor: Spawns both components at startup<br/>from CLI args
     
-    Editor->>Fiedler: acp/initialize [I0]
-    Fiedler->>Sparkle: acp/initialize (offers proxy capability) [I0]
+    Editor->>Conductor: acp/initialize [I0]
+    Conductor->>Sparkle: acp/initialize (offers proxy capability) [I0]
     
     Note over Sparkle: Sees proxy capability offer,<br/>knows it has a successor
     
-    Sparkle->>Fiedler: _proxy/successor/request(acp/initialize) [I1]
+    Sparkle->>Conductor: _proxy/successor/request(acp/initialize) [I1]
     
-    Note over Fiedler: Unwraps request,<br/>knows Agent is last in chain
+    Note over Conductor: Unwraps request,<br/>knows Agent is last in chain
     
-    Fiedler->>Agent: acp/initialize (NO proxy capability - agent is last) [I1]
-    Agent-->>Fiedler: initialize response (capabilities) [I1]
-    Fiedler-->>Sparkle: _proxy/successor response [I1]
+    Conductor->>Agent: acp/initialize (NO proxy capability - agent is last) [I1]
+    Agent-->>Conductor: initialize response (capabilities) [I1]
+    Conductor-->>Sparkle: _proxy/successor response [I1]
     
     Note over Sparkle: Sees Agent's capabilities,<br/>prepares response
     
-    Sparkle-->>Fiedler: initialize response (accepts proxy capability) [I0]
+    Sparkle-->>Conductor: initialize response (accepts proxy capability) [I0]
     
-    Note over Fiedler: Verifies Sparkle accepted proxy.<br/>If not, would fail with error.
+    Note over Conductor: Verifies Sparkle accepted proxy.<br/>If not, would fail with error.
     
-    Fiedler-->>Editor: initialize response [I0]
+    Conductor-->>Editor: initialize response [I0]
 ```
 
 Key points:
-1. **Fiedler spawns ALL components at startup** based on command-line args
-2. **Sequential initialization**: Fiedler → Component1 → Component2 → ... → Agent
+1. **Conductor spawns ALL components at startup** based on command-line args
+2. **Sequential initialization**: Conductor → Component1 → Component2 → ... → Agent
 3. **Proxy capability handshake**:
-   - Fiedler **offers** `proxy: true` to non-last components (in InitializeRequest `_meta`)
+   - Conductor **offers** `proxy: true` to non-last components (in InitializeRequest `_meta`)
    - Components **must accept** by responding with `proxy: true` (in InitializeResponse `_meta`)
    - Last component (agent) is NOT offered proxy capability
-   - Fiedler **verifies** acceptance and fails initialization if missing
+   - Conductor **verifies** acceptance and fails initialization if missing
 4. **Components use `_proxy/successor/request`** to initialize their successors
 5. **Capabilities flow back up the chain**: Each component sees successor's capabilities before responding
 6. **Message IDs**: Preserved from editor (I0), new IDs for proxy messages (I1, I2, ...)
@@ -158,7 +156,7 @@ Key points:
 ### Core Types
 
 ```rust
-struct Fiedler {
+struct Conductor {
     /// All components in the chain (spawned at startup)
     components: Vec<ComponentProcess>,
 }
@@ -174,7 +172,7 @@ struct ComponentProcess {
 
 ### Message Flow
 
-Fiedler manages message routing between editor and all components:
+Conductor manages message routing between editor and all components:
 
 **Startup:**
 1. Parse command-line args to get component list: `["sparkle-acp", "agent-acp"]`
@@ -183,7 +181,7 @@ Fiedler manages message routing between editor and all components:
 
 **Message routing:**
 
-1. **Editor → Fiedler messages** (from editor's stdin):
+1. **Editor → Conductor messages** (from editor's stdin):
    - Forward to **first component** (index 0)
    - Preserve message ID
    - Special case for `acp/initialize`: Add `proxy: true` capability before forwarding
@@ -209,7 +207,7 @@ For MVP, use a threaded model with message multiplexing:
 - **Component reader threads**: One thread per component reading stdout, forwards to appropriate destination
 - **Error threads**: One thread per component reading stderr, logs errors
 
-Fiedler needs to track message IDs to route responses correctly:
+Conductor needs to track message IDs to route responses correctly:
 - When forwarding editor message to Component1: Track `(message_id → editor)`
 - When forwarding `_proxy/successor/request`: Track `(message_id → component_index)`
 
@@ -221,14 +219,14 @@ Later optimization: async I/O with tokio for better performance.
 
 If any component process exits or crashes:
 1. Log error to stderr
-2. Shut down entire Fiedler process
+2. Shut down entire Conductor process
 3. Exit with non-zero status
 
 The editor will see the ACP connection close and can handle appropriately.
 
 ### Invalid Messages
 
-If Fiedler receives malformed JSON-RPC:
+If Conductor receives malformed JSON-RPC:
 - Log to stderr
 - Continue processing (don't crash the chain)
 - May result in downstream errors
@@ -297,16 +295,16 @@ If component fails to initialize:
 - Malformed message handling
 
 ### End-to-End Tests
-- Real editor + Fiedler + test components
+- Real editor + Conductor + test components
 - Sparkle + Claude Code integration
 - Performance benchmarks
 
 ## Open Questions
 
 1. **Component discovery**: How do we find component binaries? PATH? Configuration file?
-2. **Configuration**: Should Fiedler support a config file for default chains?
+2. **Configuration**: Should Conductor support a config file for default chains?
 3. **Logging**: Structured logging format? Integration with existing Symposium logging?
-4. **Metrics**: Should Fiedler expose metrics (message counts, latency)?
+4. **Metrics**: Should Conductor expose metrics (message counts, latency)?
 5. **Security**: Do we need to validate/sandbox component processes?
 
 ## Related Documentation
