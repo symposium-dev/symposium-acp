@@ -26,6 +26,7 @@ This repository contains three core crates:
 - **[`sacp`](./src/sacp/)** - Core protocol types and traits for building clients and agents
 - **[`sacp-proxy`](./src/sacp-proxy/)** - Framework for building proxy components
 - **[`sacp-conductor`](./src/sacp-conductor/)** - Binary that orchestrates proxy chains
+- **[`elizacp`](./src/elizacp/)** - Example ACP agent implementing the classic Eliza chatbot (useful for testing)
 
 ## Documentation
 

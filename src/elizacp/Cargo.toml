@@ -1,0 +1,34 @@
+[package]
+name = "elizacp"
+version = "0.1.0"
+edition = "2024"
+description = "Classic Eliza chatbot as an ACP agent for testing"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/agent-client-protocol/symposium-acp"
+keywords = ["acp", "agent", "eliza", "testing"]
+categories = ["development-tools"]
+authors = ["Niko Matsakis <niko@alum.mit.edu>"]
+readme = "README.md"
+
+[[bin]]
+name = "elizacp"
+path = "src/main.rs"
+
+[dependencies]
+sacp = { version = "0.1.0", path = "../sacp" }
+agent-client-protocol-schema.workspace = true
+anyhow.workspace = true
+clap.workspace = true
+futures.workspace = true
+rand = "0.8"
+regex = "1.10"
+serde.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+tokio-util.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+uuid.workspace = true
+
+[dev-dependencies]
+expect-test.workspace = true
