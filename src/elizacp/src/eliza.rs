@@ -97,7 +97,7 @@ impl Eliza {
 
         // Medium priority patterns with capture groups
         self.add_pattern(
-            r"(?i).*\bi am (.*)",
+            r"(?i).*\bi am ([\w\s]+)",
             vec![
                 "How long have you been {}?",
                 "Do you believe it is normal to be {}?",
@@ -107,7 +107,7 @@ impl Eliza {
         );
 
         self.add_pattern(
-            r"(?i).*\bi feel (.*)",
+            r"(?i).*\bi feel ([\w\s]+)",
             vec![
                 "Do you often feel {}?",
                 "What makes you feel {}?",
@@ -117,7 +117,7 @@ impl Eliza {
         );
 
         self.add_pattern(
-            r"(?i).*\bi (want|need) (.*)",
+            r"(?i).*\bi (want|need) ([\w\s]+)",
             vec![
                 "Why do you {} {}?",
                 "Would it really help you to {} {}?",
@@ -127,7 +127,7 @@ impl Eliza {
         );
 
         self.add_pattern(
-            r"(?i).*\bwhy don'?t you (.*)",
+            r"(?i).*\bwhy don'?t you ([\w\s]+)",
             vec![
                 "Do you really think I don't {}?",
                 "Perhaps eventually I will {}.",
@@ -137,7 +137,7 @@ impl Eliza {
         );
 
         self.add_pattern(
-            r"(?i).*\bwhy can'?t i (.*)",
+            r"(?i).*\bwhy can'?t i ([\w\s]+)",
             vec![
                 "Do you think you should be able to {}?",
                 "If you could {}, what would you do?",
@@ -307,6 +307,15 @@ mod tests {
     }
 
     #[test]
+    fn test_punctuation_handling() {
+        let mut eliza = Eliza::new();
+
+        // Trailing punctuation should be excluded from captures
+        let response = eliza.respond("I feel sad.");
+        expect![[r#"What makes you feel sad?"#]].assert_eq(&response);
+    }
+
+    #[test]
     fn test_deterministic_responses() {
         // Two Eliza instances with the same seed should produce identical responses
         let mut eliza1 = Eliza::with_seed(42);
@@ -334,7 +343,7 @@ mod tests {
         let mut eliza3 = Eliza::with_seed(123);
         let response_different = eliza3.respond("Hello");
 
-        // Reset eliza1 to test against same input
+        // Reset eliza1 to test again with same seed
         let mut eliza1 = Eliza::with_seed(42);
         let response_same = eliza1.respond("Hello");
 
