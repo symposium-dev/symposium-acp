@@ -7,6 +7,8 @@ license = "MIT OR Apache-2.0"
 repository = "https://github.com/agent-client-protocol/symposium-acp"
 keywords = ["acp", "agent", "eliza", "testing"]
 categories = ["development-tools"]
+authors = ["Niko Matsakis <niko@alum.mit.edu>"]
+readme = "README.md"
 
 [[bin]]
 name = "elizacp"
