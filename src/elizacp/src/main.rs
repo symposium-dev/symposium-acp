@@ -4,9 +4,10 @@ use anyhow::Result;
 use clap::Parser;
 use eliza::Eliza;
 use sacp::{
-    AgentCapabilities, ContentBlock, InitializeRequest, InitializeResponse, JrConnection,
-    LoadSessionRequest, LoadSessionResponse, NewSessionRequest, NewSessionResponse, PromptRequest,
-    PromptResponse, SessionId, StopReason, TextContent, TypeRequest, UntypedMessage,
+    AgentCapabilities, ContentBlock, ContentChunk, InitializeRequest, InitializeResponse,
+    JrConnection, LoadSessionRequest, LoadSessionResponse, NewSessionRequest, NewSessionResponse,
+    PromptRequest, PromptResponse, SessionId, SessionNotification, SessionUpdate, StopReason,
+    TextContent,
 };
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -20,6 +21,66 @@ struct Args {
     /// Enable debug logging
     #[arg(short, long)]
     debug: bool,
+}
+
+#[tokio::main]
+async fn main() -> Result<()> {
+    let args = Args::parse();
+
+    // Initialize tracing to stderr
+    let env_filter = if args.debug {
+        EnvFilter::new("elizacp=debug")
+    } else {
+        EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("elizacp=info"))
+    };
+
+    tracing_subscriber::registry()
+        .with(env_filter)
+        .with(
+            tracing_subscriber::fmt::layer()
+                .with_target(true)
+                .with_writer(std::io::stderr),
+        )
+        .init();
+
+    tracing::info!("Elizacp starting");
+
+    let agent = ElizaAgent::new();
+
+    // Set up JSON-RPC connection over stdio
+    JrConnection::new(stdout().compat_write(), stdin().compat())
+        .name("elizacp")
+        .on_receive_request({
+            async |initialize: InitializeRequest, request_cx| {
+                tracing::debug!("Received initialize request");
+
+                request_cx.respond(InitializeResponse {
+                    protocol_version: initialize.protocol_version,
+                    agent_capabilities: AgentCapabilities {
+                        load_session: Default::default(),
+                        prompt_capabilities: Default::default(),
+                        mcp_capabilities: Default::default(),
+                        meta: Default::default(),
+                    },
+                    auth_methods: Default::default(),
+                    agent_info: Default::default(),
+                    meta: Default::default(),
+                })
+            }
+        })
+        .on_receive_request(async |request: NewSessionRequest, request_cx| {
+            agent.handle_new_session(request, request_cx).await
+        })
+        .on_receive_request(async |request: LoadSessionRequest, request_cx| {
+            agent.handle_load_session(request, request_cx).await
+        })
+        .on_receive_request(async |request: PromptRequest, request_cx| {
+            agent.handle_prompt_request(request, request_cx).await
+        })
+        .serve()
+        .await?;
+
+    Ok(())
 }
 
 /// Shared state across all sessions
@@ -53,171 +114,88 @@ impl ElizaAgent {
         sessions.remove(session_id);
         tracing::info!("Ended session: {}", session_id);
     }
-}
 
-#[tokio::main]
-async fn main() -> Result<()> {
-    let args = Args::parse();
+    async fn handle_new_session(
+        &self,
+        request: NewSessionRequest,
+        request_cx: sacp::JrRequestCx<NewSessionResponse>,
+    ) -> Result<(), sacp::Error> {
+        tracing::debug!("New session request with cwd: {:?}", request.cwd);
 
-    // Initialize tracing to stderr
-    let env_filter = if args.debug {
-        EnvFilter::new("elizacp=debug")
-    } else {
-        EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("elizacp=info"))
-    };
+        // Generate a new session ID
+        let session_id = SessionId(Arc::from(uuid::Uuid::new_v4().to_string()));
+        self.create_session(&session_id);
 
-    tracing_subscriber::registry()
-        .with(env_filter)
-        .with(
-            tracing_subscriber::fmt::layer()
-                .with_target(true)
-                .with_writer(std::io::stderr),
-        )
-        .init();
+        let response = NewSessionResponse {
+            session_id,
+            modes: None,
+            meta: None,
+        };
 
-    tracing::info!("Elizacp starting");
+        request_cx.respond(response)
+    }
 
-    let agent = ElizaAgent::new();
+    async fn handle_load_session(
+        &self,
+        request: LoadSessionRequest,
+        request_cx: sacp::JrRequestCx<LoadSessionResponse>,
+    ) -> Result<(), sacp::Error> {
+        tracing::debug!("Load session request: {:?}", request.session_id);
 
-    // Set up JSON-RPC connection over stdio
-    JrConnection::new(stdout().compat_write(), stdin().compat())
-        .name("elizacp")
-        .on_receive_request({
-            async move |initialize: InitializeRequest, request_cx| {
-                tracing::debug!("Received initialize request");
+        // For Eliza, we just create a fresh session
+        self.create_session(&request.session_id);
 
-                request_cx.respond(InitializeResponse {
-                    protocol_version: initialize.protocol_version,
-                    agent_capabilities: AgentCapabilities {
-                        load_session: Default::default(),
-                        prompt_capabilities: Default::default(),
-                        mcp_capabilities: Default::default(),
-                        meta: Default::default(),
-                    },
-                    auth_methods: Default::default(),
-                    agent_info: Default::default(),
-                    meta: Default::default(),
-                })
-            }
+        let response = LoadSessionResponse {
+            modes: None,
+            meta: None,
+        };
+
+        request_cx.respond(response)
+    }
+
+    async fn handle_prompt_request(
+        &self,
+        request: PromptRequest,
+        request_cx: sacp::JrRequestCx<PromptResponse>,
+    ) -> Result<(), sacp::Error> {
+        let session_id = &request.session_id;
+
+        tracing::debug!(
+            "Received prompt in session {}: {} content blocks",
+            session_id,
+            request.prompt.len()
+        );
+
+        // Extract text from the prompt
+        let input_text = extract_text_from_prompt(&request.prompt);
+
+        // Get Eliza's response
+        let response_text = self
+            .get_response(session_id, &input_text)
+            .unwrap_or_else(|| {
+                format!(
+                    "Error: Session {} not found. Please start a new session.",
+                    session_id
+                )
+            });
+
+        tracing::debug!("Eliza response: {}", response_text);
+
+        request_cx.send_notification(SessionNotification {
+            session_id: session_id.clone(),
+            update: SessionUpdate::AgentMessageChunk(ContentChunk {
+                content: response_text.into(),
+                meta: None,
+            }),
+            meta: None,
+        })?;
+
+        // Complete the request
+        request_cx.respond(PromptResponse {
+            stop_reason: StopReason::EndTurn,
+            meta: None,
         })
-        .on_receive_request({
-            let agent = agent.clone();
-            async move |request: UntypedMessage, request_cx| {
-                TypeRequest::new(request, request_cx)
-                    .handle_if::<NewSessionRequest>({
-                        let agent = agent.clone();
-                        async move |request, request_cx| {
-                            handle_new_session(request, request_cx, agent).await
-                        }
-                    })
-                    .await
-                    .handle_if::<LoadSessionRequest>({
-                        let agent = agent.clone();
-                        async move |request, request_cx| {
-                            handle_load_session(request, request_cx, agent).await
-                        }
-                    })
-                    .await
-                    .handle_if::<PromptRequest>({
-                        let agent = agent.clone();
-                        async move |request, request_cx| {
-                            handle_prompt_request(request, request_cx, agent).await
-                        }
-                    })
-                    .await
-                    .otherwise(async move |_msg, request_cx| {
-                        request_cx.respond_with_error(sacp::Error::method_not_found())
-                    })
-                    .await
-            }
-        })
-        .serve()
-        .await?;
-
-    Ok(())
-}
-
-async fn handle_new_session(
-    request: NewSessionRequest,
-    request_cx: sacp::JrRequestCx<NewSessionResponse>,
-    agent: ElizaAgent,
-) -> Result<(), sacp::Error> {
-    tracing::debug!("New session request with cwd: {:?}", request.cwd);
-
-    // Generate a new session ID
-    let session_id = SessionId(Arc::from(uuid::Uuid::new_v4().to_string()));
-    agent.create_session(&session_id);
-
-    let response = NewSessionResponse {
-        session_id,
-        modes: None,
-        meta: None,
-    };
-
-    request_cx.respond(response)
-}
-
-async fn handle_load_session(
-    request: LoadSessionRequest,
-    request_cx: sacp::JrRequestCx<LoadSessionResponse>,
-    agent: ElizaAgent,
-) -> Result<(), sacp::Error> {
-    tracing::debug!("Load session request: {:?}", request.session_id);
-
-    // For Eliza, we just create a fresh session
-    agent.create_session(&request.session_id);
-
-    let response = LoadSessionResponse {
-        modes: None,
-        meta: None,
-    };
-
-    request_cx.respond(response)
-}
-
-async fn handle_prompt_request(
-    request: PromptRequest,
-    request_cx: sacp::JrRequestCx<PromptResponse>,
-    agent: ElizaAgent,
-) -> Result<(), sacp::Error> {
-    let session_id = &request.session_id;
-
-    tracing::debug!(
-        "Received prompt in session {}: {} content blocks",
-        session_id,
-        request.prompt.len()
-    );
-
-    // Extract text from the prompt
-    let input_text = extract_text_from_prompt(&request.prompt);
-
-    // Get Eliza's response
-    let response_text = agent
-        .get_response(session_id, &input_text)
-        .unwrap_or_else(|| {
-            format!(
-                "Error: Session {} not found. Please start a new session.",
-                session_id
-            )
-        });
-
-    tracing::debug!("Eliza response: {}", response_text);
-
-    // Send response back
-    let response = PromptResponse {
-        stop_reason: StopReason::EndTurn,
-        meta: None,
-    };
-
-    // First send the response to complete the request
-    request_cx.respond(response)?;
-
-    // Then send the actual text content as a session update notification
-    // TODO: This needs to be sent as a session/update notification
-    // For now, we're just completing the prompt response
-    // The agent should stream content via SessionNotification messages
-
-    Ok(())
+    }
 }
 
 /// Extract text content from prompt blocks
