@@ -273,16 +273,17 @@ impl Default for Eliza {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use expect_test::expect;
 
     #[test]
     fn test_basic_responses() {
         let mut eliza = Eliza::new();
 
         let response = eliza.respond("Hello");
-        assert!(!response.is_empty());
+        expect![[r#"Hi there. What brings you here today?"#]].assert_eq(&response);
 
         let response = eliza.respond("I am sad");
-        assert!(!response.is_empty());
+        expect!["Do you believe it is normal to be sad?"].assert_eq(&response);
     }
 
     #[test]
@@ -290,10 +291,10 @@ mod tests {
         let eliza = Eliza::new();
 
         let reflected = eliza.reflect("I am happy");
-        assert!(reflected.contains("you are happy"));
+        expect![[r#"you are happy"#]].assert_eq(&reflected);
 
         let reflected = eliza.reflect("my mother");
-        assert!(reflected.contains("your mother"));
+        expect![[r#"your mother"#]].assert_eq(&reflected);
     }
 
     #[test]
@@ -302,11 +303,7 @@ mod tests {
 
         // "sorry" should match high priority pattern
         let response = eliza.respond("I am sorry");
-        assert!(
-            response.contains("apologize")
-                || response.contains("Apologies")
-                || response.contains("feelings")
-        );
+        expect![[r#"Apologies are not necessary."#]].assert_eq(&response);
     }
 
     #[test]

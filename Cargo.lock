@@ -294,6 +294,7 @@ dependencies = [
  "agent-client-protocol-schema",
  "anyhow",
  "clap",
+ "expect-test",
  "futures",
  "rand",
  "regex",

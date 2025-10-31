@@ -29,3 +29,4 @@ tracing-subscriber.workspace = true
 uuid.workspace = true
 
 [dev-dependencies]
+expect-test.workspace = true
