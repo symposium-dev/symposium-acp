@@ -243,7 +243,7 @@ impl Eliza {
         for pattern in &sorted_patterns {
             if let Some(captures) = pattern.pattern.captures(input) {
                 // Choose a response using the seeded RNG
-                let response_index = self.rng.gen_range(0..pattern.responses.len());
+                let response_index = self.rng.random_range(0..pattern.responses.len());
                 let response_template = &pattern.responses[response_index];
 
                 // Fill in captures with reflection
@@ -280,7 +280,7 @@ mod tests {
         let mut eliza = Eliza::new();
 
         let response = eliza.respond("Hello");
-        expect![[r#"Hi there. What brings you here today?"#]].assert_eq(&response);
+        expect!["Hello. How are you feeling today?"].assert_eq(&response);
 
         let response = eliza.respond("I am sad");
         expect!["Do you believe it is normal to be sad?"].assert_eq(&response);
@@ -303,7 +303,7 @@ mod tests {
 
         // "sorry" should match high priority pattern
         let response = eliza.respond("I am sorry");
-        expect![[r#"Apologies are not necessary."#]].assert_eq(&response);
+        expect!["Please don't apologize."].assert_eq(&response);
     }
 
     #[test]
@@ -312,7 +312,7 @@ mod tests {
 
         // Trailing punctuation should be excluded from captures
         let response = eliza.respond("I feel sad.");
-        expect![[r#"What makes you feel sad?"#]].assert_eq(&response);
+        expect!["Do you often feel sad?"].assert_eq(&response);
     }
 
     #[test]
