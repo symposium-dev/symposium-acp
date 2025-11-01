@@ -54,21 +54,21 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Parse the agent configuration
     let agent = AcpAgent::from_str(agent_config)?;
 
-    println!("🚀 Spawning agent...");
+    eprintln!("🚀 Spawning agent...");
     let (connection, _cleanup) = agent.spawn()?;
 
-    println!("🔗 Connecting to agent...");
+    eprintln!("🔗 Connecting to agent...");
 
     // Run the client
     connection
         .on_receive_notification(async move |notification: SessionNotification, _cx| {
-            // Print all session updates
-            println!("📢 Session update: {:?}", notification.update);
+            // Print session updates to stdout (so 2>/dev/null shows only agent output)
+            println!("{:?}", notification.update);
             Ok(())
         })
         .on_receive_request(async move |request: RequestPermissionRequest, request_cx| {
             // YOLO: Auto-approve all permission requests by selecting the first option
-            println!("✅ Auto-approving permission request: {:?}", request);
+            eprintln!("✅ Auto-approving permission request: {:?}", request);
             let option_id = request.options.first().map(|opt| opt.id.clone());
             match option_id {
                 Some(id) => request_cx.respond(RequestPermissionResponse {
@@ -76,7 +76,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     meta: None,
                 }),
                 None => {
-                    println!("⚠️ No options provided in permission request, cancelling");
+                    eprintln!("⚠️ No options provided in permission request, cancelling");
                     request_cx.respond(RequestPermissionResponse {
                         outcome: RequestPermissionOutcome::Cancelled,
                         meta: None,
@@ -86,7 +86,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         })
         .with_client(|cx: sacp::JrConnectionCx| async move {
             // Initialize the agent
-            println!("🤝 Initializing agent...");
+            eprintln!("🤝 Initializing agent...");
             let init_response = cx
                 .send_request(InitializeRequest {
                     protocol_version: PROTOCOL_VERSION,
@@ -97,10 +97,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 .block_task()
                 .await?;
 
-            println!("✓ Agent initialized: {:?}", init_response.agent_info);
+            eprintln!("✓ Agent initialized: {:?}", init_response.agent_info);
 
             // Create a new session
-            println!("📝 Creating new session...");
+            eprintln!("📝 Creating new session...");
             let new_session_response = cx
                 .send_request(NewSessionRequest {
                     mcp_servers: vec![],
@@ -111,10 +111,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 .await?;
 
             let session_id = new_session_response.session_id;
-            println!("✓ Session created: {}", session_id);
+            eprintln!("✓ Session created: {}", session_id);
 
             // Send the prompt
-            println!("\n💬 Sending prompt: \"{}\"", prompt);
+            eprintln!("💬 Sending prompt: \"{}\"", prompt);
             let prompt_response = cx
                 .send_request(PromptRequest {
                     session_id: session_id.clone(),
@@ -128,8 +128,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 .block_task()
                 .await?;
 
-            println!("\n✅ Agent completed!");
-            println!("Stop reason: {:?}", prompt_response.stop_reason);
+            eprintln!("✅ Agent completed!");
+            eprintln!("Stop reason: {:?}", prompt_response.stop_reason);
 
             Ok(())
         })
