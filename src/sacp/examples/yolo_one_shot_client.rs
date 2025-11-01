@@ -20,12 +20,12 @@
 //! cargo run --example yolo_one_shot_client -- "Hello!" '{"type":"stdio","name":"my-agent","command":"python","args":["agent.py"],"env":[]}'
 //! ```
 
-use sacp::acp_agent::AcpAgent;
 use sacp::{
     ContentBlock, InitializeRequest, NewSessionRequest, PromptRequest, RequestPermissionOutcome,
     RequestPermissionRequest, RequestPermissionResponse, SessionNotification, TextContent,
     VERSION as PROTOCOL_VERSION,
 };
+use sacp_tokio::{AcpAgent, to_agent};
 use std::path::PathBuf;
 use std::str::FromStr;
 
@@ -54,13 +54,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Parse the agent configuration
     let agent = AcpAgent::from_str(agent_config)?;
 
-    eprintln!("🚀 Spawning agent...");
-    let (connection, _cleanup) = agent.spawn()?;
-
-    eprintln!("🔗 Connecting to agent...");
+    eprintln!("🚀 Spawning agent and connecting...");
 
     // Run the client
-    connection
+    to_agent(agent)?
         .on_receive_notification(async move |notification: SessionNotification, _cx| {
             // Print session updates to stdout (so 2>/dev/null shows only agent output)
             println!("{:?}", notification.update);

@@ -1,16 +1,13 @@
 //! Utilities for connecting to ACP agents and proxies.
 //!
-//! This module provides [`AcpAgent`], a convenient wrapper around [`McpServer`]
+//! This module provides [`AcpAgent`], a convenient wrapper around [`sacp::McpServer`]
 //! that can be parsed from either a command string or JSON configuration.
 
 use std::path::PathBuf;
 use std::str::FromStr;
 
-use futures::AsyncRead;
-use futures::AsyncWrite;
 use serde::{Deserialize, Serialize};
 use tokio::process::Child;
-use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
 
 /// Configuration for connecting to an ACP agent or proxy.
 ///
@@ -21,14 +18,14 @@ use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
 ///
 /// Parse from a command string:
 /// ```
-/// # use sacp::acp_agent::AcpAgent;
+/// # use sacp_tokio::AcpAgent;
 /// # use std::str::FromStr;
 /// let agent = AcpAgent::from_str("python my_agent.py --verbose").unwrap();
 /// ```
 ///
 /// Parse from JSON:
 /// ```
-/// # use sacp::acp_agent::AcpAgent;
+/// # use sacp_tokio::AcpAgent;
 /// # use std::str::FromStr;
 /// let agent = AcpAgent::from_str(r#"{"type": "stdio", "name": "my-agent", "command": "python", "args": ["my_agent.py"], "env": []}"#).unwrap();
 /// ```
@@ -36,61 +33,39 @@ use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
 #[serde(transparent)]
 pub struct AcpAgent {
     #[serde(flatten)]
-    server: crate::McpServer,
+    server: sacp::McpServer,
 }
 
 impl AcpAgent {
-    /// Create a new `AcpAgent` from an [`McpServer`] configuration.
-    pub fn new(server: crate::McpServer) -> Self {
+    /// Create a new `AcpAgent` from an [`sacp::McpServer`] configuration.
+    pub fn new(server: sacp::McpServer) -> Self {
         Self { server }
     }
 
-    /// Get the underlying [`McpServer`] configuration.
-    pub fn server(&self) -> &crate::McpServer {
+    /// Get the underlying [`sacp::McpServer`] configuration.
+    pub fn server(&self) -> &sacp::McpServer {
         &self.server
     }
 
-    /// Convert into the underlying [`McpServer`] configuration.
-    pub fn into_server(self) -> crate::McpServer {
+    /// Convert into the underlying [`sacp::McpServer`] configuration.
+    pub fn into_server(self) -> sacp::McpServer {
         self.server
     }
 
-    /// Spawn the agent/proxy and create a [`JrConnection`] to communicate with it.
-    ///
-    /// Returns the connection and a handle to clean up the spawned process.
-    ///
-    /// # Limitations
-    ///
-    /// Currently only supports `McpServer::Stdio` variant. Other variants (HTTP, SSE)
-    /// will return an error.
-    ///
-    /// # Example
-    ///
-    /// ```no_run
-    /// # use sacp::acp_agent::AcpAgent;
-    /// # use std::str::FromStr;
-    /// # async fn example() -> Result<(), sacp::Error> {
-    /// let agent = AcpAgent::from_str("python agent.py")?;
-    /// let (connection, _cleanup) = agent.spawn()?;
-    /// // Use connection...
-    /// # Ok(())
-    /// # }
-    /// ```
-    pub fn spawn(
+    /// Internal method to spawn the process and get stdio streams.
+    /// Used by JrConnectionExt::to_agent.
+    pub(crate) fn spawn_process(
         &self,
     ) -> Result<
         (
-            crate::JrConnection<
-                impl AsyncWrite + Send + 'static,
-                impl AsyncRead + Send + 'static,
-                crate::NullHandler,
-            >,
-            SpawnedProcess,
+            tokio::process::ChildStdin,
+            tokio::process::ChildStdout,
+            Child,
         ),
-        crate::Error,
+        sacp::Error,
     > {
         match &self.server {
-            crate::McpServer::Stdio {
+            sacp::McpServer::Stdio {
                 command,
                 args,
                 env,
@@ -104,53 +79,39 @@ impl AcpAgent {
                 cmd.stdin(std::process::Stdio::piped())
                     .stdout(std::process::Stdio::piped());
 
-                let mut child = cmd.spawn().map_err(crate::Error::into_internal_error)?;
+                let mut child = cmd.spawn().map_err(sacp::Error::into_internal_error)?;
 
                 let child_stdin = child
                     .stdin
                     .take()
-                    .ok_or_else(|| crate::util::internal_error("Failed to open stdin"))?;
+                    .ok_or_else(|| sacp::util::internal_error("Failed to open stdin"))?;
                 let child_stdout = child
                     .stdout
                     .take()
-                    .ok_or_else(|| crate::util::internal_error("Failed to open stdout"))?;
+                    .ok_or_else(|| sacp::util::internal_error("Failed to open stdout"))?;
 
-                let connection =
-                    crate::JrConnection::new(child_stdin.compat_write(), child_stdout.compat());
-
-                Ok((connection, SpawnedProcess { child }))
+                Ok((child_stdin, child_stdout, child))
             }
-            crate::McpServer::Http { .. } => Err(crate::util::internal_error(
-                "HTTP transport not yet supported by AcpAgent::spawn",
+            sacp::McpServer::Http { .. } => Err(sacp::util::internal_error(
+                "HTTP transport not yet supported by AcpAgent",
             )),
-            crate::McpServer::Sse { .. } => Err(crate::util::internal_error(
-                "SSE transport not yet supported by AcpAgent::spawn",
+            sacp::McpServer::Sse { .. } => Err(sacp::util::internal_error(
+                "SSE transport not yet supported by AcpAgent",
             )),
         }
     }
 }
 
-/// Handle to a spawned process that will be killed when dropped.
-pub struct SpawnedProcess {
-    child: Child,
-}
-
-impl Drop for SpawnedProcess {
-    fn drop(&mut self) {
-        let _: Result<_, _> = self.child.start_kill();
-    }
-}
-
 impl FromStr for AcpAgent {
-    type Err = crate::Error;
+    type Err = sacp::Error;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         let trimmed = s.trim();
 
         // If it starts with '{', try to parse as JSON
         if trimmed.starts_with('{') {
-            let server: crate::McpServer = serde_json::from_str(trimmed)
-                .map_err(|e| crate::util::internal_error(format!("Failed to parse JSON: {}", e)))?;
+            let server: sacp::McpServer = serde_json::from_str(trimmed)
+                .map_err(|e| sacp::util::internal_error(format!("Failed to parse JSON: {}", e)))?;
             return Ok(Self { server });
         }
 
@@ -159,15 +120,13 @@ impl FromStr for AcpAgent {
     }
 }
 
-fn parse_command_string(s: &str) -> Result<AcpAgent, crate::Error> {
+fn parse_command_string(s: &str) -> Result<AcpAgent, sacp::Error> {
     // Split the command string into words, respecting quotes
     let parts = shell_words::split(s)
-        .map_err(|e| crate::util::internal_error(format!("Failed to parse command: {}", e)))?;
+        .map_err(|e| sacp::util::internal_error(format!("Failed to parse command: {}", e)))?;
 
     if parts.is_empty() {
-        return Err(crate::util::internal_error(
-            "Command string cannot be empty",
-        ));
+        return Err(sacp::util::internal_error("Command string cannot be empty"));
     }
 
     let command = PathBuf::from(&parts[0]);
@@ -181,7 +140,7 @@ fn parse_command_string(s: &str) -> Result<AcpAgent, crate::Error> {
         .to_string();
 
     Ok(AcpAgent {
-        server: crate::McpServer::Stdio {
+        server: sacp::McpServer::Stdio {
             name,
             command,
             args,
@@ -198,7 +157,7 @@ mod tests {
     fn test_parse_simple_command() {
         let agent = AcpAgent::from_str("python agent.py").unwrap();
         match agent.server {
-            crate::McpServer::Stdio {
+            sacp::McpServer::Stdio {
                 name,
                 command,
                 args,
@@ -217,7 +176,7 @@ mod tests {
     fn test_parse_command_with_args() {
         let agent = AcpAgent::from_str("node server.js --port 8080 --verbose").unwrap();
         match agent.server {
-            crate::McpServer::Stdio {
+            sacp::McpServer::Stdio {
                 name,
                 command,
                 args,
@@ -236,7 +195,7 @@ mod tests {
     fn test_parse_command_with_quotes() {
         let agent = AcpAgent::from_str(r#"python "my agent.py" --name "Test Agent""#).unwrap();
         match agent.server {
-            crate::McpServer::Stdio {
+            sacp::McpServer::Stdio {
                 name,
                 command,
                 args,
@@ -262,7 +221,7 @@ mod tests {
         }"#;
         let agent = AcpAgent::from_str(json).unwrap();
         match agent.server {
-            crate::McpServer::Stdio {
+            sacp::McpServer::Stdio {
                 name,
                 command,
                 args,
@@ -287,7 +246,7 @@ mod tests {
         }"#;
         let agent = AcpAgent::from_str(json).unwrap();
         match agent.server {
-            crate::McpServer::Http { name, url, headers } => {
+            sacp::McpServer::Http { name, url, headers } => {
                 assert_eq!(name, "remote-agent");
                 assert_eq!(url, "https://example.com/agent");
                 assert_eq!(headers, vec![]);

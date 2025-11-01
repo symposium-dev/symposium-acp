@@ -3,6 +3,7 @@ members = [
     "src/sacp-proxy",
     "src/sacp-conductor",
     "src/sacp",
+    "src/sacp-tokio",
     "src/elizacp",
 ]
 resolver = "2"
@@ -44,7 +45,6 @@ chrono = "0.4"
 futures = "0.3.31"
 fxhash = "0.2.1"
 jsonrpcmsg = "0.1.2"
-shell-words = "1.1"
 
 # Testing
 expect-test = "1.5"

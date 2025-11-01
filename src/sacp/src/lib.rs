@@ -5,7 +5,6 @@
 //! like tool injection, context management, and protocol adaptation.
 
 mod acp;
-pub mod acp_agent;
 mod capabilities;
 mod jsonrpc;
 mod typed;

@@ -858,9 +858,9 @@ dependencies = [
  "expect-test",
  "futures",
  "jsonrpcmsg",
+ "sacp-tokio",
  "serde",
  "serde_json",
- "shell-words",
  "thiserror",
  "tokio",
  "tokio-util",
@@ -911,6 +911,20 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "uuid",
+]
+
+[[package]]
+name = "sacp-tokio"
+version = "0.1.1"
+dependencies = [
+ "expect-test",
+ "futures",
+ "sacp",
+ "serde",
+ "serde_json",
+ "shell-words",
+ "tokio",
+ "tokio-util",
 ]
 
 [[package]]
