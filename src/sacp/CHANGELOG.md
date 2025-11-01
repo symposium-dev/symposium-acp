@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.2](https://github.com/symposium-dev/symposium-acp/compare/sacp-v0.1.1...sacp-v0.1.2) - 2025-11-01
+
+### Other
+
+- update Cargo.toml dependencies
+
 ## [0.1.1](https://github.com/symposium-dev/symposium-acp/compare/sacp-v0.1.0...sacp-v0.1.1) - 2025-10-30
 
 ### Added
