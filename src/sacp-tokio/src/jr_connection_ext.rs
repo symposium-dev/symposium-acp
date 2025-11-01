@@ -29,46 +29,69 @@ impl Drop for ChildHolder {
     }
 }
 
-/// Spawn an agent and create a connection to it.
-///
-/// The child process is managed automatically - a background task holds it alive,
-/// and when the connection is dropped, the process will be killed.
-///
-/// # Example
-///
-/// ```no_run
-/// # use sacp_tokio::{AcpAgent, to_agent};
-/// # use std::str::FromStr;
-/// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
-/// let agent = AcpAgent::from_str("python my_agent.py")?;
-///
-/// to_agent(agent)?
-///     .on_receive_notification(|notif: sacp::SessionNotification, _cx| async move {
-///         println!("{:?}", notif);
-///         Ok(())
-///     })
-///     .with_client(|cx: sacp::JrConnectionCx| async move {
-///         // Use the connection...
-///         Ok(())
-///     })
-///     .await?;
-/// # Ok(())
-/// # }
-/// ```
-pub fn to_agent(
-    agent: AcpAgent,
-) -> Result<
-    JrConnection<
-        impl futures::AsyncWrite + Send + 'static,
-        impl futures::AsyncRead + Send + 'static,
+pub trait JrConnectionExt {
+    /// Spawn an agent and create a connection to it.
+    ///
+    /// The child process is managed automatically - a background task holds it alive,
+    /// and when the connection is dropped, the process will be killed.
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// # use sacp::JrConnection;
+    /// # use std::str::FromStr;
+    /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
+    /// # use sacp_tokio::AcpAgent;
+    /// use sacp_tokio::JrConnectionExt;
+    /// let agent = AcpAgent::from_str("python my_agent.py")?;
+    ///
+    /// JrConnection::to_agent(agent)?
+    ///     .on_receive_notification(|notif: sacp::SessionNotification, _cx| async move {
+    ///         println!("{:?}", notif);
+    ///         Ok(())
+    ///     })
+    ///     .with_client(|cx: sacp::JrConnectionCx| async move {
+    ///         // Use the connection...
+    ///         Ok(())
+    ///     })
+    ///     .await?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    fn to_agent(
+        agent: AcpAgent,
+    ) -> Result<
+        sacp::JrConnection<
+            impl futures::AsyncWrite + Send + 'static,
+            impl futures::AsyncRead + Send + 'static,
+            NullHandler,
+        >,
+        sacp::Error,
+    >;
+}
+
+impl JrConnectionExt
+    for JrConnection<
+        Pin<Box<dyn futures::AsyncWrite>>,
+        Pin<Box<dyn futures::AsyncRead>>,
         NullHandler,
-    >,
-    sacp::Error,
-> {
-    let (child_stdin, child_stdout, child) = agent.spawn_process()?;
+    >
+{
+    fn to_agent(
+        agent: AcpAgent,
+    ) -> Result<
+        JrConnection<
+            impl futures::AsyncWrite + Send + 'static,
+            impl futures::AsyncRead + Send + 'static,
+            NullHandler,
+        >,
+        sacp::Error,
+    > {
+        let (child_stdin, child_stdout, child) = agent.spawn_process()?;
 
-    let connection = JrConnection::new(child_stdin.compat_write(), child_stdout.compat())
-        .with_spawned(ChildHolder { _child: child });
+        let connection = sacp::JrConnection::new(child_stdin.compat_write(), child_stdout.compat())
+            .with_spawned(ChildHolder { _child: child });
 
-    Ok(connection)
+        Ok(connection)
+    }
 }

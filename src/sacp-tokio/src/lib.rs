@@ -8,4 +8,4 @@ mod acp_agent;
 mod jr_connection_ext;
 
 pub use acp_agent::AcpAgent;
-pub use jr_connection_ext::to_agent;
+pub use jr_connection_ext::JrConnectionExt;
