@@ -122,6 +122,54 @@ use crate::jsonrpc::actors::Task;
 ///     })
 /// ```
 ///
+/// # Event Loop and Concurrency
+///
+/// Understanding the event loop is critical for writing correct handlers.
+///
+/// ## The Event Loop
+///
+/// `JrConnection` runs all handler callbacks on a single async task - the event loop.
+/// While a handler is running, **the server cannot receive new messages**. This means
+/// any blocking or expensive work in your handlers will stall the entire connection.
+///
+/// To avoid blocking the event loop, use [`JrConnectionCx::spawn`] to offload serious
+/// work to concurrent tasks:
+///
+/// ```rust,ignore
+/// connection.on_receive_request(async |req: AnalyzeRequest, cx| {
+///     // Spawn expensive work to run concurrently
+///     cx.spawn(async move {
+///         let result = expensive_analysis(&req.data).await?;
+///         cx.send_notification(AnalysisComplete { result })?;
+///         Ok(())
+///     })?;
+///
+///     // Respond immediately without blocking
+///     cx.respond(AnalysisStarted { job_id: 42 })
+/// })
+/// ```
+///
+/// Note that the entire connection runs within one async task, so parallelism must be
+/// managed explicitly using [`spawn`](JrConnectionCx::spawn).
+///
+/// ## The Connection Context
+///
+/// Handler callbacks receive a context object (`cx`) for interacting with the connection:
+///
+/// * **For request handlers** - [`JrRequestCx<R>`] provides [`respond`](JrRequestCx::respond)
+///   to send the response, plus methods to send other messages
+/// * **For notification handlers** - [`JrConnectionCx`] provides methods to send messages
+///   and spawn tasks
+///
+/// Both context types support:
+/// * [`send_request`](JrConnectionCx::send_request) - Send requests to the other side
+/// * [`send_notification`](JrConnectionCx::send_notification) - Send notifications
+/// * [`spawn`](JrConnectionCx::spawn) - Run tasks concurrently without blocking the event loop
+///
+/// The [`JrResponse`] returned by `send_request` provides methods like
+/// [`await_when_result_received`](JrResponse::await_when_result_received) that help you
+/// avoid accidentally blocking the event loop while waiting for responses.
+///
 /// # Driving the Connection
 ///
 /// After adding handlers, you must drive the connection using one of two modes:
@@ -222,7 +270,7 @@ pub struct JrConnection<OB: AsyncWrite, IB: AsyncRead, H: JrHandler> {
 impl<OB: AsyncWrite, IB: AsyncRead> JrConnection<OB, IB, NullHandler> {
     /// Create a new JrConnection that will read and write from the given streams.
     /// This type follows a builder pattern; use other methods to configure and then invoke
-    /// [`Self:serve`] (to use as a server) or [`Self::with_client`] to use as a client.
+    /// [`Self::serve`] (to use as a server) or [`Self::with_client`] to use as a client.
     pub fn new(outgoing_bytes: OB, incoming_bytes: IB) -> Self {
         let (outgoing_tx, outgoing_rx) = mpsc::unbounded();
         let (new_task_tx, new_task_rx) = mpsc::unbounded();
@@ -427,7 +475,7 @@ impl<OB: AsyncWrite, IB: AsyncRead, H: JrHandler> JrConnection<OB, IB, H> {
         }
     }
 
-    /// Returns a [`JsonRpcCx`] that allows you to send requests over the connection
+    /// Returns a [`JrConnectionCx`] that allows you to send requests over the connection
     /// and receive responses.
     ///
     /// **Warning:** This method is provided for use during setup and construction.
@@ -616,7 +664,7 @@ enum OutgoingMessage {
     Error { error: crate::Error },
 }
 
-/// Handlers are invoked when new messages arrive at the [`JrServer`].
+/// Handlers are invoked when new messages arrive at the [`JrConnection`].
 /// They have a chance to inspect the method and parameters and decide whether to "claim" the request
 /// (i.e., handle it). If they do not claim it, the request will be passed to the next handler.
 #[allow(async_fn_in_trait)]
@@ -654,7 +702,28 @@ pub enum Handled<T> {
     No(T),
 }
 
-/// Connection context used to send requests/notifications of the other side.
+/// Connection context used to send requests/notifications to the other side.
+///
+/// This context is provided to notification handlers and is also accessible from
+/// request handlers (via `Deref` on [`JrRequestCx`]).
+///
+/// # Primary Uses
+///
+/// * **Send requests** - [`send_request`](Self::send_request) sends a request and returns
+///   a [`JrResponse`] that lets you handle the response without blocking the event loop
+/// * **Send notifications** - [`send_notification`](Self::send_notification) sends fire-and-forget
+///   messages
+/// * **Spawn concurrent tasks** - [`spawn`](Self::spawn) runs tasks concurrently to avoid
+///   blocking the event loop
+///
+/// # Event Loop Considerations
+///
+/// Handler callbacks run on the event loop, which means the connection cannot process new
+/// messages while your handler is running. Use [`spawn`](Self::spawn) to offload any
+/// expensive or blocking work to concurrent tasks.
+///
+/// See the [Event Loop and Concurrency](JrConnection#event-loop-and-concurrency) section
+/// for more details.
 #[derive(Clone, Debug)]
 pub struct JrConnectionCx {
     message_tx: mpsc::UnboundedSender<OutgoingMessage>,
@@ -673,7 +742,33 @@ impl JrConnectionCx {
     }
 
     /// Spawns a task that will run so long as the JSON-RPC connection is being served.
-    /// If the task returns an error, the server will shut down.
+    ///
+    /// This is the primary mechanism for offloading expensive work from handler callbacks
+    /// to avoid blocking the event loop. Spawned tasks run concurrently with the connection,
+    /// allowing the server to continue processing messages.
+    ///
+    /// # Event Loop
+    ///
+    /// Handler callbacks run on the event loop, which cannot process new messages while
+    /// your handler is running. Use `spawn` for any expensive operations:
+    ///
+    /// ```rust,ignore
+    /// connection.on_receive_request(async |req: ProcessRequest, cx| {
+    ///     // Spawn expensive work to run concurrently
+    ///     cx.spawn(async move {
+    ///         let result = expensive_operation(&req.data).await?;
+    ///         cx.send_notification(ProcessComplete { result })?;
+    ///         Ok(())
+    ///     })?;
+    ///
+    ///     // Respond immediately
+    ///     cx.respond(ProcessStarted {})
+    /// })
+    /// ```
+    ///
+    /// # Errors
+    ///
+    /// If the spawned task returns an error, the entire server will shut down.
     #[track_caller]
     pub fn spawn(
         &self,
@@ -707,7 +802,41 @@ impl JrConnectionCx {
         }
     }
 
-    /// Send an outgoing request and await the reply.
+    /// Send an outgoing request and return a [`JrResponse`] for handling the reply.
+    ///
+    /// The returned [`JrResponse`] provides methods for receiving the response without
+    /// blocking the event loop:
+    ///
+    /// * [`await_when_result_received`](JrResponse::await_when_result_received) - Schedule
+    ///   a callback to run when the response arrives (doesn't block the event loop)
+    /// * [`block_task`](JrResponse::block_task) - Block the current task until the response
+    ///   arrives (only safe in spawned tasks, not in handlers)
+    ///
+    /// # Anti-Footgun Design
+    ///
+    /// The API intentionally makes it difficult to block on the result directly to prevent
+    /// the common mistake of blocking the event loop while waiting for a response:
+    ///
+    /// ```rust,ignore
+    /// // ❌ This doesn't compile - prevents blocking the event loop
+    /// let response = cx.send_request(MyRequest { ... }).await?;
+    ///
+    /// // ✅ Option 1: Schedule callback (safe in handlers)
+    /// cx.send_request(MyRequest { ... })
+    ///     .await_when_result_received(async |result| {
+    ///         // Handle the response
+    ///         Ok(())
+    ///     })?;
+    ///
+    /// // ✅ Option 2: Block in spawned task (safe because task is concurrent)
+    /// cx.spawn(async move {
+    ///     let response = cx.send_request(MyRequest { ... })
+    ///         .block_task()
+    ///         .await?;
+    ///     // Process response...
+    ///     Ok(())
+    /// })?;
+    /// ```
     pub fn send_request<Req: JrRequest>(&self, request: Req) -> JrResponse<Req::Response> {
         let method = request.method().to_string();
         let (response_tx, response_rx) = oneshot::channel();
@@ -754,7 +883,16 @@ impl JrConnectionCx {
             .map(move |json| <Req::Response>::from_value(&method, json))
     }
 
-    /// Send an outgoing notification (no reply expected).)
+    /// Send an outgoing notification (no reply expected).
+    ///
+    /// Notifications are fire-and-forget messages that don't have IDs and don't expect responses.
+    /// This method sends the notification immediately and returns.
+    ///
+    /// ```rust,ignore
+    /// cx.send_notification(StatusUpdate {
+    ///     message: "Processing...".into(),
+    /// })?;
+    /// ```
     pub fn send_notification<N: JrNotification>(
         &self,
         notification: N,
@@ -787,7 +925,41 @@ impl JrConnectionCx {
 }
 
 /// The context to respond to an incoming request.
-/// Derefs to a [`JsonRpcCx`] which can be used to send other requests and notification.
+///
+/// This context is provided to request handlers and serves a dual role:
+///
+/// 1. **Respond to the request** - Use [`respond`](Self::respond) or
+///    [`respond_with_result`](Self::respond_with_result) to send the response
+/// 2. **Send other messages** - Derefs to [`JrConnectionCx`], giving access to
+///    [`send_request`](JrConnectionCx::send_request),
+///    [`send_notification`](JrConnectionCx::send_notification), and
+///    [`spawn`](JrConnectionCx::spawn)
+///
+/// # Example
+///
+/// ```rust,ignore
+/// connection.on_receive_request(async |req: ProcessRequest, cx| {
+///     // Send a notification while processing
+///     cx.send_notification(StatusUpdate {
+///         status: "processing".into(),
+///     })?;
+///
+///     // Do some work...
+///     let result = process(&req.data)?;
+///
+///     // Respond to the request
+///     cx.respond(ProcessResponse { result })
+/// })
+/// ```
+///
+/// # Event Loop Considerations
+///
+/// Like all handlers, request handlers run on the event loop. Use
+/// [`spawn`](JrConnectionCx::spawn) for expensive operations to avoid blocking
+/// the connection.
+///
+/// See the [Event Loop and Concurrency](JrConnection#event-loop-and-concurrency)
+/// section for more details.
 #[must_use]
 pub struct JrRequestCx<T: JrResponsePayload> {
     /// The context to use to send outgoing messages and replies.
@@ -1105,6 +1277,66 @@ impl JrRequest for UntypedMessage {
 impl JrNotification for UntypedMessage {}
 
 /// Represents a pending response of type `R` from an outgoing request.
+///
+/// Returned by [`JrConnectionCx::send_request`], this type provides methods for handling
+/// the response without blocking the event loop. The API is intentionally designed to make
+/// it difficult to accidentally block.
+///
+/// # Anti-Footgun Design
+///
+/// You cannot directly `.await` a `JrResponse`. Instead, you must choose how to handle
+/// the response:
+///
+/// ## Option 1: Schedule a Callback (Safe in Handlers)
+///
+/// Use [`await_when_result_received`](Self::await_when_result_received) to schedule a task
+/// that runs when the response arrives. This doesn't block the event loop:
+///
+/// ```rust,ignore
+/// cx.send_request(MyRequest { ... })
+///     .await_when_result_received(async |result| {
+///         match result {
+///             Ok(response) => {
+///                 // Handle successful response
+///                 Ok(())
+///             }
+///             Err(error) => {
+///                 // Handle error
+///                 Err(error)
+///             }
+///         }
+///     })?;
+/// ```
+///
+/// ## Option 2: Block in a Spawned Task (Safe Only in `spawn`)
+///
+/// Use [`block_task`](Self::block_task) to block until the response arrives, but **only**
+/// in a spawned task (never in a handler):
+///
+/// ```rust,ignore
+/// // ✅ Safe: Spawned task runs concurrently
+/// cx.spawn(async move {
+///     let response = cx.send_request(MyRequest { ... })
+///         .block_task()
+///         .await?;
+///     // Process response...
+///     Ok(())
+/// })?;
+///
+/// // ❌ NEVER do this in a handler - blocks the event loop!
+/// cx.on_receive_request(async |req, cx| {
+///     let response = cx.send_request(MyRequest { ... })
+///         .block_task()  // This will deadlock!
+///         .await?;
+///     cx.respond(response)
+/// })
+/// ```
+///
+/// # Why This Design?
+///
+/// If you block the event loop while waiting for a response, the connection cannot process
+/// the incoming response message, creating a deadlock. This API design prevents that footgun
+/// by making blocking explicit and encouraging non-blocking patterns.
 pub struct JrResponse<R> {
     method: String,
     connection_cx: JrConnectionCx,
@@ -1159,7 +1391,7 @@ impl<R: JrResponsePayload> JrResponse<R> {
     /// in callbacks like [`JrConnection::on_receive_message`]
     /// as that will prevent the event loop from running.
     ///
-    /// In a callback setting, prefer [`Self::await_when_response_received`].
+    /// In a callback setting, prefer [`Self::await_when_result_received`].
     pub async fn block_task(self) -> Result<R, crate::Error>
     where
         R: Send,
