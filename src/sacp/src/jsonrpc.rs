@@ -65,7 +65,7 @@ use crate::jsonrpc::actors::Task;
 ///     Prompt(PromptRequest),
 /// }
 ///
-/// // Implement JsonRpcRequest for your enum (typically with a derive macro)
+/// // Implement JsonRpcRequest for your enum
 /// impl JsonRpcRequest for MyRequests { /* ... */ }
 ///
 /// // Handle all variants in one place
