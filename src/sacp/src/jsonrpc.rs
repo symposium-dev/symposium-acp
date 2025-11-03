@@ -167,23 +167,31 @@ use crate::jsonrpc::actors::Task;
 ///
 /// # Example: Complete Agent
 ///
-/// ```rust,ignore
-/// use sacp::{JrConnection, InitializeRequest, PromptRequest};
-///
+/// ```no_run
+/// # use sacp::{JrConnection, InitializeRequest, InitializeResponse, PromptRequest, PromptResponse, SessionNotification};
+/// # use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
+/// # async fn example() -> Result<(), sacp::Error> {
+/// let stdout = tokio::io::stdout().compat_write();
+/// let stdin = tokio::io::stdin().compat();
 /// JrConnection::new(stdout, stdin)
 ///     .name("my-agent")  // Optional: for debugging logs
 ///     .on_receive_request(async |init: InitializeRequest, cx| {
-///         cx.respond(InitializeResponse { ... })
+///         let response: InitializeResponse = todo!();
+///         cx.respond(response)
 ///     })
 ///     .on_receive_request(async |prompt: PromptRequest, cx| {
 ///         // You can send notifications while processing a request
-///         cx.send_notification(SessionUpdate { ... })?;
+///         let notif: SessionNotification = todo!();
+///         cx.send_notification(notif)?;
 ///
 ///         // Then respond to the request
-///         cx.respond(PromptResponse { ... })
+///         let response: PromptResponse = todo!();
+///         cx.respond(response)
 ///     })
 ///     .serve()
 ///     .await?;
+/// # Ok(())
+/// # }
 /// ```
 #[must_use]
 pub struct JrConnection<OB: AsyncWrite, IB: AsyncRead, H: JrHandler> {
@@ -327,21 +335,22 @@ impl<OB: AsyncWrite, IB: AsyncRead, H: JrHandler> JrConnection<OB, IB, H> {
     ///
     /// # Example
     ///
-    /// ```rust,ignore
+    /// ```
+    /// # use sacp::{JrConnection, PromptRequest, PromptResponse, SessionNotification};
+    /// # fn example(connection: JrConnection<impl futures::AsyncWrite, impl futures::AsyncRead, impl sacp::JrHandler>) {
     /// connection.on_receive_request(async |request: PromptRequest, request_cx| {
     ///     // Send a notification while processing
-    ///     request_cx.send_notification(SessionUpdate {
-    ///         status: "processing".into(),
-    ///     })?;
+    ///     let notif: SessionNotification = todo!();
+    ///     request_cx.send_notification(notif)?;
     ///
     ///     // Do some work...
-    ///     let result = process_prompt(&request).await?;
+    ///     let result = todo!("process the prompt");
     ///
     ///     // Send the response
-    ///     request_cx.respond(PromptResponse {
-    ///         result,
-    ///     })
-    /// })
+    ///     let response: PromptResponse = todo!();
+    ///     request_cx.respond(response)
+    /// });
+    /// # }
     /// ```
     ///
     /// # Type Parameter
