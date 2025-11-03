@@ -1376,8 +1376,39 @@ impl<R: JrResponsePayload> JrResponse<R> {
         }
     }
 
-    /// Schedule an async task that will forward the respond to `response_cx` when it arrives.
-    /// Useful when proxying messages around.
+    /// Forward the response (success or error) to a request context when it arrives.
+    ///
+    /// This is a convenience method for proxying messages between connections. When the
+    /// response arrives, it will be automatically sent to the provided request context,
+    /// whether it's a successful response or an error.
+    ///
+    /// # Example: Proxying requests
+    ///
+    /// ```rust,ignore
+    /// connection.on_receive_request(async |req: ProxyRequest, request_cx| {
+    ///     // Forward the request to another connection and proxy the response back
+    ///     other_connection.send_request(req.inner_request)
+    ///         .forward_to_request_cx(request_cx)?;
+    ///
+    ///     // The response will be automatically forwarded when it arrives
+    ///     Ok(())
+    /// })
+    /// ```
+    ///
+    /// # Type Safety
+    ///
+    /// The request context's response type must match the request's response type,
+    /// ensuring type-safe message forwarding.
+    ///
+    /// # When to Use
+    ///
+    /// Use this when:
+    /// - You're implementing a proxy or gateway pattern
+    /// - You want to forward responses without processing them
+    /// - The response types match between the outgoing request and incoming request
+    ///
+    /// This is equivalent to calling `await_when_result_received` and manually forwarding
+    /// the result, but more concise.
     pub fn forward_to_request_cx(self, request_cx: JrRequestCx<R>) -> Result<(), crate::Error>
     where
         R: Send,
@@ -1387,11 +1418,51 @@ impl<R: JrResponsePayload> JrResponse<R> {
 
     /// Block the current task until the response is received.
     ///
-    /// This is useful in spawned tasks. It should *not* be used
-    /// in callbacks like [`JrConnection::on_receive_message`]
-    /// as that will prevent the event loop from running.
+    /// **Warning:** This method blocks the current async task. It is **only safe** to use
+    /// in spawned tasks created with [`JrConnectionCx::spawn`]. Using it directly in a
+    /// handler callback will deadlock the connection.
     ///
-    /// In a callback setting, prefer [`Self::await_when_result_received`].
+    /// # Safe Usage (in spawned tasks)
+    ///
+    /// ```rust,ignore
+    /// connection.on_receive_request(async |req: MyRequest, cx| {
+    ///     // Spawn a task to handle the request
+    ///     cx.spawn(async move {
+    ///         // Safe: We're in a spawned task, not blocking the event loop
+    ///         let response = cx.send_request(OtherRequest { ... })
+    ///             .block_task()
+    ///             .await?;
+    ///
+    ///         // Process the response...
+    ///         Ok(())
+    ///     })?;
+    ///
+    ///     // Respond immediately
+    ///     cx.respond(MyResponse { ... })
+    /// })
+    /// ```
+    ///
+    /// # Unsafe Usage (in handlers - will deadlock!)
+    ///
+    /// ```rust,ignore
+    /// connection.on_receive_request(async |req: MyRequest, cx| {
+    ///     // ❌ DEADLOCK: Handler blocks event loop, which can't process the response
+    ///     let response = cx.send_request(OtherRequest { ... })
+    ///         .block_task()
+    ///         .await?;
+    ///
+    ///     cx.respond(MyResponse { response })
+    /// })
+    /// ```
+    ///
+    /// # When to Use
+    ///
+    /// Use this method when:
+    /// - You're in a spawned task (via [`JrConnectionCx::spawn`])
+    /// - You need the response value to proceed with your logic
+    /// - Linear control flow is more natural than callbacks
+    ///
+    /// For handler callbacks, use [`await_when_result_received`](Self::await_when_result_received) instead.
     pub async fn block_task(self) -> Result<R, crate::Error>
     where
         R: Send,
@@ -1410,7 +1481,50 @@ impl<R: JrResponsePayload> JrResponse<R> {
     }
 
     /// Schedule an async task to run when a successful response is received.
-    /// If an error occurs, that error will be returned to `request_cx` as the result.
+    ///
+    /// This is a convenience wrapper around [`await_when_result_received`](Self::await_when_result_received)
+    /// for the common pattern of forwarding errors to a request context while only processing
+    /// successful responses.
+    ///
+    /// # Behavior
+    ///
+    /// - If the response is `Ok(value)`, your task receives the value and the request context
+    /// - If the response is `Err(error)`, the error is automatically sent to `request_cx`
+    ///   and your task is not called
+    ///
+    /// # Example: Chaining requests
+    ///
+    /// ```rust,ignore
+    /// connection.on_receive_request(async |req: ProcessRequest, request_cx| {
+    ///     // Send initial request
+    ///     cx.send_request(ValidateRequest { data: req.data })
+    ///         .await_when_ok_response_received(request_cx, async |validation, request_cx| {
+    ///             // Only runs if validation succeeded
+    ///             if validation.is_valid {
+    ///                 // Send second request
+    ///                 let result = cx.send_request(ExecuteRequest { ... })
+    ///                     .block_task()
+    ///                     .await?;
+    ///
+    ///                 // Respond to original request
+    ///                 request_cx.respond(ProcessResponse { result })
+    ///             } else {
+    ///                 request_cx.respond_with_error(validation.error)
+    ///             }
+    ///         })?;
+    ///
+    ///     Ok(())
+    /// })
+    /// ```
+    ///
+    /// # When to Use
+    ///
+    /// Use this when:
+    /// - You need to respond to a request based on another request's result
+    /// - You want errors to automatically propagate to the request context
+    /// - You only care about the success case
+    ///
+    /// For more control over error handling, use [`await_when_result_received`](Self::await_when_result_received).
     #[track_caller]
     pub fn await_when_ok_response_received<F>(
         self,
@@ -1429,10 +1543,54 @@ impl<R: JrResponsePayload> JrResponse<R> {
 
     /// Schedule an async task to run when the response is received.
     ///
-    /// It is intentionally not possible to block until the response is received
-    /// because doing so can easily stall the event loop if done directly in the `on_receive` callback.
+    /// This is the recommended way to handle responses in handler callbacks, as it doesn't
+    /// block the event loop. The task will be spawned automatically when the response arrives.
     ///
-    /// If this task ultimately returns `Err`, the server will abort.
+    /// # Example: Handle response in callback
+    ///
+    /// ```rust,ignore
+    /// connection.on_receive_request(async |req: MyRequest, cx| {
+    ///     // Send a request and schedule a callback for the response
+    ///     cx.send_request(QueryRequest { id: req.id })
+    ///         .await_when_result_received(async move |result| {
+    ///             match result {
+    ///                 Ok(response) => {
+    ///                     println!("Got response: {:?}", response);
+    ///                     // Can send more messages here
+    ///                     cx.send_notification(QueryComplete { ... })?;
+    ///                     Ok(())
+    ///                 }
+    ///                 Err(error) => {
+    ///                     eprintln!("Request failed: {}", error);
+    ///                     Err(error)
+    ///                 }
+    ///             }
+    ///         })?;
+    ///
+    ///     // Handler continues immediately without waiting
+    ///     cx.respond(MyResponse { status: "processing" })
+    /// })
+    /// ```
+    ///
+    /// # Event Loop Safety
+    ///
+    /// Unlike [`block_task`](Self::block_task), this method is safe to use in handlers because
+    /// it schedules the task to run later rather than blocking the current task. The event loop
+    /// remains free to process messages, including the response itself.
+    ///
+    /// # Error Handling
+    ///
+    /// If the scheduled task returns `Err`, the entire server will shut down. Make sure to handle
+    /// errors appropriately within your task.
+    ///
+    /// # When to Use
+    ///
+    /// Use this method when:
+    /// - You're in a handler callback (not a spawned task)
+    /// - You want to process the response asynchronously
+    /// - You don't need the response value immediately
+    ///
+    /// For spawned tasks where you need linear control flow, consider [`block_task`](Self::block_task).
     #[track_caller]
     pub fn await_when_result_received<F>(
         self,
