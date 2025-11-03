@@ -16,7 +16,175 @@ pub use handlers::*;
 
 use crate::jsonrpc::actors::Task;
 
-/// Create a JrConnection. This can be the basis for either a server or a client.
+/// A JSON-RPC connection that can act as either a server, client, or both.
+///
+/// `JrConnection` provides a builder-style API for creating JSON-RPC servers and clients.
+/// You start by calling [`JrConnection::new`] with your input/output streams, then add
+/// message handlers, and finally drive the connection with either [`serve`](Self::serve)
+/// or [`with_client`](Self::with_client).
+///
+/// # JSON-RPC Primer
+///
+/// JSON-RPC 2.0 has two fundamental message types:
+///
+/// * **Requests** - Messages that expect a response. They have an `id` field that gets
+///   echoed back in the response so the sender can correlate them.
+/// * **Notifications** - Fire-and-forget messages with no `id` field. The sender doesn't
+///   expect or receive a response.
+///
+/// # Type-Driven Message Dispatch
+///
+/// The handler registration methods use Rust's type system to determine which messages
+/// to handle. The type parameter you provide controls what gets dispatched to your handler:
+///
+/// ## Single Message Types
+///
+/// The simplest case - handle one specific message type:
+///
+/// ```rust,ignore
+/// connection
+///     .on_receive_request(async |req: InitializeRequest, cx| {
+///         // Handle only InitializeRequest messages
+///         cx.respond(InitializeResponse { ... })
+///     })
+///     .on_receive_notification(async |notif: SessionUpdate, cx| {
+///         // Handle only SessionUpdate notifications
+///         Ok(())
+///     })
+/// ```
+///
+/// ## Enum Message Types
+///
+/// You can also handle multiple related messages with a single handler by defining an enum
+/// that implements the appropriate trait ([`JsonRpcRequest`] or [`JrNotification`]):
+///
+/// ```rust,ignore
+/// // Define an enum for multiple request types
+/// enum MyRequests {
+///     Initialize(InitializeRequest),
+///     Prompt(PromptRequest),
+/// }
+///
+/// // Implement JsonRpcRequest for your enum (typically with a derive macro)
+/// impl JsonRpcRequest for MyRequests { /* ... */ }
+///
+/// // Handle all variants in one place
+/// connection.on_receive_request(async |req: MyRequests, cx| {
+///     match req {
+///         MyRequests::Initialize(init) => { /* ... */ }
+///         MyRequests::Prompt(prompt) => { /* ... */ }
+///     }
+/// })
+/// ```
+///
+/// ## Mixed Message Types
+///
+/// For enums containing both requests AND notifications, use [`on_receive_message`](Self::on_receive_message):
+///
+/// ```rust,ignore
+/// enum AllMessages {
+///     Request(MyRequests),
+///     Notification(MyNotifications),
+/// }
+///
+/// connection.on_receive_message(async |msg: AllMessages, cx| {
+///     match msg {
+///         AllMessages::Request(req, request_cx) => { /* handle and respond */ }
+///         AllMessages::Notification(notif, _) => { /* handle notification */ }
+///     }
+/// })
+/// ```
+///
+/// # Handler Registration
+///
+/// Register handlers using these methods (listed from most common to most flexible):
+///
+/// * [`on_receive_request`](Self::on_receive_request) - Handle JSON-RPC requests (messages expecting responses)
+/// * [`on_receive_notification`](Self::on_receive_notification) - Handle JSON-RPC notifications (fire-and-forget)
+/// * [`on_receive_message`](Self::on_receive_message) - Handle enums containing both requests and notifications
+/// * [`chain_handler`](Self::chain_handler) - Low-level primitive for maximum flexibility
+///
+/// ## Handler Ordering
+///
+/// Handlers are tried in the order you register them. The first handler that claims a message
+/// (by matching its type) will process it. Subsequent handlers won't see that message:
+///
+/// ```rust,ignore
+/// connection
+///     .on_receive_request(async |req: InitializeRequest, cx| {
+///         // This runs first for InitializeRequest
+///     })
+///     .on_receive_request(async |req: PromptRequest, cx| {
+///         // This runs first for PromptRequest
+///     })
+///     .on_receive_message(async |msg: FallbackMessages, cx| {
+///         // This runs for any message not handled above
+///     })
+/// ```
+///
+/// # Driving the Connection
+///
+/// After adding handlers, you must drive the connection using one of two modes:
+///
+/// ## Server Mode: `serve()`
+///
+/// Use [`serve`](Self::serve) when you only need to respond to incoming messages:
+///
+/// ```rust,ignore
+/// connection
+///     .on_receive_request(async |req: MyRequest, cx| { /* ... */ })
+///     .serve()  // Runs until connection closes or error occurs
+///     .await?;
+/// ```
+///
+/// The connection will process incoming messages and invoke your handlers until the
+/// connection is closed or an error occurs.
+///
+/// ## Client Mode: `with_client()`
+///
+/// Use [`with_client`](Self::with_client) when you need to both handle incoming messages
+/// AND send your own requests/notifications:
+///
+/// ```rust,ignore
+/// connection
+///     .on_receive_request(async |req: MyRequest, cx| { /* ... */ })
+///     .with_client(async |cx| {
+///         // You can send requests to the other side
+///         let response = cx.send_request(InitializeRequest { ... })
+///             .block_task()
+///             .await?;
+///
+///         // And send notifications
+///         cx.send_notification(MyNotification { ... })?;
+///
+///         Ok(())
+///     })
+///     .await?;
+/// ```
+///
+/// The connection will serve incoming messages in the background while your client closure
+/// runs. When the closure returns, the connection shuts down.
+///
+/// # Example: Complete Agent
+///
+/// ```rust,ignore
+/// use sacp::{JrConnection, InitializeRequest, PromptRequest};
+///
+/// JrConnection::new(stdout, stdin)
+///     .name("my-agent")  // Optional: for debugging logs
+///     .on_receive_request(async |init: InitializeRequest, cx| {
+///         cx.respond(InitializeResponse { ... })
+///     })
+///     .on_receive_request(async |prompt: PromptRequest, cx| {
+///         // You can send notifications while processing a request
+///         cx.send_notification(SessionUpdate { ... })?;
+///
+///         // Then respond to the request
+///         cx.respond(PromptResponse { ... })
+///     })
+///     .serve()
+///     .await?;
+/// ```
 #[must_use]
 pub struct JrConnection<OB: AsyncWrite, IB: AsyncRead, H: JrHandler> {
     name: Option<String>,
@@ -90,7 +258,41 @@ impl<OB: AsyncWrite, IB: AsyncRead, H: JrHandler> JrConnection<OB, IB, H> {
         }
     }
 
-    /// Invoke the given closure when either a request or notification is received.
+    /// Register a handler for messages that can be either requests OR notifications.
+    ///
+    /// Use this when you want to handle an enum type that contains both request and
+    /// notification variants. Your handler receives a [`MessageAndCx<R, N>`] which
+    /// is an enum with two variants:
+    ///
+    /// - `MessageAndCx::Request(request, request_cx)` - A request with its response context
+    /// - `MessageAndCx::Notification(notification, cx)` - A notification with the connection context
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// // Define an enum containing both requests and notifications
+    /// enum MyMessages {
+    ///     Request(MyRequests),
+    ///     Notification(MyNotifications),
+    /// }
+    ///
+    /// connection.on_receive_message(async |message: MessageAndCx<MyRequests, MyNotifications>| {
+    ///     match message {
+    ///         MessageAndCx::Request(req, request_cx) => {
+    ///             // Handle request and send response
+    ///             request_cx.respond(MyResponse { ... })
+    ///         }
+    ///         MessageAndCx::Notification(notif, _cx) => {
+    ///             // Handle notification (no response needed)
+    ///             Ok(())
+    ///         }
+    ///     }
+    /// })
+    /// ```
+    ///
+    /// For most use cases, prefer [`on_receive_request`](Self::on_receive_request) or
+    /// [`on_receive_notification`](Self::on_receive_notification) which provide cleaner APIs
+    /// for handling requests or notifications separately.
     pub fn on_receive_message<R, N, F>(
         self,
         op: F,
@@ -112,7 +314,40 @@ impl<OB: AsyncWrite, IB: AsyncRead, H: JrHandler> JrConnection<OB, IB, H> {
         }
     }
 
-    /// Invoke the given closure when a request is received.
+    /// Register a handler for JSON-RPC requests of type `R`.
+    ///
+    /// Your handler receives two arguments:
+    /// 1. The request (type `R`)
+    /// 2. A [`JrRequestCx<R::Response>`] for sending the response
+    ///
+    /// The request context allows you to:
+    /// - Send the response with [`JrRequestCx::respond`]
+    /// - Send notifications to the client with [`JrConnectionCx::send_notification`]
+    /// - Send requests to the client with [`JrConnectionCx::send_request`]
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// connection.on_receive_request(async |request: PromptRequest, request_cx| {
+    ///     // Send a notification while processing
+    ///     request_cx.send_notification(SessionUpdate {
+    ///         status: "processing".into(),
+    ///     })?;
+    ///
+    ///     // Do some work...
+    ///     let result = process_prompt(&request).await?;
+    ///
+    ///     // Send the response
+    ///     request_cx.respond(PromptResponse {
+    ///         result,
+    ///     })
+    /// })
+    /// ```
+    ///
+    /// # Type Parameter
+    ///
+    /// `R` can be either a single request type or an enum of multiple request types.
+    /// See the [type-driven dispatch](Self#type-driven-message-dispatch) section for details.
     pub fn on_receive_request<R, F>(
         self,
         op: F,
@@ -133,7 +368,36 @@ impl<OB: AsyncWrite, IB: AsyncRead, H: JrHandler> JrConnection<OB, IB, H> {
         }
     }
 
-    /// Invoke the given closure when a notification is received.
+    /// Register a handler for JSON-RPC notifications of type `N`.
+    ///
+    /// Notifications are fire-and-forget messages that don't expect a response.
+    /// Your handler receives:
+    /// 1. The notification (type `N`)
+    /// 2. A [`JrConnectionCx`] for sending messages to the other side
+    ///
+    /// Unlike request handlers, you cannot send a response (notifications don't have IDs),
+    /// but you can still send your own requests and notifications using the context.
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// connection.on_receive_notification(async |notif: SessionUpdate, cx| {
+    ///     // Process the notification
+    ///     update_session_state(&notif)?;
+    ///
+    ///     // Optionally send a notification back
+    ///     cx.send_notification(StatusUpdate {
+    ///         message: "Acknowledged".into(),
+    ///     })?;
+    ///
+    ///     Ok(())
+    /// })
+    /// ```
+    ///
+    /// # Type Parameter
+    ///
+    /// `N` can be either a single notification type or an enum of multiple notification types.
+    /// See the [type-driven dispatch](Self#type-driven-message-dispatch) section for details.
     pub fn on_receive_notification<N, F>(
         self,
         op: F,
@@ -176,7 +440,29 @@ impl<OB: AsyncWrite, IB: AsyncRead, H: JrHandler> JrConnection<OB, IB, H> {
         self
     }
 
-    /// Runs a server that listens for incoming requests and handles them according to the added handlers.
+    /// Run the connection in server mode, processing incoming messages until the connection closes.
+    ///
+    /// This drives the connection by continuously reading messages from the input stream
+    /// and dispatching them to your registered handlers. The connection will run until:
+    /// - The input stream closes (EOF)
+    /// - An error occurs
+    /// - One of your handlers returns an error
+    ///
+    /// Use this mode when you only need to respond to incoming messages and don't need
+    /// to initiate your own requests. If you need to send requests to the other side,
+    /// use [`with_client`](Self::with_client) instead.
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// JrConnection::new(stdout, stdin)
+    ///     .on_receive_request(async |req: MyRequest, cx| {
+    ///         // Handle requests...
+    ///         cx.respond(MyResponse { ... })
+    ///     })
+    ///     .serve()  // Run until connection closes
+    ///     .await?;
+    /// ```
     pub async fn serve(self) -> Result<(), crate::Error> {
         let (reply_tx, reply_rx) = mpsc::unbounded();
         let json_rpc_cx = JrConnectionCx::new(self.outgoing_tx, self.new_task_tx);
@@ -212,13 +498,51 @@ impl<OB: AsyncWrite, IB: AsyncRead, H: JrHandler> JrConnection<OB, IB, H> {
         Ok(())
     }
 
-    /// Serves messages over the connection until `main_fn` returns, then the connection will be dropped.
-    /// Incoming messages will be handled according to the added handlers.
+    /// Run the connection in client mode, both handling incoming messages and sending your own.
     ///
-    /// [`main_fn`] is invoked with a [`JsonRpcCx`] that allows you to send requests over the connection
-    /// and receive responses.
+    /// This drives the connection by:
+    /// 1. Running your registered handlers in the background to process incoming messages
+    /// 2. Executing your `main_fn` closure with a [`JrConnectionCx`] for sending requests/notifications
     ///
-    /// Errors if the server terminates before `main_fn` returns.
+    /// The connection stays active until your `main_fn` returns, then shuts down gracefully.
+    /// If the connection closes unexpectedly before `main_fn` completes, this returns an error.
+    ///
+    /// Use this mode when you need to initiate communication (send requests/notifications)
+    /// in addition to responding to incoming messages. For server-only mode where you just
+    /// respond to messages, use [`serve`](Self::serve) instead.
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// JrConnection::new(stdout, stdin)
+    ///     .on_receive_request(async |req: MyRequest, cx| {
+    ///         // Handle incoming requests in the background
+    ///         cx.respond(MyResponse { ... })
+    ///     })
+    ///     .with_client(async |cx| {
+    ///         // Initialize the protocol
+    ///         let init_response = cx.send_request(InitializeRequest { ... })
+    ///             .block_task()
+    ///             .await?;
+    ///
+    ///         // Send more requests...
+    ///         let result = cx.send_request(SomeRequest { ... })
+    ///             .block_task()
+    ///             .await?;
+    ///
+    ///         // When this closure returns, the connection shuts down
+    ///         Ok(())
+    ///     })
+    ///     .await?;
+    /// ```
+    ///
+    /// # Parameters
+    ///
+    /// - `main_fn`: Your client logic. Receives a [`JrConnectionCx`] for sending messages.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the connection closes before `main_fn` completes.
     pub async fn with_client(
         self,
         main_fn: impl AsyncFnOnce(JrConnectionCx) -> Result<(), crate::Error>,
