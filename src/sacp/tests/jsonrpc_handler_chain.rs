@@ -5,8 +5,7 @@
 //! handler claims them.
 
 use sacp::{
-    JrConnection, JrMessage, JrNotification, JrRequestCx, JrResponse, JrResponsePayload,
-    JsonRpcRequest,
+    JrConnection, JrMessage, JrNotification, JrRequest, JrRequestCx, JrResponse, JrResponsePayload,
 };
 use serde::{Deserialize, Serialize};
 use std::sync::{Arc, Mutex};
@@ -60,7 +59,7 @@ impl JrMessage for FooRequest {
     }
 }
 
-impl JsonRpcRequest for FooRequest {
+impl JrRequest for FooRequest {
     type Response = FooResponse;
 }
 
@@ -113,7 +112,7 @@ impl JrMessage for BarRequest {
     }
 }
 
-impl JsonRpcRequest for BarRequest {
+impl JrRequest for BarRequest {
     type Response = BarResponse;
 }
 
@@ -241,7 +240,7 @@ impl JrMessage for TrackRequest {
     }
 }
 
-impl JsonRpcRequest for TrackRequest {
+impl JrRequest for TrackRequest {
     type Response = FooResponse;
 }
 
@@ -356,7 +355,7 @@ impl JrMessage for Method1Request {
     }
 }
 
-impl JsonRpcRequest for Method1Request {
+impl JrRequest for Method1Request {
     type Response = FooResponse;
 }
 
@@ -394,7 +393,7 @@ impl JrMessage for Method2Request {
     }
 }
 
-impl JsonRpcRequest for Method2Request {
+impl JrRequest for Method2Request {
     type Response = FooResponse;
 }
 

@@ -9,7 +9,7 @@
 
 use expect_test::expect;
 use futures::{AsyncRead, AsyncWrite};
-use sacp::{JrConnection, JrMessage, JrRequestCx, JrResponse, JrResponsePayload, JsonRpcRequest};
+use sacp::{JrConnection, JrMessage, JrRequestCx, JrResponse, JrResponsePayload, JrRequest};
 use serde::{Deserialize, Serialize};
 use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
 
@@ -78,7 +78,7 @@ impl JrMessage for SimpleRequest {
     }
 }
 
-impl JsonRpcRequest for SimpleRequest {
+impl JrRequest for SimpleRequest {
     type Response = SimpleResponse;
 }
 
@@ -261,7 +261,7 @@ impl JrMessage for ErrorRequest {
     }
 }
 
-impl JsonRpcRequest for ErrorRequest {
+impl JrRequest for ErrorRequest {
     type Response = SimpleResponse;
 }
 
@@ -350,7 +350,7 @@ impl JrMessage for EmptyRequest {
     }
 }
 
-impl JsonRpcRequest for EmptyRequest {
+impl JrRequest for EmptyRequest {
     type Response = SimpleResponse;
 }
 

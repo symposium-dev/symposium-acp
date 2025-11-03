@@ -15,4 +15,3 @@ pub use agent_client_protocol_schema::*;
 pub use acp::*;
 pub use capabilities::*;
 pub use jsonrpc::*;
-pub use util::{TypeNotification, TypeRequest};

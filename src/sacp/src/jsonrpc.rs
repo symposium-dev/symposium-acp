@@ -56,7 +56,7 @@ use crate::jsonrpc::actors::Task;
 /// ## Enum Message Types
 ///
 /// You can also handle multiple related messages with a single handler by defining an enum
-/// that implements the appropriate trait ([`JsonRpcRequest`] or [`JrNotification`]):
+/// that implements the appropriate trait ([`JrRequest`] or [`JrNotification`]):
 ///
 /// ```rust,ignore
 /// // Define an enum for multiple request types
@@ -65,8 +65,8 @@ use crate::jsonrpc::actors::Task;
 ///     Prompt(PromptRequest),
 /// }
 ///
-/// // Implement JsonRpcRequest for your enum
-/// impl JsonRpcRequest for MyRequests { /* ... */ }
+/// // Implement JrRequest for your enum
+/// impl JrRequest for MyRequests { /* ... */ }
 ///
 /// // Handle all variants in one place
 /// connection.on_receive_request(async |req: MyRequests, cx| {
@@ -306,7 +306,7 @@ impl<OB: AsyncWrite, IB: AsyncRead, H: JrHandler> JrConnection<OB, IB, H> {
         op: F,
     ) -> JrConnection<OB, IB, ChainHandler<H, MessageHandler<R, N, F>>>
     where
-        R: JsonRpcRequest,
+        R: JrRequest,
         N: JrNotification,
         F: AsyncFnMut(MessageAndCx<R, N>) -> Result<(), crate::Error>,
     {
@@ -362,7 +362,7 @@ impl<OB: AsyncWrite, IB: AsyncRead, H: JrHandler> JrConnection<OB, IB, H> {
         op: F,
     ) -> JrConnection<OB, IB, ChainHandler<H, RequestHandler<R, F>>>
     where
-        R: JsonRpcRequest,
+        R: JrRequest,
         F: AsyncFnMut(R, JrRequestCx<R::Response>) -> Result<(), crate::Error>,
     {
         JrConnection {
@@ -696,7 +696,7 @@ impl JrConnectionCx {
         message: MessageAndCx<R, N>,
     ) -> Result<(), crate::Error>
     where
-        R: JsonRpcRequest<Response: Send>,
+        R: JrRequest<Response: Send>,
         N: JrNotification,
     {
         match message {
@@ -708,7 +708,7 @@ impl JrConnectionCx {
     }
 
     /// Send an outgoing request and await the reply.
-    pub fn send_request<Req: JsonRpcRequest>(&self, request: Req) -> JrResponse<Req::Response> {
+    pub fn send_request<Req: JrRequest>(&self, request: Req) -> JrResponse<Req::Response> {
         let method = request.method().to_string();
         let (response_tx, response_rx) = oneshot::channel();
         match request.into_untyped_message() {
@@ -973,7 +973,7 @@ impl JrResponsePayload for serde_json::Value {
 pub trait JrNotification: JrMessage {}
 
 /// A struct that represents a request (JSON-RPC message expecting a response).
-pub trait JsonRpcRequest: JrMessage {
+pub trait JrRequest: JrMessage {
     /// The type of data expected in response.
     type Response: JrResponsePayload;
 }
@@ -985,7 +985,7 @@ pub trait JsonRpcRequest: JrMessage {
 /// By default, both are `UntypedMessage` for dynamic dispatch.
 /// The request context's response type matches the request's response type.
 #[derive(Debug)]
-pub enum MessageAndCx<R: JsonRpcRequest = UntypedMessage, N: JrMessage = UntypedMessage> {
+pub enum MessageAndCx<R: JrRequest = UntypedMessage, N: JrMessage = UntypedMessage> {
     /// Incoming request and the context where the response should be sent.
     Request(R, JrRequestCx<R::Response>),
 
@@ -993,7 +993,7 @@ pub enum MessageAndCx<R: JsonRpcRequest = UntypedMessage, N: JrMessage = Untyped
     Notification(N, JrConnectionCx),
 }
 
-impl<R: JsonRpcRequest, N: JrMessage> MessageAndCx<R, N> {
+impl<R: JrRequest, N: JrMessage> MessageAndCx<R, N> {
     /// Map the request and notification types to new types.
     pub fn map<R1, N1>(
         self,
@@ -1001,7 +1001,7 @@ impl<R: JsonRpcRequest, N: JrMessage> MessageAndCx<R, N> {
         map_notification: impl FnOnce(N, JrConnectionCx) -> (N1, JrConnectionCx),
     ) -> MessageAndCx<R1, N1>
     where
-        R1: JsonRpcRequest<Response: Send>,
+        R1: JrRequest<Response: Send>,
         N1: JrMessage,
     {
         match self {
@@ -1098,7 +1098,7 @@ impl JrMessage for UntypedMessage {
     }
 }
 
-impl JsonRpcRequest for UntypedMessage {
+impl JrRequest for UntypedMessage {
     type Response = serde_json::Value;
 }
 

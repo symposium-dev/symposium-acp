@@ -5,7 +5,7 @@ use crate::{
 };
 use serde::Serialize;
 
-use crate::jsonrpc::{JrMessage, JrResponsePayload, JsonRpcRequest};
+use crate::jsonrpc::{JrMessage, JrResponsePayload, JrRequest};
 use crate::util::json_cast;
 
 // ============================================================================
@@ -39,7 +39,7 @@ impl JrMessage for InitializeRequest {
     }
 }
 
-impl JsonRpcRequest for InitializeRequest {
+impl JrRequest for InitializeRequest {
     type Response = InitializeResponse;
 }
 
@@ -83,7 +83,7 @@ impl JrMessage for AuthenticateRequest {
     }
 }
 
-impl JsonRpcRequest for AuthenticateRequest {
+impl JrRequest for AuthenticateRequest {
     type Response = AuthenticateResponse;
 }
 
@@ -127,7 +127,7 @@ impl JrMessage for LoadSessionRequest {
     }
 }
 
-impl JsonRpcRequest for LoadSessionRequest {
+impl JrRequest for LoadSessionRequest {
     type Response = LoadSessionResponse;
 }
 
@@ -171,7 +171,7 @@ impl JrMessage for NewSessionRequest {
     }
 }
 
-impl JsonRpcRequest for NewSessionRequest {
+impl JrRequest for NewSessionRequest {
     type Response = NewSessionResponse;
 }
 
@@ -215,7 +215,7 @@ impl JrMessage for PromptRequest {
     }
 }
 
-impl JsonRpcRequest for PromptRequest {
+impl JrRequest for PromptRequest {
     type Response = PromptResponse;
 }
 
@@ -259,7 +259,7 @@ impl JrMessage for SetSessionModeRequest {
     }
 }
 
-impl JsonRpcRequest for SetSessionModeRequest {
+impl JrRequest for SetSessionModeRequest {
     type Response = SetSessionModeResponse;
 }
 

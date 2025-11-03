@@ -1,8 +1,8 @@
 use futures::{AsyncRead, AsyncWrite};
 use sacp::{
     ChainHandler, Handled, InitializeRequest, InitializeResponse, JrConnection, JrConnectionCx,
-    JrHandler, JrMessage, JrNotification, JrRequestCx, JsonRpcRequest, MessageAndCx,
-    MetaCapabilityExt, Proxy, UntypedMessage,
+    JrHandler, JrMessage, JrNotification, JrRequest, JrRequestCx, MessageAndCx, MetaCapabilityExt,
+    Proxy, UntypedMessage,
 };
 use serde::{Deserialize, Serialize};
 use std::marker::PhantomData;
@@ -18,13 +18,13 @@ const SUCCESSOR_REQUEST_METHOD: &str = "_proxy/successor/request";
 ///
 /// Used in `_proxy/successor/send` when the proxy wants to forward a request downstream.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SuccessorRequest<Req: JsonRpcRequest> {
+pub struct SuccessorRequest<Req: JrRequest> {
     /// The message to be sent to the successor component.
     #[serde(flatten)]
     pub request: Req,
 }
 
-impl<Req: JsonRpcRequest> JrMessage for SuccessorRequest<Req> {
+impl<Req: JrRequest> JrMessage for SuccessorRequest<Req> {
     fn into_untyped_message(self) -> Result<sacp::UntypedMessage, sacp::Error> {
         sacp::UntypedMessage::new(
             SUCCESSOR_REQUEST_METHOD,
@@ -62,7 +62,7 @@ impl<Req: JsonRpcRequest> JrMessage for SuccessorRequest<Req> {
     }
 }
 
-impl<Req: JsonRpcRequest> JsonRpcRequest for SuccessorRequest<Req> {
+impl<Req: JrRequest> JrRequest for SuccessorRequest<Req> {
     type Response = Req::Response;
 }
 
@@ -151,7 +151,7 @@ pub trait AcpProxyExt<OB: AsyncWrite, IB: AsyncRead, H: JrHandler> {
         op: F,
     ) -> JrConnection<OB, IB, ChainHandler<H, RequestFromSuccessorHandler<R, F>>>
     where
-        R: JsonRpcRequest,
+        R: JrRequest,
         F: AsyncFnMut(R, JrRequestCx<R::Response>) -> Result<(), sacp::Error>;
 
     /// Adds a handler for messages received from the successor component.
@@ -208,7 +208,7 @@ where
         op: F,
     ) -> JrConnection<OB, IB, ChainHandler<H, RequestFromSuccessorHandler<R, F>>>
     where
-        R: JsonRpcRequest,
+        R: JrRequest,
         F: AsyncFnMut(R, JrRequestCx<R::Response>) -> Result<(), sacp::Error>,
     {
         self.chain_handler(RequestFromSuccessorHandler::new(op))
@@ -240,7 +240,7 @@ where
 /// Handler to process a request of type `R` coming from the successor component.
 pub struct RequestFromSuccessorHandler<R, F>
 where
-    R: JsonRpcRequest,
+    R: JrRequest,
     F: AsyncFnMut(R, JrRequestCx<R::Response>) -> Result<(), sacp::Error>,
 {
     handler: F,
@@ -249,7 +249,7 @@ where
 
 impl<R, F> RequestFromSuccessorHandler<R, F>
 where
-    R: JsonRpcRequest,
+    R: JrRequest,
     F: AsyncFnMut(R, JrRequestCx<R::Response>) -> Result<(), sacp::Error>,
 {
     pub fn new(handler: F) -> Self {
@@ -262,7 +262,7 @@ where
 
 impl<R, F> JrHandler for RequestFromSuccessorHandler<R, F>
 where
-    R: JsonRpcRequest,
+    R: JrRequest,
     F: AsyncFnMut(R, JrRequestCx<R::Response>) -> Result<(), sacp::Error>,
 {
     async fn handle_message(
@@ -509,7 +509,7 @@ pub trait JrCxExt {
     /// let response = cx.send_request_to_successor(prompt).recv().await?;
     /// // response is the typed PromptResponse
     /// ```
-    fn send_request_to_successor<Req: JsonRpcRequest>(
+    fn send_request_to_successor<Req: JrRequest>(
         &self,
         request: Req,
     ) -> sacp::JrResponse<Req::Response>;
@@ -532,7 +532,7 @@ pub trait JrCxExt {
 }
 
 impl JrCxExt for JrConnectionCx {
-    fn send_request_to_successor<Req: JsonRpcRequest>(
+    fn send_request_to_successor<Req: JrRequest>(
         &self,
         request: Req,
     ) -> sacp::JrResponse<Req::Response> {

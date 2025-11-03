@@ -6,7 +6,7 @@
 //! - Out-of-order response handling
 
 use futures::{AsyncRead, AsyncWrite};
-use sacp::{JrConnection, JrMessage, JrRequestCx, JrResponse, JrResponsePayload, JsonRpcRequest};
+use sacp::{JrConnection, JrMessage, JrRequestCx, JrResponse, JrResponsePayload, JrRequest};
 use serde::{Deserialize, Serialize};
 use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
 
@@ -75,7 +75,7 @@ impl JrMessage for PingRequest {
     }
 }
 
-impl JsonRpcRequest for PingRequest {
+impl JrRequest for PingRequest {
     type Response = PongResponse;
 }
 
@@ -129,7 +129,7 @@ impl JrMessage for SlowRequest {
     }
 }
 
-impl JsonRpcRequest for SlowRequest {
+impl JrRequest for SlowRequest {
     type Response = SlowResponse;
 }
 
