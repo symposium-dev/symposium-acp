@@ -85,8 +85,10 @@
 //!
 //! ## Examples
 //!
-//! - **`minimal.rs`** - Simplest possible proxy that forwards everything unchanged
-//! - **`with_mcp_server.rs`** - Proxy that adds MCP tools to any agent
+//! See the [examples directory](https://github.com/symposium-org/symposium-acp/tree/main/src/sacp-proxy/examples):
+//!
+//! - **[`minimal.rs`](https://github.com/symposium-org/symposium-acp/blob/main/src/sacp-proxy/examples/minimal.rs)** - Simplest possible proxy that forwards everything unchanged
+//! - **[`with_mcp_server.rs`](https://github.com/symposium-org/symposium-acp/blob/main/src/sacp-proxy/examples/with_mcp_server.rs)** - Proxy that adds MCP tools to any agent
 //!
 //! ## How Proxies Work
 //!
