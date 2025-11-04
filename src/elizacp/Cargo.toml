@@ -1,6 +1,6 @@
 [package]
 name = "elizacp"
-version = "0.1.0"
+version = "1.0.0-alpha"
 edition = "2024"
 description = "Classic Eliza chatbot as an ACP agent for testing"
 license = "MIT OR Apache-2.0"
@@ -15,7 +15,7 @@ name = "elizacp"
 path = "src/main.rs"
 
 [dependencies]
-sacp = { version = "0.2.0", path = "../sacp" }
+sacp = { version = "1.0.0-alpha", path = "../sacp" }
 agent-client-protocol-schema.workspace = true
 anyhow.workspace = true
 clap.workspace = true
