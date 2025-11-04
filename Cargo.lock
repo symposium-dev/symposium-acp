@@ -858,6 +858,7 @@ dependencies = [
  "expect-test",
  "futures",
  "jsonrpcmsg",
+ "sacp-doc-test",
  "sacp-tokio",
  "serde",
  "serde_json",
@@ -890,6 +891,16 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "uuid",
+]
+
+[[package]]
+name = "sacp-doc-test"
+version = "0.1.0"
+dependencies = [
+ "futures",
+ "sacp",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

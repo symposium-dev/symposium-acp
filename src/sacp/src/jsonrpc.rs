@@ -42,7 +42,7 @@ use crate::jsonrpc::actors::Task;
 /// The simplest case - handle one specific message type:
 ///
 /// ```no_run
-/// # use sacp::doc_test::*;
+/// # use sacp_doc_test::*;
 /// # use sacp::{InitializeRequest, InitializeResponse, SessionNotification};
 /// # async fn example() -> Result<(), sacp::Error> {
 /// # let connection = mock_connection();
@@ -66,7 +66,7 @@ use crate::jsonrpc::actors::Task;
 /// that implements the appropriate trait ([`JrRequest`] or [`JrNotification`]):
 ///
 /// ```no_run
-/// # use sacp::doc_test::*;
+/// # use sacp_doc_test::*;
 /// # use sacp::{InitializeRequest, InitializeResponse, PromptRequest, PromptResponse, JrRequest, JrMessage, UntypedMessage};
 /// # async fn example() -> Result<(), sacp::Error> {
 /// # let connection = mock_connection();
@@ -103,7 +103,7 @@ use crate::jsonrpc::actors::Task;
 /// For enums containing both requests AND notifications, use [`on_receive_message`](Self::on_receive_message):
 ///
 /// ```no_run
-/// # use sacp::doc_test::*;
+/// # use sacp_doc_test::*;
 /// # use sacp::{MessageAndCx, InitializeRequest, InitializeResponse, SessionNotification};
 /// # async fn example() -> Result<(), sacp::Error> {
 /// # let connection = mock_connection();
@@ -138,7 +138,7 @@ use crate::jsonrpc::actors::Task;
 /// (by matching its type) will process it. Subsequent handlers won't see that message:
 ///
 /// ```no_run
-/// # use sacp::doc_test::*;
+/// # use sacp_doc_test::*;
 /// # use sacp::{InitializeRequest, InitializeResponse, PromptRequest, PromptResponse, MessageAndCx, UntypedMessage};
 /// # async fn example() -> Result<(), sacp::Error> {
 /// # let connection = mock_connection();
@@ -174,7 +174,7 @@ use crate::jsonrpc::actors::Task;
 /// work to concurrent tasks:
 ///
 /// ```no_run
-/// # use sacp::doc_test::*;
+/// # use sacp_doc_test::*;
 /// # async fn example() -> Result<(), sacp::Error> {
 /// # let connection = mock_connection();
 /// connection.on_receive_request(async |req: AnalyzeRequest, cx| {
@@ -224,7 +224,7 @@ use crate::jsonrpc::actors::Task;
 /// Use [`serve`](Self::serve) when you only need to respond to incoming messages:
 ///
 /// ```no_run
-/// # use sacp::doc_test::*;
+/// # use sacp_doc_test::*;
 /// # async fn example() -> Result<(), sacp::Error> {
 /// # let connection = mock_connection();
 /// connection
@@ -246,7 +246,7 @@ use crate::jsonrpc::actors::Task;
 /// AND send your own requests/notifications:
 ///
 /// ```no_run
-/// # use sacp::doc_test::*;
+/// # use sacp_doc_test::*;
 /// # use sacp::InitializeRequest;
 /// # async fn example() -> Result<(), sacp::Error> {
 /// # let connection = mock_connection();
@@ -386,7 +386,7 @@ impl<OB: AsyncWrite, IB: AsyncRead, H: JrHandler> JrConnection<OB, IB, H> {
     /// # Example
     ///
     /// ```no_run
-    /// # use sacp::doc_test::*;
+    /// # use sacp_doc_test::*;
     /// # use sacp::MessageAndCx;
     /// # async fn example() -> Result<(), sacp::Error> {
     /// # let connection = mock_connection();
@@ -499,7 +499,7 @@ impl<OB: AsyncWrite, IB: AsyncRead, H: JrHandler> JrConnection<OB, IB, H> {
     /// # Example
     ///
     /// ```no_run
-    /// # use sacp::doc_test::*;
+    /// # use sacp_doc_test::*;
     /// # async fn example() -> Result<(), sacp::Error> {
     /// # let connection = mock_connection();
     /// connection.on_receive_notification(async |notif: SessionUpdate, cx| {
@@ -579,7 +579,7 @@ impl<OB: AsyncWrite, IB: AsyncRead, H: JrHandler> JrConnection<OB, IB, H> {
     /// # Example
     ///
     /// ```no_run
-    /// # use sacp::doc_test::*;
+    /// # use sacp_doc_test::*;
     /// # use std::pin::Pin;
     /// # async fn example() -> Result<(), sacp::Error> {
     /// # let stdout: Pin<Box<dyn futures::AsyncWrite + Send>> = Box::pin(futures::io::Cursor::new(Vec::new()));
@@ -645,7 +645,7 @@ impl<OB: AsyncWrite, IB: AsyncRead, H: JrHandler> JrConnection<OB, IB, H> {
     /// # Example
     ///
     /// ```no_run
-    /// # use sacp::doc_test::*;
+    /// # use sacp_doc_test::*;
     /// # use sacp::InitializeRequest;
     /// # use std::pin::Pin;
     /// # async fn example() -> Result<(), sacp::Error> {
@@ -835,7 +835,7 @@ impl JrConnectionCx {
     /// your handler is running. Use `spawn` for any expensive operations:
     ///
     /// ```no_run
-    /// # use sacp::doc_test::*;
+    /// # use sacp_doc_test::*;
     /// # async fn example() -> Result<(), sacp::Error> {
     /// # let connection = mock_connection();
     /// connection.on_receive_request(async |req: ProcessRequest, cx| {
@@ -907,7 +907,7 @@ impl JrConnectionCx {
     /// the common mistake of blocking the event loop while waiting for a response:
     ///
     /// ```compile_fail
-    /// # use sacp::doc_test::*;
+    /// # use sacp_doc_test::*;
     /// # async fn example(cx: sacp::JrConnectionCx) -> Result<(), sacp::Error> {
     /// // ❌ This doesn't compile - prevents blocking the event loop
     /// let response = cx.send_request(MyRequest {}).await?;
@@ -916,7 +916,7 @@ impl JrConnectionCx {
     /// ```
     ///
     /// ```no_run
-    /// # use sacp::doc_test::*;
+    /// # use sacp_doc_test::*;
     /// # async fn example(cx: sacp::JrConnectionCx) -> Result<(), sacp::Error> {
     /// // ✅ Option 1: Schedule callback (safe in handlers)
     /// cx.send_request(MyRequest {})
@@ -989,7 +989,7 @@ impl JrConnectionCx {
     /// This method sends the notification immediately and returns.
     ///
     /// ```no_run
-    /// # use sacp::doc_test::*;
+    /// # use sacp_doc_test::*;
     /// # async fn example(cx: sacp::JrConnectionCx) -> Result<(), sacp::Error> {
     /// cx.send_notification(StatusUpdate {
     ///     message: "Processing...".into(),
@@ -1042,7 +1042,7 @@ impl JrConnectionCx {
 /// # Example
 ///
 /// ```no_run
-/// # use sacp::doc_test::*;
+/// # use sacp_doc_test::*;
 /// # async fn example() -> Result<(), sacp::Error> {
 /// # let connection = mock_connection();
 /// connection.on_receive_request(async |req: ProcessRequest, cx| {
@@ -1403,7 +1403,7 @@ impl JrNotification for UntypedMessage {}
 /// that runs when the response arrives. This doesn't block the event loop:
 ///
 /// ```no_run
-/// # use sacp::doc_test::*;
+/// # use sacp_doc_test::*;
 /// # async fn example(cx: sacp::JrConnectionCx) -> Result<(), sacp::Error> {
 /// cx.send_request(MyRequest {})
 ///     .await_when_result_received(async |result| {
@@ -1428,7 +1428,7 @@ impl JrNotification for UntypedMessage {}
 /// in a spawned task (never in a handler):
 ///
 /// ```no_run
-/// # use sacp::doc_test::*;
+/// # use sacp_doc_test::*;
 /// # async fn example(cx: sacp::JrConnectionCx) -> Result<(), sacp::Error> {
 /// // ✅ Safe: Spawned task runs concurrently
 /// let cx_clone = cx.clone();
@@ -1444,7 +1444,7 @@ impl JrNotification for UntypedMessage {}
 /// ```
 ///
 /// ```no_run
-/// # use sacp::doc_test::*;
+/// # use sacp_doc_test::*;
 /// # async fn example() -> Result<(), sacp::Error> {
 /// # let connection = mock_connection();
 /// // ❌ NEVER do this in a handler - blocks the event loop!
@@ -1512,7 +1512,7 @@ impl<R: JrResponsePayload> JrResponse<R> {
     /// # Example: Proxying requests
     ///
     /// ```no_run
-    /// # use sacp::doc_test::*;
+    /// # use sacp_doc_test::*;
     /// # async fn example() -> Result<(), sacp::Error> {
     /// # let connection = mock_connection();
     /// # let other_connection = connection.json_rpc_cx();
@@ -1559,7 +1559,7 @@ impl<R: JrResponsePayload> JrResponse<R> {
     /// # Safe Usage (in spawned tasks)
     ///
     /// ```no_run
-    /// # use sacp::doc_test::*;
+    /// # use sacp_doc_test::*;
     /// # async fn example() -> Result<(), sacp::Error> {
     /// # let connection = mock_connection();
     /// connection.on_receive_request(async |req: MyRequest, cx| {
@@ -1586,7 +1586,7 @@ impl<R: JrResponsePayload> JrResponse<R> {
     /// # Unsafe Usage (in handlers - will deadlock!)
     ///
     /// ```no_run
-    /// # use sacp::doc_test::*;
+    /// # use sacp_doc_test::*;
     /// # async fn example() -> Result<(), sacp::Error> {
     /// # let connection = mock_connection();
     /// connection.on_receive_request(async |req: MyRequest, cx| {
@@ -1642,7 +1642,7 @@ impl<R: JrResponsePayload> JrResponse<R> {
     /// # Example: Chaining requests
     ///
     /// ```no_run
-    /// # use sacp::doc_test::*;
+    /// # use sacp_doc_test::*;
     /// # async fn example() -> Result<(), sacp::Error> {
     /// # let connection = mock_connection();
     /// connection.on_receive_request(async |req: ValidateRequest, request_cx| {
@@ -1697,7 +1697,7 @@ impl<R: JrResponsePayload> JrResponse<R> {
     /// # Example: Handle response in callback
     ///
     /// ```no_run
-    /// # use sacp::doc_test::*;
+    /// # use sacp_doc_test::*;
     /// # async fn example() -> Result<(), sacp::Error> {
     /// # let connection = mock_connection();
     /// connection.on_receive_request(async |req: MyRequest, cx| {
@@ -1765,272 +1765,4 @@ const COMMUNICATION_FAILURE: i32 = -32000;
 
 fn communication_failure(err: impl ToString) -> crate::Error {
     crate::Error::new((COMMUNICATION_FAILURE, err.to_string()))
-}
-
-/// Test utilities for doc tests
-#[cfg(doctest)]
-pub mod doc_test {
-    use super::*;
-    use agent_client_protocol_schema::InitializeResponse;
-    use serde::{Deserialize, Serialize};
-    use std::pin::Pin;
-
-    // Mock request/response types
-    #[derive(Debug, Serialize, Deserialize)]
-    pub struct MyRequest {}
-
-    #[derive(Debug, Serialize, Deserialize)]
-    pub struct MyResponse {
-        pub status: String,
-    }
-
-    #[derive(Debug, Serialize, Deserialize)]
-    pub struct ProcessRequest {
-        pub data: String,
-    }
-
-    #[derive(Debug, Serialize, Deserialize)]
-    pub struct ProcessResponse {
-        pub result: String,
-    }
-
-    #[derive(Debug, Serialize, Deserialize)]
-    pub struct ProcessStarted {}
-
-    #[derive(Debug, Serialize, Deserialize)]
-    pub struct AnalyzeRequest {
-        pub data: String,
-    }
-
-    #[derive(Debug, Serialize, Deserialize)]
-    pub struct AnalysisStarted {
-        pub job_id: u32,
-    }
-
-    #[derive(Debug, Serialize, Deserialize)]
-    pub struct QueryRequest {
-        pub id: u64,
-    }
-
-    #[derive(Debug, Serialize, Deserialize)]
-    pub struct QueryResponse {
-        pub data: String,
-    }
-
-    #[derive(Debug, Serialize, Deserialize)]
-    pub struct ValidateRequest {
-        pub data: String,
-    }
-
-    #[derive(Debug, Serialize, Deserialize)]
-    pub struct ValidateResponse {
-        pub is_valid: bool,
-        pub error: Option<String>,
-    }
-
-    #[derive(Debug, Serialize, Deserialize)]
-    pub struct ExecuteRequest {}
-
-    #[derive(Debug, Serialize, Deserialize)]
-    pub struct ExecuteResponse {
-        pub result: String,
-    }
-
-    #[derive(Debug, Serialize, Deserialize)]
-    pub struct OtherRequest {}
-
-    #[derive(Debug, Serialize, Deserialize)]
-    pub struct OtherResponse {
-        pub value: String,
-    }
-
-    #[derive(Debug, Serialize, Deserialize)]
-    pub struct ProxyRequest {
-        pub inner_request: UntypedMessage,
-    }
-
-    // Mock notification types
-    #[derive(Debug, Serialize, Deserialize)]
-    pub struct SessionUpdate {}
-
-    #[derive(Debug, Serialize, Deserialize)]
-    pub struct StatusUpdate {
-        pub message: String,
-    }
-
-    #[derive(Debug, Serialize, Deserialize)]
-    pub struct ProcessComplete {
-        pub result: String,
-    }
-
-    #[derive(Debug, Serialize, Deserialize)]
-    pub struct AnalysisComplete {
-        pub result: String,
-    }
-
-    #[derive(Debug, Serialize, Deserialize)]
-    pub struct QueryComplete {}
-
-    // Implement JrMessage for all types
-    macro_rules! impl_jr_message {
-        ($type:ty, $method:expr) => {
-            impl JrMessage for $type {
-                fn method(&self) -> &str {
-                    $method
-                }
-                fn into_untyped_message(self) -> Result<UntypedMessage, crate::Error> {
-                    UntypedMessage::new($method, self)
-                }
-                fn parse_request(
-                    _method: &str,
-                    _params: &impl Serialize,
-                ) -> Option<Result<Self, crate::Error>> {
-                    None
-                }
-                fn parse_notification(
-                    _method: &str,
-                    _params: &impl Serialize,
-                ) -> Option<Result<Self, crate::Error>> {
-                    None
-                }
-            }
-        };
-    }
-
-    // Implement JrRequest for request types
-    macro_rules! impl_jr_request {
-        ($req:ty, $resp:ty, $method:expr) => {
-            impl_jr_message!($req, $method);
-            impl JrRequest for $req {
-                type Response = $resp;
-            }
-        };
-    }
-
-    // Implement JrNotification for notification types
-    macro_rules! impl_jr_notification {
-        ($type:ty, $method:expr) => {
-            impl_jr_message!($type, $method);
-            impl JrNotification for $type {}
-        };
-    }
-
-    impl_jr_request!(MyRequest, MyResponse, "myRequest");
-    impl_jr_request!(ProcessRequest, ProcessResponse, "processRequest");
-    impl_jr_request!(AnalyzeRequest, AnalysisStarted, "analyzeRequest");
-    impl_jr_request!(QueryRequest, QueryResponse, "queryRequest");
-    impl_jr_request!(ValidateRequest, ValidateResponse, "validateRequest");
-    impl_jr_request!(ExecuteRequest, ExecuteResponse, "executeRequest");
-    impl_jr_request!(OtherRequest, OtherResponse, "otherRequest");
-    impl_jr_request!(ProxyRequest, serde_json::Value, "proxyRequest");
-
-    impl_jr_notification!(SessionUpdate, "sessionUpdate");
-    impl_jr_notification!(StatusUpdate, "statusUpdate");
-    impl_jr_notification!(ProcessComplete, "processComplete");
-    impl_jr_notification!(AnalysisComplete, "analysisComplete");
-    impl_jr_notification!(QueryComplete, "queryComplete");
-    impl_jr_notification!(ProcessStarted, "processStarted");
-
-    // Implement JrResponsePayload for response types
-    impl JrResponsePayload for MyResponse {
-        fn into_json(self, _method: &str) -> Result<serde_json::Value, crate::Error> {
-            Ok(serde_json::to_value(self)?)
-        }
-        fn from_value(_method: &str, value: serde_json::Value) -> Result<Self, crate::Error> {
-            Ok(serde_json::from_value(value)?)
-        }
-    }
-
-    impl JrResponsePayload for ProcessResponse {
-        fn into_json(self, _method: &str) -> Result<serde_json::Value, crate::Error> {
-            Ok(serde_json::to_value(self)?)
-        }
-        fn from_value(_method: &str, value: serde_json::Value) -> Result<Self, crate::Error> {
-            Ok(serde_json::from_value(value)?)
-        }
-    }
-
-    impl JrResponsePayload for AnalysisStarted {
-        fn into_json(self, _method: &str) -> Result<serde_json::Value, crate::Error> {
-            Ok(serde_json::to_value(self)?)
-        }
-        fn from_value(_method: &str, value: serde_json::Value) -> Result<Self, crate::Error> {
-            Ok(serde_json::from_value(value)?)
-        }
-    }
-
-    impl JrResponsePayload for QueryResponse {
-        fn into_json(self, _method: &str) -> Result<serde_json::Value, crate::Error> {
-            Ok(serde_json::to_value(self)?)
-        }
-        fn from_value(_method: &str, value: serde_json::Value) -> Result<Self, crate::Error> {
-            Ok(serde_json::from_value(value)?)
-        }
-    }
-
-    impl JrResponsePayload for ValidateResponse {
-        fn into_json(self, _method: &str) -> Result<serde_json::Value, crate::Error> {
-            Ok(serde_json::to_value(self)?)
-        }
-        fn from_value(_method: &str, value: serde_json::Value) -> Result<Self, crate::Error> {
-            Ok(serde_json::from_value(value)?)
-        }
-    }
-
-    impl JrResponsePayload for ExecuteResponse {
-        fn into_json(self, _method: &str) -> Result<serde_json::Value, crate::Error> {
-            Ok(serde_json::to_value(self)?)
-        }
-        fn from_value(_method: &str, value: serde_json::Value) -> Result<Self, crate::Error> {
-            Ok(serde_json::from_value(value)?)
-        }
-    }
-
-    impl JrResponsePayload for OtherResponse {
-        fn into_json(self, _method: &str) -> Result<serde_json::Value, crate::Error> {
-            Ok(serde_json::to_value(self)?)
-        }
-        fn from_value(_method: &str, value: serde_json::Value) -> Result<Self, crate::Error> {
-            Ok(serde_json::from_value(value)?)
-        }
-    }
-
-    // Mock async functions
-    pub async fn expensive_analysis(_data: &str) -> Result<String, crate::Error> {
-        Ok("analysis result".into())
-    }
-
-    pub async fn expensive_operation(_data: &str) -> Result<String, crate::Error> {
-        Ok("operation result".into())
-    }
-
-    pub fn update_session_state(_update: &SessionUpdate) -> Result<(), crate::Error> {
-        Ok(())
-    }
-
-    pub fn process(data: &str) -> Result<String, crate::Error> {
-        Ok(data.to_string())
-    }
-
-    // Helper to create a mock connection for examples
-    pub fn mock_connection() -> JrConnection<
-        Pin<Box<dyn futures::AsyncWrite + Send>>,
-        Pin<Box<dyn futures::AsyncRead + Send>>,
-        NullHandler,
-    > {
-        use futures::io::Cursor;
-        let writer: Pin<Box<dyn futures::AsyncWrite + Send>> = Box::pin(Cursor::new(Vec::new()));
-        let reader: Pin<Box<dyn futures::AsyncRead + Send>> = Box::pin(Cursor::new(Vec::new()));
-        JrConnection::new(writer, reader)
-    }
-
-    pub trait Make {
-        fn make() -> Self;
-    }
-
-    impl<T> Make for T {
-        fn make() -> Self {
-            panic!()
-        }
-    }
 }
