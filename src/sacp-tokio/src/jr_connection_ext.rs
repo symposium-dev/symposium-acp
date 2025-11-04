@@ -1,7 +1,8 @@
 //! Extension utilities for `JrConnection` to support spawning agents with Tokio.
 
 use crate::AcpAgent;
-use sacp::{JrConnection, NullHandler};
+use sacp::JrConnection;
+use sacp::handler::NullHandler;
 use std::future::Future;
 use std::pin::Pin;
 use std::task::{Context, Poll};

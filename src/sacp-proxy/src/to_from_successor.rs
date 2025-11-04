@@ -1,8 +1,9 @@
 use futures::{AsyncRead, AsyncWrite};
+use sacp::handler::ChainHandler;
 use sacp::schema::{InitializeRequest, InitializeResponse};
 use sacp::{
-    ChainHandler, Handled, JrConnection, JrConnectionCx, JrHandler, JrMessage, JrNotification,
-    JrRequest, JrRequestCx, MessageAndCx, MetaCapabilityExt, Proxy, UntypedMessage,
+    Handled, JrConnection, JrConnectionCx, JrHandler, JrMessage, JrNotification, JrRequest,
+    JrRequestCx, MessageAndCx, MetaCapabilityExt, Proxy, UntypedMessage,
 };
 use serde::{Deserialize, Serialize};
 use std::marker::PhantomData;

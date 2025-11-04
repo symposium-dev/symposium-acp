@@ -63,6 +63,8 @@
 
 /// Capability management for the `_meta.symposium` object
 mod capabilities;
+/// JSON-RPC handler types for building custom message handlers
+pub mod handler;
 /// JSON-RPC connection and handler infrastructure
 mod jsonrpc;
 /// ACP protocol schema types - all message types, requests, responses, and supporting types
@@ -71,7 +73,10 @@ pub mod schema;
 pub mod util;
 
 pub use capabilities::*;
-pub use jsonrpc::*;
+pub use jsonrpc::{
+    Handled, JrConnection, JrConnectionCx, JrHandler, JrMessage, JrNotification, JrRequest,
+    JrRequestCx, JrResponse, JrResponsePayload, MessageAndCx, UntypedMessage,
+};
 
 // Re-export the six primary message enum types at the root
 pub use schema::{

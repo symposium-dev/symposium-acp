@@ -11,10 +11,12 @@ use futures::future::Either;
 use futures::{AsyncRead, AsyncWrite, FutureExt};
 
 mod actors;
-mod handlers;
-pub use handlers::*;
+pub(crate) mod handlers;
 
 use crate::jsonrpc::actors::Task;
+use crate::jsonrpc::handlers::{
+    ChainHandler, MessageHandler, NotificationHandler, NullHandler, RequestHandler,
+};
 
 /// A JSON-RPC connection that can act as either a server, client, or both.
 ///

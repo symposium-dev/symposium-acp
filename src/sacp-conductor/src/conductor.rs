@@ -69,9 +69,10 @@ use sacp_proxy::{
     McpOverAcpRequest, SuccessorNotification, SuccessorRequest,
 };
 
+use sacp::handler::NullHandler;
 use sacp::{
     JrConnection, JrConnectionCx, JrNotification, JrRequest, JrRequestCx, JrResponse, MessageAndCx,
-    MetaCapabilityExt, NullHandler, Proxy, UntypedMessage,
+    MetaCapabilityExt, Proxy, UntypedMessage,
     util::{TypeNotification, TypeRequest},
 };
 use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
