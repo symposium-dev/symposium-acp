@@ -40,6 +40,7 @@ struct McpServiceRegistryData {
 }
 
 impl McpServiceRegistry {
+    /// Creates a new empty MCP service registry
     pub fn new() -> Self {
         Self::default()
     }

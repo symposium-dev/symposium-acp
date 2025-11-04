@@ -1,3 +1,5 @@
+#![deny(missing_docs)]
+
 //! # sacp-proxy
 //!
 //! Framework for building ACP proxy components that extend agent functionality.

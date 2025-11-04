@@ -123,6 +123,7 @@ impl<Req: JrNotification> JrNotification for SuccessorNotification<Req> {}
 // Proxy methods
 // ============================================================
 
+/// Extension trait for JrConnection that adds proxy-specific functionality
 pub trait AcpProxyExt<OB: AsyncWrite, IB: AsyncRead, H: JrHandler> {
     /// Adds a handler for requests received from the successor component.
     ///
@@ -252,6 +253,7 @@ where
     R: JrRequest,
     F: AsyncFnMut(R, JrRequestCx<R::Response>) -> Result<(), sacp::Error>,
 {
+    /// Creates a new handler for requests from the successor
     pub fn new(handler: F) -> Self {
         Self {
             handler,
@@ -315,6 +317,7 @@ where
     N: JrNotification,
     F: AsyncFnMut(N, JrConnectionCx) -> Result<(), sacp::Error>,
 {
+    /// Creates a new handler for notifications from the successor
     pub fn new(handler: F) -> Self {
         Self {
             handler,

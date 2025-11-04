@@ -776,13 +776,16 @@ pub trait JrHandler {
         message: MessageAndCx,
     ) -> Result<Handled<MessageAndCx>, crate::Error>;
 
+    /// Returns a debug description of the handler chain for diagnostics
     fn describe_chain(&self) -> impl std::fmt::Debug;
 }
 
 /// Return type from JrHandler; indicates whether the request was handled or not.
 #[must_use]
 pub enum Handled<T> {
+    /// The message was handled
     Yes,
+    /// The message was not handled; returns the original value
     No(T),
 }
 
@@ -1125,6 +1128,7 @@ impl JrRequestCx<serde_json::Value> {
         }
     }
 
+    /// Cast this request context to a different response type
     pub fn cast<T: JrResponsePayload>(self) -> JrRequestCx<T> {
         self.wrap_params(move |method, value| match value {
             Ok(value) => T::into_json(value, &method),
@@ -1338,7 +1342,9 @@ impl MessageAndCx {
 /// An incoming JSON message without any typing. Can be a request or a notification.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct UntypedMessage {
+    /// The JSON-RPC method name
     pub method: String,
+    /// The JSON-RPC parameters as a raw JSON value
     pub params: serde_json::Value,
 }
 
@@ -1352,14 +1358,17 @@ impl UntypedMessage {
         })
     }
 
+    /// Returns the method name
     pub fn method(&self) -> &str {
         &self.method
     }
 
+    /// Returns the parameters as a JSON value
     pub fn params(&self) -> &serde_json::Value {
         &self.params
     }
 
+    /// Consumes this message and returns the method and params
     pub fn into_parts(self) -> (String, serde_json::Value) {
         (self.method, self.params)
     }

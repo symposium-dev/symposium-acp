@@ -1,3 +1,5 @@
+#![deny(missing_docs)]
+
 //! # sacp -- the Symposium Agent Client Protocol (ACP) SDK
 //!
 //! **sacp** is a Rust SDK for building agents and editors using the [Agent-Client Protocol (ACP)](https://agentclientprotocol.com/).
@@ -58,9 +60,13 @@
 //! - **[sacp-tokio](https://crates.io/crates/sacp-tokio)** - Tokio-specific utilities (process spawning, connection management)
 //! - **[sacp-conductor](https://crates.io/crates/sacp-conductor)** - Binary for orchestrating proxy chains
 
+/// ACP protocol message implementations and trait implementations
 mod acp;
+/// Capability management for the `_meta.symposium` object
 mod capabilities;
+/// JSON-RPC connection and handler infrastructure
 mod jsonrpc;
+/// Utility functions and types
 pub mod util;
 
 // Re-export all ACP types
