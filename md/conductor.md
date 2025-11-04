@@ -6,30 +6,30 @@ The **Conductor** (binary name: `conductor`) is the orchestrator for P/ACP proxy
 
 ## Overview
 
-Conductor sits between an ACP editor and a chain of components, presenting itself as a normal ACP agent to the editor while managing the proxy chain internally.
+The conductor orchestrates proxy chains by sitting **between every component**. It spawns component processes and routes all messages, presenting itself as a normal ACP agent to the editor.
 
 ```mermaid
-flowchart LR
-    Editor[ACP Editor]
+flowchart TB
+    Editor[Editor]
+    C[Conductor]
+    P1[Component 1]
+    P2[Component 2]
     
-    subgraph Conductor[Conductor Process]
-        F[Conductor Orchestrator]
-    end
-    
-    subgraph Chain[Component Chain]
-        C1[Component 1<br/>Sparkle]
-        C2[Component 2<br/>Claude Code]
-        
-        C1 -->|_proxy/successor/*| C2
-    end
-    
-    Editor <-->|ACP via stdio| F
-    F <-->|ACP via stdio| C1
+    Editor <-->|ACP via stdio| C
+    C <-->|stdio| P1
+    C <-->|stdio| P2
 ```
+
+**Key insight**: Components never talk directly to each other. The conductor routes ALL messages using the `_proxy/successor/*` protocol.
 
 **From the editor's perspective**: Conductor is a normal ACP agent communicating over stdio.
 
-**From the component's perspective**: Each component is initialized by its predecessor and communicates via `_proxy/successor/*` protocol with its successor.
+**From each component's perspective**: 
+- Receives normal ACP messages from the conductor
+- Sends `_proxy/successor/request` to conductor to forward messages TO successor
+- Receives `_proxy/successor/request` from conductor for messages FROM successor
+
+See [Architecture Overview](./architecture.md) for detailed conceptual and actual message flows.
 
 ## Responsibilities
 
@@ -56,37 +56,32 @@ conductor mcp 54321
 
 ### 2. Message Routing
 
-Routes messages between editor and components:
+The conductor routes ALL messages between components. No component talks directly to another.
 
-**Editor → Component messages:**
-- Messages from editor to Conductor are forwarded to the first component
-- Preserves original message ID
-- First component initializes subsequent components via `_proxy/successor/*`
+**Message flow types:**
 
-**Component → Component messages:**
-- Components use `_proxy/successor/request` to send to their successors
-- Conductor doesn't need to route these—components talk directly via stdio pipes
+1. **Editor → First Component**: Conductor forwards normal ACP messages
+2. **Component → Successor**: Component sends `_proxy/successor/request` to conductor, which unwraps and forwards to next component
+3. **Successor → Component**: Conductor wraps messages in `_proxy/successor/request` when sending FROM successor
+4. **Responses**: Flow back via standard JSON-RPC response IDs
 
-**Response messages:**
-- Flow back through the chain automatically via stdio
-- Each component can transform responses before passing upstream
+See [Architecture Overview](./architecture.md#message-flow) for detailed request/response flow diagrams.
 
 ### 3. Capability Management
 
-The conductor performs a two-way capability handshake during initialization:
+The conductor manages proxy capability handshakes during initialization:
 
-**Proxy Capability Handshake:**
-- **For non-last components (proxies)**: Conductor offers `proxy: true` in `_meta` field of InitializeRequest
-- **Component must accept**: Proxy components MUST respond with `proxy: true` in `_meta` field of InitializeResponse
-- **For last component (agent)**: Conductor does NOT offer `proxy` capability (agent is just a normal ACP agent)
-- **Handshake failure**: If a component offered the proxy capability doesn't respond with it, conductor fails initialization with error "component X is not a proxy"
+**Normal Mode (conductor as root):**
+- Offers `proxy: true` to all components EXCEPT the last
+- Verifies each proxy component accepts the capability
+- Last component (agent) receives standard ACP initialization
 
-**Why a handshake?** The proxy capability is an *active protocol* requiring components to handle `_proxy/successor/*` messages. Unlike passive capabilities (like "http"), proxy components must actively participate in routing. The two-way handshake ensures components can fulfill their role.
+**Proxy Mode (conductor as proxy):**
+- When conductor itself receives `proxy: true` during initialization
+- Offers `proxy: true` to ALL components (including the last)
+- Enables tree-structured proxy chains
 
-**MCP bridge capability (future):**
-- Components may declare MCP servers with ACP transport (`"url": "acp:$UUID"`)
-- Conductor will handle bridging if agent doesn't support `mcp_acp_transport`
-- See [MCP Bridge](./mcp-bridge.md) for details
+See [Architecture Overview](./architecture.md#capability-handshake) for detailed handshake flows and [Proxy Mode](#proxy-mode) below for hierarchical chain details.
 
 ### 4. MCP Bridge Adaptation
 
@@ -105,6 +100,49 @@ When components provide MCP servers with ACP transport (`"url": "acp:$UUID"`):
   - Component responses flow back: component → conductor → TCP → bridge → stdio → agent
 
 See [MCP Bridge](./mcp-bridge.md) for full implementation details.
+
+## Proxy Mode
+
+The conductor can itself operate as a proxy component within a larger chain, enabling **tree-structured proxy architectures**.
+
+### How Proxy Mode Works
+
+When the conductor receives an `initialize` request **with** the `proxy` capability:
+
+1. **Detection**: Conductor detects it's being used as a proxy component
+2. **All components become proxies**: Offers `proxy: true` to ALL managed components (including the last)
+3. **Successor forwarding**: When the final component sends `_proxy/successor/request`, conductor forwards to **its own successor**
+
+### Example: Hierarchical Chain
+
+```
+client → proxy1 → conductor (proxy mode) → final-agent
+                      ↓ manages
+                  p1 → p2 → p3
+```
+
+**Message flow when p3 forwards to successor:**
+1. p3 sends `_proxy/successor/request` to conductor
+2. Conductor recognizes it's in proxy mode
+3. Conductor sends `_proxy/successor/request` to proxy1 (its predecessor)
+4. proxy1 routes to final-agent
+
+### Use Cases
+
+**Modular sub-chains**: Group related proxies into a conductor-managed sub-chain that can be inserted anywhere
+
+**Conditional routing**: A proxy can route to conductor-based sub-chains based on request type
+
+**Isolated environments**: Each conductor manages its own component lifecycle while participating in larger chains
+
+### Implementation Notes
+
+- Proxy mode is detected during initialization by checking for `proxy: true` in incoming `initialize` request
+- In normal mode: last component is agent (no proxy capability)
+- In proxy mode: all components are proxies (all receive proxy capability)
+- The conductor's own successor is determined by whoever initialized it
+
+See [Architecture Overview](./architecture.md#proxy-mode) for conceptual diagrams.
 
 ## Initialization Flow
 
@@ -151,67 +189,41 @@ Key points:
 5. **Capabilities flow back up the chain**: Each component sees successor's capabilities before responding
 6. **Message IDs**: Preserved from editor (I0), new IDs for proxy messages (I1, I2, ...)
 
-## Architecture
+## Implementation Architecture
 
-### Core Types
+The conductor uses an actor-based architecture with message passing via channels.
 
-```rust
-struct Conductor {
-    /// All components in the chain (spawned at startup)
-    components: Vec<ComponentProcess>,
-}
+### Core Components
 
-struct ComponentProcess {
-    name: String,
-    child: Child,
-    stdin: ChildStdin,
-    stdout: BufReader<ChildStdout>,
-    stderr: BufReader<ChildStderr>,
-}
-```
+- **Main connection**: Handles editor stdio and spawns the event loop
+- **Component connections**: Each component has a bidirectional JSON-RPC connection
+- **Message router**: Central actor that receives `ConductorMessage` enums and routes appropriately
+- **MCP bridge actors**: Manage MCP-over-ACP connections
 
-### Message Flow
+### Message Routing Implementation
 
-Conductor manages message routing between editor and all components:
+The conductor uses a recursive spawning pattern:
 
-**Startup:**
-1. Parse command-line args to get component list: `["sparkle-acp", "agent-acp"]`
-2. Spawn all components, creating stdio pipes for each
-3. Wait for messages
+1. **Recursive chain building**: Each component spawns the next, establishing connections
+2. **Actor-based routing**: All messages flow through a central conductor actor via channels
+3. **Response routing**: Uses JSON-RPC response IDs and request contexts to route back
+4. **No explicit ID tracking**: Context passing eliminates need for manual ID management
 
-**Message routing:**
+**Key routing decisions:**
 
-1. **Editor → Conductor messages** (from editor's stdin):
-   - Forward to **first component** (index 0)
-   - Preserve message ID
-   - Special case for `acp/initialize`: Add `proxy: true` capability before forwarding
-
-2. **`_proxy/successor/request` from any component**:
-   - Determine which component sent it (by reading from that component's stdout)
-   - Unwrap the inner message
-   - Forward to **next component in chain**
-   - Special case: If next component is last, omit `proxy: true` capability
-
-3. **Responses** (JSON-RPC responses, not requests):
-   - Match response ID to know which component should receive it
-   - Forward appropriately (back toward editor or back to requesting component)
-
-4. **`_proxy/successor/response`** (wrapping a response):
-   - Unwrap the inner response
-   - Forward back to the component that sent the original `_proxy/successor/request`
+- **Normal mode**: Last component gets normal ACP (no proxy capability)
+- **Proxy mode**: All components get proxy capability, final component can forward to conductor's successor
+- **Bidirectional `_proxy/successor/*`**: Used for both TO successor (unwrap and forward) and FROM successor (wrap and deliver)
 
 ### Concurrency Model
 
-For MVP, use a threaded model with message multiplexing:
-- **Main thread**: Reads from editor stdin, routes to first component
-- **Component reader threads**: One thread per component reading stdout, forwards to appropriate destination
-- **Error threads**: One thread per component reading stderr, logs errors
+Built on Tokio async runtime:
+- **Async I/O**: All stdio operations are non-blocking
+- **Message passing**: Components communicate via mpsc channels
+- **Spawned tasks**: Each connection handler runs as separate task
+- **Error propagation**: Tasks send errors back to main actor via channels
 
-Conductor needs to track message IDs to route responses correctly:
-- When forwarding editor message to Component1: Track `(message_id → editor)`
-- When forwarding `_proxy/successor/request`: Track `(message_id → component_index)`
-
-Later optimization: async I/O with tokio for better performance.
+See source code in `src/sacp-conductor/src/conductor.rs` for implementation details.
 
 ## Error Handling
 
