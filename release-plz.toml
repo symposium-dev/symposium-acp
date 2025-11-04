@@ -1,0 +1,19 @@
+# Release-plz configuration for symposium-acp workspace
+# See: https://release-plz.dev/docs/config
+
+[workspace]
+# Safer release strategy - only release when merging the release PR
+# (avoids race conditions with squash-merge)
+release_always = false
+
+# Keep dependencies updated in Cargo.lock
+dependencies_update = true
+
+# Tag release PRs for visibility
+pr_labels = ["release"]
+
+# Package-specific configurations
+[[package]]
+name = "sacp-doc-test"
+# Don't publish documentation test package to crates.io
+publish = false
