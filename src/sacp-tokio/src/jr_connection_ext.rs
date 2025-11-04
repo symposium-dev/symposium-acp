@@ -47,7 +47,7 @@ pub trait JrConnectionExt {
     /// let agent = AcpAgent::from_str("python my_agent.py")?;
     ///
     /// JrConnection::to_agent(agent)?
-    ///     .on_receive_notification(|notif: sacp::SessionNotification, _cx| async move {
+    ///     .on_receive_notification(|notif: sacp::schema::SessionNotification, _cx| async move {
     ///         println!("{:?}", notif);
     ///         Ok(())
     ///     })
