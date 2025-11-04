@@ -5,12 +5,8 @@
 //! 2. Session updates from eliza get the '>' prefix from arrow proxy
 //! 3. The full proxy chain works end-to-end
 
-use sacp::schema::{
-    ContentBlock, InitializeRequest, NewSessionRequest, PromptRequest, SessionNotification,
-    TextContent,
-};
-use sacp::{JrConnection, MessageAndCx};
 use sacp_conductor::conductor::Conductor;
+use sacp_test::test_client::yolo_prompt;
 use sacp_tokio::AcpAgent;
 use std::str::FromStr;
 use tokio::io::duplex;
@@ -46,92 +42,33 @@ async fn test_conductor_with_arrow_proxy_and_eliza() -> Result<(), sacp::Error> 
         .await
     });
 
-    // Editor side: connect and send a prompt
+    // Editor side: connect and send a prompt using helper
     let editor_handle = tokio::spawn(async move {
-        let connection = JrConnection::new(editor_write.compat_write(), editor_read.compat())
-            .name("test-editor");
+        let result =
+            yolo_prompt(editor_write.compat_write(), editor_read.compat(), "Hello").await?;
 
-        let editor_cx = connection.connection_cx();
+        tracing::debug!(?result, "Received response from arrow proxy chain");
 
-        // Spawn message receiver
-        let receiver_handle = tokio::spawn({
-            let _editor_cx = editor_cx.clone();
-            async move {
-                connection
-                    .on_receive_message(
-                        async move |message: MessageAndCx<
-                            sacp::UntypedMessage,
-                            SessionNotification,
-                        >| {
-                            match message {
-                                MessageAndCx::Notification(notif, _) => {
-                                    tracing::debug!(?notif, "Received session notification");
-                                    // Store the notification for verification
-                                    // (in real test we'd use a channel)
-                                }
-                                _ => {}
-                            }
-                            Ok(())
-                        },
-                    )
-                    .serve()
-                    .await
-            }
-        });
+        assert!(
+            result.starts_with('>'),
+            "Expected response to start with '>' from arrow proxy, got: {}",
+            result
+        );
 
-        // Send initialize
-        let init_response = editor_cx
-            .send_request(InitializeRequest {
-                protocol_version: Default::default(),
-                client_capabilities: Default::default(),
-                meta: None,
-                client_info: None,
-            })
-            .block_task()
-            .await?;
-        tracing::debug!(?init_response, "Initialize complete");
-
-        // Create a new session
-        let session_response = editor_cx
-            .send_request(NewSessionRequest {
-                meta: None,
-                mcp_servers: vec![],
-                cwd: std::env::current_dir().unwrap_or_default(),
-            })
-            .block_task()
-            .await?;
-        let session_id = session_response.session_id;
-        tracing::debug!(?session_id, "Session created");
-
-        // Send a prompt
-        let prompt_response = editor_cx
-            .send_request(PromptRequest {
-                session_id: session_id.clone(),
-                prompt: vec![ContentBlock::Text(TextContent {
-                    text: "Hello".to_string(),
-                    annotations: None,
-                    meta: None,
-                })],
-                meta: None,
-            })
-            .block_task()
-            .await?;
-        tracing::debug!(?prompt_response, "Prompt complete");
-
-        // Give some time for session updates to arrive
-        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
-
-        receiver_handle.abort();
-
-        Ok::<(), sacp::Error>(())
+        Ok::<String, sacp::Error>(result)
     });
 
-    // Wait for editor to complete
-    tokio::time::timeout(std::time::Duration::from_secs(30), editor_handle)
+    // Wait for editor to complete and get the result
+    let result = tokio::time::timeout(std::time::Duration::from_secs(30), editor_handle)
         .await
         .expect("Test timed out")
         .expect("Editor task panicked")
         .expect("Editor failed");
+
+    tracing::info!(
+        ?result,
+        "Test completed successfully with arrow-prefixed response"
+    );
 
     conductor_handle.abort();
 

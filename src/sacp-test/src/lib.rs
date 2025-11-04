@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 use std::pin::Pin;
 
 pub mod arrow_proxy;
+pub mod test_client;
 
 // Mock request/response types
 #[derive(Debug, Serialize, Deserialize)]
