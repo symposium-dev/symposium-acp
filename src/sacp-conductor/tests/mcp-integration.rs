@@ -53,6 +53,7 @@ async fn run_test_with_components(
         .name("editor-to-connector")
         .with_spawned(async move {
             Conductor::run_with_command(
+                "conductor".to_string(),
                 conductor_out.compat_write(),
                 conductor_in.compat(),
                 components,
@@ -149,6 +150,7 @@ async fn test_agent_handles_prompt() -> Result<(), sacp::Error> {
         })
         .with_spawned(async move {
             Conductor::run_with_command(
+                "mcp-integration-conductor".to_string(),
                 conductor_out.compat_write(),
                 conductor_in.compat(),
                 vec![

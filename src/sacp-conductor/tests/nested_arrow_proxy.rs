@@ -42,6 +42,7 @@ async fn test_conductor_with_two_arrow_proxies() -> Result<(), sacp::Error> {
     // Spawn the conductor with three components
     let conductor_handle = tokio::spawn(async move {
         Conductor::run(
+            "test-conductor".to_string(),
             conductor_write.compat_write(),
             conductor_read.compat(),
             vec![

@@ -29,7 +29,7 @@ async fn test_nested_conductor_with_arrow_proxies() -> Result<(), sacp::Error> {
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::from_default_env()
-                .add_directive("sacp_conductor=debug".parse().unwrap())
+                .add_directive("sacp_conductor=trace".parse().unwrap())
                 .add_directive("arrow_proxy=debug".parse().unwrap()),
         )
         .with_test_writer()
@@ -50,6 +50,7 @@ async fn test_nested_conductor_with_arrow_proxies() -> Result<(), sacp::Error> {
     // Spawn the outer conductor with two components
     let conductor_handle = tokio::spawn(async move {
         Conductor::run(
+            "outer-conductor".to_string(),
             conductor_write.compat_write(),
             conductor_read.compat(),
             vec![Box::new(conductor_proxy), Box::new(eliza)],

@@ -98,6 +98,10 @@ pub struct ConductorArgs {
 pub enum ConductorCommand {
     /// Run as agent orchestrator managing a proxy chain
     Agent {
+        /// Name of the agent
+        #[arg(short, long, default_value = "conductor")]
+        name: String,
+
         /// List of proxy commands to chain together
         proxies: Vec<String>,
     },
@@ -111,13 +115,13 @@ pub enum ConductorCommand {
 impl ConductorArgs {
     pub async fn run(self) -> Result<(), sacp::Error> {
         match self.command {
-            ConductorCommand::Agent { proxies } => {
+            ConductorCommand::Agent { name, proxies } => {
                 let providers = proxies
                     .into_iter()
                     .map(|s| CommandComponentProvider::new(s))
                     .collect();
 
-                Conductor::run(stdout().compat_write(), stdin().compat(), providers).await
+                Conductor::run(name, stdout().compat_write(), stdin().compat(), providers).await
             }
             ConductorCommand::Mcp { port } => mcp_bridge::run_mcp_bridge(port).await,
         }

@@ -35,6 +35,7 @@ async fn test_conductor_with_arrow_proxy_and_eliza() -> Result<(), sacp::Error> 
     // Spawn the conductor
     let conductor_handle = tokio::spawn(async move {
         Conductor::run(
+            "conductor".to_string(),
             conductor_write.compat_write(),
             conductor_read.compat(),
             vec![Box::new(arrow_proxy_agent), Box::new(eliza_agent)],

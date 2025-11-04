@@ -103,6 +103,9 @@ struct ServeArgs<OB: AsyncWrite, IB: AsyncRead> {
 /// bidirectionally between the editor, components, and agent.
 ///
 pub struct Conductor {
+    /// Name of the conductor instance
+    name: String,
+
     /// Channel for receiving internal conductor messages from spawned tasks
     conductor_rx: mpsc::Receiver<ConductorMessage>,
 
@@ -128,14 +131,16 @@ pub struct Conductor {
 
 impl Conductor {
     pub async fn run<OB: AsyncWrite, IB: AsyncRead>(
+        name: String,
         outgoing_bytes: OB,
         incoming_bytes: IB,
         providers: Vec<Box<dyn ComponentProvider>>,
     ) -> Result<(), sacp::Error> {
-        Self::run_with_command(outgoing_bytes, incoming_bytes, providers, None).await
+        Self::run_with_command(name, outgoing_bytes, incoming_bytes, providers, None).await
     }
 
     pub async fn run_with_command<OB: AsyncWrite, IB: AsyncRead>(
+        name: String,
         outgoing_bytes: OB,
         incoming_bytes: IB,
         mut providers: Vec<Box<dyn ComponentProvider>>,
@@ -180,6 +185,7 @@ impl Conductor {
         };
 
         Conductor {
+            name,
             components: Default::default(),
             bridge_listeners: Default::default(),
             bridge_connections: Default::default(),

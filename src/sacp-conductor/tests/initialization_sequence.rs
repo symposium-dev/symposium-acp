@@ -132,6 +132,7 @@ async fn run_test_with_components(
         .name("editor-to-connector")
         .with_spawned(async move {
             Conductor::run(
+                "conductor".to_string(),
                 conductor_out.compat_write(),
                 conductor_in.compat(),
                 components,
