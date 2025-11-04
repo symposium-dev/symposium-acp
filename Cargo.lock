@@ -882,6 +882,7 @@ dependencies = [
  "rmcp",
  "sacp",
  "sacp-proxy",
+ "sacp-test",
  "sacp-tokio",
  "schemars",
  "serde",
@@ -926,6 +927,8 @@ dependencies = [
  "serde_json",
  "tokio",
  "tokio-util",
+ "tracing",
+ "tracing-subscriber",
 ]
 
 [[package]]

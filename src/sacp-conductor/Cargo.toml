@@ -33,3 +33,5 @@ uuid.workspace = true
 expect-test.workspace = true
 rmcp = { workspace = true, features = ["client", "server", "transport-io", "transport-child-process"] }
 schemars.workspace = true
+sacp-test = { path = "../sacp-test" }
+sacp-tokio = { path = "../sacp-tokio" }
