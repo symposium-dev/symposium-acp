@@ -3,7 +3,7 @@ use futures::{FutureExt, future::BoxFuture};
 use futures::{SinkExt, StreamExt};
 use fxhash::FxHashMap;
 use rmcp::ServiceExt;
-use sacp::NewSessionRequest;
+use sacp::schema::NewSessionRequest;
 use sacp::{
     Handled, JrConnection, JrConnectionCx, JrHandler, JrMessage, JrRequestCx, MessageAndCx,
     UntypedMessage,
@@ -487,8 +487,8 @@ struct RegisteredMcpServer {
 }
 
 impl RegisteredMcpServer {
-    fn acp_mcp_server(&self) -> sacp::McpServer {
-        sacp::McpServer::Http {
+    fn acp_mcp_server(&self) -> sacp::schema::McpServer {
+        sacp::schema::McpServer::Http {
             name: self.name.clone(),
             url: self.url.clone(),
             headers: vec![],

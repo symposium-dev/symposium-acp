@@ -1,8 +1,8 @@
 use futures::{AsyncRead, AsyncWrite};
+use sacp::schema::{InitializeRequest, InitializeResponse};
 use sacp::{
-    ChainHandler, Handled, InitializeRequest, InitializeResponse, JrConnection, JrConnectionCx,
-    JrHandler, JrMessage, JrNotification, JrRequest, JrRequestCx, MessageAndCx, MetaCapabilityExt,
-    Proxy, UntypedMessage,
+    ChainHandler, Handled, JrConnection, JrConnectionCx, JrHandler, JrMessage, JrNotification,
+    JrRequest, JrRequestCx, MessageAndCx, MetaCapabilityExt, Proxy, UntypedMessage,
 };
 use serde::{Deserialize, Serialize};
 use std::marker::PhantomData;
@@ -472,7 +472,7 @@ impl ProxyHandler {
     }
 }
 
-/// Extension trait for [`JsonRpcCx`] that adds methods for sending to successor.
+/// Extension trait for [`JrConnectionCx`](sacp::JrConnectionCx) that adds methods for sending to successor.
 ///
 /// This trait provides convenient methods for proxies to forward messages downstream
 /// to their successor component (next proxy or agent). Messages are automatically
@@ -499,7 +499,7 @@ pub trait JrCxExt {
     ///
     /// # Returns
     ///
-    /// Returns a [`JrResponse`] that can be awaited to get the successor's
+    /// Returns a [`JrResponse`](sacp::JrResponse) that can be awaited to get the successor's
     /// response.
     ///
     /// # Example

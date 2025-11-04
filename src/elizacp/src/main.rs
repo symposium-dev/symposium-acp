@@ -39,11 +39,11 @@ mod eliza;
 use anyhow::Result;
 use clap::Parser;
 use eliza::Eliza;
-use sacp::{
+use sacp::JrConnection;
+use sacp::schema::{
     AgentCapabilities, ContentBlock, ContentChunk, InitializeRequest, InitializeResponse,
-    JrConnection, LoadSessionRequest, LoadSessionResponse, NewSessionRequest, NewSessionResponse,
-    PromptRequest, PromptResponse, SessionId, SessionNotification, SessionUpdate, StopReason,
-    TextContent,
+    LoadSessionRequest, LoadSessionResponse, NewSessionRequest, NewSessionResponse, PromptRequest,
+    PromptResponse, SessionId, SessionNotification, SessionUpdate, StopReason, TextContent,
 };
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};

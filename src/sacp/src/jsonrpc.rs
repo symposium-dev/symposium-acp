@@ -43,7 +43,7 @@ use crate::jsonrpc::actors::Task;
 ///
 /// ```no_run
 /// # use sacp_doc_test::*;
-/// # use sacp::{InitializeRequest, InitializeResponse, SessionNotification};
+/// # use sacp::schema::{InitializeRequest, InitializeResponse, SessionNotification};
 /// # async fn example() -> Result<(), sacp::Error> {
 /// # let connection = mock_connection();
 /// connection
@@ -67,7 +67,8 @@ use crate::jsonrpc::actors::Task;
 ///
 /// ```no_run
 /// # use sacp_doc_test::*;
-/// # use sacp::{InitializeRequest, InitializeResponse, PromptRequest, PromptResponse, JrRequest, JrMessage, UntypedMessage};
+/// # use sacp::{JrRequest, JrMessage, UntypedMessage};
+/// # use sacp::schema::{InitializeRequest, InitializeResponse, PromptRequest, PromptResponse};
 /// # async fn example() -> Result<(), sacp::Error> {
 /// # let connection = mock_connection();
 /// // Define an enum for multiple request types
@@ -104,7 +105,8 @@ use crate::jsonrpc::actors::Task;
 ///
 /// ```no_run
 /// # use sacp_doc_test::*;
-/// # use sacp::{MessageAndCx, InitializeRequest, InitializeResponse, SessionNotification};
+/// # use sacp::MessageAndCx;
+/// # use sacp::schema::{InitializeRequest, InitializeResponse, SessionNotification};
 /// # async fn example() -> Result<(), sacp::Error> {
 /// # let connection = mock_connection();
 /// // on_receive_message receives MessageAndCx which can be either a request or notification
@@ -139,7 +141,8 @@ use crate::jsonrpc::actors::Task;
 ///
 /// ```no_run
 /// # use sacp_doc_test::*;
-/// # use sacp::{InitializeRequest, InitializeResponse, PromptRequest, PromptResponse, MessageAndCx, UntypedMessage};
+/// # use sacp::{MessageAndCx, UntypedMessage};
+/// # use sacp::schema::{InitializeRequest, InitializeResponse, PromptRequest, PromptResponse};
 /// # async fn example() -> Result<(), sacp::Error> {
 /// # let connection = mock_connection();
 /// connection
@@ -249,7 +252,7 @@ use crate::jsonrpc::actors::Task;
 ///
 /// ```no_run
 /// # use sacp_doc_test::*;
-/// # use sacp::InitializeRequest;
+/// # use sacp::schema::InitializeRequest;
 /// # async fn example() -> Result<(), sacp::Error> {
 /// # let connection = mock_connection();
 /// connection
@@ -278,7 +281,8 @@ use crate::jsonrpc::actors::Task;
 /// # Example: Complete Agent
 ///
 /// ```no_run
-/// # use sacp::{JrConnection, InitializeRequest, InitializeResponse, PromptRequest, PromptResponse, SessionNotification};
+/// # use sacp::JrConnection;
+/// # use sacp::schema::{InitializeRequest, InitializeResponse, PromptRequest, PromptResponse, SessionNotification};
 /// # use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
 /// # async fn example() -> Result<(), sacp::Error> {
 /// let stdout = tokio::io::stdout().compat_write();
@@ -447,7 +451,8 @@ impl<OB: AsyncWrite, IB: AsyncRead, H: JrHandler> JrConnection<OB, IB, H> {
     /// # Example
     ///
     /// ```
-    /// # use sacp::{JrConnection, PromptRequest, PromptResponse, SessionNotification};
+    /// # use sacp::JrConnection;
+    /// # use sacp::schema::{PromptRequest, PromptResponse, SessionNotification};
     /// # fn example(connection: JrConnection<impl futures::AsyncWrite, impl futures::AsyncRead, impl sacp::JrHandler>) {
     /// connection.on_receive_request(async |request: PromptRequest, request_cx| {
     ///     // Send a notification while processing
@@ -648,7 +653,7 @@ impl<OB: AsyncWrite, IB: AsyncRead, H: JrHandler> JrConnection<OB, IB, H> {
     ///
     /// ```no_run
     /// # use sacp_doc_test::*;
-    /// # use sacp::InitializeRequest;
+    /// # use sacp::schema::InitializeRequest;
     /// # use std::pin::Pin;
     /// # async fn example() -> Result<(), sacp::Error> {
     /// # let stdout: Pin<Box<dyn futures::AsyncWrite + Send>> = Box::pin(futures::io::Cursor::new(Vec::new()));
@@ -1532,7 +1537,7 @@ impl<R: JrResponsePayload> JrResponse<R> {
     /// # use sacp_doc_test::*;
     /// # async fn example() -> Result<(), sacp::Error> {
     /// # let connection = mock_connection();
-    /// # let other_connection = connection.json_rpc_cx();
+    /// # let other_connection = connection.connection_cx();
     /// connection.on_receive_request(async |req: ProxyRequest, request_cx| {
     ///     // Forward the request to another connection and proxy the response back
     ///     other_connection.send_request(req.inner_request)

@@ -1,7 +1,5 @@
-use sacp::{
-    AgentCapabilities, InitializeRequest, InitializeResponse, JrConnection, MessageAndCx,
-    UntypedMessage,
-};
+use sacp::schema::{AgentCapabilities, InitializeRequest, InitializeResponse};
+use sacp::{JrConnection, MessageAndCx, UntypedMessage};
 use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
 
 #[tokio::main]

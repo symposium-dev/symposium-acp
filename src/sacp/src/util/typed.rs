@@ -26,7 +26,8 @@ use crate::{
 /// # Example
 ///
 /// ```
-/// # use sacp::{UntypedMessage, InitializeRequest, InitializeResponse, PromptRequest, PromptResponse, JrRequestCx};
+/// # use sacp::{UntypedMessage, JrRequestCx};
+/// # use sacp::schema::{InitializeRequest, InitializeResponse, PromptRequest, PromptResponse};
 /// # use sacp::util::TypeRequest;
 /// # async fn example(message: UntypedMessage, cx: JrRequestCx<serde_json::Value>) -> Result<(), sacp::Error> {
 /// TypeRequest::new(message, cx)
@@ -137,7 +138,8 @@ impl TypeRequest {
 /// # Example
 ///
 /// ```
-/// # use sacp::{UntypedMessage, SessionNotification, JrConnectionCx};
+/// # use sacp::{UntypedMessage, JrConnectionCx};
+/// # use sacp::schema::SessionNotification;
 /// # use sacp::util::TypeNotification;
 /// # async fn example(message: UntypedMessage, cx: &JrConnectionCx) -> Result<(), sacp::Error> {
 /// TypeNotification::new(message, cx)

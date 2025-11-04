@@ -63,7 +63,7 @@
 use std::{collections::HashMap, pin::Pin};
 
 use futures::{AsyncRead, AsyncWrite, SinkExt, StreamExt, channel::mpsc};
-use sacp::{InitializeRequest, InitializeResponse, NewSessionRequest, NewSessionResponse};
+use sacp::schema::{InitializeRequest, InitializeResponse, NewSessionRequest, NewSessionResponse};
 use sacp_proxy::{
     McpConnectRequest, McpConnectResponse, McpDisconnectNotification, McpOverAcpNotification,
     McpOverAcpRequest, SuccessorNotification, SuccessorRequest,
@@ -732,7 +732,7 @@ impl Conductor {
     async fn forward_session_new_request(
         &mut self,
         target_component_index: usize,
-        mut request: sacp::NewSessionRequest,
+        mut request: NewSessionRequest,
         conductor_tx: &mpsc::Sender<ConductorMessage>,
         request_cx: JrRequestCx<NewSessionResponse>,
     ) -> Result<(), sacp::Error> {

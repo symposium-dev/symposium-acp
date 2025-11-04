@@ -7,8 +7,7 @@
 //! 4. Last component (agent) never receives proxy capability offer
 
 use futures::{AsyncRead, AsyncWrite};
-use sacp::AgentCapabilities;
-use sacp::{InitializeRequest, InitializeResponse};
+use sacp::schema::{AgentCapabilities, InitializeRequest, InitializeResponse};
 use sacp::{JrConnection, JrConnectionCx, MetaCapabilityExt, Proxy};
 use sacp_conductor::component::{Cleanup, ComponentProvider};
 use sacp_conductor::conductor::Conductor;

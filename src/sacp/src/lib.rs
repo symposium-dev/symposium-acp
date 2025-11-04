@@ -10,7 +10,8 @@
 //! Building an ACP agent is straightforward with sacp's type-safe API:
 //!
 //! ```no_run
-//! use sacp::{JrConnection, InitializeRequest, InitializeResponse, AgentCapabilities, MessageAndCx, UntypedMessage};
+//! use sacp::{JrConnection, MessageAndCx, UntypedMessage};
+//! use sacp::schema::{InitializeRequest, InitializeResponse, AgentCapabilities};
 //! use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
 //!
 //! # #[tokio::main]
@@ -60,18 +61,23 @@
 //! - **[sacp-tokio](https://crates.io/crates/sacp-tokio)** - Tokio-specific utilities (process spawning, connection management)
 //! - **[sacp-conductor](https://crates.io/crates/sacp-conductor)** - Binary for orchestrating proxy chains
 
-/// ACP protocol message implementations and trait implementations
-mod acp;
 /// Capability management for the `_meta.symposium` object
 mod capabilities;
 /// JSON-RPC connection and handler infrastructure
 mod jsonrpc;
+/// ACP protocol schema types - all message types, requests, responses, and supporting types
+pub mod schema;
 /// Utility functions and types
 pub mod util;
 
-// Re-export all ACP types
-pub use agent_client_protocol_schema::*;
-
-pub use acp::*;
 pub use capabilities::*;
 pub use jsonrpc::*;
+
+// Re-export the six primary message enum types at the root
+pub use schema::{
+    AgentNotification, AgentRequest, AgentResponse, ClientNotification, ClientRequest,
+    ClientResponse,
+};
+
+// Re-export commonly used infrastructure types for convenience
+pub use schema::{Error, ErrorCode};

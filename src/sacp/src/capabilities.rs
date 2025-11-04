@@ -7,7 +7,7 @@
 //!
 //! ```rust,no_run
 //! use sacp::{MetaCapabilityExt, Proxy};
-//! # use sacp::InitializeRequest;
+//! # use sacp::schema::InitializeRequest;
 //! # let init_request: InitializeRequest = unimplemented!();
 //!
 //! let request = init_request.add_meta_capability(Proxy);
@@ -16,7 +16,7 @@
 //! }
 //! ```
 
-use crate::{InitializeRequest, InitializeResponse};
+use crate::schema::{InitializeRequest, InitializeResponse};
 use serde_json::json;
 
 /// Trait for capabilities stored in the `_meta.symposium` object.
@@ -152,13 +152,14 @@ impl MetaCapabilityExt for InitializeResponse {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::schema::{AgentCapabilities, ClientCapabilities, VERSION};
     use serde_json::json;
 
     #[test]
     fn test_add_proxy_capability() {
         let request = InitializeRequest {
-            protocol_version: crate::VERSION,
-            client_capabilities: crate::ClientCapabilities::default(),
+            protocol_version: VERSION,
+            client_capabilities: ClientCapabilities::default(),
             meta: None,
             client_info: None,
         };
@@ -174,7 +175,7 @@ mod tests {
 
     #[test]
     fn test_remove_proxy_capability() {
-        let mut client_capabilities = crate::ClientCapabilities::default();
+        let mut client_capabilities = ClientCapabilities::default();
         client_capabilities.meta = Some(json!({
             "symposium": {
                 "version": "1.0",
@@ -183,7 +184,7 @@ mod tests {
         }));
 
         let request = InitializeRequest {
-            protocol_version: crate::VERSION,
+            protocol_version: VERSION,
             client_capabilities,
             meta: None,
             client_info: None,
@@ -196,7 +197,7 @@ mod tests {
 
     #[test]
     fn test_has_proxy_capability() {
-        let mut client_capabilities = crate::ClientCapabilities::default();
+        let mut client_capabilities = ClientCapabilities::default();
         client_capabilities.meta = Some(json!({
             "symposium": {
                 "proxy": true
@@ -204,7 +205,7 @@ mod tests {
         }));
 
         let request = InitializeRequest {
-            protocol_version: crate::VERSION,
+            protocol_version: VERSION,
             client_capabilities,
             meta: None,
             client_info: None,
@@ -217,8 +218,8 @@ mod tests {
     #[test]
     fn test_response_capabilities() {
         let response = InitializeResponse {
-            protocol_version: crate::VERSION,
-            agent_capabilities: crate::AgentCapabilities::default(),
+            protocol_version: VERSION,
+            agent_capabilities: AgentCapabilities::default(),
             auth_methods: vec![],
             meta: None,
             agent_info: None,
