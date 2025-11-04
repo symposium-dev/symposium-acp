@@ -22,6 +22,7 @@ futures.workspace = true
 jsonrpcmsg.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+shell-words = "1.1"
 thiserror.workspace = true
 tokio.workspace = true
 tokio-util.workspace = true

@@ -84,7 +84,16 @@ impl ComponentProvider for CommandComponentProvider {
     ) -> Result<Cleanup, sacp::Error> {
         debug!(command = self.command, "Spawning command");
 
-        let mut child = tokio::process::Command::new(&self.command)
+        // Parse the command string into program and arguments
+        let parts = shell_words::split(&self.command)
+            .map_err(|e| sacp::util::internal_error(format!("Failed to parse command: {}", e)))?;
+
+        if parts.is_empty() {
+            return Err(sacp::util::internal_error("Command string cannot be empty"));
+        }
+
+        let mut child = tokio::process::Command::new(&parts[0])
+            .args(&parts[1..])
             .stdin(std::process::Stdio::piped())
             .stdout(std::process::Stdio::piped())
             .spawn()
