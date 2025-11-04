@@ -15,7 +15,7 @@ name = "elizacp"
 path = "src/main.rs"
 
 [dependencies]
-sacp = { version = "0.1.0", path = "../sacp" }
+sacp = { version = "0.2.0", path = "../sacp" }
 agent-client-protocol-schema.workspace = true
 anyhow.workspace = true
 clap.workspace = true
