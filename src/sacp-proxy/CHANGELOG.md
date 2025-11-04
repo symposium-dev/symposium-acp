@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.2](https://github.com/symposium-dev/symposium-acp/compare/sacp-proxy-v0.1.1...sacp-proxy-v0.1.2) - 2025-11-04
+
+### Fixed
+
+- fix github url
+
+### Other
+
+- add GitHub links to example files in sacp and sacp-proxy
+- add deny(missing_docs) and document all public APIs
+- *(sacp-proxy)* add comprehensive crate-level documentation
+- rename JsonRpcRequest to JrRequest
+- add READMEs for sacp-tokio, sacp-proxy, and sacp-conductor
+
 ## [0.1.1](https://github.com/symposium-dev/symposium-acp/compare/sacp-proxy-v0.1.0...sacp-proxy-v0.1.1) - 2025-10-30
 
 ### Fixed
