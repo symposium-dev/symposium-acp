@@ -2,7 +2,7 @@ use std::{collections::HashMap, net::SocketAddr};
 
 use futures::{SinkExt, StreamExt as _, channel::mpsc};
 use sacp;
-use sacp::McpServer;
+use sacp::schema::McpServer;
 use sacp::{JrConnection, JrConnectionCx, MessageAndCx};
 use sacp_proxy::McpDisconnectNotification;
 use tokio::net::TcpStream;
@@ -51,7 +51,7 @@ impl McpBridgeListeners {
         conductor_tx: &mpsc::Sender<ConductorMessage>,
         conductor_command: &[String],
     ) -> Result<(), sacp::Error> {
-        use sacp::McpServer;
+        use sacp::schema::McpServer;
 
         let McpServer::Http { name, url, headers } = mcp_server else {
             return Ok(());

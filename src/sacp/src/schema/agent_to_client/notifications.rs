@@ -1,17 +1,19 @@
-use crate::CancelNotification;
+use crate::schema::SessionNotification;
 use serde::Serialize;
 
 use crate::jsonrpc::{JrMessage, JrNotification};
-use crate::util::json_cast;
 
-impl JrMessage for CancelNotification {
+// Agent -> Client notifications
+// These are one-way messages that agents send to clients/editors
+
+impl JrMessage for SessionNotification {
     fn into_untyped_message(self) -> Result<crate::UntypedMessage, crate::Error> {
         let method = self.method().to_string();
         crate::UntypedMessage::new(&method, self)
     }
 
     fn method(&self) -> &str {
-        "session/cancel"
+        "session/update"
     }
 
     fn parse_request(
@@ -26,12 +28,11 @@ impl JrMessage for CancelNotification {
         method: &str,
         params: &impl Serialize,
     ) -> Option<Result<Self, crate::Error>> {
-        if method != "session/cancel" {
+        if method != "session/update" {
             return None;
         }
-
-        Some(json_cast(params))
+        Some(crate::util::json_cast(params))
     }
 }
 
-impl JrNotification for CancelNotification {}
+impl JrNotification for SessionNotification {}

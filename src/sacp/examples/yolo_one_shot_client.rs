@@ -20,10 +20,11 @@
 //! cargo run --example yolo_one_shot_client -- "Hello!" '{"type":"stdio","name":"my-agent","command":"python","args":["agent.py"],"env":[]}'
 //! ```
 
-use sacp::{
-    ContentBlock, InitializeRequest, JrConnection, NewSessionRequest, PromptRequest,
-    RequestPermissionOutcome, RequestPermissionRequest, RequestPermissionResponse,
-    SessionNotification, TextContent, VERSION as PROTOCOL_VERSION,
+use sacp::JrConnection;
+use sacp::schema::{
+    ContentBlock, InitializeRequest, NewSessionRequest, PromptRequest, RequestPermissionOutcome,
+    RequestPermissionRequest, RequestPermissionResponse, SessionNotification, TextContent,
+    VERSION as PROTOCOL_VERSION,
 };
 use sacp_tokio::{AcpAgent, JrConnectionExt};
 use std::path::PathBuf;

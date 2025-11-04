@@ -1,6 +1,6 @@
 //! Utilities for connecting to ACP agents and proxies.
 //!
-//! This module provides [`AcpAgent`], a convenient wrapper around [`sacp::McpServer`]
+//! This module provides [`AcpAgent`], a convenient wrapper around [`sacp::schema::McpServer`]
 //! that can be parsed from either a command string or JSON configuration.
 
 use std::path::PathBuf;
@@ -11,7 +11,7 @@ use tokio::process::Child;
 
 /// Configuration for connecting to an ACP agent or proxy.
 ///
-/// This is a wrapper around [`McpServer`] that provides convenient parsing
+/// This is a wrapper around [`sacp::schema::McpServer`] that provides convenient parsing
 /// from command-line strings or JSON configurations.
 ///
 /// # Examples
@@ -33,22 +33,22 @@ use tokio::process::Child;
 #[serde(transparent)]
 pub struct AcpAgent {
     #[serde(flatten)]
-    server: sacp::McpServer,
+    server: sacp::schema::McpServer,
 }
 
 impl AcpAgent {
-    /// Create a new `AcpAgent` from an [`sacp::McpServer`] configuration.
-    pub fn new(server: sacp::McpServer) -> Self {
+    /// Create a new `AcpAgent` from an [`sacp::schema::McpServer`] configuration.
+    pub fn new(server: sacp::schema::McpServer) -> Self {
         Self { server }
     }
 
-    /// Get the underlying [`sacp::McpServer`] configuration.
-    pub fn server(&self) -> &sacp::McpServer {
+    /// Get the underlying [`sacp::schema::McpServer`] configuration.
+    pub fn server(&self) -> &sacp::schema::McpServer {
         &self.server
     }
 
-    /// Convert into the underlying [`sacp::McpServer`] configuration.
-    pub fn into_server(self) -> sacp::McpServer {
+    /// Convert into the underlying [`sacp::schema::McpServer`] configuration.
+    pub fn into_server(self) -> sacp::schema::McpServer {
         self.server
     }
 
@@ -65,7 +65,7 @@ impl AcpAgent {
         sacp::Error,
     > {
         match &self.server {
-            sacp::McpServer::Stdio {
+            sacp::schema::McpServer::Stdio {
                 command,
                 args,
                 env,
@@ -92,10 +92,10 @@ impl AcpAgent {
 
                 Ok((child_stdin, child_stdout, child))
             }
-            sacp::McpServer::Http { .. } => Err(sacp::util::internal_error(
+            sacp::schema::McpServer::Http { .. } => Err(sacp::util::internal_error(
                 "HTTP transport not yet supported by AcpAgent",
             )),
-            sacp::McpServer::Sse { .. } => Err(sacp::util::internal_error(
+            sacp::schema::McpServer::Sse { .. } => Err(sacp::util::internal_error(
                 "SSE transport not yet supported by AcpAgent",
             )),
         }
@@ -110,7 +110,7 @@ impl FromStr for AcpAgent {
 
         // If it starts with '{', try to parse as JSON
         if trimmed.starts_with('{') {
-            let server: sacp::McpServer = serde_json::from_str(trimmed)
+            let server: sacp::schema::McpServer = serde_json::from_str(trimmed)
                 .map_err(|e| sacp::util::internal_error(format!("Failed to parse JSON: {}", e)))?;
             return Ok(Self { server });
         }
@@ -140,7 +140,7 @@ fn parse_command_string(s: &str) -> Result<AcpAgent, sacp::Error> {
         .to_string();
 
     Ok(AcpAgent {
-        server: sacp::McpServer::Stdio {
+        server: sacp::schema::McpServer::Stdio {
             name,
             command,
             args,
@@ -157,7 +157,7 @@ mod tests {
     fn test_parse_simple_command() {
         let agent = AcpAgent::from_str("python agent.py").unwrap();
         match agent.server {
-            sacp::McpServer::Stdio {
+            sacp::schema::McpServer::Stdio {
                 name,
                 command,
                 args,
@@ -176,7 +176,7 @@ mod tests {
     fn test_parse_command_with_args() {
         let agent = AcpAgent::from_str("node server.js --port 8080 --verbose").unwrap();
         match agent.server {
-            sacp::McpServer::Stdio {
+            sacp::schema::McpServer::Stdio {
                 name,
                 command,
                 args,
@@ -195,7 +195,7 @@ mod tests {
     fn test_parse_command_with_quotes() {
         let agent = AcpAgent::from_str(r#"python "my agent.py" --name "Test Agent""#).unwrap();
         match agent.server {
-            sacp::McpServer::Stdio {
+            sacp::schema::McpServer::Stdio {
                 name,
                 command,
                 args,
@@ -221,7 +221,7 @@ mod tests {
         }"#;
         let agent = AcpAgent::from_str(json).unwrap();
         match agent.server {
-            sacp::McpServer::Stdio {
+            sacp::schema::McpServer::Stdio {
                 name,
                 command,
                 args,
@@ -246,7 +246,7 @@ mod tests {
         }"#;
         let agent = AcpAgent::from_str(json).unwrap();
         match agent.server {
-            sacp::McpServer::Http { name, url, headers } => {
+            sacp::schema::McpServer::Http { name, url, headers } => {
                 assert_eq!(name, "remote-agent");
                 assert_eq!(url, "https://example.com/agent");
                 assert_eq!(headers, vec![]);

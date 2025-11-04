@@ -8,8 +8,8 @@ use sacp::JrConnectionCx;
 use tokio::process::Child;
 use tracing::debug;
 
-/// "Provider" used to spawn components. The [`CommandProvider`] is used from the CLI, but for testing
-/// or internal purposes, other comment providers may be created.
+/// "Provider" used to spawn components. The `CommandProvider` is used from the CLI, but for testing
+/// or internal purposes, other component providers may be created.
 pub trait ComponentProvider: Send {
     /// Create a component that will read/write ACP messages from the given streams.
     /// The `cx` can be used to spawn tasks running in the JSON RPC connection.

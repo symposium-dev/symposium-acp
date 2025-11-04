@@ -1,7 +1,8 @@
 //! Extension utilities for `JrConnection` to support spawning agents with Tokio.
 
 use crate::AcpAgent;
-use sacp::{JrConnection, NullHandler};
+use sacp::JrConnection;
+use sacp::handler::NullHandler;
 use std::future::Future;
 use std::pin::Pin;
 use std::task::{Context, Poll};
@@ -46,7 +47,7 @@ pub trait JrConnectionExt {
     /// let agent = AcpAgent::from_str("python my_agent.py")?;
     ///
     /// JrConnection::to_agent(agent)?
-    ///     .on_receive_notification(|notif: sacp::SessionNotification, _cx| async move {
+    ///     .on_receive_notification(|notif: sacp::schema::SessionNotification, _cx| async move {
     ///         println!("{:?}", notif);
     ///         Ok(())
     ///     })

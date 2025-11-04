@@ -2,7 +2,7 @@
 
 use futures::{AsyncRead, AsyncWrite};
 use rmcp::ServiceExt;
-use sacp::{
+use sacp::schema::{
     AgentCapabilities, ContentBlock, ContentChunk, InitializeRequest, InitializeResponse,
     McpServer, NewSessionRequest, NewSessionResponse, PromptRequest, PromptResponse,
     SessionNotification, SessionUpdate, StopReason, TextContent,

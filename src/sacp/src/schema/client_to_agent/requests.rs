@@ -1,36 +1,32 @@
+use crate::schema::{
+    AuthenticateRequest, AuthenticateResponse, InitializeRequest, InitializeResponse,
+    LoadSessionRequest, LoadSessionResponse, NewSessionRequest, NewSessionResponse, PromptRequest,
+    PromptResponse, SetSessionModeRequest, SetSessionModeResponse,
+};
 use serde::Serialize;
 
 use crate::jsonrpc::{JrMessage, JrRequest, JrResponsePayload};
 use crate::util::json_cast;
-use crate::{
-    CreateTerminalRequest, CreateTerminalResponse, KillTerminalCommandRequest,
-    KillTerminalCommandResponse, ReadTextFileRequest, ReadTextFileResponse, ReleaseTerminalRequest,
-    ReleaseTerminalResponse, RequestPermissionRequest, RequestPermissionResponse,
-    TerminalOutputRequest, TerminalOutputResponse, WaitForTerminalExitRequest,
-    WaitForTerminalExitResponse, WriteTextFileRequest, WriteTextFileResponse,
-};
-
-// Agent -> Client requests
-// These are messages that agents send to clients/editors
 
 // ============================================================================
-// RequestPermissionRequest
+// InitializeRequest
 // ============================================================================
 
-impl JrMessage for RequestPermissionRequest {
+impl JrMessage for InitializeRequest {
     fn into_untyped_message(self) -> Result<crate::UntypedMessage, crate::Error> {
         let method = self.method().to_string();
         crate::UntypedMessage::new(&method, self)
     }
 
     fn method(&self) -> &str {
-        "session/request_permission"
+        "initialize"
     }
 
     fn parse_request(method: &str, params: &impl Serialize) -> Option<Result<Self, crate::Error>> {
-        if method != "session/request_permission" {
+        if method != "initialize" {
             return None;
         }
+
         Some(json_cast(params))
     }
 
@@ -43,11 +39,11 @@ impl JrMessage for RequestPermissionRequest {
     }
 }
 
-impl JrRequest for RequestPermissionRequest {
-    type Response = RequestPermissionResponse;
+impl JrRequest for InitializeRequest {
+    type Response = InitializeResponse;
 }
 
-impl JrResponsePayload for RequestPermissionResponse {
+impl JrResponsePayload for InitializeResponse {
     fn into_json(self, _method: &str) -> Result<serde_json::Value, crate::Error> {
         serde_json::to_value(self).map_err(crate::Error::into_internal_error)
     }
@@ -58,21 +54,21 @@ impl JrResponsePayload for RequestPermissionResponse {
 }
 
 // ============================================================================
-// WriteTextFileRequest
+// AuthenticateRequest
 // ============================================================================
 
-impl JrMessage for WriteTextFileRequest {
+impl JrMessage for AuthenticateRequest {
     fn into_untyped_message(self) -> Result<crate::UntypedMessage, crate::Error> {
         let method = self.method().to_string();
         crate::UntypedMessage::new(&method, self)
     }
 
     fn method(&self) -> &str {
-        "fs/write_text_file"
+        "authenticate"
     }
 
     fn parse_request(method: &str, params: &impl Serialize) -> Option<Result<Self, crate::Error>> {
-        if method != "fs/write_text_file" {
+        if method != "authenticate" {
             return None;
         }
         Some(json_cast(params))
@@ -87,11 +83,11 @@ impl JrMessage for WriteTextFileRequest {
     }
 }
 
-impl JrRequest for WriteTextFileRequest {
-    type Response = WriteTextFileResponse;
+impl JrRequest for AuthenticateRequest {
+    type Response = AuthenticateResponse;
 }
 
-impl JrResponsePayload for WriteTextFileResponse {
+impl JrResponsePayload for AuthenticateResponse {
     fn into_json(self, _method: &str) -> Result<serde_json::Value, crate::Error> {
         serde_json::to_value(self).map_err(crate::Error::into_internal_error)
     }
@@ -102,21 +98,21 @@ impl JrResponsePayload for WriteTextFileResponse {
 }
 
 // ============================================================================
-// ReadTextFileRequest
+// LoadSessionRequest
 // ============================================================================
 
-impl JrMessage for ReadTextFileRequest {
+impl JrMessage for LoadSessionRequest {
     fn into_untyped_message(self) -> Result<crate::UntypedMessage, crate::Error> {
         let method = self.method().to_string();
         crate::UntypedMessage::new(&method, self)
     }
 
     fn method(&self) -> &str {
-        "fs/read_text_file"
+        "session/load"
     }
 
     fn parse_request(method: &str, params: &impl Serialize) -> Option<Result<Self, crate::Error>> {
-        if method != "fs/read_text_file" {
+        if method != "session/load" {
             return None;
         }
         Some(json_cast(params))
@@ -131,11 +127,11 @@ impl JrMessage for ReadTextFileRequest {
     }
 }
 
-impl JrRequest for ReadTextFileRequest {
-    type Response = ReadTextFileResponse;
+impl JrRequest for LoadSessionRequest {
+    type Response = LoadSessionResponse;
 }
 
-impl JrResponsePayload for ReadTextFileResponse {
+impl JrResponsePayload for LoadSessionResponse {
     fn into_json(self, _method: &str) -> Result<serde_json::Value, crate::Error> {
         serde_json::to_value(self).map_err(crate::Error::into_internal_error)
     }
@@ -146,21 +142,21 @@ impl JrResponsePayload for ReadTextFileResponse {
 }
 
 // ============================================================================
-// CreateTerminalRequest
+// NewSessionRequest
 // ============================================================================
 
-impl JrMessage for CreateTerminalRequest {
+impl JrMessage for NewSessionRequest {
     fn into_untyped_message(self) -> Result<crate::UntypedMessage, crate::Error> {
         let method = self.method().to_string();
         crate::UntypedMessage::new(&method, self)
     }
 
     fn method(&self) -> &str {
-        "terminal/create"
+        "session/new"
     }
 
     fn parse_request(method: &str, params: &impl Serialize) -> Option<Result<Self, crate::Error>> {
-        if method != "terminal/create" {
+        if method != "session/new" {
             return None;
         }
         Some(json_cast(params))
@@ -175,11 +171,11 @@ impl JrMessage for CreateTerminalRequest {
     }
 }
 
-impl JrRequest for CreateTerminalRequest {
-    type Response = CreateTerminalResponse;
+impl JrRequest for NewSessionRequest {
+    type Response = NewSessionResponse;
 }
 
-impl JrResponsePayload for CreateTerminalResponse {
+impl JrResponsePayload for NewSessionResponse {
     fn into_json(self, _method: &str) -> Result<serde_json::Value, crate::Error> {
         serde_json::to_value(self).map_err(crate::Error::into_internal_error)
     }
@@ -190,21 +186,21 @@ impl JrResponsePayload for CreateTerminalResponse {
 }
 
 // ============================================================================
-// TerminalOutputRequest
+// PromptRequest
 // ============================================================================
 
-impl JrMessage for TerminalOutputRequest {
+impl JrMessage for PromptRequest {
     fn into_untyped_message(self) -> Result<crate::UntypedMessage, crate::Error> {
         let method = self.method().to_string();
         crate::UntypedMessage::new(&method, self)
     }
 
     fn method(&self) -> &str {
-        "terminal/output"
+        "session/prompt"
     }
 
     fn parse_request(method: &str, params: &impl Serialize) -> Option<Result<Self, crate::Error>> {
-        if method != "terminal/output" {
+        if method != "session/prompt" {
             return None;
         }
         Some(json_cast(params))
@@ -219,11 +215,11 @@ impl JrMessage for TerminalOutputRequest {
     }
 }
 
-impl JrRequest for TerminalOutputRequest {
-    type Response = TerminalOutputResponse;
+impl JrRequest for PromptRequest {
+    type Response = PromptResponse;
 }
 
-impl JrResponsePayload for TerminalOutputResponse {
+impl JrResponsePayload for PromptResponse {
     fn into_json(self, _method: &str) -> Result<serde_json::Value, crate::Error> {
         serde_json::to_value(self).map_err(crate::Error::into_internal_error)
     }
@@ -234,21 +230,21 @@ impl JrResponsePayload for TerminalOutputResponse {
 }
 
 // ============================================================================
-// ReleaseTerminalRequest
+// SetSessionModeRequest
 // ============================================================================
 
-impl JrMessage for ReleaseTerminalRequest {
+impl JrMessage for SetSessionModeRequest {
     fn into_untyped_message(self) -> Result<crate::UntypedMessage, crate::Error> {
         let method = self.method().to_string();
         crate::UntypedMessage::new(&method, self)
     }
 
     fn method(&self) -> &str {
-        "terminal/release"
+        "session/set_mode"
     }
 
     fn parse_request(method: &str, params: &impl Serialize) -> Option<Result<Self, crate::Error>> {
-        if method != "terminal/release" {
+        if method != "session/set_mode" {
             return None;
         }
         Some(json_cast(params))
@@ -263,99 +259,11 @@ impl JrMessage for ReleaseTerminalRequest {
     }
 }
 
-impl JrRequest for ReleaseTerminalRequest {
-    type Response = ReleaseTerminalResponse;
+impl JrRequest for SetSessionModeRequest {
+    type Response = SetSessionModeResponse;
 }
 
-impl JrResponsePayload for ReleaseTerminalResponse {
-    fn into_json(self, _method: &str) -> Result<serde_json::Value, crate::Error> {
-        serde_json::to_value(self).map_err(crate::Error::into_internal_error)
-    }
-
-    fn from_value(_method: &str, value: serde_json::Value) -> Result<Self, crate::Error> {
-        json_cast(&value)
-    }
-}
-
-// ============================================================================
-// WaitForTerminalExitRequest
-// ============================================================================
-
-impl JrMessage for WaitForTerminalExitRequest {
-    fn into_untyped_message(self) -> Result<crate::UntypedMessage, crate::Error> {
-        let method = self.method().to_string();
-        crate::UntypedMessage::new(&method, self)
-    }
-
-    fn method(&self) -> &str {
-        "terminal/wait_for_exit"
-    }
-
-    fn parse_request(method: &str, params: &impl Serialize) -> Option<Result<Self, crate::Error>> {
-        if method != "terminal/wait_for_exit" {
-            return None;
-        }
-        Some(json_cast(params))
-    }
-
-    fn parse_notification(
-        _method: &str,
-        _params: &impl Serialize,
-    ) -> Option<Result<Self, crate::Error>> {
-        // This is a request, not a notification
-        None
-    }
-}
-
-impl JrRequest for WaitForTerminalExitRequest {
-    type Response = WaitForTerminalExitResponse;
-}
-
-impl JrResponsePayload for WaitForTerminalExitResponse {
-    fn into_json(self, _method: &str) -> Result<serde_json::Value, crate::Error> {
-        serde_json::to_value(self).map_err(crate::Error::into_internal_error)
-    }
-
-    fn from_value(_method: &str, value: serde_json::Value) -> Result<Self, crate::Error> {
-        json_cast(&value)
-    }
-}
-
-// ============================================================================
-// KillTerminalCommandRequest
-// ============================================================================
-
-impl JrMessage for KillTerminalCommandRequest {
-    fn into_untyped_message(self) -> Result<crate::UntypedMessage, crate::Error> {
-        let method = self.method().to_string();
-        crate::UntypedMessage::new(&method, self)
-    }
-
-    fn method(&self) -> &str {
-        "terminal/kill"
-    }
-
-    fn parse_request(method: &str, params: &impl Serialize) -> Option<Result<Self, crate::Error>> {
-        if method != "terminal/kill" {
-            return None;
-        }
-        Some(json_cast(params))
-    }
-
-    fn parse_notification(
-        _method: &str,
-        _params: &impl Serialize,
-    ) -> Option<Result<Self, crate::Error>> {
-        // This is a request, not a notification
-        None
-    }
-}
-
-impl JrRequest for KillTerminalCommandRequest {
-    type Response = KillTerminalCommandResponse;
-}
-
-impl JrResponsePayload for KillTerminalCommandResponse {
+impl JrResponsePayload for SetSessionModeResponse {
     fn into_json(self, _method: &str) -> Result<serde_json::Value, crate::Error> {
         serde_json::to_value(self).map_err(crate::Error::into_internal_error)
     }

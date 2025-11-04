@@ -7,7 +7,7 @@
 //! - AgentRequest/ClientResponse (messages clients receive/send)
 //! - AgentNotification (notifications clients receive)
 
-use crate::{AgentNotification, AgentRequest, ClientNotification, ClientRequest};
+use crate::schema::{AgentNotification, AgentRequest, ClientNotification, ClientRequest};
 use serde::Serialize;
 
 use crate::jsonrpc::{JrMessage, JrNotification, JrRequest};
@@ -46,8 +46,8 @@ impl JrMessage for ClientRequest {
             _ => {
                 // Check for extension methods (prefixed with underscore)
                 if let Some(custom_method) = method.strip_prefix('_') {
-                    json_cast(params).map(|ext_req: crate::ExtRequest| {
-                        ClientRequest::ExtMethodRequest(crate::ExtRequest {
+                    json_cast(params).map(|ext_req: crate::schema::ExtRequest| {
+                        ClientRequest::ExtMethodRequest(crate::schema::ExtRequest {
                             method: custom_method.to_string().into(),
                             params: ext_req.params,
                         })
@@ -104,8 +104,8 @@ impl JrMessage for ClientNotification {
             _ => {
                 // Check for extension notifications (prefixed with underscore)
                 if let Some(custom_method) = method.strip_prefix('_') {
-                    json_cast(params).map(|ext_notif: crate::ExtNotification| {
-                        ClientNotification::ExtNotification(crate::ExtNotification {
+                    json_cast(params).map(|ext_notif: crate::schema::ExtNotification| {
+                        ClientNotification::ExtNotification(crate::schema::ExtNotification {
                             method: custom_method.to_string().into(),
                             params: ext_notif.params,
                         })
@@ -163,8 +163,8 @@ impl JrMessage for AgentRequest {
             _ => {
                 // Check for extension methods (prefixed with underscore)
                 if let Some(custom_method) = method.strip_prefix('_') {
-                    json_cast(params).map(|ext_req: crate::ExtRequest| {
-                        AgentRequest::ExtMethodRequest(crate::ExtRequest {
+                    json_cast(params).map(|ext_req: crate::schema::ExtRequest| {
+                        AgentRequest::ExtMethodRequest(crate::schema::ExtRequest {
                             method: custom_method.to_string().into(),
                             params: ext_req.params,
                         })
@@ -221,8 +221,8 @@ impl JrMessage for AgentNotification {
             _ => {
                 // Check for extension notifications (prefixed with underscore)
                 if let Some(custom_method) = method.strip_prefix('_') {
-                    json_cast(params).map(|ext_notif: crate::ExtNotification| {
-                        AgentNotification::ExtNotification(crate::ExtNotification {
+                    json_cast(params).map(|ext_notif: crate::schema::ExtNotification| {
+                        AgentNotification::ExtNotification(crate::schema::ExtNotification {
                             method: custom_method.to_string().into(),
                             params: ext_notif.params,
                         })

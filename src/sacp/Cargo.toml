@@ -1,6 +1,6 @@
 [package]
 name = "sacp"
-version = "0.2.0"
+version = "1.0.0-alpha"
 edition = "2024"
 description = "Core protocol types and traits for SACP (Symposium's extensions to ACP)"
 license = "MIT OR Apache-2.0"
@@ -22,7 +22,7 @@ uuid.workspace = true
 
 [dev-dependencies]
 expect-test.workspace = true
-sacp-tokio = { version = "0.1.1", path = "../sacp-tokio" }
+sacp-tokio = { version = "1.0.0-alpha", path = "../sacp-tokio" }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "io-util", "time"] }
 tokio-util.workspace = true
 sacp-doc-test = { path = "../sacp-doc-test" }
