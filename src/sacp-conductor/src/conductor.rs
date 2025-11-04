@@ -577,7 +577,14 @@ impl Conductor {
                 component_count = self.components.len(),
                 "Proxy mode: forwarding successor message to conductor's predecessor"
             );
-            return client.send_proxied_message(message);
+            // Wrap the message as a successor message before sending
+            let wrapped = message.map(
+                |request, request_cx| (SuccessorRequest { request }, request_cx),
+                |notification, notification_cx| {
+                    (SuccessorNotification { notification }, notification_cx)
+                },
+            );
+            return client.send_proxied_message(wrapped);
         }
 
         match message {
