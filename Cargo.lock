@@ -921,8 +921,11 @@ version = "1.0.0-alpha"
 dependencies = [
  "futures",
  "sacp",
+ "sacp-proxy",
  "serde",
  "serde_json",
+ "tokio",
+ "tokio-util",
 ]
 
 [[package]]

@@ -3,6 +3,8 @@ use sacp::*;
 use serde::{Deserialize, Serialize};
 use std::pin::Pin;
 
+pub mod arrow_proxy;
+
 // Mock request/response types
 #[derive(Debug, Serialize, Deserialize)]
 pub struct MyRequest {}
