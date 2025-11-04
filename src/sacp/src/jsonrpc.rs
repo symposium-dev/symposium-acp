@@ -179,11 +179,13 @@ use crate::jsonrpc::actors::Task;
 /// # let connection = mock_connection();
 /// connection.on_receive_request(async |req: AnalyzeRequest, cx| {
 ///     // Clone cx for the spawned task
-///     let cx_clone = cx.connection_cx();
-///     cx.spawn(async move {
-///         let result = expensive_analysis(&req.data).await?;
-///         cx_clone.send_notification(AnalysisComplete { result })?;
-///         Ok(())
+///     cx.spawn({
+///         let cx = cx.clone();
+///         async move {
+///             let result = expensive_analysis(&req.data).await?;
+///             cx.send_notification(AnalysisComplete { result })?;
+///             Ok(())
+///         }
 ///     })?;
 ///
 ///     // Respond immediately without blocking
@@ -840,11 +842,13 @@ impl JrConnectionCx {
     /// # let connection = mock_connection();
     /// connection.on_receive_request(async |req: ProcessRequest, cx| {
     ///     // Clone cx for the spawned task
-    ///     let cx_clone = cx.connection_cx();
-    ///     cx.spawn(async move {
-    ///         let result = expensive_operation(&req.data).await?;
-    ///         cx_clone.send_notification(ProcessComplete { result })?;
-    ///         Ok(())
+    ///     cx.spawn({
+    ///         let cx = cx.clone();
+    ///         async move {
+    ///             let result = expensive_operation(&req.data).await?;
+    ///             cx.send_notification(ProcessComplete { result })?;
+    ///             Ok(())
+    ///         }
     ///     })?;
     ///
     ///     // Respond immediately
@@ -926,13 +930,15 @@ impl JrConnectionCx {
     ///     })?;
     ///
     /// // ✅ Option 2: Block in spawned task (safe because task is concurrent)
-    /// let cx_clone = cx.clone();
-    /// cx.spawn(async move {
-    ///     let response = cx_clone.send_request(MyRequest {})
-    ///         .block_task()
-    ///         .await?;
-    ///     // Process response...
-    ///     Ok(())
+    /// cx.spawn({
+    ///     let cx = cx.clone();
+    ///     async move {
+    ///         let response = cx.send_request(MyRequest {})
+    ///             .block_task()
+    ///             .await?;
+    ///         // Process response...
+    ///         Ok(())
+    ///     }
     /// })?;
     /// # Ok(())
     /// # }
@@ -1431,13 +1437,15 @@ impl JrNotification for UntypedMessage {}
 /// # use sacp_doc_test::*;
 /// # async fn example(cx: sacp::JrConnectionCx) -> Result<(), sacp::Error> {
 /// // ✅ Safe: Spawned task runs concurrently
-/// let cx_clone = cx.clone();
-/// cx.spawn(async move {
-///     let response = cx_clone.send_request(MyRequest {})
-///         .block_task()
-///         .await?;
-///     // Process response...
-///     Ok(())
+/// cx.spawn({
+///     let cx = cx.clone();
+///     async move {
+///         let response = cx.send_request(MyRequest {})
+///             .block_task()
+///             .await?;
+///         // Process response...
+///         Ok(())
+///     }
 /// })?;
 /// # Ok(())
 /// # }
@@ -1564,15 +1572,17 @@ impl<R: JrResponsePayload> JrResponse<R> {
     /// # let connection = mock_connection();
     /// connection.on_receive_request(async |req: MyRequest, cx| {
     ///     // Spawn a task to handle the request
-    ///     let cx_clone = cx.connection_cx();
-    ///     cx.spawn(async move {
-    ///         // Safe: We're in a spawned task, not blocking the event loop
-    ///         let response = cx_clone.send_request(OtherRequest {})
-    ///             .block_task()
-    ///             .await?;
+    ///     cx.spawn({
+    ///         let cx = cx.clone();
+    ///         async move {
+    ///             // Safe: We're in a spawned task, not blocking the event loop
+    ///             let response = cx.send_request(OtherRequest {})
+    ///                 .block_task()
+    ///                 .await?;
     ///
-    ///         // Process the response...
-    ///         Ok(())
+    ///             // Process the response...
+    ///             Ok(())
+    ///         }
     ///     })?;
     ///
     ///     // Respond immediately
@@ -1701,20 +1711,22 @@ impl<R: JrResponsePayload> JrResponse<R> {
     /// # async fn example() -> Result<(), sacp::Error> {
     /// # let connection = mock_connection();
     /// connection.on_receive_request(async |req: MyRequest, cx| {
-    ///     let cx_clone = cx.connection_cx();
     ///     // Send a request and schedule a callback for the response
     ///     cx.send_request(QueryRequest { id: 22 })
-    ///         .await_when_result_received(async move |result| {
-    ///             match result {
-    ///                 Ok(response) => {
-    ///                     println!("Got response: {:?}", response);
-    ///                     // Can send more messages here
-    ///                     cx_clone.send_notification(QueryComplete {})?;
-    ///                     Ok(())
+    ///         .await_when_result_received({
+    ///             let cx = cx.clone();
+    ///             async move |result| {
+    ///                 match result {
+    ///                     Ok(response) => {
+    ///                         println!("Got response: {:?}", response);
+    ///                         // Can send more messages here
+    ///                         cx.send_notification(QueryComplete {})?;
+    ///                         Ok(())
     ///                 }
-    ///                 Err(error) => {
-    ///                     eprintln!("Request failed: {}", error);
-    ///                     Err(error)
+    ///                     Err(error) => {
+    ///                         eprintln!("Request failed: {}", error);
+    ///                         Err(error)
+    ///                     }
     ///                 }
     ///             }
     ///         })?;
