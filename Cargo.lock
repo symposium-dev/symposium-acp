@@ -882,6 +882,7 @@ dependencies = [
  "rmcp",
  "sacp",
  "sacp-proxy",
+ "sacp-tokio",
  "schemars",
  "serde",
  "serde_json",

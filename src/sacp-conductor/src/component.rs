@@ -1,4 +1,5 @@
 use sacp;
+use sacp_tokio::AcpAgent;
 use std::pin::Pin;
 use tokio_util::compat::{FuturesAsyncReadCompatExt as _, FuturesAsyncWriteCompatExt};
 
@@ -92,6 +93,35 @@ impl ComponentProvider for CommandComponentProvider {
         // Take ownership of the streams (can only do this once!)
         let mut child_stdin = child.stdin.take().expect("Failed to open stdin");
         let mut child_stdout = child.stdout.take().expect("Failed to open stdout");
+
+        cx.spawn(async move {
+            tokio::io::copy(&mut incoming_bytes.compat(), &mut child_stdin)
+                .await
+                .map_err(sacp::Error::into_internal_error)?;
+            Ok(())
+        })?;
+
+        cx.spawn(async move {
+            tokio::io::copy(&mut child_stdout, &mut outgoing_bytes.compat_write())
+                .await
+                .map_err(sacp::Error::into_internal_error)?;
+            Ok(())
+        })?;
+
+        Ok(Cleanup::KillProcess(child))
+    }
+}
+
+impl ComponentProvider for AcpAgent {
+    fn create(
+        &self,
+        cx: &JrConnectionCx,
+        outgoing_bytes: Pin<Box<dyn AsyncWrite + Send>>,
+        incoming_bytes: Pin<Box<dyn AsyncRead + Send>>,
+    ) -> Result<Cleanup, sacp::Error> {
+        debug!(agent = ?self, "Spawning AcpAgent");
+
+        let (mut child_stdin, mut child_stdout, child) = self.spawn_process()?;
 
         cx.spawn(async move {
             tokio::io::copy(&mut incoming_bytes.compat(), &mut child_stdin)
