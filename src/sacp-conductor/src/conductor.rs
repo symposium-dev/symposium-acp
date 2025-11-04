@@ -80,7 +80,7 @@ use sacp::{
     util::{TypeNotification, TypeRequest},
 };
 use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
-use tracing::{debug, info};
+use tracing::{Instrument, debug, info};
 
 use crate::{
     component::{Component, ComponentProvider},
@@ -329,32 +329,38 @@ impl Conductor {
             mut conductor_tx,
         } = serve_args;
 
-        connection
-            // Any incoming messages from the client are client-to-agent messages targeting the first component.
-            .on_receive_message({
-                let mut conductor_tx = conductor_tx.clone();
-                async move |message: MessageAndCx| {
-                    conductor_tx
-                        .send(ConductorMessage::ClientToAgent {
-                            target_component_index: 0,
-                            message,
-                        })
-                        .await
-                        .map_err(sacp::util::internal_error)
-                }
-            })
-            .with_client({
-                async |client| {
-                    // This is the "central actor" of the conductor. Most other things forward messages
-                    // via `conductor_tx` into this loop. This lets us serialize the conductor's activity.
-                    while let Some(message) = self.conductor_rx.next().await {
-                        self.handle_conductor_message(&client, message, &mut conductor_tx)
-                            .await?;
+        let conductor_name = self.name.clone();
+
+        async move {
+            connection
+                // Any incoming messages from the client are client-to-agent messages targeting the first component.
+                .on_receive_message({
+                    let mut conductor_tx = conductor_tx.clone();
+                    async move |message: MessageAndCx| {
+                        conductor_tx
+                            .send(ConductorMessage::ClientToAgent {
+                                target_component_index: 0,
+                                message,
+                            })
+                            .await
+                            .map_err(sacp::util::internal_error)
                     }
-                    Ok(())
-                }
-            })
-            .await
+                })
+                .with_client({
+                    async |client| {
+                        // This is the "central actor" of the conductor. Most other things forward messages
+                        // via `conductor_tx` into this loop. This lets us serialize the conductor's activity.
+                        while let Some(message) = self.conductor_rx.next().await {
+                            self.handle_conductor_message(&client, message, &mut conductor_tx)
+                                .await?;
+                        }
+                        Ok(())
+                    }
+                })
+                .await
+        }
+        .instrument(tracing::info_span!("conductor", name = %conductor_name))
+        .await
     }
 
     /// Central message handling logic for the conductor.
