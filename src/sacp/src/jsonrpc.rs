@@ -551,17 +551,17 @@ impl<OB: AsyncWrite, IB: AsyncRead, H: JrHandler> JrConnection<OB, IB, H> {
     /// It returns a [`JrConnectionCx`] that you can use later to send requests
     /// or to spawn tasks. But if you do not invoke [`Self::serve`] or [`Self::with_client`],
     /// the server will not be running, and those messages will not be received.
-    pub fn json_rpc_cx(&self) -> JrConnectionCx {
+    pub fn connection_cx(&self) -> JrConnectionCx {
         JrConnectionCx::new(self.outgoing_tx.clone(), self.new_task_tx.clone())
     }
 
-    /// With a task that will be spawned on the server's executor when it is active.
+    /// Enqueue a task to run once the connection is actively serving traffic.
     #[track_caller]
     pub fn with_spawned(
         self,
         task: impl Future<Output = Result<(), crate::Error>> + Send + 'static,
     ) -> Self {
-        let json_rpc_cx = self.json_rpc_cx();
+        let json_rpc_cx = self.connection_cx();
         json_rpc_cx.spawn(task).expect("spawning failed");
         self
     }
@@ -688,7 +688,7 @@ impl<OB: AsyncWrite, IB: AsyncRead, H: JrHandler> JrConnection<OB, IB, H> {
         self,
         main_fn: impl AsyncFnOnce(JrConnectionCx) -> Result<(), crate::Error>,
     ) -> Result<(), crate::Error> {
-        let cx = self.json_rpc_cx();
+        let cx = self.connection_cx();
 
         // Run the server + the main function until one terminates.
         // We EXPECT the main function to be the one to terminate

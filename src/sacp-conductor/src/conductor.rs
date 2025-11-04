@@ -221,7 +221,7 @@ impl Conductor {
             let (component_read, component_write) = tokio::io::split(component_stream);
             let (conductor_read, conductor_write) = tokio::io::split(conductor_stream);
 
-            let cx = serve_args.connection.json_rpc_cx();
+            let cx = serve_args.connection.connection_cx();
 
             // Create the component streams based on the provider type
             let cleanup = next_provider.create(
