@@ -15,3 +15,7 @@ pub use agent_client_protocol_schema::*;
 pub use acp::*;
 pub use capabilities::*;
 pub use jsonrpc::*;
+
+// Re-export doc_test module for doc tests
+#[doc(hidden)]
+pub use jsonrpc::doc_test;

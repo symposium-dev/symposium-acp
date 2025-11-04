@@ -41,16 +41,23 @@ use crate::jsonrpc::actors::Task;
 ///
 /// The simplest case - handle one specific message type:
 ///
-/// ```rust,ignore
+/// ```no_run
+/// # use sacp::doc_test::*;
+/// # use sacp::{InitializeRequest, InitializeResponse, SessionNotification};
+/// # async fn example() -> Result<(), sacp::Error> {
+/// # let connection = mock_connection();
 /// connection
 ///     .on_receive_request(async |req: InitializeRequest, cx| {
 ///         // Handle only InitializeRequest messages
-///         cx.respond(InitializeResponse { ... })
+///         cx.respond(InitializeResponse::make())
 ///     })
-///     .on_receive_notification(async |notif: SessionUpdate, cx| {
+///     .on_receive_notification(async |notif: SessionNotification, cx| {
 ///         // Handle only SessionUpdate notifications
 ///         Ok(())
 ///     })
+/// # .serve().await?;
+/// # Ok(())
+/// # }
 /// ```
 ///
 /// ## Enum Message Types
@@ -58,41 +65,62 @@ use crate::jsonrpc::actors::Task;
 /// You can also handle multiple related messages with a single handler by defining an enum
 /// that implements the appropriate trait ([`JrRequest`] or [`JrNotification`]):
 ///
-/// ```rust,ignore
+/// ```no_run
+/// # use sacp::doc_test::*;
+/// # use sacp::{InitializeRequest, InitializeResponse, PromptRequest, PromptResponse, JrRequest, JrMessage, UntypedMessage};
+/// # async fn example() -> Result<(), sacp::Error> {
+/// # let connection = mock_connection();
 /// // Define an enum for multiple request types
+/// #[derive(Debug)]
 /// enum MyRequests {
 ///     Initialize(InitializeRequest),
 ///     Prompt(PromptRequest),
 /// }
 ///
 /// // Implement JrRequest for your enum
-/// impl JrRequest for MyRequests { /* ... */ }
+/// # impl JrMessage for MyRequests {
+/// #     fn method(&self) -> &str { "myRequests" }
+/// #     fn into_untyped_message(self) -> Result<UntypedMessage, sacp::Error> { todo!() }
+/// #     fn parse_request(_method: &str, _params: &impl serde::Serialize) -> Option<Result<Self, sacp::Error>> { None }
+/// #     fn parse_notification(_method: &str, _params: &impl serde::Serialize) -> Option<Result<Self, sacp::Error>> { None }
+/// # }
+/// impl JrRequest for MyRequests { type Response = serde_json::Value; }
 ///
 /// // Handle all variants in one place
 /// connection.on_receive_request(async |req: MyRequests, cx| {
 ///     match req {
-///         MyRequests::Initialize(init) => { /* ... */ }
-///         MyRequests::Prompt(prompt) => { /* ... */ }
+///         MyRequests::Initialize(init) => { cx.respond(serde_json::json!({})) }
+///         MyRequests::Prompt(prompt) => { cx.respond(serde_json::json!({})) }
 ///     }
 /// })
+/// # .serve().await?;
+/// # Ok(())
+/// # }
 /// ```
 ///
 /// ## Mixed Message Types
 ///
 /// For enums containing both requests AND notifications, use [`on_receive_message`](Self::on_receive_message):
 ///
-/// ```rust,ignore
-/// enum AllMessages {
-///     Request(MyRequests),
-///     Notification(MyNotifications),
-/// }
-///
-/// connection.on_receive_message(async |msg: AllMessages, cx| {
+/// ```no_run
+/// # use sacp::doc_test::*;
+/// # use sacp::{MessageAndCx, InitializeRequest, InitializeResponse, SessionNotification};
+/// # async fn example() -> Result<(), sacp::Error> {
+/// # let connection = mock_connection();
+/// // on_receive_message receives MessageAndCx which can be either a request or notification
+/// connection.on_receive_message(async |msg: MessageAndCx<InitializeRequest, SessionNotification>| {
 ///     match msg {
-///         AllMessages::Request(req, request_cx) => { /* handle and respond */ }
-///         AllMessages::Notification(notif, _) => { /* handle notification */ }
+///         MessageAndCx::Request(req, request_cx) => {
+///             request_cx.respond(InitializeResponse::make())
+///         }
+///         MessageAndCx::Notification(notif, _cx) => {
+///             Ok(())
+///         }
 ///     }
 /// })
+/// # .serve().await?;
+/// # Ok(())
+/// # }
 /// ```
 ///
 /// # Handler Registration
@@ -109,17 +137,27 @@ use crate::jsonrpc::actors::Task;
 /// Handlers are tried in the order you register them. The first handler that claims a message
 /// (by matching its type) will process it. Subsequent handlers won't see that message:
 ///
-/// ```rust,ignore
+/// ```no_run
+/// # use sacp::doc_test::*;
+/// # use sacp::{InitializeRequest, InitializeResponse, PromptRequest, PromptResponse, MessageAndCx, UntypedMessage};
+/// # async fn example() -> Result<(), sacp::Error> {
+/// # let connection = mock_connection();
 /// connection
 ///     .on_receive_request(async |req: InitializeRequest, cx| {
 ///         // This runs first for InitializeRequest
+///         cx.respond(InitializeResponse::make())
 ///     })
 ///     .on_receive_request(async |req: PromptRequest, cx| {
 ///         // This runs first for PromptRequest
+///         cx.respond(PromptResponse::make())
 ///     })
-///     .on_receive_message(async |msg: FallbackMessages, cx| {
+///     .on_receive_message(async |msg: MessageAndCx| {
 ///         // This runs for any message not handled above
+///         msg.respond_with_error(sacp::util::internal_error("unknown method"))
 ///     })
+/// # .serve().await?;
+/// # Ok(())
+/// # }
 /// ```
 ///
 /// # Event Loop and Concurrency
@@ -135,18 +173,25 @@ use crate::jsonrpc::actors::Task;
 /// To avoid blocking the event loop, use [`JrConnectionCx::spawn`] to offload serious
 /// work to concurrent tasks:
 ///
-/// ```rust,ignore
+/// ```no_run
+/// # use sacp::doc_test::*;
+/// # async fn example() -> Result<(), sacp::Error> {
+/// # let connection = mock_connection();
 /// connection.on_receive_request(async |req: AnalyzeRequest, cx| {
-///     // Spawn expensive work to run concurrently
+///     // Clone cx for the spawned task
+///     let cx_clone = cx.connection_cx();
 ///     cx.spawn(async move {
 ///         let result = expensive_analysis(&req.data).await?;
-///         cx.send_notification(AnalysisComplete { result })?;
+///         cx_clone.send_notification(AnalysisComplete { result })?;
 ///         Ok(())
 ///     })?;
 ///
 ///     // Respond immediately without blocking
 ///     cx.respond(AnalysisStarted { job_id: 42 })
 /// })
+/// # .serve().await?;
+/// # Ok(())
+/// # }
 /// ```
 ///
 /// Note that the entire connection runs within one async task, so parallelism must be
@@ -178,11 +223,18 @@ use crate::jsonrpc::actors::Task;
 ///
 /// Use [`serve`](Self::serve) when you only need to respond to incoming messages:
 ///
-/// ```rust,ignore
+/// ```no_run
+/// # use sacp::doc_test::*;
+/// # async fn example() -> Result<(), sacp::Error> {
+/// # let connection = mock_connection();
 /// connection
-///     .on_receive_request(async |req: MyRequest, cx| { /* ... */ })
+///     .on_receive_request(async |req: MyRequest, cx| {
+///         cx.respond(MyResponse { status: "ok".into() })
+///     })
 ///     .serve()  // Runs until connection closes or error occurs
 ///     .await?;
+/// # Ok(())
+/// # }
 /// ```
 ///
 /// The connection will process incoming messages and invoke your handlers until the
@@ -193,21 +245,29 @@ use crate::jsonrpc::actors::Task;
 /// Use [`with_client`](Self::with_client) when you need to both handle incoming messages
 /// AND send your own requests/notifications:
 ///
-/// ```rust,ignore
+/// ```no_run
+/// # use sacp::doc_test::*;
+/// # use sacp::InitializeRequest;
+/// # async fn example() -> Result<(), sacp::Error> {
+/// # let connection = mock_connection();
 /// connection
-///     .on_receive_request(async |req: MyRequest, cx| { /* ... */ })
+///     .on_receive_request(async |req: MyRequest, cx| {
+///         cx.respond(MyResponse { status: "ok".into() })
+///     })
 ///     .with_client(async |cx| {
 ///         // You can send requests to the other side
-///         let response = cx.send_request(InitializeRequest { ... })
+///         let response = cx.send_request(InitializeRequest::make())
 ///             .block_task()
 ///             .await?;
 ///
 ///         // And send notifications
-///         cx.send_notification(MyNotification { ... })?;
+///         cx.send_notification(StatusUpdate { message: "ready".into() })?;
 ///
 ///         Ok(())
 ///     })
 ///     .await?;
+/// # Ok(())
+/// # }
 /// ```
 ///
 /// The connection will serve incoming messages in the background while your client closure
@@ -325,18 +385,16 @@ impl<OB: AsyncWrite, IB: AsyncRead, H: JrHandler> JrConnection<OB, IB, H> {
     ///
     /// # Example
     ///
-    /// ```rust,ignore
-    /// // Define an enum containing both requests and notifications
-    /// enum MyMessages {
-    ///     Request(MyRequests),
-    ///     Notification(MyNotifications),
-    /// }
-    ///
-    /// connection.on_receive_message(async |message: MessageAndCx<MyRequests, MyNotifications>| {
+    /// ```no_run
+    /// # use sacp::doc_test::*;
+    /// # use sacp::MessageAndCx;
+    /// # async fn example() -> Result<(), sacp::Error> {
+    /// # let connection = mock_connection();
+    /// connection.on_receive_message(async |message: MessageAndCx<MyRequest, StatusUpdate>| {
     ///     match message {
     ///         MessageAndCx::Request(req, request_cx) => {
     ///             // Handle request and send response
-    ///             request_cx.respond(MyResponse { ... })
+    ///             request_cx.respond(MyResponse { status: "ok".into() })
     ///         }
     ///         MessageAndCx::Notification(notif, _cx) => {
     ///             // Handle notification (no response needed)
@@ -344,6 +402,9 @@ impl<OB: AsyncWrite, IB: AsyncRead, H: JrHandler> JrConnection<OB, IB, H> {
     ///         }
     ///     }
     /// })
+    /// # .serve().await?;
+    /// # Ok(())
+    /// # }
     /// ```
     ///
     /// For most use cases, prefer [`on_receive_request`](Self::on_receive_request) or
@@ -437,7 +498,10 @@ impl<OB: AsyncWrite, IB: AsyncRead, H: JrHandler> JrConnection<OB, IB, H> {
     ///
     /// # Example
     ///
-    /// ```rust,ignore
+    /// ```no_run
+    /// # use sacp::doc_test::*;
+    /// # async fn example() -> Result<(), sacp::Error> {
+    /// # let connection = mock_connection();
     /// connection.on_receive_notification(async |notif: SessionUpdate, cx| {
     ///     // Process the notification
     ///     update_session_state(&notif)?;
@@ -449,6 +513,9 @@ impl<OB: AsyncWrite, IB: AsyncRead, H: JrHandler> JrConnection<OB, IB, H> {
     ///
     ///     Ok(())
     /// })
+    /// # .serve().await?;
+    /// # Ok(())
+    /// # }
     /// ```
     ///
     /// # Type Parameter
@@ -511,14 +578,21 @@ impl<OB: AsyncWrite, IB: AsyncRead, H: JrHandler> JrConnection<OB, IB, H> {
     ///
     /// # Example
     ///
-    /// ```rust,ignore
-    /// JrConnection::new(stdout, stdin)
+    /// ```no_run
+    /// # use sacp::doc_test::*;
+    /// # use std::pin::Pin;
+    /// # async fn example() -> Result<(), sacp::Error> {
+    /// # let stdout: Pin<Box<dyn futures::AsyncWrite + Send>> = Box::pin(futures::io::Cursor::new(Vec::new()));
+    /// # let stdin: Pin<Box<dyn futures::AsyncRead + Send>> = Box::pin(futures::io::Cursor::new(Vec::new()));
+    /// sacp::JrConnection::new(stdout, stdin)
     ///     .on_receive_request(async |req: MyRequest, cx| {
     ///         // Handle requests...
-    ///         cx.respond(MyResponse { ... })
+    ///         cx.respond(MyResponse { status: "ok".into() })
     ///     })
     ///     .serve()  // Run until connection closes
     ///     .await?;
+    /// # Ok(())
+    /// # }
     /// ```
     pub async fn serve(self) -> Result<(), crate::Error> {
         let (reply_tx, reply_rx) = mpsc::unbounded();
@@ -570,20 +644,26 @@ impl<OB: AsyncWrite, IB: AsyncRead, H: JrHandler> JrConnection<OB, IB, H> {
     ///
     /// # Example
     ///
-    /// ```rust,ignore
-    /// JrConnection::new(stdout, stdin)
+    /// ```no_run
+    /// # use sacp::doc_test::*;
+    /// # use sacp::InitializeRequest;
+    /// # use std::pin::Pin;
+    /// # async fn example() -> Result<(), sacp::Error> {
+    /// # let stdout: Pin<Box<dyn futures::AsyncWrite + Send>> = Box::pin(futures::io::Cursor::new(Vec::new()));
+    /// # let stdin: Pin<Box<dyn futures::AsyncRead + Send>> = Box::pin(futures::io::Cursor::new(Vec::new()));
+    /// sacp::JrConnection::new(stdout, stdin)
     ///     .on_receive_request(async |req: MyRequest, cx| {
     ///         // Handle incoming requests in the background
-    ///         cx.respond(MyResponse { ... })
+    ///         cx.respond(MyResponse { status: "ok".into() })
     ///     })
     ///     .with_client(async |cx| {
     ///         // Initialize the protocol
-    ///         let init_response = cx.send_request(InitializeRequest { ... })
+    ///         let init_response = cx.send_request(InitializeRequest::make())
     ///             .block_task()
     ///             .await?;
     ///
     ///         // Send more requests...
-    ///         let result = cx.send_request(SomeRequest { ... })
+    ///         let result = cx.send_request(MyRequest {})
     ///             .block_task()
     ///             .await?;
     ///
@@ -591,6 +671,8 @@ impl<OB: AsyncWrite, IB: AsyncRead, H: JrHandler> JrConnection<OB, IB, H> {
     ///         Ok(())
     ///     })
     ///     .await?;
+    /// # Ok(())
+    /// # }
     /// ```
     ///
     /// # Parameters
@@ -752,18 +834,25 @@ impl JrConnectionCx {
     /// Handler callbacks run on the event loop, which cannot process new messages while
     /// your handler is running. Use `spawn` for any expensive operations:
     ///
-    /// ```rust,ignore
+    /// ```no_run
+    /// # use sacp::doc_test::*;
+    /// # async fn example() -> Result<(), sacp::Error> {
+    /// # let connection = mock_connection();
     /// connection.on_receive_request(async |req: ProcessRequest, cx| {
-    ///     // Spawn expensive work to run concurrently
+    ///     // Clone cx for the spawned task
+    ///     let cx_clone = cx.connection_cx();
     ///     cx.spawn(async move {
     ///         let result = expensive_operation(&req.data).await?;
-    ///         cx.send_notification(ProcessComplete { result })?;
+    ///         cx_clone.send_notification(ProcessComplete { result })?;
     ///         Ok(())
     ///     })?;
     ///
     ///     // Respond immediately
-    ///     cx.respond(ProcessStarted {})
+    ///     cx.respond(ProcessResponse { result: "started".into() })
     /// })
+    /// # .serve().await?;
+    /// # Ok(())
+    /// # }
     /// ```
     ///
     /// # Errors
@@ -817,25 +906,36 @@ impl JrConnectionCx {
     /// The API intentionally makes it difficult to block on the result directly to prevent
     /// the common mistake of blocking the event loop while waiting for a response:
     ///
-    /// ```rust,ignore
+    /// ```compile_fail
+    /// # use sacp::doc_test::*;
+    /// # async fn example(cx: sacp::JrConnectionCx) -> Result<(), sacp::Error> {
     /// // ❌ This doesn't compile - prevents blocking the event loop
-    /// let response = cx.send_request(MyRequest { ... }).await?;
+    /// let response = cx.send_request(MyRequest {}).await?;
+    /// # Ok(())
+    /// # }
+    /// ```
     ///
+    /// ```no_run
+    /// # use sacp::doc_test::*;
+    /// # async fn example(cx: sacp::JrConnectionCx) -> Result<(), sacp::Error> {
     /// // ✅ Option 1: Schedule callback (safe in handlers)
-    /// cx.send_request(MyRequest { ... })
+    /// cx.send_request(MyRequest {})
     ///     .await_when_result_received(async |result| {
     ///         // Handle the response
     ///         Ok(())
     ///     })?;
     ///
     /// // ✅ Option 2: Block in spawned task (safe because task is concurrent)
+    /// let cx_clone = cx.clone();
     /// cx.spawn(async move {
-    ///     let response = cx.send_request(MyRequest { ... })
+    ///     let response = cx_clone.send_request(MyRequest {})
     ///         .block_task()
     ///         .await?;
     ///     // Process response...
     ///     Ok(())
     /// })?;
+    /// # Ok(())
+    /// # }
     /// ```
     pub fn send_request<Req: JrRequest>(&self, request: Req) -> JrResponse<Req::Response> {
         let method = request.method().to_string();
@@ -888,10 +988,14 @@ impl JrConnectionCx {
     /// Notifications are fire-and-forget messages that don't have IDs and don't expect responses.
     /// This method sends the notification immediately and returns.
     ///
-    /// ```rust,ignore
+    /// ```no_run
+    /// # use sacp::doc_test::*;
+    /// # async fn example(cx: sacp::JrConnectionCx) -> Result<(), sacp::Error> {
     /// cx.send_notification(StatusUpdate {
     ///     message: "Processing...".into(),
     /// })?;
+    /// # Ok(())
+    /// # }
     /// ```
     pub fn send_notification<N: JrNotification>(
         &self,
@@ -937,11 +1041,14 @@ impl JrConnectionCx {
 ///
 /// # Example
 ///
-/// ```rust,ignore
+/// ```no_run
+/// # use sacp::doc_test::*;
+/// # async fn example() -> Result<(), sacp::Error> {
+/// # let connection = mock_connection();
 /// connection.on_receive_request(async |req: ProcessRequest, cx| {
 ///     // Send a notification while processing
 ///     cx.send_notification(StatusUpdate {
-///         status: "processing".into(),
+///         message: "processing".into(),
 ///     })?;
 ///
 ///     // Do some work...
@@ -950,6 +1057,9 @@ impl JrConnectionCx {
 ///     // Respond to the request
 ///     cx.respond(ProcessResponse { result })
 /// })
+/// # .serve().await?;
+/// # Ok(())
+/// # }
 /// ```
 ///
 /// # Event Loop Considerations
@@ -1292,8 +1402,10 @@ impl JrNotification for UntypedMessage {}
 /// Use [`await_when_result_received`](Self::await_when_result_received) to schedule a task
 /// that runs when the response arrives. This doesn't block the event loop:
 ///
-/// ```rust,ignore
-/// cx.send_request(MyRequest { ... })
+/// ```no_run
+/// # use sacp::doc_test::*;
+/// # async fn example(cx: sacp::JrConnectionCx) -> Result<(), sacp::Error> {
+/// cx.send_request(MyRequest {})
 ///     .await_when_result_received(async |result| {
 ///         match result {
 ///             Ok(response) => {
@@ -1306,6 +1418,8 @@ impl JrNotification for UntypedMessage {}
 ///             }
 ///         }
 ///     })?;
+/// # Ok(())
+/// # }
 /// ```
 ///
 /// ## Option 2: Block in a Spawned Task (Safe Only in `spawn`)
@@ -1313,23 +1427,36 @@ impl JrNotification for UntypedMessage {}
 /// Use [`block_task`](Self::block_task) to block until the response arrives, but **only**
 /// in a spawned task (never in a handler):
 ///
-/// ```rust,ignore
+/// ```no_run
+/// # use sacp::doc_test::*;
+/// # async fn example(cx: sacp::JrConnectionCx) -> Result<(), sacp::Error> {
 /// // ✅ Safe: Spawned task runs concurrently
+/// let cx_clone = cx.clone();
 /// cx.spawn(async move {
-///     let response = cx.send_request(MyRequest { ... })
+///     let response = cx_clone.send_request(MyRequest {})
 ///         .block_task()
 ///         .await?;
 ///     // Process response...
 ///     Ok(())
 /// })?;
+/// # Ok(())
+/// # }
+/// ```
 ///
+/// ```no_run
+/// # use sacp::doc_test::*;
+/// # async fn example() -> Result<(), sacp::Error> {
+/// # let connection = mock_connection();
 /// // ❌ NEVER do this in a handler - blocks the event loop!
-/// cx.on_receive_request(async |req, cx| {
-///     let response = cx.send_request(MyRequest { ... })
+/// connection.on_receive_request(async |req: MyRequest, cx| {
+///     let response = cx.send_request(MyRequest {})
 ///         .block_task()  // This will deadlock!
 ///         .await?;
 ///     cx.respond(response)
 /// })
+/// # .serve().await?;
+/// # Ok(())
+/// # }
 /// ```
 ///
 /// # Why This Design?
@@ -1384,7 +1511,11 @@ impl<R: JrResponsePayload> JrResponse<R> {
     ///
     /// # Example: Proxying requests
     ///
-    /// ```rust,ignore
+    /// ```no_run
+    /// # use sacp::doc_test::*;
+    /// # async fn example() -> Result<(), sacp::Error> {
+    /// # let connection = mock_connection();
+    /// # let other_connection = connection.json_rpc_cx();
     /// connection.on_receive_request(async |req: ProxyRequest, request_cx| {
     ///     // Forward the request to another connection and proxy the response back
     ///     other_connection.send_request(req.inner_request)
@@ -1393,6 +1524,9 @@ impl<R: JrResponsePayload> JrResponse<R> {
     ///     // The response will be automatically forwarded when it arrives
     ///     Ok(())
     /// })
+    /// # .serve().await?;
+    /// # Ok(())
+    /// # }
     /// ```
     ///
     /// # Type Safety
@@ -1424,12 +1558,16 @@ impl<R: JrResponsePayload> JrResponse<R> {
     ///
     /// # Safe Usage (in spawned tasks)
     ///
-    /// ```rust,ignore
+    /// ```no_run
+    /// # use sacp::doc_test::*;
+    /// # async fn example() -> Result<(), sacp::Error> {
+    /// # let connection = mock_connection();
     /// connection.on_receive_request(async |req: MyRequest, cx| {
     ///     // Spawn a task to handle the request
+    ///     let cx_clone = cx.connection_cx();
     ///     cx.spawn(async move {
     ///         // Safe: We're in a spawned task, not blocking the event loop
-    ///         let response = cx.send_request(OtherRequest { ... })
+    ///         let response = cx_clone.send_request(OtherRequest {})
     ///             .block_task()
     ///             .await?;
     ///
@@ -1438,21 +1576,30 @@ impl<R: JrResponsePayload> JrResponse<R> {
     ///     })?;
     ///
     ///     // Respond immediately
-    ///     cx.respond(MyResponse { ... })
+    ///     cx.respond(MyResponse { status: "ok".into() })
     /// })
+    /// # .serve().await?;
+    /// # Ok(())
+    /// # }
     /// ```
     ///
     /// # Unsafe Usage (in handlers - will deadlock!)
     ///
-    /// ```rust,ignore
+    /// ```no_run
+    /// # use sacp::doc_test::*;
+    /// # async fn example() -> Result<(), sacp::Error> {
+    /// # let connection = mock_connection();
     /// connection.on_receive_request(async |req: MyRequest, cx| {
     ///     // ❌ DEADLOCK: Handler blocks event loop, which can't process the response
-    ///     let response = cx.send_request(OtherRequest { ... })
+    ///     let response = cx.send_request(OtherRequest {})
     ///         .block_task()
     ///         .await?;
     ///
-    ///     cx.respond(MyResponse { response })
+    ///     cx.respond(MyResponse { status: response.value })
     /// })
+    /// # .serve().await?;
+    /// # Ok(())
+    /// # }
     /// ```
     ///
     /// # When to Use
@@ -1494,27 +1641,28 @@ impl<R: JrResponsePayload> JrResponse<R> {
     ///
     /// # Example: Chaining requests
     ///
-    /// ```rust,ignore
-    /// connection.on_receive_request(async |req: ProcessRequest, request_cx| {
+    /// ```no_run
+    /// # use sacp::doc_test::*;
+    /// # async fn example() -> Result<(), sacp::Error> {
+    /// # let connection = mock_connection();
+    /// connection.on_receive_request(async |req: ValidateRequest, request_cx| {
     ///     // Send initial request
-    ///     cx.send_request(ValidateRequest { data: req.data })
+    ///     request_cx.connection_cx().send_request(ValidateRequest { data: req.data.clone() })
     ///         .await_when_ok_response_received(request_cx, async |validation, request_cx| {
     ///             // Only runs if validation succeeded
     ///             if validation.is_valid {
-    ///                 // Send second request
-    ///                 let result = cx.send_request(ExecuteRequest { ... })
-    ///                     .block_task()
-    ///                     .await?;
-    ///
     ///                 // Respond to original request
-    ///                 request_cx.respond(ProcessResponse { result })
+    ///                 request_cx.respond(ValidateResponse { is_valid: true, error: None })
     ///             } else {
-    ///                 request_cx.respond_with_error(validation.error)
+    ///                 request_cx.respond_with_error(sacp::util::internal_error("validation failed"))
     ///             }
     ///         })?;
     ///
     ///     Ok(())
     /// })
+    /// # .serve().await?;
+    /// # Ok(())
+    /// # }
     /// ```
     ///
     /// # When to Use
@@ -1548,16 +1696,20 @@ impl<R: JrResponsePayload> JrResponse<R> {
     ///
     /// # Example: Handle response in callback
     ///
-    /// ```rust,ignore
+    /// ```no_run
+    /// # use sacp::doc_test::*;
+    /// # async fn example() -> Result<(), sacp::Error> {
+    /// # let connection = mock_connection();
     /// connection.on_receive_request(async |req: MyRequest, cx| {
+    ///     let cx_clone = cx.connection_cx();
     ///     // Send a request and schedule a callback for the response
-    ///     cx.send_request(QueryRequest { id: req.id })
+    ///     cx.send_request(QueryRequest { id: 22 })
     ///         .await_when_result_received(async move |result| {
     ///             match result {
     ///                 Ok(response) => {
     ///                     println!("Got response: {:?}", response);
     ///                     // Can send more messages here
-    ///                     cx.send_notification(QueryComplete { ... })?;
+    ///                     cx_clone.send_notification(QueryComplete {})?;
     ///                     Ok(())
     ///                 }
     ///                 Err(error) => {
@@ -1568,8 +1720,11 @@ impl<R: JrResponsePayload> JrResponse<R> {
     ///         })?;
     ///
     ///     // Handler continues immediately without waiting
-    ///     cx.respond(MyResponse { status: "processing" })
+    ///     cx.respond(MyResponse { status: "processing".into() })
     /// })
+    /// # .serve().await?;
+    /// # Ok(())
+    /// # }
     /// ```
     ///
     /// # Event Loop Safety
@@ -1610,4 +1765,272 @@ const COMMUNICATION_FAILURE: i32 = -32000;
 
 fn communication_failure(err: impl ToString) -> crate::Error {
     crate::Error::new((COMMUNICATION_FAILURE, err.to_string()))
+}
+
+/// Test utilities for doc tests
+#[doc(hidden)]
+pub mod doc_test {
+    use super::*;
+    use agent_client_protocol_schema::InitializeResponse;
+    use serde::{Deserialize, Serialize};
+    use std::pin::Pin;
+
+    // Mock request/response types
+    #[derive(Debug, Serialize, Deserialize)]
+    pub struct MyRequest {}
+
+    #[derive(Debug, Serialize, Deserialize)]
+    pub struct MyResponse {
+        pub status: String,
+    }
+
+    #[derive(Debug, Serialize, Deserialize)]
+    pub struct ProcessRequest {
+        pub data: String,
+    }
+
+    #[derive(Debug, Serialize, Deserialize)]
+    pub struct ProcessResponse {
+        pub result: String,
+    }
+
+    #[derive(Debug, Serialize, Deserialize)]
+    pub struct ProcessStarted {}
+
+    #[derive(Debug, Serialize, Deserialize)]
+    pub struct AnalyzeRequest {
+        pub data: String,
+    }
+
+    #[derive(Debug, Serialize, Deserialize)]
+    pub struct AnalysisStarted {
+        pub job_id: u32,
+    }
+
+    #[derive(Debug, Serialize, Deserialize)]
+    pub struct QueryRequest {
+        pub id: u64,
+    }
+
+    #[derive(Debug, Serialize, Deserialize)]
+    pub struct QueryResponse {
+        pub data: String,
+    }
+
+    #[derive(Debug, Serialize, Deserialize)]
+    pub struct ValidateRequest {
+        pub data: String,
+    }
+
+    #[derive(Debug, Serialize, Deserialize)]
+    pub struct ValidateResponse {
+        pub is_valid: bool,
+        pub error: Option<String>,
+    }
+
+    #[derive(Debug, Serialize, Deserialize)]
+    pub struct ExecuteRequest {}
+
+    #[derive(Debug, Serialize, Deserialize)]
+    pub struct ExecuteResponse {
+        pub result: String,
+    }
+
+    #[derive(Debug, Serialize, Deserialize)]
+    pub struct OtherRequest {}
+
+    #[derive(Debug, Serialize, Deserialize)]
+    pub struct OtherResponse {
+        pub value: String,
+    }
+
+    #[derive(Debug, Serialize, Deserialize)]
+    pub struct ProxyRequest {
+        pub inner_request: UntypedMessage,
+    }
+
+    // Mock notification types
+    #[derive(Debug, Serialize, Deserialize)]
+    pub struct SessionUpdate {}
+
+    #[derive(Debug, Serialize, Deserialize)]
+    pub struct StatusUpdate {
+        pub message: String,
+    }
+
+    #[derive(Debug, Serialize, Deserialize)]
+    pub struct ProcessComplete {
+        pub result: String,
+    }
+
+    #[derive(Debug, Serialize, Deserialize)]
+    pub struct AnalysisComplete {
+        pub result: String,
+    }
+
+    #[derive(Debug, Serialize, Deserialize)]
+    pub struct QueryComplete {}
+
+    // Implement JrMessage for all types
+    macro_rules! impl_jr_message {
+        ($type:ty, $method:expr) => {
+            impl JrMessage for $type {
+                fn method(&self) -> &str {
+                    $method
+                }
+                fn into_untyped_message(self) -> Result<UntypedMessage, crate::Error> {
+                    UntypedMessage::new($method, self)
+                }
+                fn parse_request(
+                    _method: &str,
+                    _params: &impl Serialize,
+                ) -> Option<Result<Self, crate::Error>> {
+                    None
+                }
+                fn parse_notification(
+                    _method: &str,
+                    _params: &impl Serialize,
+                ) -> Option<Result<Self, crate::Error>> {
+                    None
+                }
+            }
+        };
+    }
+
+    // Implement JrRequest for request types
+    macro_rules! impl_jr_request {
+        ($req:ty, $resp:ty, $method:expr) => {
+            impl_jr_message!($req, $method);
+            impl JrRequest for $req {
+                type Response = $resp;
+            }
+        };
+    }
+
+    // Implement JrNotification for notification types
+    macro_rules! impl_jr_notification {
+        ($type:ty, $method:expr) => {
+            impl_jr_message!($type, $method);
+            impl JrNotification for $type {}
+        };
+    }
+
+    impl_jr_request!(MyRequest, MyResponse, "myRequest");
+    impl_jr_request!(ProcessRequest, ProcessResponse, "processRequest");
+    impl_jr_request!(AnalyzeRequest, AnalysisStarted, "analyzeRequest");
+    impl_jr_request!(QueryRequest, QueryResponse, "queryRequest");
+    impl_jr_request!(ValidateRequest, ValidateResponse, "validateRequest");
+    impl_jr_request!(ExecuteRequest, ExecuteResponse, "executeRequest");
+    impl_jr_request!(OtherRequest, OtherResponse, "otherRequest");
+    impl_jr_request!(ProxyRequest, serde_json::Value, "proxyRequest");
+
+    impl_jr_notification!(SessionUpdate, "sessionUpdate");
+    impl_jr_notification!(StatusUpdate, "statusUpdate");
+    impl_jr_notification!(ProcessComplete, "processComplete");
+    impl_jr_notification!(AnalysisComplete, "analysisComplete");
+    impl_jr_notification!(QueryComplete, "queryComplete");
+    impl_jr_notification!(ProcessStarted, "processStarted");
+
+    // Implement JrResponsePayload for response types
+    impl JrResponsePayload for MyResponse {
+        fn into_json(self, _method: &str) -> Result<serde_json::Value, crate::Error> {
+            Ok(serde_json::to_value(self)?)
+        }
+        fn from_value(_method: &str, value: serde_json::Value) -> Result<Self, crate::Error> {
+            Ok(serde_json::from_value(value)?)
+        }
+    }
+
+    impl JrResponsePayload for ProcessResponse {
+        fn into_json(self, _method: &str) -> Result<serde_json::Value, crate::Error> {
+            Ok(serde_json::to_value(self)?)
+        }
+        fn from_value(_method: &str, value: serde_json::Value) -> Result<Self, crate::Error> {
+            Ok(serde_json::from_value(value)?)
+        }
+    }
+
+    impl JrResponsePayload for AnalysisStarted {
+        fn into_json(self, _method: &str) -> Result<serde_json::Value, crate::Error> {
+            Ok(serde_json::to_value(self)?)
+        }
+        fn from_value(_method: &str, value: serde_json::Value) -> Result<Self, crate::Error> {
+            Ok(serde_json::from_value(value)?)
+        }
+    }
+
+    impl JrResponsePayload for QueryResponse {
+        fn into_json(self, _method: &str) -> Result<serde_json::Value, crate::Error> {
+            Ok(serde_json::to_value(self)?)
+        }
+        fn from_value(_method: &str, value: serde_json::Value) -> Result<Self, crate::Error> {
+            Ok(serde_json::from_value(value)?)
+        }
+    }
+
+    impl JrResponsePayload for ValidateResponse {
+        fn into_json(self, _method: &str) -> Result<serde_json::Value, crate::Error> {
+            Ok(serde_json::to_value(self)?)
+        }
+        fn from_value(_method: &str, value: serde_json::Value) -> Result<Self, crate::Error> {
+            Ok(serde_json::from_value(value)?)
+        }
+    }
+
+    impl JrResponsePayload for ExecuteResponse {
+        fn into_json(self, _method: &str) -> Result<serde_json::Value, crate::Error> {
+            Ok(serde_json::to_value(self)?)
+        }
+        fn from_value(_method: &str, value: serde_json::Value) -> Result<Self, crate::Error> {
+            Ok(serde_json::from_value(value)?)
+        }
+    }
+
+    impl JrResponsePayload for OtherResponse {
+        fn into_json(self, _method: &str) -> Result<serde_json::Value, crate::Error> {
+            Ok(serde_json::to_value(self)?)
+        }
+        fn from_value(_method: &str, value: serde_json::Value) -> Result<Self, crate::Error> {
+            Ok(serde_json::from_value(value)?)
+        }
+    }
+
+    // Mock async functions
+    pub async fn expensive_analysis(_data: &str) -> Result<String, crate::Error> {
+        Ok("analysis result".into())
+    }
+
+    pub async fn expensive_operation(_data: &str) -> Result<String, crate::Error> {
+        Ok("operation result".into())
+    }
+
+    pub fn update_session_state(_update: &SessionUpdate) -> Result<(), crate::Error> {
+        Ok(())
+    }
+
+    pub fn process(data: &str) -> Result<String, crate::Error> {
+        Ok(data.to_string())
+    }
+
+    // Helper to create a mock connection for examples
+    pub fn mock_connection() -> JrConnection<
+        Pin<Box<dyn futures::AsyncWrite + Send>>,
+        Pin<Box<dyn futures::AsyncRead + Send>>,
+        NullHandler,
+    > {
+        use futures::io::Cursor;
+        let writer: Pin<Box<dyn futures::AsyncWrite + Send>> = Box::pin(Cursor::new(Vec::new()));
+        let reader: Pin<Box<dyn futures::AsyncRead + Send>> = Box::pin(Cursor::new(Vec::new()));
+        JrConnection::new(writer, reader)
+    }
+
+    pub trait Make {
+        fn make() -> Self;
+    }
+
+    impl<T> Make for T {
+        fn make() -> Self {
+            panic!()
+        }
+    }
 }
