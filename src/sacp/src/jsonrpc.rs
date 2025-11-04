@@ -1768,7 +1768,7 @@ fn communication_failure(err: impl ToString) -> crate::Error {
 }
 
 /// Test utilities for doc tests
-#[doc(hidden)]
+#[cfg(doctest)]
 pub mod doc_test {
     use super::*;
     use agent_client_protocol_schema::InitializeResponse;

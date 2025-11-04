@@ -18,4 +18,4 @@ pub use jsonrpc::*;
 
 // Re-export doc_test module for doc tests
 #[doc(hidden)]
-pub use jsonrpc::doc_test;
+pub mod doc_test;
