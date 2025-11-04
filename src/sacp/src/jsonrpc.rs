@@ -179,11 +179,13 @@ use crate::jsonrpc::actors::Task;
 /// # let connection = mock_connection();
 /// connection.on_receive_request(async |req: AnalyzeRequest, cx| {
 ///     // Clone cx for the spawned task
-///     let cx_clone = cx.connection_cx();
-///     cx.spawn(async move {
-///         let result = expensive_analysis(&req.data).await?;
-///         cx_clone.send_notification(AnalysisComplete { result })?;
-///         Ok(())
+///     cx.spawn({
+///         let cx = cx.clone();
+///         async move {
+///             let result = expensive_analysis(&req.data).await?;
+///             cx.send_notification(AnalysisComplete { result })?;
+///             Ok(())
+///         }
 ///     })?;
 ///
 ///     // Respond immediately without blocking
@@ -549,17 +551,17 @@ impl<OB: AsyncWrite, IB: AsyncRead, H: JrHandler> JrConnection<OB, IB, H> {
     /// It returns a [`JrConnectionCx`] that you can use later to send requests
     /// or to spawn tasks. But if you do not invoke [`Self::serve`] or [`Self::with_client`],
     /// the server will not be running, and those messages will not be received.
-    pub fn json_rpc_cx(&self) -> JrConnectionCx {
+    pub fn connection_cx(&self) -> JrConnectionCx {
         JrConnectionCx::new(self.outgoing_tx.clone(), self.new_task_tx.clone())
     }
 
-    /// With a task that will be spawned on the server's executor when it is active.
+    /// Enqueue a task to run once the connection is actively serving traffic.
     #[track_caller]
     pub fn with_spawned(
         self,
         task: impl Future<Output = Result<(), crate::Error>> + Send + 'static,
     ) -> Self {
-        let json_rpc_cx = self.json_rpc_cx();
+        let json_rpc_cx = self.connection_cx();
         json_rpc_cx.spawn(task).expect("spawning failed");
         self
     }
@@ -686,7 +688,7 @@ impl<OB: AsyncWrite, IB: AsyncRead, H: JrHandler> JrConnection<OB, IB, H> {
         self,
         main_fn: impl AsyncFnOnce(JrConnectionCx) -> Result<(), crate::Error>,
     ) -> Result<(), crate::Error> {
-        let cx = self.json_rpc_cx();
+        let cx = self.connection_cx();
 
         // Run the server + the main function until one terminates.
         // We EXPECT the main function to be the one to terminate
@@ -774,13 +776,16 @@ pub trait JrHandler {
         message: MessageAndCx,
     ) -> Result<Handled<MessageAndCx>, crate::Error>;
 
+    /// Returns a debug description of the handler chain for diagnostics
     fn describe_chain(&self) -> impl std::fmt::Debug;
 }
 
 /// Return type from JrHandler; indicates whether the request was handled or not.
 #[must_use]
 pub enum Handled<T> {
+    /// The message was handled
     Yes,
+    /// The message was not handled; returns the original value
     No(T),
 }
 
@@ -840,11 +845,13 @@ impl JrConnectionCx {
     /// # let connection = mock_connection();
     /// connection.on_receive_request(async |req: ProcessRequest, cx| {
     ///     // Clone cx for the spawned task
-    ///     let cx_clone = cx.connection_cx();
-    ///     cx.spawn(async move {
-    ///         let result = expensive_operation(&req.data).await?;
-    ///         cx_clone.send_notification(ProcessComplete { result })?;
-    ///         Ok(())
+    ///     cx.spawn({
+    ///         let cx = cx.clone();
+    ///         async move {
+    ///             let result = expensive_operation(&req.data).await?;
+    ///             cx.send_notification(ProcessComplete { result })?;
+    ///             Ok(())
+    ///         }
     ///     })?;
     ///
     ///     // Respond immediately
@@ -926,13 +933,15 @@ impl JrConnectionCx {
     ///     })?;
     ///
     /// // ✅ Option 2: Block in spawned task (safe because task is concurrent)
-    /// let cx_clone = cx.clone();
-    /// cx.spawn(async move {
-    ///     let response = cx_clone.send_request(MyRequest {})
-    ///         .block_task()
-    ///         .await?;
-    ///     // Process response...
-    ///     Ok(())
+    /// cx.spawn({
+    ///     let cx = cx.clone();
+    ///     async move {
+    ///         let response = cx.send_request(MyRequest {})
+    ///             .block_task()
+    ///             .await?;
+    ///         // Process response...
+    ///         Ok(())
+    ///     }
     /// })?;
     /// # Ok(())
     /// # }
@@ -1119,6 +1128,7 @@ impl JrRequestCx<serde_json::Value> {
         }
     }
 
+    /// Cast this request context to a different response type
     pub fn cast<T: JrResponsePayload>(self) -> JrRequestCx<T> {
         self.wrap_params(move |method, value| match value {
             Ok(value) => T::into_json(value, &method),
@@ -1332,7 +1342,9 @@ impl MessageAndCx {
 /// An incoming JSON message without any typing. Can be a request or a notification.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct UntypedMessage {
+    /// The JSON-RPC method name
     pub method: String,
+    /// The JSON-RPC parameters as a raw JSON value
     pub params: serde_json::Value,
 }
 
@@ -1346,14 +1358,17 @@ impl UntypedMessage {
         })
     }
 
+    /// Returns the method name
     pub fn method(&self) -> &str {
         &self.method
     }
 
+    /// Returns the parameters as a JSON value
     pub fn params(&self) -> &serde_json::Value {
         &self.params
     }
 
+    /// Consumes this message and returns the method and params
     pub fn into_parts(self) -> (String, serde_json::Value) {
         (self.method, self.params)
     }
@@ -1431,13 +1446,15 @@ impl JrNotification for UntypedMessage {}
 /// # use sacp_doc_test::*;
 /// # async fn example(cx: sacp::JrConnectionCx) -> Result<(), sacp::Error> {
 /// // ✅ Safe: Spawned task runs concurrently
-/// let cx_clone = cx.clone();
-/// cx.spawn(async move {
-///     let response = cx_clone.send_request(MyRequest {})
-///         .block_task()
-///         .await?;
-///     // Process response...
-///     Ok(())
+/// cx.spawn({
+///     let cx = cx.clone();
+///     async move {
+///         let response = cx.send_request(MyRequest {})
+///             .block_task()
+///             .await?;
+///         // Process response...
+///         Ok(())
+///     }
 /// })?;
 /// # Ok(())
 /// # }
@@ -1564,15 +1581,17 @@ impl<R: JrResponsePayload> JrResponse<R> {
     /// # let connection = mock_connection();
     /// connection.on_receive_request(async |req: MyRequest, cx| {
     ///     // Spawn a task to handle the request
-    ///     let cx_clone = cx.connection_cx();
-    ///     cx.spawn(async move {
-    ///         // Safe: We're in a spawned task, not blocking the event loop
-    ///         let response = cx_clone.send_request(OtherRequest {})
-    ///             .block_task()
-    ///             .await?;
+    ///     cx.spawn({
+    ///         let cx = cx.clone();
+    ///         async move {
+    ///             // Safe: We're in a spawned task, not blocking the event loop
+    ///             let response = cx.send_request(OtherRequest {})
+    ///                 .block_task()
+    ///                 .await?;
     ///
-    ///         // Process the response...
-    ///         Ok(())
+    ///             // Process the response...
+    ///             Ok(())
+    ///         }
     ///     })?;
     ///
     ///     // Respond immediately
@@ -1701,20 +1720,22 @@ impl<R: JrResponsePayload> JrResponse<R> {
     /// # async fn example() -> Result<(), sacp::Error> {
     /// # let connection = mock_connection();
     /// connection.on_receive_request(async |req: MyRequest, cx| {
-    ///     let cx_clone = cx.connection_cx();
     ///     // Send a request and schedule a callback for the response
     ///     cx.send_request(QueryRequest { id: 22 })
-    ///         .await_when_result_received(async move |result| {
-    ///             match result {
-    ///                 Ok(response) => {
-    ///                     println!("Got response: {:?}", response);
-    ///                     // Can send more messages here
-    ///                     cx_clone.send_notification(QueryComplete {})?;
-    ///                     Ok(())
+    ///         .await_when_result_received({
+    ///             let cx = cx.clone();
+    ///             async move |result| {
+    ///                 match result {
+    ///                     Ok(response) => {
+    ///                         println!("Got response: {:?}", response);
+    ///                         // Can send more messages here
+    ///                         cx.send_notification(QueryComplete {})?;
+    ///                         Ok(())
     ///                 }
-    ///                 Err(error) => {
-    ///                     eprintln!("Request failed: {}", error);
-    ///                     Err(error)
+    ///                     Err(error) => {
+    ///                         eprintln!("Request failed: {}", error);
+    ///                         Err(error)
+    ///                     }
     ///                 }
     ///             }
     ///         })?;

@@ -1,3 +1,39 @@
+//! # elizacp
+//!
+//! A classic Eliza chatbot implemented as an ACP (Agent-Client Protocol) agent.
+//!
+//! ## Overview
+//!
+//! Elizacp provides a simple, predictable agent implementation that's useful for:
+//!
+//! - **Testing ACP clients** - Lightweight agent with deterministic pattern-based responses
+//! - **Protocol development** - Verify ACP implementations without heavy AI infrastructure
+//! - **Learning ACP** - Clean example of implementing the Agent-Client Protocol
+//!
+//! ## Features
+//!
+//! - **Classic Eliza patterns** - Pattern matching and reflection-based responses
+//! - **Full ACP support** - Session management, initialization, and prompt handling
+//! - **Per-session state** - Each session maintains its own Eliza instance
+//! - **Extensible patterns** - Easy to add new response patterns
+//!
+//! ## Usage
+//!
+//! ```bash
+//! # Build and run
+//! cargo run -p elizacp
+//!
+//! # With debug logging
+//! cargo run -p elizacp -- --debug
+//! ```
+//!
+//! The agent communicates over stdin/stdout using JSON-RPC, following the ACP specification.
+//!
+//! ## Implementation
+//!
+//! The agent maintains a `HashMap<SessionId, Eliza>` to track per-session state.
+//! Each session gets its own Eliza instance with independent conversation state.
+
 mod eliza;
 
 use anyhow::Result;

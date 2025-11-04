@@ -4,11 +4,13 @@ use sacp::{
 };
 use serde::{Deserialize, Serialize};
 
+/// JSON-RPC method name for MCP connect requests
 pub const METHOD_MCP_CONNECT_REQUEST: &str = "_mcp/connect";
 
 /// Creates a new MCP connection. This is equivalent to "running the command".
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct McpConnectRequest {
+    /// The ACP URL to connect to (e.g., "acp:uuid")
     pub acp_url: String,
 }
 
@@ -41,8 +43,10 @@ impl JrRequest for McpConnectRequest {
     type Response = McpConnectResponse;
 }
 
+/// Response to an MCP connect request
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct McpConnectResponse {
+    /// Unique identifier for the established MCP connection
     pub connection_id: String,
 }
 
@@ -56,6 +60,7 @@ impl JrResponsePayload for McpConnectResponse {
     }
 }
 
+/// JSON-RPC method name for MCP disconnect notifications
 pub const METHOD_MCP_DISCONNECT_NOTIFICATION: &str = "_mcp/disconnect";
 
 /// Disconnects the MCP connection.
@@ -92,6 +97,7 @@ impl JrMessage for McpDisconnectNotification {
 
 impl JrNotification for McpDisconnectNotification {}
 
+/// JSON-RPC method name for MCP requests over ACP
 pub const METHOD_MCP_REQUEST: &str = "_mcp/request";
 
 /// An MCP request sent via ACP. This could be an MCP-server-to-MCP-client request
@@ -155,6 +161,7 @@ impl<R: JrRequest> JrRequest for McpOverAcpRequest<R> {
     type Response = R::Response;
 }
 
+/// JSON-RPC method name for MCP notifications over ACP
 pub const METHOD_MCP_NOTIFICATION: &str = "_mcp/notification";
 
 /// An MCP notification sent via ACP, either from the MCP client (the ACP agent)

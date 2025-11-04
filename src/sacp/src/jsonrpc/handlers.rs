@@ -23,6 +23,7 @@ impl JrHandler for NullHandler {
     }
 }
 
+/// Handler for typed request messages
 pub struct RequestHandler<R, F>
 where
     R: JrRequest,
@@ -37,6 +38,7 @@ where
     R: JrRequest,
     F: AsyncFnMut(R, JrRequestCx<R::Response>) -> Result<(), crate::Error>,
 {
+    /// Creates a new request handler
     pub fn new(handler: F) -> Self {
         Self {
             handler,
@@ -87,6 +89,7 @@ where
     }
 }
 
+/// Handler for typed notification messages
 pub struct NotificationHandler<N, F>
 where
     N: JrNotification,
@@ -101,6 +104,7 @@ where
     R: JrNotification,
     F: AsyncFnMut(R, JrConnectionCx) -> Result<(), crate::Error>,
 {
+    /// Creates a new notification handler
     pub fn new(handler: F) -> Self {
         Self {
             handler,
@@ -172,6 +176,7 @@ where
     N: JrNotification,
     F: AsyncFnMut(MessageAndCx<R, N>) -> Result<(), crate::Error>,
 {
+    /// Creates a new message handler
     pub fn new(handler: F) -> Self {
         Self {
             handler,
@@ -253,6 +258,7 @@ where
     }
 }
 
+/// Chains two handlers together, trying the first handler and falling back to the second
 pub struct ChainHandler<H1, H2>
 where
     H1: JrHandler,
@@ -267,6 +273,7 @@ where
     H1: JrHandler,
     H2: JrHandler,
 {
+    /// Creates a new chain handler
     pub fn new(handler1: H1, handler2: H2) -> Self {
         Self { handler1, handler2 }
     }
