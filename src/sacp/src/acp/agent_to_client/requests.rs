@@ -1,6 +1,6 @@
 use serde::Serialize;
 
-use crate::jsonrpc::{JrMessage, JrResponsePayload, JsonRpcRequest};
+use crate::jsonrpc::{JrMessage, JrRequest, JrResponsePayload};
 use crate::util::json_cast;
 use crate::{
     CreateTerminalRequest, CreateTerminalResponse, KillTerminalCommandRequest,
@@ -43,7 +43,7 @@ impl JrMessage for RequestPermissionRequest {
     }
 }
 
-impl JsonRpcRequest for RequestPermissionRequest {
+impl JrRequest for RequestPermissionRequest {
     type Response = RequestPermissionResponse;
 }
 
@@ -87,7 +87,7 @@ impl JrMessage for WriteTextFileRequest {
     }
 }
 
-impl JsonRpcRequest for WriteTextFileRequest {
+impl JrRequest for WriteTextFileRequest {
     type Response = WriteTextFileResponse;
 }
 
@@ -131,7 +131,7 @@ impl JrMessage for ReadTextFileRequest {
     }
 }
 
-impl JsonRpcRequest for ReadTextFileRequest {
+impl JrRequest for ReadTextFileRequest {
     type Response = ReadTextFileResponse;
 }
 
@@ -175,7 +175,7 @@ impl JrMessage for CreateTerminalRequest {
     }
 }
 
-impl JsonRpcRequest for CreateTerminalRequest {
+impl JrRequest for CreateTerminalRequest {
     type Response = CreateTerminalResponse;
 }
 
@@ -219,7 +219,7 @@ impl JrMessage for TerminalOutputRequest {
     }
 }
 
-impl JsonRpcRequest for TerminalOutputRequest {
+impl JrRequest for TerminalOutputRequest {
     type Response = TerminalOutputResponse;
 }
 
@@ -263,7 +263,7 @@ impl JrMessage for ReleaseTerminalRequest {
     }
 }
 
-impl JsonRpcRequest for ReleaseTerminalRequest {
+impl JrRequest for ReleaseTerminalRequest {
     type Response = ReleaseTerminalResponse;
 }
 
@@ -307,7 +307,7 @@ impl JrMessage for WaitForTerminalExitRequest {
     }
 }
 
-impl JsonRpcRequest for WaitForTerminalExitRequest {
+impl JrRequest for WaitForTerminalExitRequest {
     type Response = WaitForTerminalExitResponse;
 }
 
@@ -351,7 +351,7 @@ impl JrMessage for KillTerminalCommandRequest {
     }
 }
 
-impl JsonRpcRequest for KillTerminalCommandRequest {
+impl JrRequest for KillTerminalCommandRequest {
     type Response = KillTerminalCommandResponse;
 }
 

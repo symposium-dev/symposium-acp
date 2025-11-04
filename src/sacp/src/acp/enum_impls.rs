@@ -1,4 +1,4 @@
-//! JsonRpcRequest and JrNotification implementations for ACP enum types.
+//! JrRequest and JrNotification implementations for ACP enum types.
 //!
 //! This module implements the JSON-RPC traits for the enum types from
 //! agent-client-protocol-schema that represent all possible messages:
@@ -10,7 +10,7 @@
 use crate::{AgentNotification, AgentRequest, ClientNotification, ClientRequest};
 use serde::Serialize;
 
-use crate::jsonrpc::{JrMessage, JrNotification, JsonRpcRequest};
+use crate::jsonrpc::{JrMessage, JrNotification, JrRequest};
 use crate::util::json_cast;
 
 // ============================================================================
@@ -70,7 +70,7 @@ impl JrMessage for ClientRequest {
     }
 }
 
-impl JsonRpcRequest for ClientRequest {
+impl JrRequest for ClientRequest {
     type Response = serde_json::Value;
 }
 
@@ -187,7 +187,7 @@ impl JrMessage for AgentRequest {
     }
 }
 
-impl JsonRpcRequest for AgentRequest {
+impl JrRequest for AgentRequest {
     type Response = serde_json::Value;
 }
 

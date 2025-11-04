@@ -1,6 +1,6 @@
 use sacp;
 use sacp::{
-    JrMessage, JrNotification, JrResponsePayload, JsonRpcRequest, UntypedMessage, util::json_cast,
+    JrMessage, JrNotification, JrRequest, JrResponsePayload, UntypedMessage, util::json_cast,
 };
 use serde::{Deserialize, Serialize};
 
@@ -37,7 +37,7 @@ impl JrMessage for McpConnectRequest {
     }
 }
 
-impl JsonRpcRequest for McpConnectRequest {
+impl JrRequest for McpConnectRequest {
     type Response = McpConnectResponse;
 }
 
@@ -109,7 +109,7 @@ pub struct McpOverAcpRequest<R> {
     pub request: R,
 }
 
-impl<R: JsonRpcRequest> JrMessage for McpOverAcpRequest<R> {
+impl<R: JrRequest> JrMessage for McpOverAcpRequest<R> {
     fn into_untyped_message(self) -> Result<UntypedMessage, sacp::Error> {
         let message = self.request.into_untyped_message()?;
         UntypedMessage::new(
@@ -151,7 +151,7 @@ impl<R: JsonRpcRequest> JrMessage for McpOverAcpRequest<R> {
     }
 }
 
-impl<R: JsonRpcRequest> JsonRpcRequest for McpOverAcpRequest<R> {
+impl<R: JrRequest> JrRequest for McpOverAcpRequest<R> {
     type Response = R::Response;
 }
 

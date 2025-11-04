@@ -16,7 +16,291 @@ pub use handlers::*;
 
 use crate::jsonrpc::actors::Task;
 
-/// Create a JrConnection. This can be the basis for either a server or a client.
+/// A JSON-RPC connection that can act as either a server, client, or both.
+///
+/// `JrConnection` provides a builder-style API for creating JSON-RPC servers and clients.
+/// You start by calling [`JrConnection::new`] with your input/output streams, then add
+/// message handlers, and finally drive the connection with either [`serve`](Self::serve)
+/// or [`with_client`](Self::with_client).
+///
+/// # JSON-RPC Primer
+///
+/// JSON-RPC 2.0 has two fundamental message types:
+///
+/// * **Requests** - Messages that expect a response. They have an `id` field that gets
+///   echoed back in the response so the sender can correlate them.
+/// * **Notifications** - Fire-and-forget messages with no `id` field. The sender doesn't
+///   expect or receive a response.
+///
+/// # Type-Driven Message Dispatch
+///
+/// The handler registration methods use Rust's type system to determine which messages
+/// to handle. The type parameter you provide controls what gets dispatched to your handler:
+///
+/// ## Single Message Types
+///
+/// The simplest case - handle one specific message type:
+///
+/// ```no_run
+/// # use sacp_doc_test::*;
+/// # use sacp::{InitializeRequest, InitializeResponse, SessionNotification};
+/// # async fn example() -> Result<(), sacp::Error> {
+/// # let connection = mock_connection();
+/// connection
+///     .on_receive_request(async |req: InitializeRequest, cx| {
+///         // Handle only InitializeRequest messages
+///         cx.respond(InitializeResponse::make())
+///     })
+///     .on_receive_notification(async |notif: SessionNotification, cx| {
+///         // Handle only SessionUpdate notifications
+///         Ok(())
+///     })
+/// # .serve().await?;
+/// # Ok(())
+/// # }
+/// ```
+///
+/// ## Enum Message Types
+///
+/// You can also handle multiple related messages with a single handler by defining an enum
+/// that implements the appropriate trait ([`JrRequest`] or [`JrNotification`]):
+///
+/// ```no_run
+/// # use sacp_doc_test::*;
+/// # use sacp::{InitializeRequest, InitializeResponse, PromptRequest, PromptResponse, JrRequest, JrMessage, UntypedMessage};
+/// # async fn example() -> Result<(), sacp::Error> {
+/// # let connection = mock_connection();
+/// // Define an enum for multiple request types
+/// #[derive(Debug)]
+/// enum MyRequests {
+///     Initialize(InitializeRequest),
+///     Prompt(PromptRequest),
+/// }
+///
+/// // Implement JrRequest for your enum
+/// # impl JrMessage for MyRequests {
+/// #     fn method(&self) -> &str { "myRequests" }
+/// #     fn into_untyped_message(self) -> Result<UntypedMessage, sacp::Error> { todo!() }
+/// #     fn parse_request(_method: &str, _params: &impl serde::Serialize) -> Option<Result<Self, sacp::Error>> { None }
+/// #     fn parse_notification(_method: &str, _params: &impl serde::Serialize) -> Option<Result<Self, sacp::Error>> { None }
+/// # }
+/// impl JrRequest for MyRequests { type Response = serde_json::Value; }
+///
+/// // Handle all variants in one place
+/// connection.on_receive_request(async |req: MyRequests, cx| {
+///     match req {
+///         MyRequests::Initialize(init) => { cx.respond(serde_json::json!({})) }
+///         MyRequests::Prompt(prompt) => { cx.respond(serde_json::json!({})) }
+///     }
+/// })
+/// # .serve().await?;
+/// # Ok(())
+/// # }
+/// ```
+///
+/// ## Mixed Message Types
+///
+/// For enums containing both requests AND notifications, use [`on_receive_message`](Self::on_receive_message):
+///
+/// ```no_run
+/// # use sacp_doc_test::*;
+/// # use sacp::{MessageAndCx, InitializeRequest, InitializeResponse, SessionNotification};
+/// # async fn example() -> Result<(), sacp::Error> {
+/// # let connection = mock_connection();
+/// // on_receive_message receives MessageAndCx which can be either a request or notification
+/// connection.on_receive_message(async |msg: MessageAndCx<InitializeRequest, SessionNotification>| {
+///     match msg {
+///         MessageAndCx::Request(req, request_cx) => {
+///             request_cx.respond(InitializeResponse::make())
+///         }
+///         MessageAndCx::Notification(notif, _cx) => {
+///             Ok(())
+///         }
+///     }
+/// })
+/// # .serve().await?;
+/// # Ok(())
+/// # }
+/// ```
+///
+/// # Handler Registration
+///
+/// Register handlers using these methods (listed from most common to most flexible):
+///
+/// * [`on_receive_request`](Self::on_receive_request) - Handle JSON-RPC requests (messages expecting responses)
+/// * [`on_receive_notification`](Self::on_receive_notification) - Handle JSON-RPC notifications (fire-and-forget)
+/// * [`on_receive_message`](Self::on_receive_message) - Handle enums containing both requests and notifications
+/// * [`chain_handler`](Self::chain_handler) - Low-level primitive for maximum flexibility
+///
+/// ## Handler Ordering
+///
+/// Handlers are tried in the order you register them. The first handler that claims a message
+/// (by matching its type) will process it. Subsequent handlers won't see that message:
+///
+/// ```no_run
+/// # use sacp_doc_test::*;
+/// # use sacp::{InitializeRequest, InitializeResponse, PromptRequest, PromptResponse, MessageAndCx, UntypedMessage};
+/// # async fn example() -> Result<(), sacp::Error> {
+/// # let connection = mock_connection();
+/// connection
+///     .on_receive_request(async |req: InitializeRequest, cx| {
+///         // This runs first for InitializeRequest
+///         cx.respond(InitializeResponse::make())
+///     })
+///     .on_receive_request(async |req: PromptRequest, cx| {
+///         // This runs first for PromptRequest
+///         cx.respond(PromptResponse::make())
+///     })
+///     .on_receive_message(async |msg: MessageAndCx| {
+///         // This runs for any message not handled above
+///         msg.respond_with_error(sacp::util::internal_error("unknown method"))
+///     })
+/// # .serve().await?;
+/// # Ok(())
+/// # }
+/// ```
+///
+/// # Event Loop and Concurrency
+///
+/// Understanding the event loop is critical for writing correct handlers.
+///
+/// ## The Event Loop
+///
+/// `JrConnection` runs all handler callbacks on a single async task - the event loop.
+/// While a handler is running, **the server cannot receive new messages**. This means
+/// any blocking or expensive work in your handlers will stall the entire connection.
+///
+/// To avoid blocking the event loop, use [`JrConnectionCx::spawn`] to offload serious
+/// work to concurrent tasks:
+///
+/// ```no_run
+/// # use sacp_doc_test::*;
+/// # async fn example() -> Result<(), sacp::Error> {
+/// # let connection = mock_connection();
+/// connection.on_receive_request(async |req: AnalyzeRequest, cx| {
+///     // Clone cx for the spawned task
+///     let cx_clone = cx.connection_cx();
+///     cx.spawn(async move {
+///         let result = expensive_analysis(&req.data).await?;
+///         cx_clone.send_notification(AnalysisComplete { result })?;
+///         Ok(())
+///     })?;
+///
+///     // Respond immediately without blocking
+///     cx.respond(AnalysisStarted { job_id: 42 })
+/// })
+/// # .serve().await?;
+/// # Ok(())
+/// # }
+/// ```
+///
+/// Note that the entire connection runs within one async task, so parallelism must be
+/// managed explicitly using [`spawn`](JrConnectionCx::spawn).
+///
+/// ## The Connection Context
+///
+/// Handler callbacks receive a context object (`cx`) for interacting with the connection:
+///
+/// * **For request handlers** - [`JrRequestCx<R>`] provides [`respond`](JrRequestCx::respond)
+///   to send the response, plus methods to send other messages
+/// * **For notification handlers** - [`JrConnectionCx`] provides methods to send messages
+///   and spawn tasks
+///
+/// Both context types support:
+/// * [`send_request`](JrConnectionCx::send_request) - Send requests to the other side
+/// * [`send_notification`](JrConnectionCx::send_notification) - Send notifications
+/// * [`spawn`](JrConnectionCx::spawn) - Run tasks concurrently without blocking the event loop
+///
+/// The [`JrResponse`] returned by `send_request` provides methods like
+/// [`await_when_result_received`](JrResponse::await_when_result_received) that help you
+/// avoid accidentally blocking the event loop while waiting for responses.
+///
+/// # Driving the Connection
+///
+/// After adding handlers, you must drive the connection using one of two modes:
+///
+/// ## Server Mode: `serve()`
+///
+/// Use [`serve`](Self::serve) when you only need to respond to incoming messages:
+///
+/// ```no_run
+/// # use sacp_doc_test::*;
+/// # async fn example() -> Result<(), sacp::Error> {
+/// # let connection = mock_connection();
+/// connection
+///     .on_receive_request(async |req: MyRequest, cx| {
+///         cx.respond(MyResponse { status: "ok".into() })
+///     })
+///     .serve()  // Runs until connection closes or error occurs
+///     .await?;
+/// # Ok(())
+/// # }
+/// ```
+///
+/// The connection will process incoming messages and invoke your handlers until the
+/// connection is closed or an error occurs.
+///
+/// ## Client Mode: `with_client()`
+///
+/// Use [`with_client`](Self::with_client) when you need to both handle incoming messages
+/// AND send your own requests/notifications:
+///
+/// ```no_run
+/// # use sacp_doc_test::*;
+/// # use sacp::InitializeRequest;
+/// # async fn example() -> Result<(), sacp::Error> {
+/// # let connection = mock_connection();
+/// connection
+///     .on_receive_request(async |req: MyRequest, cx| {
+///         cx.respond(MyResponse { status: "ok".into() })
+///     })
+///     .with_client(async |cx| {
+///         // You can send requests to the other side
+///         let response = cx.send_request(InitializeRequest::make())
+///             .block_task()
+///             .await?;
+///
+///         // And send notifications
+///         cx.send_notification(StatusUpdate { message: "ready".into() })?;
+///
+///         Ok(())
+///     })
+///     .await?;
+/// # Ok(())
+/// # }
+/// ```
+///
+/// The connection will serve incoming messages in the background while your client closure
+/// runs. When the closure returns, the connection shuts down.
+///
+/// # Example: Complete Agent
+///
+/// ```no_run
+/// # use sacp::{JrConnection, InitializeRequest, InitializeResponse, PromptRequest, PromptResponse, SessionNotification};
+/// # use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
+/// # async fn example() -> Result<(), sacp::Error> {
+/// let stdout = tokio::io::stdout().compat_write();
+/// let stdin = tokio::io::stdin().compat();
+/// JrConnection::new(stdout, stdin)
+///     .name("my-agent")  // Optional: for debugging logs
+///     .on_receive_request(async |init: InitializeRequest, cx| {
+///         let response: InitializeResponse = todo!();
+///         cx.respond(response)
+///     })
+///     .on_receive_request(async |prompt: PromptRequest, cx| {
+///         // You can send notifications while processing a request
+///         let notif: SessionNotification = todo!();
+///         cx.send_notification(notif)?;
+///
+///         // Then respond to the request
+///         let response: PromptResponse = todo!();
+///         cx.respond(response)
+///     })
+///     .serve()
+///     .await?;
+/// # Ok(())
+/// # }
+/// ```
 #[must_use]
 pub struct JrConnection<OB: AsyncWrite, IB: AsyncRead, H: JrHandler> {
     name: Option<String>,
@@ -46,7 +330,7 @@ pub struct JrConnection<OB: AsyncWrite, IB: AsyncRead, H: JrHandler> {
 impl<OB: AsyncWrite, IB: AsyncRead> JrConnection<OB, IB, NullHandler> {
     /// Create a new JrConnection that will read and write from the given streams.
     /// This type follows a builder pattern; use other methods to configure and then invoke
-    /// [`Self:serve`] (to use as a server) or [`Self::with_client`] to use as a client.
+    /// [`Self::serve`] (to use as a server) or [`Self::with_client`] to use as a client.
     pub fn new(outgoing_bytes: OB, incoming_bytes: IB) -> Self {
         let (outgoing_tx, outgoing_rx) = mpsc::unbounded();
         let (new_task_tx, new_task_rx) = mpsc::unbounded();
@@ -90,13 +374,48 @@ impl<OB: AsyncWrite, IB: AsyncRead, H: JrHandler> JrConnection<OB, IB, H> {
         }
     }
 
-    /// Invoke the given closure when either a request or notification is received.
+    /// Register a handler for messages that can be either requests OR notifications.
+    ///
+    /// Use this when you want to handle an enum type that contains both request and
+    /// notification variants. Your handler receives a [`MessageAndCx<R, N>`] which
+    /// is an enum with two variants:
+    ///
+    /// - `MessageAndCx::Request(request, request_cx)` - A request with its response context
+    /// - `MessageAndCx::Notification(notification, cx)` - A notification with the connection context
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// # use sacp_doc_test::*;
+    /// # use sacp::MessageAndCx;
+    /// # async fn example() -> Result<(), sacp::Error> {
+    /// # let connection = mock_connection();
+    /// connection.on_receive_message(async |message: MessageAndCx<MyRequest, StatusUpdate>| {
+    ///     match message {
+    ///         MessageAndCx::Request(req, request_cx) => {
+    ///             // Handle request and send response
+    ///             request_cx.respond(MyResponse { status: "ok".into() })
+    ///         }
+    ///         MessageAndCx::Notification(notif, _cx) => {
+    ///             // Handle notification (no response needed)
+    ///             Ok(())
+    ///         }
+    ///     }
+    /// })
+    /// # .serve().await?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    ///
+    /// For most use cases, prefer [`on_receive_request`](Self::on_receive_request) or
+    /// [`on_receive_notification`](Self::on_receive_notification) which provide cleaner APIs
+    /// for handling requests or notifications separately.
     pub fn on_receive_message<R, N, F>(
         self,
         op: F,
     ) -> JrConnection<OB, IB, ChainHandler<H, MessageHandler<R, N, F>>>
     where
-        R: JsonRpcRequest,
+        R: JrRequest,
         N: JrNotification,
         F: AsyncFnMut(MessageAndCx<R, N>) -> Result<(), crate::Error>,
     {
@@ -112,13 +431,47 @@ impl<OB: AsyncWrite, IB: AsyncRead, H: JrHandler> JrConnection<OB, IB, H> {
         }
     }
 
-    /// Invoke the given closure when a request is received.
+    /// Register a handler for JSON-RPC requests of type `R`.
+    ///
+    /// Your handler receives two arguments:
+    /// 1. The request (type `R`)
+    /// 2. A [`JrRequestCx<R::Response>`] for sending the response
+    ///
+    /// The request context allows you to:
+    /// - Send the response with [`JrRequestCx::respond`]
+    /// - Send notifications to the client with [`JrConnectionCx::send_notification`]
+    /// - Send requests to the client with [`JrConnectionCx::send_request`]
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// # use sacp::{JrConnection, PromptRequest, PromptResponse, SessionNotification};
+    /// # fn example(connection: JrConnection<impl futures::AsyncWrite, impl futures::AsyncRead, impl sacp::JrHandler>) {
+    /// connection.on_receive_request(async |request: PromptRequest, request_cx| {
+    ///     // Send a notification while processing
+    ///     let notif: SessionNotification = todo!();
+    ///     request_cx.send_notification(notif)?;
+    ///
+    ///     // Do some work...
+    ///     let result = todo!("process the prompt");
+    ///
+    ///     // Send the response
+    ///     let response: PromptResponse = todo!();
+    ///     request_cx.respond(response)
+    /// });
+    /// # }
+    /// ```
+    ///
+    /// # Type Parameter
+    ///
+    /// `R` can be either a single request type or an enum of multiple request types.
+    /// See the [type-driven dispatch](Self#type-driven-message-dispatch) section for details.
     pub fn on_receive_request<R, F>(
         self,
         op: F,
     ) -> JrConnection<OB, IB, ChainHandler<H, RequestHandler<R, F>>>
     where
-        R: JsonRpcRequest,
+        R: JrRequest,
         F: AsyncFnMut(R, JrRequestCx<R::Response>) -> Result<(), crate::Error>,
     {
         JrConnection {
@@ -133,7 +486,42 @@ impl<OB: AsyncWrite, IB: AsyncRead, H: JrHandler> JrConnection<OB, IB, H> {
         }
     }
 
-    /// Invoke the given closure when a notification is received.
+    /// Register a handler for JSON-RPC notifications of type `N`.
+    ///
+    /// Notifications are fire-and-forget messages that don't expect a response.
+    /// Your handler receives:
+    /// 1. The notification (type `N`)
+    /// 2. A [`JrConnectionCx`] for sending messages to the other side
+    ///
+    /// Unlike request handlers, you cannot send a response (notifications don't have IDs),
+    /// but you can still send your own requests and notifications using the context.
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// # use sacp_doc_test::*;
+    /// # async fn example() -> Result<(), sacp::Error> {
+    /// # let connection = mock_connection();
+    /// connection.on_receive_notification(async |notif: SessionUpdate, cx| {
+    ///     // Process the notification
+    ///     update_session_state(&notif)?;
+    ///
+    ///     // Optionally send a notification back
+    ///     cx.send_notification(StatusUpdate {
+    ///         message: "Acknowledged".into(),
+    ///     })?;
+    ///
+    ///     Ok(())
+    /// })
+    /// # .serve().await?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    ///
+    /// # Type Parameter
+    ///
+    /// `N` can be either a single notification type or an enum of multiple notification types.
+    /// See the [type-driven dispatch](Self#type-driven-message-dispatch) section for details.
     pub fn on_receive_notification<N, F>(
         self,
         op: F,
@@ -154,7 +542,7 @@ impl<OB: AsyncWrite, IB: AsyncRead, H: JrHandler> JrConnection<OB, IB, H> {
         }
     }
 
-    /// Returns a [`JsonRpcCx`] that allows you to send requests over the connection
+    /// Returns a [`JrConnectionCx`] that allows you to send requests over the connection
     /// and receive responses.
     ///
     /// **Warning:** This method is provided for use during setup and construction.
@@ -176,7 +564,36 @@ impl<OB: AsyncWrite, IB: AsyncRead, H: JrHandler> JrConnection<OB, IB, H> {
         self
     }
 
-    /// Runs a server that listens for incoming requests and handles them according to the added handlers.
+    /// Run the connection in server mode, processing incoming messages until the connection closes.
+    ///
+    /// This drives the connection by continuously reading messages from the input stream
+    /// and dispatching them to your registered handlers. The connection will run until:
+    /// - The input stream closes (EOF)
+    /// - An error occurs
+    /// - One of your handlers returns an error
+    ///
+    /// Use this mode when you only need to respond to incoming messages and don't need
+    /// to initiate your own requests. If you need to send requests to the other side,
+    /// use [`with_client`](Self::with_client) instead.
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// # use sacp_doc_test::*;
+    /// # use std::pin::Pin;
+    /// # async fn example() -> Result<(), sacp::Error> {
+    /// # let stdout: Pin<Box<dyn futures::AsyncWrite + Send>> = Box::pin(futures::io::Cursor::new(Vec::new()));
+    /// # let stdin: Pin<Box<dyn futures::AsyncRead + Send>> = Box::pin(futures::io::Cursor::new(Vec::new()));
+    /// sacp::JrConnection::new(stdout, stdin)
+    ///     .on_receive_request(async |req: MyRequest, cx| {
+    ///         // Handle requests...
+    ///         cx.respond(MyResponse { status: "ok".into() })
+    ///     })
+    ///     .serve()  // Run until connection closes
+    ///     .await?;
+    /// # Ok(())
+    /// # }
+    /// ```
     pub async fn serve(self) -> Result<(), crate::Error> {
         let (reply_tx, reply_rx) = mpsc::unbounded();
         let json_rpc_cx = JrConnectionCx::new(self.outgoing_tx, self.new_task_tx);
@@ -212,13 +629,59 @@ impl<OB: AsyncWrite, IB: AsyncRead, H: JrHandler> JrConnection<OB, IB, H> {
         Ok(())
     }
 
-    /// Serves messages over the connection until `main_fn` returns, then the connection will be dropped.
-    /// Incoming messages will be handled according to the added handlers.
+    /// Run the connection in client mode, both handling incoming messages and sending your own.
     ///
-    /// [`main_fn`] is invoked with a [`JsonRpcCx`] that allows you to send requests over the connection
-    /// and receive responses.
+    /// This drives the connection by:
+    /// 1. Running your registered handlers in the background to process incoming messages
+    /// 2. Executing your `main_fn` closure with a [`JrConnectionCx`] for sending requests/notifications
     ///
-    /// Errors if the server terminates before `main_fn` returns.
+    /// The connection stays active until your `main_fn` returns, then shuts down gracefully.
+    /// If the connection closes unexpectedly before `main_fn` completes, this returns an error.
+    ///
+    /// Use this mode when you need to initiate communication (send requests/notifications)
+    /// in addition to responding to incoming messages. For server-only mode where you just
+    /// respond to messages, use [`serve`](Self::serve) instead.
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// # use sacp_doc_test::*;
+    /// # use sacp::InitializeRequest;
+    /// # use std::pin::Pin;
+    /// # async fn example() -> Result<(), sacp::Error> {
+    /// # let stdout: Pin<Box<dyn futures::AsyncWrite + Send>> = Box::pin(futures::io::Cursor::new(Vec::new()));
+    /// # let stdin: Pin<Box<dyn futures::AsyncRead + Send>> = Box::pin(futures::io::Cursor::new(Vec::new()));
+    /// sacp::JrConnection::new(stdout, stdin)
+    ///     .on_receive_request(async |req: MyRequest, cx| {
+    ///         // Handle incoming requests in the background
+    ///         cx.respond(MyResponse { status: "ok".into() })
+    ///     })
+    ///     .with_client(async |cx| {
+    ///         // Initialize the protocol
+    ///         let init_response = cx.send_request(InitializeRequest::make())
+    ///             .block_task()
+    ///             .await?;
+    ///
+    ///         // Send more requests...
+    ///         let result = cx.send_request(MyRequest {})
+    ///             .block_task()
+    ///             .await?;
+    ///
+    ///         // When this closure returns, the connection shuts down
+    ///         Ok(())
+    ///     })
+    ///     .await?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    ///
+    /// # Parameters
+    ///
+    /// - `main_fn`: Your client logic. Receives a [`JrConnectionCx`] for sending messages.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the connection closes before `main_fn` completes.
     pub async fn with_client(
         self,
         main_fn: impl AsyncFnOnce(JrConnectionCx) -> Result<(), crate::Error>,
@@ -283,7 +746,7 @@ enum OutgoingMessage {
     Error { error: crate::Error },
 }
 
-/// Handlers are invoked when new messages arrive at the [`JrServer`].
+/// Handlers are invoked when new messages arrive at the [`JrConnection`].
 /// They have a chance to inspect the method and parameters and decide whether to "claim" the request
 /// (i.e., handle it). If they do not claim it, the request will be passed to the next handler.
 #[allow(async_fn_in_trait)]
@@ -321,7 +784,28 @@ pub enum Handled<T> {
     No(T),
 }
 
-/// Connection context used to send requests/notifications of the other side.
+/// Connection context used to send requests/notifications to the other side.
+///
+/// This context is provided to notification handlers and is also accessible from
+/// request handlers (via `Deref` on [`JrRequestCx`]).
+///
+/// # Primary Uses
+///
+/// * **Send requests** - [`send_request`](Self::send_request) sends a request and returns
+///   a [`JrResponse`] that lets you handle the response without blocking the event loop
+/// * **Send notifications** - [`send_notification`](Self::send_notification) sends fire-and-forget
+///   messages
+/// * **Spawn concurrent tasks** - [`spawn`](Self::spawn) runs tasks concurrently to avoid
+///   blocking the event loop
+///
+/// # Event Loop Considerations
+///
+/// Handler callbacks run on the event loop, which means the connection cannot process new
+/// messages while your handler is running. Use [`spawn`](Self::spawn) to offload any
+/// expensive or blocking work to concurrent tasks.
+///
+/// See the [Event Loop and Concurrency](JrConnection#event-loop-and-concurrency) section
+/// for more details.
 #[derive(Clone, Debug)]
 pub struct JrConnectionCx {
     message_tx: mpsc::UnboundedSender<OutgoingMessage>,
@@ -340,7 +824,40 @@ impl JrConnectionCx {
     }
 
     /// Spawns a task that will run so long as the JSON-RPC connection is being served.
-    /// If the task returns an error, the server will shut down.
+    ///
+    /// This is the primary mechanism for offloading expensive work from handler callbacks
+    /// to avoid blocking the event loop. Spawned tasks run concurrently with the connection,
+    /// allowing the server to continue processing messages.
+    ///
+    /// # Event Loop
+    ///
+    /// Handler callbacks run on the event loop, which cannot process new messages while
+    /// your handler is running. Use `spawn` for any expensive operations:
+    ///
+    /// ```no_run
+    /// # use sacp_doc_test::*;
+    /// # async fn example() -> Result<(), sacp::Error> {
+    /// # let connection = mock_connection();
+    /// connection.on_receive_request(async |req: ProcessRequest, cx| {
+    ///     // Clone cx for the spawned task
+    ///     let cx_clone = cx.connection_cx();
+    ///     cx.spawn(async move {
+    ///         let result = expensive_operation(&req.data).await?;
+    ///         cx_clone.send_notification(ProcessComplete { result })?;
+    ///         Ok(())
+    ///     })?;
+    ///
+    ///     // Respond immediately
+    ///     cx.respond(ProcessResponse { result: "started".into() })
+    /// })
+    /// # .serve().await?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    ///
+    /// # Errors
+    ///
+    /// If the spawned task returns an error, the entire server will shut down.
     #[track_caller]
     pub fn spawn(
         &self,
@@ -363,7 +880,7 @@ impl JrConnectionCx {
         message: MessageAndCx<R, N>,
     ) -> Result<(), crate::Error>
     where
-        R: JsonRpcRequest<Response: Send>,
+        R: JrRequest<Response: Send>,
         N: JrNotification,
     {
         match message {
@@ -374,8 +891,53 @@ impl JrConnectionCx {
         }
     }
 
-    /// Send an outgoing request and await the reply.
-    pub fn send_request<Req: JsonRpcRequest>(&self, request: Req) -> JrResponse<Req::Response> {
+    /// Send an outgoing request and return a [`JrResponse`] for handling the reply.
+    ///
+    /// The returned [`JrResponse`] provides methods for receiving the response without
+    /// blocking the event loop:
+    ///
+    /// * [`await_when_result_received`](JrResponse::await_when_result_received) - Schedule
+    ///   a callback to run when the response arrives (doesn't block the event loop)
+    /// * [`block_task`](JrResponse::block_task) - Block the current task until the response
+    ///   arrives (only safe in spawned tasks, not in handlers)
+    ///
+    /// # Anti-Footgun Design
+    ///
+    /// The API intentionally makes it difficult to block on the result directly to prevent
+    /// the common mistake of blocking the event loop while waiting for a response:
+    ///
+    /// ```compile_fail
+    /// # use sacp_doc_test::*;
+    /// # async fn example(cx: sacp::JrConnectionCx) -> Result<(), sacp::Error> {
+    /// // ❌ This doesn't compile - prevents blocking the event loop
+    /// let response = cx.send_request(MyRequest {}).await?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    ///
+    /// ```no_run
+    /// # use sacp_doc_test::*;
+    /// # async fn example(cx: sacp::JrConnectionCx) -> Result<(), sacp::Error> {
+    /// // ✅ Option 1: Schedule callback (safe in handlers)
+    /// cx.send_request(MyRequest {})
+    ///     .await_when_result_received(async |result| {
+    ///         // Handle the response
+    ///         Ok(())
+    ///     })?;
+    ///
+    /// // ✅ Option 2: Block in spawned task (safe because task is concurrent)
+    /// let cx_clone = cx.clone();
+    /// cx.spawn(async move {
+    ///     let response = cx_clone.send_request(MyRequest {})
+    ///         .block_task()
+    ///         .await?;
+    ///     // Process response...
+    ///     Ok(())
+    /// })?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn send_request<Req: JrRequest>(&self, request: Req) -> JrResponse<Req::Response> {
         let method = request.method().to_string();
         let (response_tx, response_rx) = oneshot::channel();
         match request.into_untyped_message() {
@@ -421,7 +983,20 @@ impl JrConnectionCx {
             .map(move |json| <Req::Response>::from_value(&method, json))
     }
 
-    /// Send an outgoing notification (no reply expected).)
+    /// Send an outgoing notification (no reply expected).
+    ///
+    /// Notifications are fire-and-forget messages that don't have IDs and don't expect responses.
+    /// This method sends the notification immediately and returns.
+    ///
+    /// ```no_run
+    /// # use sacp_doc_test::*;
+    /// # async fn example(cx: sacp::JrConnectionCx) -> Result<(), sacp::Error> {
+    /// cx.send_notification(StatusUpdate {
+    ///     message: "Processing...".into(),
+    /// })?;
+    /// # Ok(())
+    /// # }
+    /// ```
     pub fn send_notification<N: JrNotification>(
         &self,
         notification: N,
@@ -454,7 +1029,47 @@ impl JrConnectionCx {
 }
 
 /// The context to respond to an incoming request.
-/// Derefs to a [`JsonRpcCx`] which can be used to send other requests and notification.
+///
+/// This context is provided to request handlers and serves a dual role:
+///
+/// 1. **Respond to the request** - Use [`respond`](Self::respond) or
+///    [`respond_with_result`](Self::respond_with_result) to send the response
+/// 2. **Send other messages** - Derefs to [`JrConnectionCx`], giving access to
+///    [`send_request`](JrConnectionCx::send_request),
+///    [`send_notification`](JrConnectionCx::send_notification), and
+///    [`spawn`](JrConnectionCx::spawn)
+///
+/// # Example
+///
+/// ```no_run
+/// # use sacp_doc_test::*;
+/// # async fn example() -> Result<(), sacp::Error> {
+/// # let connection = mock_connection();
+/// connection.on_receive_request(async |req: ProcessRequest, cx| {
+///     // Send a notification while processing
+///     cx.send_notification(StatusUpdate {
+///         message: "processing".into(),
+///     })?;
+///
+///     // Do some work...
+///     let result = process(&req.data)?;
+///
+///     // Respond to the request
+///     cx.respond(ProcessResponse { result })
+/// })
+/// # .serve().await?;
+/// # Ok(())
+/// # }
+/// ```
+///
+/// # Event Loop Considerations
+///
+/// Like all handlers, request handlers run on the event loop. Use
+/// [`spawn`](JrConnectionCx::spawn) for expensive operations to avoid blocking
+/// the connection.
+///
+/// See the [Event Loop and Concurrency](JrConnection#event-loop-and-concurrency)
+/// section for more details.
 #[must_use]
 pub struct JrRequestCx<T: JrResponsePayload> {
     /// The context to use to send outgoing messages and replies.
@@ -640,7 +1255,7 @@ impl JrResponsePayload for serde_json::Value {
 pub trait JrNotification: JrMessage {}
 
 /// A struct that represents a request (JSON-RPC message expecting a response).
-pub trait JsonRpcRequest: JrMessage {
+pub trait JrRequest: JrMessage {
     /// The type of data expected in response.
     type Response: JrResponsePayload;
 }
@@ -652,7 +1267,7 @@ pub trait JsonRpcRequest: JrMessage {
 /// By default, both are `UntypedMessage` for dynamic dispatch.
 /// The request context's response type matches the request's response type.
 #[derive(Debug)]
-pub enum MessageAndCx<R: JsonRpcRequest = UntypedMessage, N: JrMessage = UntypedMessage> {
+pub enum MessageAndCx<R: JrRequest = UntypedMessage, N: JrMessage = UntypedMessage> {
     /// Incoming request and the context where the response should be sent.
     Request(R, JrRequestCx<R::Response>),
 
@@ -660,7 +1275,7 @@ pub enum MessageAndCx<R: JsonRpcRequest = UntypedMessage, N: JrMessage = Untyped
     Notification(N, JrConnectionCx),
 }
 
-impl<R: JsonRpcRequest, N: JrMessage> MessageAndCx<R, N> {
+impl<R: JrRequest, N: JrMessage> MessageAndCx<R, N> {
     /// Map the request and notification types to new types.
     pub fn map<R1, N1>(
         self,
@@ -668,7 +1283,7 @@ impl<R: JsonRpcRequest, N: JrMessage> MessageAndCx<R, N> {
         map_notification: impl FnOnce(N, JrConnectionCx) -> (N1, JrConnectionCx),
     ) -> MessageAndCx<R1, N1>
     where
-        R1: JsonRpcRequest<Response: Send>,
+        R1: JrRequest<Response: Send>,
         N1: JrMessage,
     {
         match self {
@@ -765,13 +1380,90 @@ impl JrMessage for UntypedMessage {
     }
 }
 
-impl JsonRpcRequest for UntypedMessage {
+impl JrRequest for UntypedMessage {
     type Response = serde_json::Value;
 }
 
 impl JrNotification for UntypedMessage {}
 
 /// Represents a pending response of type `R` from an outgoing request.
+///
+/// Returned by [`JrConnectionCx::send_request`], this type provides methods for handling
+/// the response without blocking the event loop. The API is intentionally designed to make
+/// it difficult to accidentally block.
+///
+/// # Anti-Footgun Design
+///
+/// You cannot directly `.await` a `JrResponse`. Instead, you must choose how to handle
+/// the response:
+///
+/// ## Option 1: Schedule a Callback (Safe in Handlers)
+///
+/// Use [`await_when_result_received`](Self::await_when_result_received) to schedule a task
+/// that runs when the response arrives. This doesn't block the event loop:
+///
+/// ```no_run
+/// # use sacp_doc_test::*;
+/// # async fn example(cx: sacp::JrConnectionCx) -> Result<(), sacp::Error> {
+/// cx.send_request(MyRequest {})
+///     .await_when_result_received(async |result| {
+///         match result {
+///             Ok(response) => {
+///                 // Handle successful response
+///                 Ok(())
+///             }
+///             Err(error) => {
+///                 // Handle error
+///                 Err(error)
+///             }
+///         }
+///     })?;
+/// # Ok(())
+/// # }
+/// ```
+///
+/// ## Option 2: Block in a Spawned Task (Safe Only in `spawn`)
+///
+/// Use [`block_task`](Self::block_task) to block until the response arrives, but **only**
+/// in a spawned task (never in a handler):
+///
+/// ```no_run
+/// # use sacp_doc_test::*;
+/// # async fn example(cx: sacp::JrConnectionCx) -> Result<(), sacp::Error> {
+/// // ✅ Safe: Spawned task runs concurrently
+/// let cx_clone = cx.clone();
+/// cx.spawn(async move {
+///     let response = cx_clone.send_request(MyRequest {})
+///         .block_task()
+///         .await?;
+///     // Process response...
+///     Ok(())
+/// })?;
+/// # Ok(())
+/// # }
+/// ```
+///
+/// ```no_run
+/// # use sacp_doc_test::*;
+/// # async fn example() -> Result<(), sacp::Error> {
+/// # let connection = mock_connection();
+/// // ❌ NEVER do this in a handler - blocks the event loop!
+/// connection.on_receive_request(async |req: MyRequest, cx| {
+///     let response = cx.send_request(MyRequest {})
+///         .block_task()  // This will deadlock!
+///         .await?;
+///     cx.respond(response)
+/// })
+/// # .serve().await?;
+/// # Ok(())
+/// # }
+/// ```
+///
+/// # Why This Design?
+///
+/// If you block the event loop while waiting for a response, the connection cannot process
+/// the incoming response message, creating a deadlock. This API design prevents that footgun
+/// by making blocking explicit and encouraging non-blocking patterns.
 pub struct JrResponse<R> {
     method: String,
     connection_cx: JrConnectionCx,
@@ -811,8 +1503,46 @@ impl<R: JrResponsePayload> JrResponse<R> {
         }
     }
 
-    /// Schedule an async task that will forward the respond to `response_cx` when it arrives.
-    /// Useful when proxying messages around.
+    /// Forward the response (success or error) to a request context when it arrives.
+    ///
+    /// This is a convenience method for proxying messages between connections. When the
+    /// response arrives, it will be automatically sent to the provided request context,
+    /// whether it's a successful response or an error.
+    ///
+    /// # Example: Proxying requests
+    ///
+    /// ```no_run
+    /// # use sacp_doc_test::*;
+    /// # async fn example() -> Result<(), sacp::Error> {
+    /// # let connection = mock_connection();
+    /// # let other_connection = connection.json_rpc_cx();
+    /// connection.on_receive_request(async |req: ProxyRequest, request_cx| {
+    ///     // Forward the request to another connection and proxy the response back
+    ///     other_connection.send_request(req.inner_request)
+    ///         .forward_to_request_cx(request_cx)?;
+    ///
+    ///     // The response will be automatically forwarded when it arrives
+    ///     Ok(())
+    /// })
+    /// # .serve().await?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    ///
+    /// # Type Safety
+    ///
+    /// The request context's response type must match the request's response type,
+    /// ensuring type-safe message forwarding.
+    ///
+    /// # When to Use
+    ///
+    /// Use this when:
+    /// - You're implementing a proxy or gateway pattern
+    /// - You want to forward responses without processing them
+    /// - The response types match between the outgoing request and incoming request
+    ///
+    /// This is equivalent to calling `await_when_result_received` and manually forwarding
+    /// the result, but more concise.
     pub fn forward_to_request_cx(self, request_cx: JrRequestCx<R>) -> Result<(), crate::Error>
     where
         R: Send,
@@ -822,11 +1552,64 @@ impl<R: JrResponsePayload> JrResponse<R> {
 
     /// Block the current task until the response is received.
     ///
-    /// This is useful in spawned tasks. It should *not* be used
-    /// in callbacks like [`JrConnection::on_receive_message`]
-    /// as that will prevent the event loop from running.
+    /// **Warning:** This method blocks the current async task. It is **only safe** to use
+    /// in spawned tasks created with [`JrConnectionCx::spawn`]. Using it directly in a
+    /// handler callback will deadlock the connection.
     ///
-    /// In a callback setting, prefer [`Self::await_when_response_received`].
+    /// # Safe Usage (in spawned tasks)
+    ///
+    /// ```no_run
+    /// # use sacp_doc_test::*;
+    /// # async fn example() -> Result<(), sacp::Error> {
+    /// # let connection = mock_connection();
+    /// connection.on_receive_request(async |req: MyRequest, cx| {
+    ///     // Spawn a task to handle the request
+    ///     let cx_clone = cx.connection_cx();
+    ///     cx.spawn(async move {
+    ///         // Safe: We're in a spawned task, not blocking the event loop
+    ///         let response = cx_clone.send_request(OtherRequest {})
+    ///             .block_task()
+    ///             .await?;
+    ///
+    ///         // Process the response...
+    ///         Ok(())
+    ///     })?;
+    ///
+    ///     // Respond immediately
+    ///     cx.respond(MyResponse { status: "ok".into() })
+    /// })
+    /// # .serve().await?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    ///
+    /// # Unsafe Usage (in handlers - will deadlock!)
+    ///
+    /// ```no_run
+    /// # use sacp_doc_test::*;
+    /// # async fn example() -> Result<(), sacp::Error> {
+    /// # let connection = mock_connection();
+    /// connection.on_receive_request(async |req: MyRequest, cx| {
+    ///     // ❌ DEADLOCK: Handler blocks event loop, which can't process the response
+    ///     let response = cx.send_request(OtherRequest {})
+    ///         .block_task()
+    ///         .await?;
+    ///
+    ///     cx.respond(MyResponse { status: response.value })
+    /// })
+    /// # .serve().await?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    ///
+    /// # When to Use
+    ///
+    /// Use this method when:
+    /// - You're in a spawned task (via [`JrConnectionCx::spawn`])
+    /// - You need the response value to proceed with your logic
+    /// - Linear control flow is more natural than callbacks
+    ///
+    /// For handler callbacks, use [`await_when_result_received`](Self::await_when_result_received) instead.
     pub async fn block_task(self) -> Result<R, crate::Error>
     where
         R: Send,
@@ -845,7 +1628,51 @@ impl<R: JrResponsePayload> JrResponse<R> {
     }
 
     /// Schedule an async task to run when a successful response is received.
-    /// If an error occurs, that error will be returned to `request_cx` as the result.
+    ///
+    /// This is a convenience wrapper around [`await_when_result_received`](Self::await_when_result_received)
+    /// for the common pattern of forwarding errors to a request context while only processing
+    /// successful responses.
+    ///
+    /// # Behavior
+    ///
+    /// - If the response is `Ok(value)`, your task receives the value and the request context
+    /// - If the response is `Err(error)`, the error is automatically sent to `request_cx`
+    ///   and your task is not called
+    ///
+    /// # Example: Chaining requests
+    ///
+    /// ```no_run
+    /// # use sacp_doc_test::*;
+    /// # async fn example() -> Result<(), sacp::Error> {
+    /// # let connection = mock_connection();
+    /// connection.on_receive_request(async |req: ValidateRequest, request_cx| {
+    ///     // Send initial request
+    ///     request_cx.connection_cx().send_request(ValidateRequest { data: req.data.clone() })
+    ///         .await_when_ok_response_received(request_cx, async |validation, request_cx| {
+    ///             // Only runs if validation succeeded
+    ///             if validation.is_valid {
+    ///                 // Respond to original request
+    ///                 request_cx.respond(ValidateResponse { is_valid: true, error: None })
+    ///             } else {
+    ///                 request_cx.respond_with_error(sacp::util::internal_error("validation failed"))
+    ///             }
+    ///         })?;
+    ///
+    ///     Ok(())
+    /// })
+    /// # .serve().await?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    ///
+    /// # When to Use
+    ///
+    /// Use this when:
+    /// - You need to respond to a request based on another request's result
+    /// - You want errors to automatically propagate to the request context
+    /// - You only care about the success case
+    ///
+    /// For more control over error handling, use [`await_when_result_received`](Self::await_when_result_received).
     #[track_caller]
     pub fn await_when_ok_response_received<F>(
         self,
@@ -864,10 +1691,61 @@ impl<R: JrResponsePayload> JrResponse<R> {
 
     /// Schedule an async task to run when the response is received.
     ///
-    /// It is intentionally not possible to block until the response is received
-    /// because doing so can easily stall the event loop if done directly in the `on_receive` callback.
+    /// This is the recommended way to handle responses in handler callbacks, as it doesn't
+    /// block the event loop. The task will be spawned automatically when the response arrives.
     ///
-    /// If this task ultimately returns `Err`, the server will abort.
+    /// # Example: Handle response in callback
+    ///
+    /// ```no_run
+    /// # use sacp_doc_test::*;
+    /// # async fn example() -> Result<(), sacp::Error> {
+    /// # let connection = mock_connection();
+    /// connection.on_receive_request(async |req: MyRequest, cx| {
+    ///     let cx_clone = cx.connection_cx();
+    ///     // Send a request and schedule a callback for the response
+    ///     cx.send_request(QueryRequest { id: 22 })
+    ///         .await_when_result_received(async move |result| {
+    ///             match result {
+    ///                 Ok(response) => {
+    ///                     println!("Got response: {:?}", response);
+    ///                     // Can send more messages here
+    ///                     cx_clone.send_notification(QueryComplete {})?;
+    ///                     Ok(())
+    ///                 }
+    ///                 Err(error) => {
+    ///                     eprintln!("Request failed: {}", error);
+    ///                     Err(error)
+    ///                 }
+    ///             }
+    ///         })?;
+    ///
+    ///     // Handler continues immediately without waiting
+    ///     cx.respond(MyResponse { status: "processing".into() })
+    /// })
+    /// # .serve().await?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    ///
+    /// # Event Loop Safety
+    ///
+    /// Unlike [`block_task`](Self::block_task), this method is safe to use in handlers because
+    /// it schedules the task to run later rather than blocking the current task. The event loop
+    /// remains free to process messages, including the response itself.
+    ///
+    /// # Error Handling
+    ///
+    /// If the scheduled task returns `Err`, the entire server will shut down. Make sure to handle
+    /// errors appropriately within your task.
+    ///
+    /// # When to Use
+    ///
+    /// Use this method when:
+    /// - You're in a handler callback (not a spawned task)
+    /// - You want to process the response asynchronously
+    /// - You don't need the response value immediately
+    ///
+    /// For spawned tasks where you need linear control flow, consider [`block_task`](Self::block_task).
     #[track_caller]
     pub fn await_when_result_received<F>(
         self,

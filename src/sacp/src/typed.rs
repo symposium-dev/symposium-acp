@@ -2,8 +2,7 @@
 use jsonrpcmsg::Params;
 
 use crate::{
-    JrConnectionCx, JrNotification, JsonRpcRequest, JrRequestCx, UntypedMessage,
-    util::json_cast,
+    JrConnectionCx, JrNotification, JrRequest, JrRequestCx, UntypedMessage, util::json_cast,
 };
 
 /// Utility class for handling untyped requests.
@@ -26,7 +25,7 @@ impl TypeRequest {
         }
     }
 
-    pub async fn handle_if<R: JsonRpcRequest>(
+    pub async fn handle_if<R: JrRequest>(
         mut self,
         op: impl AsyncFnOnce(R, JrRequestCx<R::Response>) -> Result<(), crate::Error>,
     ) -> Self {
@@ -50,10 +49,7 @@ impl TypeRequest {
 
     pub async fn otherwise(
         mut self,
-        op: impl AsyncFnOnce(
-            UntypedMessage,
-            JrRequestCx<serde_json::Value>,
-        ) -> Result<(), crate::Error>,
+        op: impl AsyncFnOnce(UntypedMessage, JrRequestCx<serde_json::Value>) -> Result<(), crate::Error>,
     ) -> Result<(), crate::Error> {
         match self.state.take().expect("valid state") {
             TypeMessageState::Unhandled(method, params, request_cx) => {

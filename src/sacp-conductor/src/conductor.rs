@@ -70,9 +70,9 @@ use sacp_proxy::{
 };
 
 use sacp::{
-    JrConnection, JrConnectionCx, JrNotification, JrRequestCx, JrResponse, JsonRpcRequest,
-    MessageAndCx, MetaCapabilityExt, NullHandler, Proxy, TypeNotification, TypeRequest,
-    UntypedMessage,
+    JrConnection, JrConnectionCx, JrNotification, JrRequest, JrRequestCx, JrResponse, MessageAndCx,
+    MetaCapabilityExt, NullHandler, Proxy, UntypedMessage,
+    util::{TypeNotification, TypeRequest},
 };
 use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
 use tracing::{debug, info};
@@ -480,7 +480,7 @@ impl Conductor {
     /// * If the message is going to a proxy component, then we have to wrap
     ///   it in a "from successor" wrapper, because the conductor is the
     ///   proxy's client.
-    fn send_message_to_predecessor_of<Req: JsonRpcRequest, N: JrNotification>(
+    fn send_message_to_predecessor_of<Req: JrRequest, N: JrNotification>(
         &mut self,
         client: &JrConnectionCx,
         source_component_index: usize,
@@ -504,7 +504,7 @@ impl Conductor {
         }
     }
 
-    fn send_request_to_predecessor_of<Req: JsonRpcRequest>(
+    fn send_request_to_predecessor_of<Req: JrRequest>(
         &mut self,
         client: &JrConnectionCx,
         source_component_index: usize,

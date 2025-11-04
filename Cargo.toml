@@ -3,7 +3,9 @@ members = [
     "src/sacp-proxy",
     "src/sacp-conductor",
     "src/sacp",
+    "src/sacp-tokio",
     "src/elizacp",
+    "src/sacp-doc-test",
 ]
 resolver = "2"
 

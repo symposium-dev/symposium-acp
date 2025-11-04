@@ -6,7 +6,7 @@
 use futures::{AsyncRead, AsyncWrite};
 use sacp::{
     JrConnection, JrMessage, JrNotification, JrRequestCx, JrResponse, JrResponsePayload,
-    JsonRpcRequest,
+    JrRequest,
 };
 use serde::{Deserialize, Serialize};
 use std::sync::{Arc, Mutex};
@@ -76,7 +76,7 @@ impl JrMessage for PingRequest {
     }
 }
 
-impl JsonRpcRequest for PingRequest {
+impl JrRequest for PingRequest {
     type Response = PongResponse;
 }
 

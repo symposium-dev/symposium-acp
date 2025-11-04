@@ -7,7 +7,7 @@
 //! - Client disconnect handling
 
 use futures::{AsyncRead, AsyncWrite};
-use sacp::{JrConnection, JrMessage, JrRequestCx, JrResponse, JrResponsePayload, JsonRpcRequest};
+use sacp::{JrConnection, JrMessage, JrRequestCx, JrResponse, JrResponsePayload, JrRequest};
 use serde::{Deserialize, Serialize};
 use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
 
@@ -74,7 +74,7 @@ impl JrMessage for EmptyRequest {
     }
 }
 
-impl JsonRpcRequest for EmptyRequest {
+impl JrRequest for EmptyRequest {
     type Response = SimpleResponse;
 }
 
@@ -113,7 +113,7 @@ impl JrMessage for OptionalParamsRequest {
     }
 }
 
-impl JsonRpcRequest for OptionalParamsRequest {
+impl JrRequest for OptionalParamsRequest {
     type Response = SimpleResponse;
 }
 
