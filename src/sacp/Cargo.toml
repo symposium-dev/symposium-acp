@@ -25,4 +25,4 @@ expect-test.workspace = true
 sacp-tokio = { version = "1.0.0-alpha", path = "../sacp-tokio" }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "io-util", "time"] }
 tokio-util.workspace = true
-sacp-doc-test = { path = "../sacp-doc-test" }
+sacp-test = { path = "../sacp-test" }

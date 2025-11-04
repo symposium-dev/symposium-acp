@@ -1,5 +1,5 @@
 [package]
-name = "sacp-doc-test"
+name = "sacp-test"
 version = "1.0.0-alpha"
 edition = "2024"
 

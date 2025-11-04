@@ -5,7 +5,7 @@ members = [
     "src/sacp",
     "src/sacp-tokio",
     "src/elizacp",
-    "src/sacp-doc-test",
+    "src/sacp-test",
 ]
 resolver = "2"
 
