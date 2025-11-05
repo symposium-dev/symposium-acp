@@ -148,7 +148,8 @@ async fn test_multiple_handlers_different_methods() {
             let client_writer = client_writer.compat_write();
 
             // Chain both handlers
-            let server = JrConnection::new(server_writer, server_reader)
+            let server_transport = sacp::ViaBytes::new(server_writer, server_reader);
+            let server = JrConnection::new()
                 .on_receive_request(
                     async |request: FooRequest, request_cx: JrRequestCx<FooResponse>| {
                         request_cx.respond(FooResponse {
@@ -163,16 +164,17 @@ async fn test_multiple_handlers_different_methods() {
                         })
                     },
                 );
-            let client = JrConnection::new(client_writer, client_reader);
+            let client_transport = sacp::ViaBytes::new(client_writer, client_reader);
+            let client = JrConnection::new();
 
             tokio::task::spawn_local(async move {
-                if let Err(e) = server.serve().await {
+                if let Err(e) = server.serve(server_transport).await {
                     eprintln!("Server error: {e:?}");
                 }
             });
 
             let result = client
-                .with_client(async |cx| -> std::result::Result<(), sacp::Error> {
+                .with_client(client_transport, async |cx| -> std::result::Result<(), sacp::Error> {
                     // Test foo request
                     let foo_response = recv(cx.send_request(FooRequest {
                         value: "test1".to_string(),
@@ -265,7 +267,8 @@ async fn test_handler_priority_ordering() {
             // First handler in chain should get first chance
             let handled_clone1 = handled.clone();
             let handled_clone2 = handled.clone();
-            let server = JrConnection::new(server_writer, server_reader)
+            let server_transport = sacp::ViaBytes::new(server_writer, server_reader);
+            let server = JrConnection::new()
                 .on_receive_request(
                     async move |request: TrackRequest, request_cx: JrRequestCx<FooResponse>| {
                         handled_clone1.lock().unwrap().push("handler1".to_string());
@@ -282,16 +285,17 @@ async fn test_handler_priority_ordering() {
                         })
                     },
                 );
-            let client = JrConnection::new(client_writer, client_reader);
+            let client_transport = sacp::ViaBytes::new(client_writer, client_reader);
+            let client = JrConnection::new();
 
             tokio::task::spawn_local(async move {
-                if let Err(e) = server.serve().await {
+                if let Err(e) = server.serve(server_transport).await {
                     eprintln!("Server error: {:?}", e);
                 }
             });
 
             let result = client
-                .with_client(async |cx| -> std::result::Result<(), sacp::Error> {
+                .with_client(client_transport, async |cx| -> std::result::Result<(), sacp::Error> {
                     let response = recv(cx.send_request(TrackRequest {
                         value: "test".to_string(),
                     }))
@@ -418,7 +422,8 @@ async fn test_fallthrough_behavior() {
             // Handler1 only handles "method1", Handler2 only handles "method2"
             let handled_clone1 = handled.clone();
             let handled_clone2 = handled.clone();
-            let server = JrConnection::new(server_writer, server_reader)
+            let server_transport = sacp::ViaBytes::new(server_writer, server_reader);
+            let server = JrConnection::new()
                 .on_receive_request(
                     async move |request: Method1Request, request_cx: JrRequestCx<FooResponse>| {
                         handled_clone1.lock().unwrap().push("method1".to_string());
@@ -435,16 +440,17 @@ async fn test_fallthrough_behavior() {
                         })
                     },
                 );
-            let client = JrConnection::new(client_writer, client_reader);
+            let client_transport = sacp::ViaBytes::new(client_writer, client_reader);
+            let client = JrConnection::new();
 
             tokio::task::spawn_local(async move {
-                if let Err(e) = server.serve().await {
+                if let Err(e) = server.serve(server_transport).await {
                     eprintln!("Server error: {:?}", e);
                 }
             });
 
             let result = client
-                .with_client(async |cx| -> std::result::Result<(), sacp::Error> {
+                .with_client(client_transport, async |cx| -> std::result::Result<(), sacp::Error> {
                     // Send method2 - should fallthrough handler1 to handler2
                     let response = recv(cx.send_request(Method2Request {
                         value: "fallthrough".to_string(),
@@ -491,23 +497,25 @@ async fn test_no_handler_claims() {
             let client_writer = client_writer.compat_write();
 
             // Handler that only handles "foo"
-            let server = JrConnection::new(server_writer, server_reader).on_receive_request(
+            let server_transport = sacp::ViaBytes::new(server_writer, server_reader);
+            let server = JrConnection::new().on_receive_request(
                 async |request: FooRequest, request_cx: JrRequestCx<FooResponse>| {
                     request_cx.respond(FooResponse {
                         result: format!("foo: {}", request.value),
                     })
                 },
             );
-            let client = JrConnection::new(client_writer, client_reader);
+            let client_transport = sacp::ViaBytes::new(client_writer, client_reader);
+            let client = JrConnection::new();
 
             tokio::task::spawn_local(async move {
-                if let Err(e) = server.serve().await {
+                if let Err(e) = server.serve(server_transport).await {
                     eprintln!("Server error: {:?}", e);
                 }
             });
 
             let result = client
-                .with_client(async |cx| -> std::result::Result<(), sacp::Error> {
+                .with_client(client_transport, async |cx| -> std::result::Result<(), sacp::Error> {
                     // Send "bar" request which no handler claims
                     let response_result = recv(cx.send_request(BarRequest {
                         value: "unclaimed".to_string(),
@@ -586,22 +594,24 @@ async fn test_handler_claims_notification() {
 
             // EventHandler claims notifications
             let events_clone = events.clone();
-            let server = JrConnection::new(server_writer, server_reader).on_receive_notification(
+            let server_transport = sacp::ViaBytes::new(server_writer, server_reader);
+            let server = JrConnection::new().on_receive_notification(
                 async move |notification: EventNotification, _notification_cx| {
                     events_clone.lock().unwrap().push(notification.event);
                     Ok(())
                 },
             );
-            let client = JrConnection::new(client_writer, client_reader);
+            let client_transport = sacp::ViaBytes::new(client_writer, client_reader);
+            let client = JrConnection::new();
 
             tokio::task::spawn_local(async move {
-                if let Err(e) = server.serve().await {
+                if let Err(e) = server.serve(server_transport).await {
                     eprintln!("Server error: {:?}", e);
                 }
             });
 
             let result = client
-                .with_client(async |cx| -> std::result::Result<(), sacp::Error> {
+                .with_client(client_transport, async |cx| -> std::result::Result<(), sacp::Error> {
                     cx.send_notification(EventNotification {
                         event: "test_event".to_string(),
                     })

@@ -3,16 +3,21 @@
 //! This module provides [`AcpAgent`], a convenient wrapper around [`sacp::schema::McpServer`]
 //! that can be parsed from either a command string or JSON configuration.
 
+use std::future::Future;
 use std::path::PathBuf;
+use std::pin::Pin;
 use std::str::FromStr;
+use std::task::{Context, Poll};
 
 use serde::{Deserialize, Serialize};
 use tokio::process::Child;
+use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
 
 /// Configuration for connecting to an ACP agent or proxy.
 ///
 /// This is a wrapper around [`sacp::schema::McpServer`] that provides convenient parsing
-/// from command-line strings or JSON configurations.
+/// from command-line strings or JSON configurations. It implements [`sacp::IntoJrTransport`],
+/// so it can be passed directly to [`sacp::JrConnection::serve`] or [`sacp::JrConnection::with_client`].
 ///
 /// # Examples
 ///
@@ -28,6 +33,24 @@ use tokio::process::Child;
 /// # use sacp_tokio::AcpAgent;
 /// # use std::str::FromStr;
 /// let agent = AcpAgent::from_str(r#"{"type": "stdio", "name": "my-agent", "command": "python", "args": ["my_agent.py"], "env": []}"#).unwrap();
+/// ```
+///
+/// Use as a transport:
+/// ```no_run
+/// # use sacp::JrConnection;
+/// # use sacp_tokio::AcpAgent;
+/// # use std::str::FromStr;
+/// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
+/// let agent = AcpAgent::from_str("python my_agent.py")?;
+///
+/// JrConnection::new()
+///     .with_client(agent, |cx| async move {
+///         // Use the connection to communicate with the agent
+///         Ok(())
+///     })
+///     .await?;
+/// # Ok(())
+/// # }
 /// ```
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(transparent)]
@@ -99,6 +122,45 @@ impl AcpAgent {
                 "SSE transport not yet supported by AcpAgent",
             )),
         }
+    }
+}
+
+/// A future that holds a `Child` process and never resolves.
+/// When dropped, the child process is killed.
+struct ChildHolder {
+    _child: Child,
+}
+
+impl Future for ChildHolder {
+    type Output = Result<(), sacp::Error>;
+
+    fn poll(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<Self::Output> {
+        // Never ready - just hold the child process alive
+        Poll::Pending
+    }
+}
+
+impl Drop for ChildHolder {
+    fn drop(&mut self) {
+        let _: Result<_, _> = self._child.start_kill();
+    }
+}
+
+impl sacp::IntoJrTransport for AcpAgent {
+    fn into_jr_transport(
+        self,
+        cx: &sacp::JrConnectionCx,
+        outgoing_rx: futures::channel::mpsc::UnboundedReceiver<jsonrpcmsg::Message>,
+        incoming_tx: futures::channel::mpsc::UnboundedSender<jsonrpcmsg::Message>,
+    ) -> Result<(), sacp::Error> {
+        let (child_stdin, child_stdout, child) = self.spawn_process()?;
+
+        // Spawn a task to hold the child process alive
+        cx.spawn(ChildHolder { _child: child })?;
+
+        // Create the ViaBytes transport and set it up
+        let transport = sacp::ViaBytes::new(child_stdin.compat_write(), child_stdout.compat());
+        transport.into_jr_transport(cx, outgoing_rx, incoming_tx)
     }
 }
 

@@ -211,7 +211,9 @@ impl McpBridgeConnectionActor {
         // Establish bidirectional JSON-RPC connection
         // The bridge will send MCP requests (tools/call, etc.) to the conductor
         // The conductor can also send responses back
-        let result = JrConnection::new(write_half.compat_write(), read_half.compat())
+        let transport = sacp::ViaBytes::new(write_half.compat_write(), read_half.compat());
+
+        let result = JrConnection::new()
             .name(format!("mpc-client-to-conductor({connection_id})"))
             // When we receive a message from the MCP client, forward it to the conductor
             .on_receive_message({
@@ -228,7 +230,7 @@ impl McpBridgeConnectionActor {
                 }
             })
             // When we receive messages from the conductor, forward them to the MCP client
-            .with_client(async move |mcp_client_cx| {
+            .with_client(transport, async move |mcp_client_cx| {
                 while let Some(message) = self.to_mcp_client_rx.next().await {
                     mcp_client_cx.send_proxied_message(message)?;
                 }

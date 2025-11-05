@@ -83,12 +83,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     tracing::info!("MCP server proxy starting");
 
-    // Create connection over stdio with compat layer for tokio/futures interop
-    let stdin = tokio::io::stdin().compat();
-    let stdout = tokio::io::stdout().compat_write();
-
     // Set up the proxy connection with our MCP server
-    JrConnection::new(stdout, stdin)
+    JrConnection::new()
         .name("mcp-server-proxy")
         // Register the MCP server named "example"
         .provide_mcp(
@@ -97,7 +93,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         // Enable proxy mode
         .proxy()
         // Start serving
-        .serve()
+        .serve(sacp::ViaBytes::new(
+            tokio::io::stdout().compat_write(),
+            tokio::io::stdin().compat(),
+        ))
         .await?;
 
     Ok(())

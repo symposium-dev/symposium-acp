@@ -49,7 +49,9 @@ async fn run_test_with_components(
     let (editor_out, conductor_in) = duplex(1024);
     let (conductor_out, editor_in) = duplex(1024);
 
-    JrConnection::new(editor_out.compat_write(), editor_in.compat())
+    let transport = sacp::ViaBytes::new(editor_out.compat_write(), editor_in.compat());
+
+    JrConnection::new()
         .name("editor-to-connector")
         .with_spawned(async move {
             Conductor::run_with_command(
@@ -61,7 +63,7 @@ async fn run_test_with_components(
             )
             .await
         })
-        .with_client(editor_task)
+        .with_client(transport, editor_task)
         .await
 }
 
@@ -123,7 +125,9 @@ async fn test_agent_handles_prompt() -> Result<(), sacp::Error> {
     let (editor_in, editor_out) = tokio::io::split(editor);
     let (conductor_in, conductor_out) = tokio::io::split(conductor);
 
-    JrConnection::new(editor_out.compat_write(), editor_in.compat())
+    let transport = sacp::ViaBytes::new(editor_out.compat_write(), editor_in.compat());
+
+    JrConnection::new()
         .name("editor-to-connector")
         .on_receive_notification({
             let mut log_tx = log_tx.clone();
@@ -148,7 +152,7 @@ async fn test_agent_handles_prompt() -> Result<(), sacp::Error> {
             )
             .await
         })
-        .with_client(async |editor_cx| {
+        .with_client(transport, async |editor_cx| {
             // Initialize
             recv(editor_cx.send_request(InitializeRequest {
                 protocol_version: Default::default(),

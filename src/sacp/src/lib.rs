@@ -16,11 +16,8 @@
 //!
 //! # #[tokio::main]
 //! # async fn main() -> Result<(), sacp::Error> {
-//! // Start by creating an agent talking on stdout/stdin
-//! JrConnection::new(
-//!     tokio::io::stdout().compat_write(),
-//!     tokio::io::stdin().compat(),
-//! )
+//! // Start by creating an agent connection
+//! JrConnection::new()
 //! .name("my-agent") // Give it a name for logging purposes
 //! .on_receive_request(async move |initialize: InitializeRequest, request_cx| {
 //!     // Create one or more request handlers -- these are attempted in order.
@@ -38,7 +35,10 @@
 //!     // You can also handle any kind of message:
 //!     message.respond_with_error(sacp::util::internal_error("TODO"))
 //! })
-//! .serve() // Finally, start the server (or use `with_client`)
+//! .serve(sacp::ViaBytes::new(
+//!     tokio::io::stdout().compat_write(),
+//!     tokio::io::stdin().compat(),
+//! ))
 //! .await
 //! # }
 //! ```
@@ -74,9 +74,8 @@ pub mod util;
 
 pub use capabilities::*;
 pub use jsonrpc::{
-    ByteStreamTransport, Handled, IntoJrConnectionTransport, JrConnection, JrConnectionCx,
-    JrHandler, JrMessage, JrNotification, JrRequest, JrRequestCx, JrResponse, JrResponsePayload,
-    MessageAndCx, UntypedMessage,
+    Handled, IntoJrTransport, JrConnection, JrConnectionCx, JrHandler, JrMessage, JrNotification,
+    JrRequest, JrRequestCx, JrResponse, JrResponsePayload, MessageAndCx, UntypedMessage, ViaBytes,
 };
 
 // Re-export the six primary message enum types at the root

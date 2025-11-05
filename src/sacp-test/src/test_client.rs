@@ -38,7 +38,8 @@ where
 {
     let collected_text = Arc::new(Mutex::new(String::new()));
 
-    let connection = JrConnection::new(outgoing, incoming).name("test-client");
+    let transport = sacp::ViaBytes::new(outgoing, incoming);
+    let connection = JrConnection::new().name("test-client");
 
     let cx = connection.connection_cx();
 
@@ -56,7 +57,7 @@ where
                     }
                     Ok(())
                 })
-                .serve()
+                .serve(transport)
                 .await
         }
     });

@@ -80,7 +80,8 @@ impl ComponentProvider for InitComponentProvider {
     ) -> Result<Cleanup, sacp::Error> {
         let config = Arc::clone(&self.config);
         cx.spawn(async move {
-            JrConnection::new(outgoing_bytes, incoming_bytes)
+            let transport = sacp::ViaBytes::new(outgoing_bytes, incoming_bytes);
+            JrConnection::new()
                 .name("init-component-provider")
                 .on_receive_request(async move |mut request: InitializeRequest, request_cx| {
                     let has_proxy_capability = request.has_meta_capability(Proxy);
@@ -112,7 +113,7 @@ impl ComponentProvider for InitComponentProvider {
                         request_cx.respond(response)
                     }
                 })
-                .serve()
+                .serve(transport)
                 .await
         })?;
 
@@ -128,7 +129,9 @@ async fn run_test_with_components(
     let (editor_out, conductor_in) = duplex(1024);
     let (conductor_out, editor_in) = duplex(1024);
 
-    JrConnection::new(editor_out.compat_write(), editor_in.compat())
+    let transport = sacp::ViaBytes::new(editor_out.compat_write(), editor_in.compat());
+
+    JrConnection::new()
         .name("editor-to-connector")
         .with_spawned(async move {
             Conductor::run(
@@ -139,7 +142,7 @@ async fn run_test_with_components(
             )
             .await
         })
-        .with_client(editor_task)
+        .with_client(transport, editor_task)
         .await
 }
 

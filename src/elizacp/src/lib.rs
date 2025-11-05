@@ -150,7 +150,9 @@ where
     let agent = ElizaAgent::new();
 
     // Set up JSON-RPC connection
-    JrConnection::new(stdout, stdin)
+    let transport = sacp::ViaBytes::new(stdout, stdin);
+
+    JrConnection::new()
         .name("elizacp")
         .on_receive_request({
             async |initialize: InitializeRequest, request_cx| {
@@ -188,7 +190,7 @@ where
                 agent.handle_prompt_request(request, request_cx).await
             }
         })
-        .serve()
+        .serve(transport)
         .await?;
 
     Ok(())

@@ -37,7 +37,8 @@ impl ComponentProvider for AgentComponentProvider {
         cx.spawn({
             let state = state.clone();
             async move {
-                JrConnection::new(outgoing_bytes, incoming_bytes)
+                let transport = sacp::ViaBytes::new(outgoing_bytes, incoming_bytes);
+                JrConnection::new()
                     .name("agent-component")
                     .on_receive_request(async move |request: InitializeRequest, request_cx| {
                         // Simple initialization response
@@ -105,7 +106,7 @@ impl ComponentProvider for AgentComponentProvider {
                             connection_cx.spawn(Self::respond_to_prompt(state, request, request_cx))
                         }
                     })
-                    .serve()
+                    .serve(transport)
                     .await
             }
         })?;

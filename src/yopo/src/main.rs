@@ -26,7 +26,7 @@ use sacp::schema::{
     RequestPermissionRequest, RequestPermissionResponse, SessionNotification, TextContent,
     VERSION as PROTOCOL_VERSION,
 };
-use sacp_tokio::{AcpAgent, JrConnectionExt};
+use sacp_tokio::AcpAgent;
 use std::path::PathBuf;
 use std::str::FromStr;
 
@@ -57,8 +57,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     eprintln!("🚀 Spawning agent and connecting...");
 
-    // Run the client
-    JrConnection::to_agent(agent)?
+    // Run the client - AcpAgent implements IntoJrTransport
+    JrConnection::new()
         .on_receive_notification(async move |notification: SessionNotification, _cx| {
             // Print session updates to stdout (so 2>/dev/null shows only agent output)
             println!("{:?}", notification.update);
@@ -82,7 +82,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
             }
         })
-        .with_client(|cx: sacp::JrConnectionCx| async move {
+        .with_client(agent, |cx: sacp::JrConnectionCx| async move {
             // Initialize the agent
             eprintln!("🤝 Initializing agent...");
             let init_response = cx

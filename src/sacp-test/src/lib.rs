@@ -1,10 +1,24 @@
 use sacp::handler::*;
 use sacp::*;
 use serde::{Deserialize, Serialize};
-use std::pin::Pin;
 
 pub mod arrow_proxy;
 pub mod test_client;
+
+/// A mock transport for doctests that panics if actually used.
+/// This is only for documentation examples that don't actually run.
+pub struct MockTransport;
+
+impl IntoJrTransport for MockTransport {
+    fn into_jr_transport(
+        self,
+        _cx: &JrConnectionCx,
+        _outgoing_rx: futures::channel::mpsc::UnboundedReceiver<jsonrpcmsg::Message>,
+        _incoming_tx: futures::channel::mpsc::UnboundedSender<jsonrpcmsg::Message>,
+    ) -> Result<(), Error> {
+        panic!("MockTransport should never be used in running code - it's only for doctests")
+    }
+}
 
 // Mock request/response types
 #[derive(Debug, Serialize, Deserialize)]
@@ -244,15 +258,8 @@ pub fn process(data: &str) -> Result<String, crate::Error> {
 }
 
 // Helper to create a mock connection for examples
-pub fn mock_connection() -> JrConnection<
-    Pin<Box<dyn futures::AsyncWrite + Send>>,
-    Pin<Box<dyn futures::AsyncRead + Send>>,
-    NullHandler,
-> {
-    use futures::io::Cursor;
-    let writer: Pin<Box<dyn futures::AsyncWrite + Send>> = Box::pin(Cursor::new(Vec::new()));
-    let reader: Pin<Box<dyn futures::AsyncRead + Send>> = Box::pin(Cursor::new(Vec::new()));
-    JrConnection::new(writer, reader)
+pub fn mock_connection() -> JrConnection<NullHandler> {
+    JrConnection::new()
 }
 
 pub trait Make {

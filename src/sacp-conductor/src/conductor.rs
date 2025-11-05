@@ -92,9 +92,10 @@ mod mcp_bridge;
 /// Arguments for the serve method, containing I/O streams.
 ///
 /// These are kept separate from the Conductor struct to avoid partial move issues.
-struct ServeArgs<OB: AsyncWrite, IB: AsyncRead> {
-    connection: JrConnection<OB, IB, NullHandler>,
+struct ServeArgs<OB: AsyncWrite + Send + 'static, IB: AsyncRead + Send + 'static> {
+    connection: JrConnection<NullHandler>,
     conductor_tx: mpsc::Sender<ConductorMessage>,
+    client_transport: sacp::ViaBytes<OB, IB>,
 }
 
 /// The conductor manages the proxy chain lifecycle and message routing.
@@ -130,7 +131,7 @@ pub struct Conductor {
 }
 
 impl Conductor {
-    pub async fn run<OB: AsyncWrite, IB: AsyncRead>(
+    pub async fn run<OB: AsyncWrite + Send + 'static, IB: AsyncRead + Send + 'static>(
         name: String,
         outgoing_bytes: OB,
         incoming_bytes: IB,
@@ -139,7 +140,10 @@ impl Conductor {
         Self::run_with_command(name, outgoing_bytes, incoming_bytes, providers, None).await
     }
 
-    pub async fn run_with_command<OB: AsyncWrite, IB: AsyncRead>(
+    pub async fn run_with_command<
+        OB: AsyncWrite + Send + 'static,
+        IB: AsyncRead + Send + 'static,
+    >(
         name: String,
         outgoing_bytes: OB,
         incoming_bytes: IB,
@@ -176,12 +180,13 @@ impl Conductor {
         providers.reverse();
         let (conductor_tx, conductor_rx) = mpsc::channel(128 /* chosen arbitrarily */);
 
-        let connection =
-            JrConnection::new(outgoing_bytes, incoming_bytes).name("client-to-conductor");
+        let client_transport = sacp::ViaBytes::new(outgoing_bytes, incoming_bytes);
+        let connection = JrConnection::new().name("client-to-conductor");
 
         let serve_args = ServeArgs {
             connection,
             conductor_tx: conductor_tx.clone(),
+            client_transport,
         };
 
         Conductor {
@@ -213,7 +218,7 @@ impl Conductor {
     ///
     /// - `providers`: Stack of component providers (reversed, so we pop from the end)
     /// - `serve_args`: I/O streams and conductor channel for the serve method
-    fn launch_proxy<OB: AsyncWrite, IB: AsyncRead>(
+    fn launch_proxy<OB: AsyncWrite + Send + 'static, IB: AsyncRead + Send + 'static>(
         mut self,
         mut providers: Vec<Box<dyn ComponentProvider>>,
         serve_args: ServeArgs<OB, IB>,
@@ -253,7 +258,10 @@ impl Conductor {
                 "Component created, setting up JSON-RPC connection"
             );
 
-            JrConnection::new(conductor_write.compat_write(), conductor_read.compat())
+            let transport =
+                sacp::ViaBytes::new(conductor_write.compat_write(), conductor_read.compat());
+
+            JrConnection::new()
                 .name(format!("conductor-to-component({})", component_index))
                 // Intercept messages sent by a proxy component (acting as ACP client) to its successor agent.
                 .on_receive_message({
@@ -289,7 +297,7 @@ impl Conductor {
                             .map_err(sacp::util::internal_error)
                     }
                 })
-                .with_client(async move |jsonrpccx| {
+                .with_client(transport, async move |jsonrpccx| {
                     self.components.push(Component {
                         cleanup,
                         agent_cx: jsonrpccx,
@@ -320,13 +328,14 @@ impl Conductor {
     /// # Arguments
     ///
     /// - `serve_args`: I/O streams and conductor channel
-    async fn serve<OB: AsyncWrite, IB: AsyncRead>(
+    async fn serve<OB: AsyncWrite + Send + 'static, IB: AsyncRead + Send + 'static>(
         mut self,
         serve_args: ServeArgs<OB, IB>,
     ) -> Result<(), sacp::Error> {
         let ServeArgs {
             connection,
             mut conductor_tx,
+            client_transport,
         } = serve_args;
 
         let conductor_name = self.name.clone();
@@ -360,7 +369,7 @@ impl Conductor {
                             .map_err(sacp::util::internal_error)
                     }
                 })
-                .with_client({
+                .with_client(client_transport, {
                     async |client| {
                         // This is the "central actor" of the conductor. Most other things forward messages
                         // via `conductor_tx` into this loop. This lets us serialize the conductor's activity.

@@ -229,8 +229,11 @@ impl McpServiceRegistry {
         // Every request/notification that is sent over `mcp_server_tx` we will
         // send to the MCP server.
         let spawn_results = request_cx
-            .spawn(
-                JrConnection::new(mcp_client_write.compat_write(), mcp_client_read.compat())
+            .spawn({
+                let transport =
+                    sacp::ViaBytes::new(mcp_client_write.compat_write(), mcp_client_read.compat());
+
+                JrConnection::new()
                     .on_receive_message({
                         let connection_id = connection_id.clone();
                         let outer_cx = request_cx.connection_cx();
@@ -259,15 +262,15 @@ impl McpServiceRegistry {
                             outer_cx.send_proxied_message(wrapped)
                         }
                     })
-                    .with_client({
+                    .with_client(transport, {
                         async move |mcp_cx| {
                             while let Some(msg) = mcp_server_rx.next().await {
                                 mcp_cx.send_proxied_message(msg)?;
                             }
                             Ok(())
                         }
-                    }),
-            )
+                    })
+            })
             .and_then(|()| {
                 // Spawn MCP server task
                 request_cx.spawn(async move {

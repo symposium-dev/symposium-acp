@@ -30,14 +30,14 @@
 //!
 //! # #[tokio::main]
 //! # async fn main() -> Result<(), Box<dyn std::error::Error>> {
-//! JrConnection::new(
-//!     tokio::io::stdout().compat_write(),
-//!     tokio::io::stdin().compat()
-//! )
+//! JrConnection::new()
 //!     .name("my-proxy")
 //!     .provide_mcp(McpServiceRegistry::default())  // Provide MCP services
 //!     .proxy()  // Enable proxy mode
-//!     .serve()
+//!     .serve(sacp::ViaBytes::new(
+//!         tokio::io::stdout().compat_write(),
+//!         tokio::io::stdin().compat()
+//!     ))
 //!     .await?;
 //! # Ok(())
 //! # }
@@ -52,10 +52,7 @@
 //!
 //! # #[tokio::main]
 //! # async fn main() -> Result<(), Box<dyn std::error::Error>> {
-//! JrConnection::new(
-//!     tokio::io::stdout().compat_write(),
-//!     tokio::io::stdin().compat()
-//! )
+//! JrConnection::new()
 //!     .name("my-proxy")
 //!     // Add MCP servers to provide tools/resources/prompts
 //!     .provide_mcp(
@@ -63,7 +60,10 @@
 //!             // .with_rmcp_server("my-server", || MyMcpServer::new())?
 //!     )
 //!     .proxy()
-//!     .serve()
+//!     .serve(sacp::ViaBytes::new(
+//!         tokio::io::stdout().compat_write(),
+//!         tokio::io::stdin().compat()
+//!     ))
 //!     .await?;
 //! # Ok(())
 //! # }

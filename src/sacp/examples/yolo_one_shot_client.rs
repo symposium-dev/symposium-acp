@@ -81,8 +81,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Spawn the agent process
     let (child_stdin, child_stdout, mut child) = spawn_agent_process(command, args)?;
 
-    // Create a JrConnection with the agent's stdio streams
-    let connection = JrConnection::new(child_stdin.compat_write(), child_stdout.compat());
+    // Create transport and connection
+    let transport = sacp::ViaBytes::new(child_stdin.compat_write(), child_stdout.compat());
+    let connection = JrConnection::new();
 
     // Run the client
     connection
@@ -109,7 +110,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
             }
         })
-        .with_client(|cx: sacp::JrConnectionCx| async move {
+        .with_client(transport, |cx: sacp::JrConnectionCx| async move {
             // Initialize the agent
             eprintln!("🤝 Initializing agent...");
             let init_response = cx

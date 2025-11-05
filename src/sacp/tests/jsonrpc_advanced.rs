@@ -6,7 +6,7 @@
 //! - Out-of-order response handling
 
 use futures::{AsyncRead, AsyncWrite};
-use sacp::{JrConnection, JrMessage, JrRequestCx, JrResponse, JrResponsePayload, JrRequest};
+use sacp::{JrConnection, JrMessage, JrRequest, JrRequestCx, JrResponse, JrResponsePayload};
 use serde::{Deserialize, Serialize};
 use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
 
@@ -163,7 +163,8 @@ async fn test_bidirectional_communication() {
             // Set up two connections that are symmetric - both can send and receive
             let (server_reader, server_writer, client_reader, client_writer) = setup_test_streams();
 
-            let side_a = JrConnection::new(server_writer, server_reader).on_receive_request(
+            let side_a_transport = sacp::ViaBytes::new(server_writer, server_reader);
+            let side_a = JrConnection::new().on_receive_request(
                 async |request: PingRequest, request_cx: JrRequestCx<PongResponse>| {
                     request_cx.respond(PongResponse {
                         value: request.value + 1,
@@ -171,16 +172,17 @@ async fn test_bidirectional_communication() {
                 },
             );
 
-            let side_b = JrConnection::new(client_writer, client_reader);
+            let side_b_transport = sacp::ViaBytes::new(client_writer, client_reader);
+            let side_b = JrConnection::new();
 
             // Spawn side_a as server
             tokio::task::spawn_local(async move {
-                side_a.serve().await.ok();
+                side_a.serve(side_a_transport).await.ok();
             });
 
             // Use side_b as client
             let result = side_b
-                .with_client(async |cx| -> Result<(), sacp::Error> {
+                .with_client(side_b_transport, async |cx| -> Result<(), sacp::Error> {
                     let request = PingRequest { value: 10 };
                     let response_future = recv(cx.send_request(request));
                     let response: Result<PongResponse, _> = response_future.await;
@@ -212,7 +214,8 @@ async fn test_request_ids() {
         .run_until(async {
             let (server_reader, server_writer, client_reader, client_writer) = setup_test_streams();
 
-            let server = JrConnection::new(server_writer, server_reader).on_receive_request(
+            let server_transport = sacp::ViaBytes::new(server_writer, server_reader);
+            let server = JrConnection::new().on_receive_request(
                 async |request: PingRequest, request_cx: JrRequestCx<PongResponse>| {
                     request_cx.respond(PongResponse {
                         value: request.value + 1,
@@ -220,14 +223,15 @@ async fn test_request_ids() {
                 },
             );
 
-            let client = JrConnection::new(client_writer, client_reader);
+            let client_transport = sacp::ViaBytes::new(client_writer, client_reader);
+            let client = JrConnection::new();
 
             tokio::task::spawn_local(async move {
-                server.serve().await.ok();
+                server.serve(server_transport).await.ok();
             });
 
             let result = client
-                .with_client(async |cx| -> Result<(), sacp::Error> {
+                .with_client(client_transport, async |cx| -> Result<(), sacp::Error> {
                     // Send multiple requests and verify responses match
                     let req1 = PingRequest { value: 1 };
                     let req2 = PingRequest { value: 2 };
@@ -269,7 +273,8 @@ async fn test_out_of_order_responses() {
         .run_until(async {
             let (server_reader, server_writer, client_reader, client_writer) = setup_test_streams();
 
-            let server = JrConnection::new(server_writer, server_reader).on_receive_request(
+            let server_transport = sacp::ViaBytes::new(server_writer, server_reader);
+            let server = JrConnection::new().on_receive_request(
                 async |request: SlowRequest, request_cx: JrRequestCx<SlowResponse>| {
                     // Simulate delay
                     tokio::time::sleep(tokio::time::Duration::from_millis(request.delay_ms)).await;
@@ -277,14 +282,15 @@ async fn test_out_of_order_responses() {
                 },
             );
 
-            let client = JrConnection::new(client_writer, client_reader);
+            let client_transport = sacp::ViaBytes::new(client_writer, client_reader);
+            let client = JrConnection::new();
 
             tokio::task::spawn_local(async move {
-                server.serve().await.ok();
+                server.serve(server_transport).await.ok();
             });
 
             let result = client
-                .with_client(async |cx| -> Result<(), sacp::Error> {
+                .with_client(client_transport, async |cx| -> Result<(), sacp::Error> {
                     // Send requests with different delays
                     // Request 1: 100ms delay
                     // Request 2: 50ms delay

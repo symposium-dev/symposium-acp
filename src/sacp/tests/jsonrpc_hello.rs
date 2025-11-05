@@ -106,7 +106,8 @@ async fn test_hello_world() {
         .run_until(async {
             let (server_reader, server_writer, client_reader, client_writer) = setup_test_streams();
 
-            let server = JrConnection::new(server_writer, server_reader).on_receive_request(
+            let server_transport = sacp::ViaBytes::new(server_writer, server_reader);
+            let server = JrConnection::new().on_receive_request(
                 async move |request: PingRequest, request_cx: JrRequestCx<PongResponse>| {
                     let pong = PongResponse {
                         echo: format!("pong: {}", request.message),
@@ -115,18 +116,19 @@ async fn test_hello_world() {
                 },
             );
 
-            let client = JrConnection::new(client_writer, client_reader);
+            let client_transport = sacp::ViaBytes::new(client_writer, client_reader);
+            let client = JrConnection::new();
 
             // Spawn the server in the background
             tokio::task::spawn_local(async move {
-                if let Err(e) = server.serve().await {
+                if let Err(e) = server.serve(server_transport).await {
                     eprintln!("Server error: {:?}", e);
                 }
             });
 
             // Use the client to send a ping and wait for a pong
             let result = client
-                .with_client(async |cx| -> std::result::Result<(), sacp::Error> {
+                .with_client(client_transport, async |cx| -> std::result::Result<(), sacp::Error> {
                     let request = PingRequest {
                         message: "hello world".to_string(),
                     };
@@ -196,7 +198,8 @@ async fn test_notification() {
 
             let (server_reader, server_writer, client_reader, client_writer) = setup_test_streams();
 
-            let server = JrConnection::new(server_writer, server_reader).on_receive_notification({
+            let server_transport = sacp::ViaBytes::new(server_writer, server_reader);
+            let server = JrConnection::new().on_receive_notification({
                 let logs = logs_clone.clone();
                 async move |notification: LogNotification, _cx| {
                     logs.lock().unwrap().push(notification.message);
@@ -204,16 +207,17 @@ async fn test_notification() {
                 }
             });
 
-            let client = JrConnection::new(client_writer, client_reader);
+            let client_transport = sacp::ViaBytes::new(client_writer, client_reader);
+            let client = JrConnection::new();
 
             tokio::task::spawn_local(async move {
-                if let Err(e) = server.serve().await {
+                if let Err(e) = server.serve(server_transport).await {
                     eprintln!("Server error: {:?}", e);
                 }
             });
 
             let result = client
-                .with_client(async |cx| -> std::result::Result<(), sacp::Error> {
+                .with_client(client_transport, async |cx| -> std::result::Result<(), sacp::Error> {
                     // Send a notification (no response expected)
                     cx.send_notification(LogNotification {
                         message: "test log 1".to_string(),
@@ -256,7 +260,8 @@ async fn test_multiple_sequential_requests() {
         .run_until(async {
             let (server_reader, server_writer, client_reader, client_writer) = setup_test_streams();
 
-            let server = JrConnection::new(server_writer, server_reader).on_receive_request(
+            let server_transport = sacp::ViaBytes::new(server_writer, server_reader);
+            let server = JrConnection::new().on_receive_request(
                 async |request: PingRequest, request_cx: JrRequestCx<PongResponse>| {
                     let pong = PongResponse {
                         echo: format!("pong: {}", request.message),
@@ -265,16 +270,17 @@ async fn test_multiple_sequential_requests() {
                 },
             );
 
-            let client = JrConnection::new(client_writer, client_reader);
+            let client_transport = sacp::ViaBytes::new(client_writer, client_reader);
+            let client = JrConnection::new();
 
             tokio::task::spawn_local(async move {
-                if let Err(e) = server.serve().await {
+                if let Err(e) = server.serve(server_transport).await {
                     eprintln!("Server error: {:?}", e);
                 }
             });
 
             let result = client
-                .with_client(async |cx| -> std::result::Result<(), sacp::Error> {
+                .with_client(client_transport, async |cx| -> std::result::Result<(), sacp::Error> {
                     // Send multiple requests sequentially
                     for i in 1..=5 {
                         let request = PingRequest {
@@ -307,7 +313,8 @@ async fn test_concurrent_requests() {
         .run_until(async {
             let (server_reader, server_writer, client_reader, client_writer) = setup_test_streams();
 
-            let server = JrConnection::new(server_writer, server_reader).on_receive_request(
+            let server_transport = sacp::ViaBytes::new(server_writer, server_reader);
+            let server = JrConnection::new().on_receive_request(
                 async |request: PingRequest, request_cx: JrRequestCx<PongResponse>| {
                     let pong = PongResponse {
                         echo: format!("pong: {}", request.message),
@@ -316,16 +323,17 @@ async fn test_concurrent_requests() {
                 },
             );
 
-            let client = JrConnection::new(client_writer, client_reader);
+            let client_transport = sacp::ViaBytes::new(client_writer, client_reader);
+            let client = JrConnection::new();
 
             tokio::task::spawn_local(async move {
-                if let Err(e) = server.serve().await {
+                if let Err(e) = server.serve(server_transport).await {
                     eprintln!("Server error: {:?}", e);
                 }
             });
 
             let result = client
-                .with_client(async |cx| -> std::result::Result<(), sacp::Error> {
+                .with_client(client_transport, async |cx| -> std::result::Result<(), sacp::Error> {
                     // Send multiple requests concurrently
                     let mut responses = Vec::new();
 
