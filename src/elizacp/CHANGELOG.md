@@ -7,6 +7,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.0-alpha.1](https://github.com/symposium-dev/symposium-acp/releases/tag/elizacp-v1.0.0-alpha.1) - 2025-11-05
+
+### Added
+
+- *(elizacp)* add Eliza chatbot as ACP agent for testing
+
+### Fixed
+
+- fix github url
+- *(elizacp)* exclude punctuation from pattern captures
+
+### Other
+
+- update all versions from 1.0.0-alpha to 1.0.0-alpha.1
+- release v1.0.0-alpha
+- *(conductor)* add mock component tests for nested conductors
+- bump all packages to version 1.0.0-alpha
+- *(sacp)* [**breaking**] reorganize modules with flat schema namespace
+- release
+- *(elizacp)* add module-level documentation to main.rs
+- upgrade to latest version of depdencies
+- *(elizacp)* release v0.1.0
+- *(elizacp)* prepare for crates.io publication
+- cleanup the source to make it prettier as an example
+- *(elizacp)* use expect_test for exact output verification
+- *(elizacp)* use seeded RNG for deterministic responses
+
 ## [1.0.0-alpha](https://github.com/symposium-dev/symposium-acp/releases/tag/elizacp-v1.0.0-alpha) - 2025-11-05
 
 ### Added
