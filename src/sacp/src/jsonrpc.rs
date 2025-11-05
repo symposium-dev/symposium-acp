@@ -2,6 +2,7 @@
 
 // Types re-exported from crate root
 use serde::{Deserialize, Serialize};
+use std::convert::Infallible;
 use std::fmt::Debug;
 use std::panic::Location;
 
@@ -361,15 +362,20 @@ impl<H: JrHandler> JrConnection<H> {
     ///
     /// Prefer [`Self::on_receive_request`] or [`Self::on_receive_notification`].
     /// This is a low-level method that is not intended for general use.
-    pub fn chain_handler<H1: JrHandler>(self, handler: H1) -> JrConnection<ChainHandler<H, H1>> {
-        JrConnection {
+    pub fn chain_handler<H1: JrHandler, E>(
+        self,
+        handler: impl IntoJrHandler<Handler = H1, Error = E>,
+    ) -> Result<JrConnection<ChainHandler<H, H1>>, E> {
+        let cx = self.connection_cx();
+        let handler1 = handler.into_jr_handler(cx)?;
+        Ok(JrConnection {
             name: self.name,
-            handler: ChainHandler::new(self.handler, handler),
+            handler: ChainHandler::new(self.handler, handler1),
             outgoing_rx: self.outgoing_rx,
             outgoing_tx: self.outgoing_tx,
             new_task_rx: self.new_task_rx,
             new_task_tx: self.new_task_tx,
-        }
+        })
     }
 
     /// Register a handler for messages that can be either requests OR notifications.
@@ -792,6 +798,25 @@ pub trait JrHandler {
 
     /// Returns a debug description of the handler chain for diagnostics
     fn describe_chain(&self) -> impl std::fmt::Debug;
+}
+
+/// Handlers are invoked when new messages arrive at the [`JrConnection`].
+/// They have a chance to inspect the method and parameters and decide whether to "claim" the request
+/// (i.e., handle it). If they do not claim it, the request will be passed to the next handler.
+pub trait IntoJrHandler {
+    type Handler: JrHandler;
+    type Error;
+
+    fn into_jr_handler(self, cx: JrConnectionCx) -> Result<Self::Handler, Self::Error>;
+}
+
+impl<T: JrHandler> IntoJrHandler for T {
+    type Handler = T;
+    type Error = Infallible;
+
+    fn into_jr_handler(self, _cx: JrConnectionCx) -> Result<Self::Handler, Self::Error> {
+        Ok(self)
+    }
 }
 
 /// Return type from JrHandler; indicates whether the request was handled or not.
