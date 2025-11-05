@@ -606,24 +606,50 @@ impl<OB: AsyncWrite, IB: AsyncRead, H: JrHandler> JrConnection<OB, IB, H> {
     pub async fn serve(self) -> Result<(), crate::Error> {
         let (reply_tx, reply_rx) = mpsc::unbounded();
         let json_rpc_cx = JrConnectionCx::new(self.outgoing_tx, self.new_task_tx);
+
+        // Create channels for protocol/transport boundary
+        let (transport_outgoing_tx, transport_outgoing_rx) = mpsc::unbounded();
+        let (transport_incoming_tx, transport_incoming_rx) = mpsc::unbounded();
+
         futures::select!(
-            r = actors::outgoing_actor(
+            // Protocol layer: OutgoingMessage → jsonrpcmsg::Message
+            r = actors::outgoing_protocol_actor(
                 &self.name,
                 self.outgoing_rx,
                 reply_tx.clone(),
-                self.outgoing_bytes,
+                transport_outgoing_tx,
             ).fuse() => {
-                tracing::trace!(?r, "outgoing actor terminated");
+                tracing::trace!(?r, "outgoing protocol actor terminated");
                 r?;
             }
-            r = actors::incoming_actor(
+            // Transport layer: jsonrpcmsg::Message → bytes
+            r = actors::transport_outgoing_actor(
+                &self.name,
+                transport_outgoing_rx,
+                self.outgoing_bytes,
+            ).fuse() => {
+                tracing::trace!(?r, "transport outgoing actor terminated");
+                r?;
+            }
+            // Transport layer: bytes → jsonrpcmsg::Message
+            r = actors::transport_incoming_actor(
                 &self.name,
                 &json_rpc_cx,
                 self.incoming_bytes,
+                transport_incoming_tx,
+            ).fuse() => {
+                tracing::trace!(?r, "transport incoming actor terminated");
+                r?;
+            }
+            // Protocol layer: jsonrpcmsg::Message → handler/reply routing
+            r = actors::incoming_protocol_actor(
+                &self.name,
+                &json_rpc_cx,
+                transport_incoming_rx,
                 reply_tx,
                 self.handler,
             ).fuse() => {
-                tracing::trace!(?r, "incoming actor terminated");
+                tracing::trace!(?r, "incoming protocol actor terminated");
                 r?;
             }
             r = actors::reply_actor(reply_rx).fuse() => {
