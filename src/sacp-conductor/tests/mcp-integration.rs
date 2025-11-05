@@ -53,6 +53,7 @@ async fn run_test_with_components(
         .name("editor-to-connector")
         .with_spawned(async move {
             Conductor::run_with_command(
+                "conductor".to_string(),
                 conductor_out.compat_write(),
                 conductor_in.compat(),
                 components,
@@ -66,14 +67,6 @@ async fn run_test_with_components(
 
 #[tokio::test]
 async fn test_proxy_provides_mcp_tools() -> Result<(), sacp::Error> {
-    let _ = tracing_subscriber::fmt()
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::from_default_env()
-                .add_directive("conductor=debug".parse().unwrap()),
-        )
-        .with_test_writer()
-        .try_init();
-
     run_test_with_components(
         vec![
             mcp_integration::proxy::create(),
@@ -122,11 +115,6 @@ async fn test_proxy_provides_mcp_tools() -> Result<(), sacp::Error> {
 
 #[tokio::test]
 async fn test_agent_handles_prompt() -> Result<(), sacp::Error> {
-    let _ = tracing_subscriber::fmt()
-        .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
-        .with_test_writer()
-        .try_init();
-
     // Create channel to collect log events
     let (mut log_tx, mut log_rx) = mpsc::unbounded();
 
@@ -149,6 +137,7 @@ async fn test_agent_handles_prompt() -> Result<(), sacp::Error> {
         })
         .with_spawned(async move {
             Conductor::run_with_command(
+                "mcp-integration-conductor".to_string(),
                 conductor_out.compat_write(),
                 conductor_in.compat(),
                 vec![

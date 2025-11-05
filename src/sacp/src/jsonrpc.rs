@@ -44,7 +44,7 @@ use crate::jsonrpc::handlers::{
 /// The simplest case - handle one specific message type:
 ///
 /// ```no_run
-/// # use sacp_doc_test::*;
+/// # use sacp_test::*;
 /// # use sacp::schema::{InitializeRequest, InitializeResponse, SessionNotification};
 /// # async fn example() -> Result<(), sacp::Error> {
 /// # let connection = mock_connection();
@@ -68,7 +68,7 @@ use crate::jsonrpc::handlers::{
 /// that implements the appropriate trait ([`JrRequest`] or [`JrNotification`]):
 ///
 /// ```no_run
-/// # use sacp_doc_test::*;
+/// # use sacp_test::*;
 /// # use sacp::{JrRequest, JrMessage, UntypedMessage};
 /// # use sacp::schema::{InitializeRequest, InitializeResponse, PromptRequest, PromptResponse};
 /// # async fn example() -> Result<(), sacp::Error> {
@@ -106,7 +106,7 @@ use crate::jsonrpc::handlers::{
 /// For enums containing both requests AND notifications, use [`on_receive_message`](Self::on_receive_message):
 ///
 /// ```no_run
-/// # use sacp_doc_test::*;
+/// # use sacp_test::*;
 /// # use sacp::MessageAndCx;
 /// # use sacp::schema::{InitializeRequest, InitializeResponse, SessionNotification};
 /// # async fn example() -> Result<(), sacp::Error> {
@@ -142,7 +142,7 @@ use crate::jsonrpc::handlers::{
 /// (by matching its type) will process it. Subsequent handlers won't see that message:
 ///
 /// ```no_run
-/// # use sacp_doc_test::*;
+/// # use sacp_test::*;
 /// # use sacp::{MessageAndCx, UntypedMessage};
 /// # use sacp::schema::{InitializeRequest, InitializeResponse, PromptRequest, PromptResponse};
 /// # async fn example() -> Result<(), sacp::Error> {
@@ -179,7 +179,7 @@ use crate::jsonrpc::handlers::{
 /// work to concurrent tasks:
 ///
 /// ```no_run
-/// # use sacp_doc_test::*;
+/// # use sacp_test::*;
 /// # async fn example() -> Result<(), sacp::Error> {
 /// # let connection = mock_connection();
 /// connection.on_receive_request(async |req: AnalyzeRequest, cx| {
@@ -231,7 +231,7 @@ use crate::jsonrpc::handlers::{
 /// Use [`serve`](Self::serve) when you only need to respond to incoming messages:
 ///
 /// ```no_run
-/// # use sacp_doc_test::*;
+/// # use sacp_test::*;
 /// # async fn example() -> Result<(), sacp::Error> {
 /// # let connection = mock_connection();
 /// connection
@@ -253,7 +253,7 @@ use crate::jsonrpc::handlers::{
 /// AND send your own requests/notifications:
 ///
 /// ```no_run
-/// # use sacp_doc_test::*;
+/// # use sacp_test::*;
 /// # use sacp::schema::InitializeRequest;
 /// # async fn example() -> Result<(), sacp::Error> {
 /// # let connection = mock_connection();
@@ -394,7 +394,7 @@ impl<OB: AsyncWrite, IB: AsyncRead, H: JrHandler> JrConnection<OB, IB, H> {
     /// # Example
     ///
     /// ```no_run
-    /// # use sacp_doc_test::*;
+    /// # use sacp_test::*;
     /// # use sacp::MessageAndCx;
     /// # async fn example() -> Result<(), sacp::Error> {
     /// # let connection = mock_connection();
@@ -508,7 +508,7 @@ impl<OB: AsyncWrite, IB: AsyncRead, H: JrHandler> JrConnection<OB, IB, H> {
     /// # Example
     ///
     /// ```no_run
-    /// # use sacp_doc_test::*;
+    /// # use sacp_test::*;
     /// # async fn example() -> Result<(), sacp::Error> {
     /// # let connection = mock_connection();
     /// connection.on_receive_notification(async |notif: SessionUpdate, cx| {
@@ -588,7 +588,7 @@ impl<OB: AsyncWrite, IB: AsyncRead, H: JrHandler> JrConnection<OB, IB, H> {
     /// # Example
     ///
     /// ```no_run
-    /// # use sacp_doc_test::*;
+    /// # use sacp_test::*;
     /// # use std::pin::Pin;
     /// # async fn example() -> Result<(), sacp::Error> {
     /// # let stdout: Pin<Box<dyn futures::AsyncWrite + Send>> = Box::pin(futures::io::Cursor::new(Vec::new()));
@@ -654,7 +654,7 @@ impl<OB: AsyncWrite, IB: AsyncRead, H: JrHandler> JrConnection<OB, IB, H> {
     /// # Example
     ///
     /// ```no_run
-    /// # use sacp_doc_test::*;
+    /// # use sacp_test::*;
     /// # use sacp::schema::InitializeRequest;
     /// # use std::pin::Pin;
     /// # async fn example() -> Result<(), sacp::Error> {
@@ -847,7 +847,7 @@ impl JrConnectionCx {
     /// your handler is running. Use `spawn` for any expensive operations:
     ///
     /// ```no_run
-    /// # use sacp_doc_test::*;
+    /// # use sacp_test::*;
     /// # async fn example() -> Result<(), sacp::Error> {
     /// # let connection = mock_connection();
     /// connection.on_receive_request(async |req: ProcessRequest, cx| {
@@ -921,7 +921,7 @@ impl JrConnectionCx {
     /// the common mistake of blocking the event loop while waiting for a response:
     ///
     /// ```compile_fail
-    /// # use sacp_doc_test::*;
+    /// # use sacp_test::*;
     /// # async fn example(cx: sacp::JrConnectionCx) -> Result<(), sacp::Error> {
     /// // ❌ This doesn't compile - prevents blocking the event loop
     /// let response = cx.send_request(MyRequest {}).await?;
@@ -930,7 +930,7 @@ impl JrConnectionCx {
     /// ```
     ///
     /// ```no_run
-    /// # use sacp_doc_test::*;
+    /// # use sacp_test::*;
     /// # async fn example(cx: sacp::JrConnectionCx) -> Result<(), sacp::Error> {
     /// // ✅ Option 1: Schedule callback (safe in handlers)
     /// cx.send_request(MyRequest {})
@@ -1005,7 +1005,7 @@ impl JrConnectionCx {
     /// This method sends the notification immediately and returns.
     ///
     /// ```no_run
-    /// # use sacp_doc_test::*;
+    /// # use sacp_test::*;
     /// # async fn example(cx: sacp::JrConnectionCx) -> Result<(), sacp::Error> {
     /// cx.send_notification(StatusUpdate {
     ///     message: "Processing...".into(),
@@ -1058,7 +1058,7 @@ impl JrConnectionCx {
 /// # Example
 ///
 /// ```no_run
-/// # use sacp_doc_test::*;
+/// # use sacp_test::*;
 /// # async fn example() -> Result<(), sacp::Error> {
 /// # let connection = mock_connection();
 /// connection.on_receive_request(async |req: ProcessRequest, cx| {
@@ -1425,7 +1425,7 @@ impl JrNotification for UntypedMessage {}
 /// that runs when the response arrives. This doesn't block the event loop:
 ///
 /// ```no_run
-/// # use sacp_doc_test::*;
+/// # use sacp_test::*;
 /// # async fn example(cx: sacp::JrConnectionCx) -> Result<(), sacp::Error> {
 /// cx.send_request(MyRequest {})
 ///     .await_when_result_received(async |result| {
@@ -1450,7 +1450,7 @@ impl JrNotification for UntypedMessage {}
 /// in a spawned task (never in a handler):
 ///
 /// ```no_run
-/// # use sacp_doc_test::*;
+/// # use sacp_test::*;
 /// # async fn example(cx: sacp::JrConnectionCx) -> Result<(), sacp::Error> {
 /// // ✅ Safe: Spawned task runs concurrently
 /// cx.spawn({
@@ -1468,7 +1468,7 @@ impl JrNotification for UntypedMessage {}
 /// ```
 ///
 /// ```no_run
-/// # use sacp_doc_test::*;
+/// # use sacp_test::*;
 /// # async fn example() -> Result<(), sacp::Error> {
 /// # let connection = mock_connection();
 /// // ❌ NEVER do this in a handler - blocks the event loop!
@@ -1536,7 +1536,7 @@ impl<R: JrResponsePayload> JrResponse<R> {
     /// # Example: Proxying requests
     ///
     /// ```no_run
-    /// # use sacp_doc_test::*;
+    /// # use sacp_test::*;
     /// # async fn example() -> Result<(), sacp::Error> {
     /// # let connection = mock_connection();
     /// # let other_connection = connection.connection_cx();
@@ -1583,7 +1583,7 @@ impl<R: JrResponsePayload> JrResponse<R> {
     /// # Safe Usage (in spawned tasks)
     ///
     /// ```no_run
-    /// # use sacp_doc_test::*;
+    /// # use sacp_test::*;
     /// # async fn example() -> Result<(), sacp::Error> {
     /// # let connection = mock_connection();
     /// connection.on_receive_request(async |req: MyRequest, cx| {
@@ -1612,7 +1612,7 @@ impl<R: JrResponsePayload> JrResponse<R> {
     /// # Unsafe Usage (in handlers - will deadlock!)
     ///
     /// ```no_run
-    /// # use sacp_doc_test::*;
+    /// # use sacp_test::*;
     /// # async fn example() -> Result<(), sacp::Error> {
     /// # let connection = mock_connection();
     /// connection.on_receive_request(async |req: MyRequest, cx| {
@@ -1668,7 +1668,7 @@ impl<R: JrResponsePayload> JrResponse<R> {
     /// # Example: Chaining requests
     ///
     /// ```no_run
-    /// # use sacp_doc_test::*;
+    /// # use sacp_test::*;
     /// # async fn example() -> Result<(), sacp::Error> {
     /// # let connection = mock_connection();
     /// connection.on_receive_request(async |req: ValidateRequest, request_cx| {
@@ -1723,7 +1723,7 @@ impl<R: JrResponsePayload> JrResponse<R> {
     /// # Example: Handle response in callback
     ///
     /// ```no_run
-    /// # use sacp_doc_test::*;
+    /// # use sacp_test::*;
     /// # async fn example() -> Result<(), sacp::Error> {
     /// # let connection = mock_connection();
     /// connection.on_receive_request(async |req: MyRequest, cx| {

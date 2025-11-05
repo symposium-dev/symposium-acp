@@ -14,6 +14,6 @@ pr_labels = ["release"]
 
 # Package-specific configurations
 [[package]]
-name = "sacp-doc-test"
-# Don't publish documentation test package to crates.io
+name = "sacp-test"
+# Don't publish test utilities package to crates.io
 publish = false

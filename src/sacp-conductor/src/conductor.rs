@@ -60,13 +60,17 @@
 //! The message flow ensures bidirectional communication while maintaining the
 //! abstraction that each component only knows about its immediate successor.
 
-use std::{collections::HashMap, pin::Pin};
+use std::{
+    collections::HashMap,
+    pin::Pin,
+    sync::atomic::{AtomicBool, Ordering},
+};
 
 use futures::{AsyncRead, AsyncWrite, SinkExt, StreamExt, channel::mpsc};
 use sacp::schema::{InitializeRequest, InitializeResponse, NewSessionRequest, NewSessionResponse};
 use sacp_proxy::{
-    McpConnectRequest, McpConnectResponse, McpDisconnectNotification, McpOverAcpNotification,
-    McpOverAcpRequest, SuccessorNotification, SuccessorRequest,
+    AcpProxyExt, McpConnectRequest, McpConnectResponse, McpDisconnectNotification,
+    McpOverAcpNotification, McpOverAcpRequest, SuccessorNotification, SuccessorRequest,
 };
 
 use sacp::handler::NullHandler;
@@ -76,7 +80,7 @@ use sacp::{
     util::{TypeNotification, TypeRequest},
 };
 use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
-use tracing::{debug, info};
+use tracing::{Instrument, debug, info};
 
 use crate::{
     component::{Component, ComponentProvider},
@@ -99,6 +103,9 @@ struct ServeArgs<OB: AsyncWrite, IB: AsyncRead> {
 /// bidirectionally between the editor, components, and agent.
 ///
 pub struct Conductor {
+    /// Name of the conductor instance
+    name: String,
+
     /// Channel for receiving internal conductor messages from spawned tasks
     conductor_rx: mpsc::Receiver<ConductorMessage>,
 
@@ -114,18 +121,26 @@ pub struct Conductor {
     /// Command and args to spawn conductor MCP bridge processes
     /// E.g., vec!["conductor"] or vec!["cargo", "run", "-p", "conductor", "--"]
     conductor_command: Vec<String>,
+
+    /// Whether the conductor is operating in proxy mode.
+    /// In proxy mode, the conductor itself acts as a proxy component in a larger chain,
+    /// and ALL components (including the last) receive the proxy capability.
+    /// Uses AtomicBool for thread-safe interior mutability since we detect this during initialization.
+    proxy_mode: AtomicBool,
 }
 
 impl Conductor {
     pub async fn run<OB: AsyncWrite, IB: AsyncRead>(
+        name: String,
         outgoing_bytes: OB,
         incoming_bytes: IB,
         providers: Vec<Box<dyn ComponentProvider>>,
     ) -> Result<(), sacp::Error> {
-        Self::run_with_command(outgoing_bytes, incoming_bytes, providers, None).await
+        Self::run_with_command(name, outgoing_bytes, incoming_bytes, providers, None).await
     }
 
     pub async fn run_with_command<OB: AsyncWrite, IB: AsyncRead>(
+        name: String,
         outgoing_bytes: OB,
         incoming_bytes: IB,
         mut providers: Vec<Box<dyn ComponentProvider>>,
@@ -170,11 +185,13 @@ impl Conductor {
         };
 
         Conductor {
+            name,
             components: Default::default(),
             bridge_listeners: Default::default(),
             bridge_connections: Default::default(),
             conductor_rx,
             conductor_command,
+            proxy_mode: AtomicBool::new(false),
         }
         .launch_proxy(providers, serve_args)
         .await
@@ -312,32 +329,52 @@ impl Conductor {
             mut conductor_tx,
         } = serve_args;
 
-        connection
-            // Any incoming messages from the client are client-to-agent messages targeting the first component.
-            .on_receive_message({
-                let mut conductor_tx = conductor_tx.clone();
-                async move |message: MessageAndCx| {
-                    conductor_tx
-                        .send(ConductorMessage::ClientToAgent {
-                            target_component_index: 0,
-                            message,
-                        })
-                        .await
-                        .map_err(sacp::util::internal_error)
-                }
-            })
-            .with_client({
-                async |client| {
-                    // This is the "central actor" of the conductor. Most other things forward messages
-                    // via `conductor_tx` into this loop. This lets us serialize the conductor's activity.
-                    while let Some(message) = self.conductor_rx.next().await {
-                        self.handle_conductor_message(&client, message, &mut conductor_tx)
-                            .await?;
+        let conductor_name = self.name.clone();
+
+        async move {
+            connection
+                .on_receive_message_from_successor({
+                    let mut conductor_tx = conductor_tx.clone();
+                    let len_components = self.components.len();
+                    async move |message: MessageAndCx| {
+                        // If we receive a message from our successor, we must be in proxy mode or else something odd is going on.
+                        conductor_tx
+                            .send(ConductorMessage::AgentToClient {
+                                source_component_index: len_components,
+                                message,
+                            })
+                            .await
+                            .map_err(sacp::util::internal_error)
                     }
-                    Ok(())
-                }
-            })
-            .await
+                })
+                // Any incoming messages from the client are client-to-agent messages targeting the first component.
+                .on_receive_message({
+                    let mut conductor_tx = conductor_tx.clone();
+                    async move |message: MessageAndCx| {
+                        conductor_tx
+                            .send(ConductorMessage::ClientToAgent {
+                                target_component_index: 0,
+                                message,
+                            })
+                            .await
+                            .map_err(sacp::util::internal_error)
+                    }
+                })
+                .with_client({
+                    async |client| {
+                        // This is the "central actor" of the conductor. Most other things forward messages
+                        // via `conductor_tx` into this loop. This lets us serialize the conductor's activity.
+                        while let Some(message) = self.conductor_rx.next().await {
+                            self.handle_conductor_message(&client, message, &mut conductor_tx)
+                                .await?;
+                        }
+                        Ok(())
+                    }
+                })
+                .await
+        }
+        .instrument(tracing::info_span!("conductor", name = %conductor_name))
+        .await
     }
 
     /// Central message handling logic for the conductor.
@@ -493,6 +530,14 @@ impl Conductor {
         if source_component_index == 0 {
             client.send_proxied_message(message)
         } else {
+            // If message is coming from the conductor's successor,
+            // check whether we have proxy capability and error otherwise.
+            if source_component_index == self.components.len() {
+                if !self.proxy_mode.load(Ordering::Relaxed) {
+                    return Err(sacp::Error::invalid_request().with_data("cannot accept successor message when not initialized with proxy capability"));
+                }
+            }
+
             let wrapped = message.map(
                 |request, request_cx| (SuccessorRequest { request }, request_cx),
                 |notification, notification_cx| {
@@ -556,6 +601,28 @@ impl Conductor {
         message: MessageAndCx,
         client: &JrConnectionCx,
     ) -> Result<(), sacp::Error> {
+        // In proxy mode, if the target is beyond our component chain,
+        // forward to the conductor's own successor (via client connection)
+        if self.proxy_mode.load(Ordering::Relaxed)
+            && target_component_index >= self.components.len()
+        {
+            debug!(
+                target_component_index,
+                component_count = self.components.len(),
+                "Proxy mode: forwarding successor message to conductor's successor"
+            );
+            // Wrap the message as a successor message before sending
+            let to_successor_message = message.map(
+                |request, request_cx| (SuccessorRequest { request }, request_cx),
+                |notification, notification_cx| {
+                    (SuccessorNotification { notification }, notification_cx)
+                },
+            );
+            return client.send_proxied_message(to_successor_message);
+        }
+
+        tracing::debug!(?message, "forward_client_to_agent_message");
+
         match message {
             MessageAndCx::Request(request, request_cx) => {
                 self.forward_client_to_agent_request(
@@ -672,9 +739,11 @@ impl Conductor {
             .await
     }
 
-    /// Checks if the given component index is the agent (final component).
+    /// Checks if the given component index is the agent.
+    ///
+    /// Note that, in proxy mode, there is no agent.
     fn is_agent_component(&self, component_index: usize) -> bool {
-        component_index == self.components.len() - 1
+        !self.proxy_mode.load(Ordering::Relaxed) && component_index == self.components.len() - 1
     }
 
     /// Checks if the given component index is the last proxy before the agent.
@@ -684,31 +753,41 @@ impl Conductor {
         mut initialize_req: InitializeRequest,
         request_cx: JrRequestCx<InitializeResponse>,
     ) -> Result<(), sacp::Error> {
-        // The conductor does not accept proxy capabilities.
-        if initialize_req.has_meta_capability(Proxy) {
-            return Err(sacp::util::internal_error(
-                "conductor received unexpected initialization request with proxy capability",
-            ));
+        tracing::debug!(?initialize_req, "forward_initialize_request");
+
+        // Handle proxy capability in incoming initialize request
+        let initialize_had_proxy = initialize_req.has_meta_capability(Proxy);
+        if initialize_had_proxy {
+            if target_component_index == 0 {
+                // First component receiving proxy capability means conductor is in proxy mode
+                debug!("Conductor entering proxy mode - received initialize with proxy capability");
+                self.proxy_mode.store(true, Ordering::Relaxed);
+
+                // Remove the proxy capability from the request before forwarding
+                initialize_req = initialize_req.remove_meta_capability(Proxy);
+            } else {
+                // Components should never forward initialize with proxy capability attached
+                return Err(sacp::util::internal_error(
+                    "conductor received unexpected initialization request with proxy capability",
+                ));
+            }
         }
 
-        // Either add or remove proxy, depending on whether this component has a successor.
+        // In normal mode, only non-agent components get proxy capability.
+        // In proxy mode, ALL components (including the last) get proxy capability.
         let is_agent = self.is_agent_component(target_component_index);
-        if is_agent {
-            self.components[target_component_index]
-                .agent_cx
-                .send_request(initialize_req)
-                .await_when_result_received(async move |response| match response {
-                    Ok(response) => request_cx.respond(response),
-                    Err(error) => request_cx.respond_with_error(error),
-                })
-        } else {
+
+        tracing::debug!(?is_agent, "forward_initialize_request");
+
+        if !is_agent {
+            // Add proxy capability and verify response
             initialize_req = initialize_req.add_meta_capability(Proxy);
             self.components[target_component_index]
                 .agent_cx
                 .send_request(initialize_req)
                 .await_when_result_received(async move |response| match response {
                     Ok(mut response) => {
-                        // Verify proxy capability handshake for non-agent components
+                        // Verify proxy capability handshake
                         // Each proxy component must respond with Proxy capability or we
                         // abort the conductor.
                         if !response.has_meta_capability(Proxy) {
@@ -720,11 +799,26 @@ impl Conductor {
 
                         // We don't want to respond with that proxy capability to the predecessor.
                         // Proxy communication is just between the conductor and others.
-                        response = response.remove_meta_capability(Proxy);
+                        if !initialize_had_proxy {
+                            response = response.remove_meta_capability(Proxy);
+                        }
 
                         request_cx.respond(response)
                     }
                     Err(error) => request_cx.respond_with_error(error),
+                })
+        } else {
+            // Agent component - no proxy capability
+            self.components[target_component_index]
+                .agent_cx
+                .send_request(initialize_req)
+                .await_when_result_received(async move |response| {
+                    tracing::debug!(?response, "got initialize response");
+
+                    match response {
+                        Ok(response) => request_cx.respond(response),
+                        Err(error) => request_cx.respond_with_error(error),
+                    }
                 })
         }
     }

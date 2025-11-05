@@ -14,6 +14,7 @@ test-support = []
 [dependencies]
 sacp = { version = "1.0.0-alpha", path = "../sacp" }
 sacp-proxy = { version = "1.0.0-alpha", path = "../sacp-proxy" }
+sacp-tokio = { version = "1.0.0-alpha", path = "../sacp-tokio" }
 agent-client-protocol-schema.workspace = true
 anyhow.workspace = true
 clap.workspace = true
@@ -21,6 +22,7 @@ futures.workspace = true
 jsonrpcmsg.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+shell-words = "1.1"
 thiserror.workspace = true
 tokio.workspace = true
 tokio-util.workspace = true
@@ -29,6 +31,9 @@ tracing-subscriber.workspace = true
 uuid.workspace = true
 
 [dev-dependencies]
+elizacp = { path = "../elizacp" }
 expect-test.workspace = true
 rmcp = { workspace = true, features = ["client", "server", "transport-io", "transport-child-process"] }
 schemars.workspace = true
+sacp-test = { path = "../sacp-test" }
+sacp-tokio = { path = "../sacp-tokio" }

@@ -858,7 +858,7 @@ dependencies = [
  "expect-test",
  "futures",
  "jsonrpcmsg",
- "sacp-doc-test",
+ "sacp-test",
  "sacp-tokio",
  "serde",
  "serde_json",
@@ -876,31 +876,25 @@ dependencies = [
  "agent-client-protocol-schema",
  "anyhow",
  "clap",
+ "elizacp",
  "expect-test",
  "futures",
  "jsonrpcmsg",
  "rmcp",
  "sacp",
  "sacp-proxy",
+ "sacp-test",
+ "sacp-tokio",
  "schemars",
  "serde",
  "serde_json",
+ "shell-words",
  "thiserror",
  "tokio",
  "tokio-util",
  "tracing",
  "tracing-subscriber",
  "uuid",
-]
-
-[[package]]
-name = "sacp-doc-test"
-version = "1.0.0-alpha"
-dependencies = [
- "futures",
- "sacp",
- "serde",
- "serde_json",
 ]
 
 [[package]]
@@ -922,6 +916,21 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "uuid",
+]
+
+[[package]]
+name = "sacp-test"
+version = "1.0.0-alpha"
+dependencies = [
+ "futures",
+ "sacp",
+ "sacp-proxy",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tokio-util",
+ "tracing",
+ "tracing-subscriber",
 ]
 
 [[package]]

@@ -52,9 +52,9 @@ impl AcpAgent {
         self.server
     }
 
-    /// Internal method to spawn the process and get stdio streams.
-    /// Used by JrConnectionExt::to_agent.
-    pub(crate) fn spawn_process(
+    /// Spawn the process and get stdio streams.
+    /// Used by JrConnectionExt::to_agent and ComponentProvider implementations.
+    pub fn spawn_process(
         &self,
     ) -> Result<
         (

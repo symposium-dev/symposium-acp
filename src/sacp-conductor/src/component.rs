@@ -1,4 +1,5 @@
 use sacp;
+use sacp_tokio::AcpAgent;
 use std::pin::Pin;
 use tokio_util::compat::{FuturesAsyncReadCompatExt as _, FuturesAsyncWriteCompatExt};
 
@@ -83,7 +84,16 @@ impl ComponentProvider for CommandComponentProvider {
     ) -> Result<Cleanup, sacp::Error> {
         debug!(command = self.command, "Spawning command");
 
-        let mut child = tokio::process::Command::new(&self.command)
+        // Parse the command string into program and arguments
+        let parts = shell_words::split(&self.command)
+            .map_err(|e| sacp::util::internal_error(format!("Failed to parse command: {}", e)))?;
+
+        if parts.is_empty() {
+            return Err(sacp::util::internal_error("Command string cannot be empty"));
+        }
+
+        let mut child = tokio::process::Command::new(&parts[0])
+            .args(&parts[1..])
             .stdin(std::process::Stdio::piped())
             .stdout(std::process::Stdio::piped())
             .spawn()
@@ -92,6 +102,35 @@ impl ComponentProvider for CommandComponentProvider {
         // Take ownership of the streams (can only do this once!)
         let mut child_stdin = child.stdin.take().expect("Failed to open stdin");
         let mut child_stdout = child.stdout.take().expect("Failed to open stdout");
+
+        cx.spawn(async move {
+            tokio::io::copy(&mut incoming_bytes.compat(), &mut child_stdin)
+                .await
+                .map_err(sacp::Error::into_internal_error)?;
+            Ok(())
+        })?;
+
+        cx.spawn(async move {
+            tokio::io::copy(&mut child_stdout, &mut outgoing_bytes.compat_write())
+                .await
+                .map_err(sacp::Error::into_internal_error)?;
+            Ok(())
+        })?;
+
+        Ok(Cleanup::KillProcess(child))
+    }
+}
+
+impl ComponentProvider for AcpAgent {
+    fn create(
+        &self,
+        cx: &JrConnectionCx,
+        outgoing_bytes: Pin<Box<dyn AsyncWrite + Send>>,
+        incoming_bytes: Pin<Box<dyn AsyncRead + Send>>,
+    ) -> Result<Cleanup, sacp::Error> {
+        debug!(agent = ?self, "Spawning AcpAgent");
+
+        let (mut child_stdin, mut child_stdout, child) = self.spawn_process()?;
 
         cx.spawn(async move {
             tokio::io::copy(&mut incoming_bytes.compat(), &mut child_stdin)
