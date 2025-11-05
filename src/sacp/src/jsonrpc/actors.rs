@@ -130,7 +130,7 @@ pub(super) async fn reply_actor(
 }
 
 // ============================================================================
-// Split Actors for Pluggable Transport (Phase 2)
+// Split Actors for Pluggable Transport
 // ============================================================================
 
 /// Outgoing protocol actor: Converts application-level OutgoingMessage to protocol-level jsonrpcmsg::Message.
@@ -201,6 +201,8 @@ pub(super) async fn outgoing_protocol_actor(
                     message: error.message,
                     data: error.data,
                 };
+                // Response with id: None means this is an error notification that couldn't be
+                // correlated to a specific request (e.g., parse error before we could read the id)
                 jsonrpcmsg::Message::Response(jsonrpcmsg::Response::error_v2(jsonrpc_error, None))
             }
         };
