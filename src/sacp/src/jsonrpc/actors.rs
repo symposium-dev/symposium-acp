@@ -224,7 +224,7 @@ pub(super) async fn outgoing_protocol_actor(
 ///
 /// This is the transport layer - it has no knowledge of protocol semantics (IDs, correlation, etc.).
 pub(super) async fn transport_outgoing_actor(
-    connection_name: &Option<String>,
+    connection_name: Option<String>,
     mut transport_rx: mpsc::UnboundedReceiver<jsonrpcmsg::Message>,
     outgoing_bytes: impl AsyncWrite,
 ) -> Result<(), crate::Error> {
@@ -340,8 +340,8 @@ pub(super) async fn incoming_protocol_actor(
 ///
 /// This is the transport layer - it has no knowledge of protocol semantics.
 pub(super) async fn transport_incoming_actor(
-    connection_name: &Option<String>,
-    json_rpc_cx: &JrConnectionCx,
+    connection_name: Option<String>,
+    json_rpc_cx: JrConnectionCx,
     incoming_bytes: impl AsyncRead,
     transport_tx: mpsc::UnboundedSender<jsonrpcmsg::Message>,
 ) -> Result<(), crate::Error> {

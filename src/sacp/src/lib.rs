@@ -74,8 +74,9 @@ pub mod util;
 
 pub use capabilities::*;
 pub use jsonrpc::{
-    Handled, JrConnection, JrConnectionCx, JrHandler, JrMessage, JrNotification, JrRequest,
-    JrRequestCx, JrResponse, JrResponsePayload, MessageAndCx, UntypedMessage,
+    ByteStreamTransport, Handled, IntoJrConnectionTransport, JrConnection, JrConnectionCx,
+    JrHandler, JrMessage, JrNotification, JrRequest, JrRequestCx, JrResponse, JrResponsePayload,
+    MessageAndCx, UntypedMessage,
 };
 
 // Re-export the six primary message enum types at the root

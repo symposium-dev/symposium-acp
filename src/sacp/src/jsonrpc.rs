@@ -624,7 +624,7 @@ impl<OB: AsyncWrite, IB: AsyncRead, H: JrHandler> JrConnection<OB, IB, H> {
             }
             // Transport layer: jsonrpcmsg::Message → bytes
             r = actors::transport_outgoing_actor(
-                &self.name,
+                self.name.clone(),
                 transport_outgoing_rx,
                 self.outgoing_bytes,
             ).fuse() => {
@@ -633,8 +633,8 @@ impl<OB: AsyncWrite, IB: AsyncRead, H: JrHandler> JrConnection<OB, IB, H> {
             }
             // Transport layer: bytes → jsonrpcmsg::Message
             r = actors::transport_incoming_actor(
-                &self.name,
-                &json_rpc_cx,
+                self.name.clone(),
+                json_rpc_cx.clone(),
                 self.incoming_bytes,
                 transport_incoming_tx,
             ).fuse() => {
@@ -837,6 +837,68 @@ pub enum Handled<T> {
 ///   blocking the event loop
 ///
 /// # Event Loop Considerations
+///
+/// Handler callbacks run on the event loop, which means the connection cannot process new
+/// messages while your handler is running. Use [`spawn`](Self::spawn) to offload any
+/// expensive or blocking work to concurrent tasks.
+///
+/// See the [Event Loop and Concurrency](JrConnection#event-loop-and-concurrency) section
+/// for more details.
+
+/// Trait for types that can provide transport for JSON-RPC messages.
+///
+/// Implementations of this trait bridge between the internal protocol channels
+/// (which carry `jsonrpcmsg::Message`) and the actual I/O mechanism (byte streams,
+/// in-process channels, network sockets, etc.).
+///
+/// The transport layer is responsible only for moving `jsonrpcmsg::Message` in and out.
+/// It has no knowledge of protocol semantics like request/response correlation, ID assignment,
+/// or handler dispatch - those are handled by the protocol layer in `JrConnection`.
+///
+/// # Example
+///
+/// See [`ByteStreamTransport`] for the standard byte stream implementation.
+pub trait IntoJrConnectionTransport {
+    /// Set up the transport by spawning actors that bridge internal channels with I/O.
+    ///
+    /// Implementations should use `cx.spawn()` to launch their transport actors.
+    /// These actors should:
+    /// - Read `jsonrpcmsg::Message` from `outgoing_rx` and send to the transport
+    /// - Receive messages from the transport and send to `incoming_tx`
+    ///
+    /// # Parameters
+    ///
+    /// - `cx`: Connection context for spawning tasks
+    /// - `outgoing_rx`: Receives protocol messages to send over the transport
+    /// - `incoming_tx`: Sends received messages to the protocol layer
+    ///
+    /// # Returns
+    ///
+    /// Returns immediately after spawning the transport actors. The actual I/O happens
+    /// asynchronously in the spawned tasks.
+    fn setup_transport(
+        self,
+        cx: &JrConnectionCx,
+        outgoing_rx: mpsc::UnboundedReceiver<jsonrpcmsg::Message>,
+        incoming_tx: mpsc::UnboundedSender<jsonrpcmsg::Message>,
+    ) -> Result<(), crate::Error>;
+}
+
+/// Connection context for sending messages and spawning tasks.
+///
+/// This is the primary handle for interacting with the JSON-RPC connection from
+/// within handler callbacks. You can use it to:
+///
+/// * Send requests and notifications to the other side
+/// * Spawn concurrent tasks that run alongside the connection
+/// * Respond to requests (via [`JrRequestCx`] which wraps this)
+///
+/// # Cloning
+///
+/// `JrConnectionCx` is cheaply cloneable - all clones refer to the same underlying connection.
+/// This makes it easy to share across async tasks.
+///
+/// # Event Loop and Concurrency
 ///
 /// Handler callbacks run on the event loop, which means the connection cannot process new
 /// messages while your handler is running. Use [`spawn`](Self::spawn) to offload any
@@ -1819,4 +1881,73 @@ const COMMUNICATION_FAILURE: i32 = -32000;
 
 fn communication_failure(err: impl ToString) -> crate::Error {
     crate::Error::new((COMMUNICATION_FAILURE, err.to_string()))
+}
+
+// ============================================================================
+// IntoJrConnectionTransport Implementations
+// ============================================================================
+
+/// Byte stream transport for JSON-RPC messages.
+///
+/// This transport serializes `jsonrpcmsg::Message` to/from newline-delimited JSON
+/// over byte streams (AsyncRead + AsyncWrite).
+///
+/// # Example
+///
+/// ```no_run
+/// use sacp::ByteStreamTransport;
+/// use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
+///
+/// # async fn example() -> Result<(), sacp::Error> {
+/// let transport = ByteStreamTransport::new(
+///     tokio::io::stdout().compat_write(),
+///     tokio::io::stdin().compat(),
+/// );
+/// # Ok(())
+/// # }
+/// ```
+pub struct ByteStreamTransport<OB, IB> {
+    /// Outgoing byte stream (where we write serialized messages)
+    pub outgoing: OB,
+    /// Incoming byte stream (where we read and parse messages)
+    pub incoming: IB,
+}
+
+impl<OB, IB> ByteStreamTransport<OB, IB> {
+    /// Create a new byte stream transport.
+    pub fn new(outgoing: OB, incoming: IB) -> Self {
+        Self { outgoing, incoming }
+    }
+}
+
+impl<OB, IB> IntoJrConnectionTransport for ByteStreamTransport<OB, IB>
+where
+    OB: AsyncWrite + Send + Unpin + 'static,
+    IB: AsyncRead + Send + Unpin + 'static,
+{
+    fn setup_transport(
+        self,
+        cx: &JrConnectionCx,
+        outgoing_rx: mpsc::UnboundedReceiver<jsonrpcmsg::Message>,
+        incoming_tx: mpsc::UnboundedSender<jsonrpcmsg::Message>,
+    ) -> Result<(), crate::Error> {
+        let connection_name = None; // TODO: get connection name from cx?
+
+        // Spawn transport outgoing actor: jsonrpcmsg::Message → serialize → bytes
+        cx.spawn(actors::transport_outgoing_actor(
+            connection_name.clone(),
+            outgoing_rx,
+            self.outgoing,
+        ))?;
+
+        // Spawn transport incoming actor: bytes → parse → jsonrpcmsg::Message
+        cx.spawn(actors::transport_incoming_actor(
+            connection_name,
+            cx.clone(),
+            self.incoming,
+            incoming_tx,
+        ))?;
+
+        Ok(())
+    }
 }
