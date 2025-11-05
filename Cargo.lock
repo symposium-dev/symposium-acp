@@ -876,6 +876,7 @@ dependencies = [
  "agent-client-protocol-schema",
  "anyhow",
  "clap",
+ "elizacp",
  "expect-test",
  "futures",
  "jsonrpcmsg",

@@ -156,7 +156,7 @@ pub trait AcpProxyExt<OB: AsyncWrite, IB: AsyncRead, H: JrHandler> {
         R: JrRequest,
         F: AsyncFnMut(R, JrRequestCx<R::Response>) -> Result<(), sacp::Error>;
 
-    /// Adds a handler for messages received from the successor component.
+    /// Adds a handler for notifications received from the successor component.
     ///
     /// The provided handler will receive unwrapped ACP messages - the
     /// `_proxy/successor/receive/*` protocol wrappers are handled automatically.
@@ -185,6 +185,21 @@ pub trait AcpProxyExt<OB: AsyncWrite, IB: AsyncRead, H: JrHandler> {
     where
         N: JrNotification,
         F: AsyncFnMut(N, JrConnectionCx) -> Result<(), sacp::Error>;
+
+    /// Adds a handler for messages received from the successor component.
+    ///
+    /// The provided handler will receive unwrapped ACP messages - the
+    /// `_proxy/successor/receive/*` protocol wrappers are handled automatically.
+    /// Your handler processes normal ACP requests and notifications as if it were
+    /// a regular ACP component.
+    fn on_receive_message_from_successor<R, N, F>(
+        self,
+        op: F,
+    ) -> JrConnection<OB, IB, ChainHandler<H, MessageFromSuccessorHandler<R, N, F>>>
+    where
+        R: JrRequest,
+        N: JrNotification,
+        F: AsyncFnMut(MessageAndCx<R, N>) -> Result<(), sacp::Error>;
 
     /// Installs a proxy layer that proxies all requests/notifications to/from the successor.
     /// This is typically the last component in the chain.
@@ -227,6 +242,18 @@ where
         self.chain_handler(NotificationFromSuccessorHandler::new(op))
     }
 
+    fn on_receive_message_from_successor<R, N, F>(
+        self,
+        op: F,
+    ) -> JrConnection<OB, IB, ChainHandler<H, MessageFromSuccessorHandler<R, N, F>>>
+    where
+        R: JrRequest,
+        N: JrNotification,
+        F: AsyncFnMut(MessageAndCx<R, N>) -> Result<(), sacp::Error>,
+    {
+        self.chain_handler(MessageFromSuccessorHandler::new(op))
+    }
+
     fn proxy(self) -> JrConnection<OB, IB, ChainHandler<H, ProxyHandler>> {
         self.chain_handler(ProxyHandler {})
     }
@@ -236,6 +263,116 @@ where
         registry: impl AsRef<McpServiceRegistry>,
     ) -> JrConnection<OB, IB, ChainHandler<H, McpServiceRegistry>> {
         self.chain_handler(registry.as_ref().clone())
+    }
+}
+
+/// Handler to process a message of type `R` coming from the successor component.
+pub struct MessageFromSuccessorHandler<R, N, F>
+where
+    R: JrRequest,
+    N: JrNotification,
+    F: AsyncFnMut(MessageAndCx<R, N>) -> Result<(), sacp::Error>,
+{
+    handler: F,
+    phantom: PhantomData<fn(R, N)>,
+}
+
+impl<R, N, F> MessageFromSuccessorHandler<R, N, F>
+where
+    R: JrRequest,
+    N: JrNotification,
+    F: AsyncFnMut(MessageAndCx<R, N>) -> Result<(), sacp::Error>,
+{
+    /// Creates a new handler for requests from the successor
+    pub fn new(handler: F) -> Self {
+        Self {
+            handler,
+            phantom: PhantomData,
+        }
+    }
+}
+
+impl<R, N, F> JrHandler for MessageFromSuccessorHandler<R, N, F>
+where
+    R: JrRequest,
+    N: JrNotification,
+    F: AsyncFnMut(MessageAndCx<R, N>) -> Result<(), sacp::Error>,
+{
+    async fn handle_message(
+        &mut self,
+        message: sacp::MessageAndCx,
+    ) -> Result<Handled<sacp::MessageAndCx>, sacp::Error> {
+        match message {
+            MessageAndCx::Request(request, request_cx) => {
+                tracing::trace!(
+                    request_type = std::any::type_name::<R>(),
+                    message = ?request,
+                    "MessageFromSuccessorHandler::handle_message"
+                );
+                match <SuccessorRequest<R>>::parse_request(&request.method, &request.params) {
+                    Some(Ok(request)) => {
+                        tracing::trace!(
+                            ?request,
+                            "RequestHandler::handle_request: parse completed"
+                        );
+                        (self.handler)(MessageAndCx::Request(request.request, request_cx.cast()))
+                            .await?;
+                        Ok(Handled::Yes)
+                    }
+                    Some(Err(err)) => {
+                        tracing::trace!(?err, "RequestHandler::handle_request: parse errored");
+                        Err(err)
+                    }
+                    None => {
+                        tracing::trace!("RequestHandler::handle_request: parse failed");
+                        Ok(Handled::No(MessageAndCx::Request(request, request_cx)))
+                    }
+                }
+            }
+            MessageAndCx::Notification(notification, connection_cx) => {
+                tracing::trace!(
+                    ?notification,
+                    "NotificationFromSuccessorHandler::handle_message"
+                );
+                match <SuccessorNotification<N>>::parse_notification(
+                    &notification.method,
+                    &notification.params,
+                ) {
+                    Some(Ok(notification)) => {
+                        tracing::trace!(
+                            ?notification,
+                            "NotificationFromSuccessorHandler::handle_message: parse completed"
+                        );
+                        (self.handler)(MessageAndCx::Notification(
+                            notification.notification,
+                            connection_cx,
+                        ))
+                        .await?;
+                        Ok(Handled::Yes)
+                    }
+                    Some(Err(err)) => {
+                        tracing::trace!(
+                            ?err,
+                            "NotificationFromSuccessorHandler::handle_message: parse errored"
+                        );
+                        Err(err)
+                    }
+                    None => {
+                        tracing::trace!(
+                            "NotificationFromSuccessorHandler::handle_message: parse failed"
+                        );
+                        Ok(Handled::No(MessageAndCx::Notification(
+                            notification,
+                            connection_cx,
+                        )))
+                    }
+                }
+            }
+        }
+    }
+
+    fn describe_chain(&self) -> impl std::fmt::Debug {
+        std::any::type_name::<R>()
     }
 }
 
