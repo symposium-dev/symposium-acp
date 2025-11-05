@@ -21,8 +21,9 @@ tracing.workspace = true
 uuid.workspace = true
 
 [dev-dependencies]
+clap = { workspace = true, features = ["derive"] }
 expect-test.workspace = true
-sacp-tokio = { version = "1.0.0-alpha", path = "../sacp-tokio" }
-tokio = { workspace = true, features = ["macros", "rt-multi-thread", "io-util", "time"] }
+shell-words = "1.1"
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "io-util", "time", "process"] }
 tokio-util.workspace = true
 sacp-test = { path = "../sacp-test" }
