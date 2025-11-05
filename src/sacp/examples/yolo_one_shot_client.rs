@@ -22,13 +22,86 @@
 
 use sacp::JrConnection;
 use sacp::schema::{
-    ContentBlock, InitializeRequest, NewSessionRequest, PromptRequest, RequestPermissionOutcome,
-    RequestPermissionRequest, RequestPermissionResponse, SessionNotification, TextContent,
-    VERSION as PROTOCOL_VERSION,
+    ContentBlock, InitializeRequest, McpServer, NewSessionRequest, PromptRequest,
+    RequestPermissionOutcome, RequestPermissionRequest, RequestPermissionResponse,
+    SessionNotification, TextContent, VERSION as PROTOCOL_VERSION,
 };
-use sacp_tokio::{AcpAgent, JrConnectionExt};
 use std::path::PathBuf;
-use std::str::FromStr;
+use tokio::process::Child;
+use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
+
+// NOTE: This code is inlined here to avoid a circular dependency between `sacp` and `sacp-tokio`.
+// If you're writing your own client, you can use `sacp_tokio::AcpAgent` and `JrConnectionExt::to_agent()`
+// to simplify this setup significantly.
+
+/// Parse agent configuration from either a command string or JSON.
+fn parse_agent_config(s: &str) -> Result<McpServer, Box<dyn std::error::Error>> {
+    let trimmed = s.trim();
+
+    // If it starts with '{', try to parse as JSON
+    if trimmed.starts_with('{') {
+        let server: McpServer = serde_json::from_str(trimmed)?;
+        return Ok(server);
+    }
+
+    // Otherwise, parse as a command string
+    let parts = shell_words::split(trimmed)?;
+    if parts.is_empty() {
+        return Err("Command string cannot be empty".into());
+    }
+
+    let command = PathBuf::from(&parts[0]);
+    let args = parts[1..].to_vec();
+    let name = command
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("agent")
+        .to_string();
+
+    Ok(McpServer::Stdio {
+        name,
+        command,
+        args,
+        env: vec![],
+    })
+}
+
+/// Spawn a process for the agent and get stdio streams.
+fn spawn_agent_process(
+    server: &McpServer,
+) -> Result<
+    (
+        tokio::process::ChildStdin,
+        tokio::process::ChildStdout,
+        Child,
+    ),
+    Box<dyn std::error::Error>,
+> {
+    match server {
+        McpServer::Stdio {
+            command,
+            args,
+            env,
+            name: _,
+        } => {
+            let mut cmd = tokio::process::Command::new(command);
+            cmd.args(args);
+            for env_var in env {
+                cmd.env(&env_var.name, &env_var.value);
+            }
+            cmd.stdin(std::process::Stdio::piped())
+                .stdout(std::process::Stdio::piped());
+
+            let mut child = cmd.spawn()?;
+            let child_stdin = child.stdin.take().ok_or("Failed to open stdin")?;
+            let child_stdout = child.stdout.take().ok_or("Failed to open stdout")?;
+
+            Ok((child_stdin, child_stdout, child))
+        }
+        McpServer::Http { .. } => Err("HTTP transport not yet supported".into()),
+        McpServer::Sse { .. } => Err("SSE transport not yet supported".into()),
+    }
+}
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -53,12 +126,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let agent_config = &args[2];
 
     // Parse the agent configuration
-    let agent = AcpAgent::from_str(agent_config)?;
+    let server = parse_agent_config(agent_config)?;
 
     eprintln!("🚀 Spawning agent and connecting...");
 
+    // Spawn the agent process
+    let (child_stdin, child_stdout, mut child) = spawn_agent_process(&server)?;
+
+    // Create a JrConnection with the agent's stdio streams
+    // NOTE: Using sacp_tokio::JrConnectionExt::to_agent() would simplify this setup
+    let connection = JrConnection::new(child_stdin.compat_write(), child_stdout.compat());
+
     // Run the client
-    JrConnection::to_agent(agent)?
+    connection
         .on_receive_notification(async move |notification: SessionNotification, _cx| {
             // Print session updates to stdout (so 2>/dev/null shows only agent output)
             println!("{:?}", notification.update);
@@ -132,6 +212,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             Ok(())
         })
         .await?;
+
+    // Kill the child process when done
+    let _ = child.kill().await;
 
     Ok(())
 }
