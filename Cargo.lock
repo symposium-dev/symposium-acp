@@ -855,6 +855,7 @@ dependencies = [
  "agent-client-protocol-schema",
  "anyhow",
  "boxfnonce",
+ "clap",
  "expect-test",
  "futures",
  "jsonrpcmsg",
@@ -1589,6 +1590,15 @@ name = "wit-bindgen"
 version = "0.46.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f17a85883d4e6d00e8a97c586de764dabcc06133f7f1d55dce5cdc070ad7fe59"
+
+[[package]]
+name = "yopo"
+version = "1.0.0-alpha"
+dependencies = [
+ "sacp",
+ "sacp-tokio",
+ "tokio",
+]
 
 [[package]]
 name = "zerocopy"

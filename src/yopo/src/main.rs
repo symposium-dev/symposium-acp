@@ -1,98 +1,71 @@
-//! YOLO one-shot client: A simple ACP client that runs a single prompt against an agent.
+//! YOPO (You Only Prompt Once) - A simple ACP client for one-shot prompts
 //!
-//! This is a simplified example showing basic ACP client usage. It only supports
-//! simple command strings (not JSON configs or environment variables).
-//!
-//! For a more full-featured client with JSON config support, see the `yopo` binary crate.
+//! This client:
+//! - Takes a prompt and agent configuration as arguments
+//! - Spawns the agent
+//! - Sends the prompt
+//! - Auto-approves all permission requests
+//! - Prints all session updates to stdout
+//! - Runs until the agent completes
 //!
 //! # Usage
 //!
+//! With a command:
 //! ```bash
-//! cargo run --example yolo_one_shot_client -- --command "python my_agent.py" "What is 2+2?"
+//! yopo "What is 2+2?" "python my_agent.py"
+//! ```
+//!
+//! With JSON config:
+//! ```bash
+//! yopo "Hello!" '{"type":"stdio","name":"my-agent","command":"python","args":["agent.py"],"env":[]}'
 //! ```
 
-use clap::Parser;
 use sacp::JrConnection;
 use sacp::schema::{
     ContentBlock, InitializeRequest, NewSessionRequest, PromptRequest, RequestPermissionOutcome,
     RequestPermissionRequest, RequestPermissionResponse, SessionNotification, TextContent,
     VERSION as PROTOCOL_VERSION,
 };
+use sacp_tokio::{AcpAgent, JrConnectionExt};
 use std::path::PathBuf;
-use tokio::process::Child;
-use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
-
-#[derive(Parser)]
-#[command(name = "yolo-one-shot-client")]
-#[command(about = "A simple ACP client for one-shot prompts", long_about = None)]
-struct Cli {
-    /// The command to run the agent (e.g., "python my_agent.py")
-    #[arg(short, long)]
-    command: String,
-
-    /// The prompt to send to the agent
-    prompt: String,
-}
-
-/// Parse a command string into command and args
-fn parse_command_string(s: &str) -> Result<(PathBuf, Vec<String>), Box<dyn std::error::Error>> {
-    let parts = shell_words::split(s)?;
-    if parts.is_empty() {
-        return Err("Command string cannot be empty".into());
-    }
-    let command = PathBuf::from(&parts[0]);
-    let args = parts[1..].to_vec();
-    Ok((command, args))
-}
-
-/// Spawn a process for the agent and get stdio streams.
-fn spawn_agent_process(
-    command: PathBuf,
-    args: Vec<String>,
-) -> Result<
-    (
-        tokio::process::ChildStdin,
-        tokio::process::ChildStdout,
-        Child,
-    ),
-    Box<dyn std::error::Error>,
-> {
-    let mut cmd = tokio::process::Command::new(&command);
-    cmd.args(&args);
-    cmd.stdin(std::process::Stdio::piped())
-        .stdout(std::process::Stdio::piped());
-
-    let mut child = cmd.spawn()?;
-    let child_stdin = child.stdin.take().ok_or("Failed to open stdin")?;
-    let child_stdout = child.stdout.take().ok_or("Failed to open stdout")?;
-
-    Ok((child_stdin, child_stdout, child))
-}
+use std::str::FromStr;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let cli = Cli::parse();
+    // Parse command line arguments
+    let args: Vec<String> = std::env::args().collect();
+    if args.len() != 3 {
+        eprintln!("Usage: {} <prompt> <agent-config>", args[0]);
+        eprintln!();
+        eprintln!("  <prompt>       - The prompt to send to the agent");
+        eprintln!("  <agent-config> - Either a command string or JSON (starting with '{{')");
+        eprintln!();
+        eprintln!("Examples:");
+        eprintln!("  {} \"What is 2+2?\" \"python my_agent.py\"", args[0]);
+        eprintln!(
+            "  {} \"Hello!\" '{{\"type\":\"stdio\",\"name\":\"agent\",\"command\":\"python\",\"args\":[\"agent.py\"],\"env\":[]}}'",
+            args[0]
+        );
+        std::process::exit(1);
+    }
 
-    // Parse the command string
-    let (command, args) = parse_command_string(&cli.command)?;
+    let prompt = &args[1];
+    let agent_config = &args[2];
 
-    eprintln!("🚀 Spawning agent: {} {:?}", command.display(), args);
+    // Parse the agent configuration
+    let agent = AcpAgent::from_str(agent_config)?;
 
-    // Spawn the agent process
-    let (child_stdin, child_stdout, mut child) = spawn_agent_process(command, args)?;
-
-    // Create a JrConnection with the agent's stdio streams
-    let connection = JrConnection::new(child_stdin.compat_write(), child_stdout.compat());
+    eprintln!("🚀 Spawning agent and connecting...");
 
     // Run the client
-    connection
+    JrConnection::to_agent(agent)?
         .on_receive_notification(async move |notification: SessionNotification, _cx| {
             // Print session updates to stdout (so 2>/dev/null shows only agent output)
             println!("{:?}", notification.update);
             Ok(())
         })
         .on_receive_request(async move |request: RequestPermissionRequest, request_cx| {
-            // YOLO: Auto-approve all permission requests by selecting the first option
+            // YOPO: Auto-approve all permission requests by selecting the first option
             eprintln!("✅ Auto-approving permission request: {:?}", request);
             let option_id = request.options.first().map(|opt| opt.id.clone());
             match option_id {
@@ -139,12 +112,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             eprintln!("✓ Session created: {}", session_id);
 
             // Send the prompt
-            eprintln!("💬 Sending prompt: \"{}\"", cli.prompt);
+            eprintln!("💬 Sending prompt: \"{}\"", prompt);
             let prompt_response = cx
                 .send_request(PromptRequest {
                     session_id: session_id.clone(),
                     prompt: vec![ContentBlock::Text(TextContent {
-                        text: cli.prompt.clone(),
+                        text: prompt.to_string(),
                         annotations: None,
                         meta: None,
                     })],
@@ -159,9 +132,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             Ok(())
         })
         .await?;
-
-    // Kill the child process when done
-    let _ = child.kill().await;
 
     Ok(())
 }
