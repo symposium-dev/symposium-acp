@@ -116,12 +116,6 @@ impl ComponentProvider for MockInnerConductor {
 
 #[tokio::test]
 async fn test_nested_conductor_with_arrow_proxies() -> Result<(), sacp::Error> {
-    tracing_subscriber::fmt()
-        .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
-        .with_test_writer()
-        .try_init()
-        .unwrap();
-
     // Create the nested component chain using mock components
     // Inner conductor will manage: arrow_proxy1 -> arrow_proxy2 -> eliza
     // Outer conductor will manage: inner_conductor only
@@ -176,12 +170,6 @@ async fn test_nested_conductor_with_arrow_proxies() -> Result<(), sacp::Error> {
 
 #[tokio::test]
 async fn test_nested_conductor_with_external_arrow_proxies() -> Result<(), sacp::Error> {
-    tracing_subscriber::fmt()
-        .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
-        .with_test_writer()
-        .try_init()
-        .unwrap();
-
     // Create the nested component chain using external processes
     // Inner conductor spawned as a separate process with two arrow proxies
     // Outer conductor manages: inner_conductor -> eliza (both as external processes)

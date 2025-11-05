@@ -21,16 +21,6 @@ use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
 
 #[tokio::test]
 async fn test_conductor_with_two_external_arrow_proxies() -> Result<(), sacp::Error> {
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::from_default_env()
-                .add_directive("sacp_conductor=debug".parse().unwrap())
-                .add_directive("arrow_proxy=debug".parse().unwrap()),
-        )
-        .with_test_writer()
-        .try_init()
-        .unwrap();
-
     // Create the component chain: arrow_proxy1 -> arrow_proxy2 -> eliza
     let arrow_proxy1 = AcpAgent::from_str("cargo run -p sacp-test --example arrow_proxy")?;
     let arrow_proxy2 = AcpAgent::from_str("cargo run -p sacp-test --example arrow_proxy")?;

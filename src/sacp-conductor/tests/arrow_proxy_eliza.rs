@@ -14,16 +14,6 @@ use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
 
 #[tokio::test]
 async fn test_conductor_with_arrow_proxy_and_eliza() -> Result<(), sacp::Error> {
-    // Set up tracing for debugging
-    let _ = tracing_subscriber::fmt()
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::from_default_env()
-                .add_directive("sacp_conductor=debug".parse().unwrap())
-                .add_directive("arrow_proxy=debug".parse().unwrap()),
-        )
-        .with_test_writer()
-        .try_init();
-
     // Create the component chain: arrow_proxy -> eliza
     let arrow_proxy_agent = AcpAgent::from_str("cargo run -p sacp-test --example arrow_proxy")?;
     let eliza_agent = AcpAgent::from_str("cargo run -p elizacp")?;

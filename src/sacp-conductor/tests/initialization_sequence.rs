@@ -145,14 +145,6 @@ async fn run_test_with_components(
 
 #[tokio::test]
 async fn test_single_component_no_proxy_offer() -> Result<(), sacp::Error> {
-    let _ = tracing_subscriber::fmt()
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::from_default_env()
-                .add_directive("conductor=debug".parse().unwrap()),
-        )
-        .with_test_writer()
-        .try_init();
-
     // Create a single mock component
     let component1 = InitConfig::new(false);
 
@@ -185,14 +177,6 @@ async fn test_single_component_no_proxy_offer() -> Result<(), sacp::Error> {
 
 #[tokio::test]
 async fn test_two_components() -> Result<(), sacp::Error> {
-    let _ = tracing_subscriber::fmt()
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::from_default_env()
-                .add_directive("conductor=debug".parse().unwrap()),
-        )
-        .with_test_writer()
-        .try_init();
-
     // Create a single mock component
     let component1 = InitConfig::new(true);
     let component2 = InitConfig::new(false);
@@ -230,14 +214,6 @@ async fn test_two_components() -> Result<(), sacp::Error> {
 
 #[tokio::test]
 async fn test_proxy_component_must_respond_with_proxy() -> Result<(), sacp::Error> {
-    let _ = tracing_subscriber::fmt()
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::from_default_env()
-                .add_directive("conductor=debug".parse().unwrap()),
-        )
-        .with_test_writer()
-        .try_init();
-
     // Component is offered proxy but does NOT respond with it (respond_with_proxy: false)
     let component1 = InitConfig::new(false);
     let component2 = InitConfig::new(false);
@@ -284,14 +260,6 @@ async fn test_proxy_component_must_respond_with_proxy() -> Result<(), sacp::Erro
 
 #[tokio::test]
 async fn test_proxy_component_must_strip_proxy_when_forwarding() -> Result<(), sacp::Error> {
-    let _ = tracing_subscriber::fmt()
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::from_default_env()
-                .add_directive("conductor=debug".parse().unwrap()),
-        )
-        .with_test_writer()
-        .try_init();
-
     // Component responds with proxy BUT incorrectly forwards the request with proxy still attached
     let component1 = InitConfig::new_with_forward_behavior(true, true);
     let component2 = InitConfig::new(false);
