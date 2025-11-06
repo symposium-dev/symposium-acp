@@ -13,8 +13,8 @@ use uuid::Uuid;
 
 use crate::MessageAndCx;
 use crate::UntypedMessage;
-use crate::handler::JrMessageHandler;
 use crate::jsonrpc::JrConnectionCx;
+use crate::jsonrpc::JrMessageHandler;
 use crate::jsonrpc::JrRequestCx;
 use crate::jsonrpc::OutgoingMessage;
 use crate::jsonrpc::ReplyMessage;
@@ -81,13 +81,12 @@ pub(super) async fn reply_actor(
 ///
 /// This is the protocol layer - it has no knowledge of how messages are transported.
 pub(super) async fn outgoing_protocol_actor(
-    connection_name: &Option<String>,
     mut outgoing_rx: mpsc::UnboundedReceiver<OutgoingMessage>,
     reply_tx: mpsc::UnboundedSender<ReplyMessage>,
     transport_tx: mpsc::UnboundedSender<jsonrpcmsg::Message>,
 ) -> Result<(), crate::Error> {
     while let Some(message) = outgoing_rx.next().await {
-        tracing::debug!(connection_name, ?message, "outgoing_protocol_actor");
+        tracing::debug!(?message, "outgoing_protocol_actor");
 
         // Create the message to be sent over the transport
         let json_rpc_message = match message {
@@ -163,7 +162,6 @@ pub(super) async fn outgoing_protocol_actor(
 ///
 /// This is the transport layer - it has no knowledge of protocol semantics (IDs, correlation, etc.).
 pub(super) async fn transport_outgoing_actor(
-    connection_name: Option<String>,
     mut transport_rx: mpsc::UnboundedReceiver<jsonrpcmsg::Message>,
     outgoing_bytes: impl AsyncWrite,
 ) -> Result<(), crate::Error> {
@@ -173,7 +171,7 @@ pub(super) async fn transport_outgoing_actor(
         match serde_json::to_vec(&json_rpc_message) {
             Ok(mut bytes) => {
                 if let Ok(msg_str) = std::str::from_utf8(&bytes) {
-                    tracing::trace!(connection_name, message = %msg_str, "Sending JSON-RPC message");
+                    tracing::trace!(message = %msg_str, "Sending JSON-RPC message");
                 }
                 bytes.push('\n' as u8);
                 outgoing_bytes
@@ -190,7 +188,6 @@ pub(super) async fn transport_outgoing_actor(
                         //
                         // Q: (Maybe it'd be nice to "reply" with an error?)
                         tracing::error!(
-                            connection_name,
                             ?serialization_error,
                             "Failed to serialize request, ignoring"
                         );
@@ -198,7 +195,7 @@ pub(super) async fn transport_outgoing_actor(
                     jsonrpcmsg::Message::Response(response) => {
                         // If we failed to serialize a *response*,
                         // send an error in response.
-                        tracing::error!(connection_name, ?serialization_error, id = ?response.id, "Failed to serialize response, sending internal_error instead");
+                        tracing::error!(?serialization_error, id = ?response.id, "Failed to serialize response, sending internal_error instead");
                         // Convert crate::Error to jsonrpcmsg::Error
                         let acp_error = crate::Error::internal_error();
                         let jsonrpc_error = jsonrpcmsg::Error {
@@ -233,7 +230,6 @@ pub(super) async fn transport_outgoing_actor(
 ///
 /// This is the protocol layer - it has no knowledge of how messages arrived.
 pub(super) async fn incoming_protocol_actor(
-    connection_name: &Option<String>,
     json_rpc_cx: &JrConnectionCx,
     mut transport_rx: mpsc::UnboundedReceiver<jsonrpcmsg::Message>,
     reply_tx: mpsc::UnboundedSender<ReplyMessage>,
@@ -243,7 +239,7 @@ pub(super) async fn incoming_protocol_actor(
         match message {
             jsonrpcmsg::Message::Request(request) => {
                 tracing::trace!(method = %request.method, id = ?request.id, "Handling request");
-                dispatch_request(connection_name, json_rpc_cx, request, &mut handler).await?
+                dispatch_request(json_rpc_cx, request, &mut handler).await?
             }
             jsonrpcmsg::Message::Response(response) => {
                 tracing::trace!(id = ?response.id, has_result = response.result.is_some(), has_error = response.error.is_some(), "Handling response");
@@ -279,7 +275,6 @@ pub(super) async fn incoming_protocol_actor(
 ///
 /// This is the transport layer - it has no knowledge of protocol semantics.
 pub(super) async fn transport_incoming_actor(
-    connection_name: Option<String>,
     json_rpc_cx: JrConnectionCx,
     incoming_bytes: impl AsyncRead,
     transport_tx: mpsc::UnboundedSender<jsonrpcmsg::Message>,
@@ -290,7 +285,7 @@ pub(super) async fn transport_incoming_actor(
 
     while let Some(line) = incoming_lines.next().await {
         let line = line.map_err(crate::Error::into_internal_error)?;
-        tracing::trace!(connection_name, message = %line, "Received JSON-RPC message");
+        tracing::trace!(message = %line, "Received JSON-RPC message");
 
         let message: Result<jsonrpcmsg::Message, _> = serde_json::from_str(&line);
         match message {
@@ -310,18 +305,10 @@ pub(super) async fn transport_incoming_actor(
 /// Dispatches a JSON-RPC request to the handler.
 /// Report an error back to the server if it does not get handled.
 async fn dispatch_request(
-    connection_name: &Option<String>,
     json_rpc_cx: &JrConnectionCx,
     request: jsonrpcmsg::Request,
     handler: &mut impl JrMessageHandler,
 ) -> Result<(), crate::Error> {
-    tracing::debug!(
-        ?request,
-        "handler_type" = ?handler.describe_chain(),
-        connection_name,
-        "dispatch_request"
-    );
-
     let message = UntypedMessage::new(&request.method, &request.params).expect("well-formed JSON");
 
     let message_cx = match &request.id {
@@ -334,13 +321,13 @@ async fn dispatch_request(
 
     match handler.handle_message(message_cx).await? {
         Handled::Yes => {
-            tracing::debug!(method = request.method, ?request.id, "Handler reported: Handled::Yes");
+            tracing::debug!(method = request.method, ?request.id, handler = ?handler.describe_chain(), "Message handled");
+            return Ok(());
         }
-        Handled::No(request_cx) => {
-            tracing::debug!(method = ?request.method, ?request.id, "Handler reported: Handled::No, sending method_not_found");
-            request_cx.respond_with_error(crate::Error::method_not_found())?;
+
+        Handled::No(m) => {
+            tracing::debug!(method = ?request.method, ?request.id, "No suitable handler found");
+            m.respond_with_error(crate::Error::method_not_found())
         }
     }
-
-    Ok(())
 }

@@ -11,7 +11,7 @@ pub struct MockTransport;
 
 impl IntoJrTransport for MockTransport {
     fn into_jr_transport(
-        self,
+        self: Box<MockTransport>,
         _cx: &JrConnectionCx,
         _outgoing_rx: futures::channel::mpsc::UnboundedReceiver<jsonrpcmsg::Message>,
         _incoming_tx: futures::channel::mpsc::UnboundedSender<jsonrpcmsg::Message>,
@@ -258,8 +258,8 @@ pub fn process(data: &str) -> Result<String, crate::Error> {
 }
 
 // Helper to create a mock connection for examples
-pub fn mock_connection() -> JrConnection<NullHandler> {
-    JrConnection::new()
+pub fn mock_connection() -> JrHandlerChain<NullHandler> {
+    JrHandlerChain::new()
 }
 
 pub trait Make {

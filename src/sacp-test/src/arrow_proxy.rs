@@ -3,7 +3,7 @@
 //! This proxy demonstrates basic proxy functionality by intercepting
 //! `session/update` notifications and prepending `>` to the content.
 
-use sacp::JrConnection;
+use sacp::JrHandlerChain;
 use sacp::schema::{ContentBlock, ContentChunk, SessionNotification, SessionUpdate};
 use sacp_proxy::{AcpProxyExt, McpServiceRegistry};
 
@@ -18,9 +18,9 @@ where
     OB: futures::AsyncWrite + Send + 'static,
     IB: futures::AsyncRead + Send + 'static,
 {
-    let transport = sacp::ViaBytes::new(stdout, stdin);
+    let transport = sacp::ByteStreams::new(stdout, stdin);
 
-    JrConnection::new()
+    JrHandlerChain::new()
         .name("arrow-proxy")
         // Intercept session notifications from successor (agent) and modify them
         .on_receive_notification_from_successor(
@@ -48,7 +48,8 @@ where
         // Enable proxy mode (handles capability handshake and message routing)
         .proxy()
         // Start serving
-        .serve(transport)
+        .connect_to(transport)?
+        .serve()
         .await
 }
 

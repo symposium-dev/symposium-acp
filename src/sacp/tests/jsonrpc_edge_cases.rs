@@ -7,7 +7,7 @@
 //! - Client disconnect handling
 
 use futures::{AsyncRead, AsyncWrite};
-use sacp::{JrConnection, JrMessage, JrRequestCx, JrResponse, JrResponsePayload, JrRequest};
+use sacp::{JrHandlerChain, JrMessage, JrRequest, JrRequestCx, JrResponse, JrResponsePayload};
 use serde::{Deserialize, Serialize};
 use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
 
@@ -146,8 +146,8 @@ async fn test_empty_request() {
         .run_until(async {
             let (server_reader, server_writer, client_reader, client_writer) = setup_test_streams();
 
-            let server_transport = sacp::ViaBytes::new(server_writer, server_reader);
-            let server = JrConnection::new().on_receive_request(
+            let server_transport = sacp::ByteStreams::new(server_writer, server_reader);
+            let server = JrHandlerChain::new().on_receive_request(
                 async |_request: EmptyRequest, request_cx: JrRequestCx<SimpleResponse>| {
                     request_cx.respond(SimpleResponse {
                         result: "Got empty request".to_string(),
@@ -155,15 +155,15 @@ async fn test_empty_request() {
                 },
             );
 
-            let client_transport = sacp::ViaBytes::new(client_writer, client_reader);
-            let client = JrConnection::new();
+            let client_transport = sacp::ByteStreams::new(client_writer, client_reader);
+            let client = JrHandlerChain::new();
 
             tokio::task::spawn_local(async move {
                 server.serve(server_transport).await.ok();
             });
 
             let result = client
-                .with_client(client_transport, async |cx| -> Result<(), sacp::Error> {
+                .serve_with(client_transport, async |cx| -> Result<(), sacp::Error> {
                     let request = EmptyRequest;
 
                     let result: Result<SimpleResponse, _> = recv(cx.send_request(request)).await;
@@ -196,8 +196,8 @@ async fn test_null_params() {
         .run_until(async {
             let (server_reader, server_writer, client_reader, client_writer) = setup_test_streams();
 
-            let server_transport = sacp::ViaBytes::new(server_writer, server_reader);
-            let server = JrConnection::new().on_receive_request(
+            let server_transport = sacp::ByteStreams::new(server_writer, server_reader);
+            let server = JrHandlerChain::new().on_receive_request(
                 async |_request: OptionalParamsRequest, request_cx: JrRequestCx<SimpleResponse>| {
                     request_cx.respond(SimpleResponse {
                         result: "Has params: true".to_string(),
@@ -205,15 +205,15 @@ async fn test_null_params() {
                 },
             );
 
-            let client_transport = sacp::ViaBytes::new(client_writer, client_reader);
-            let client = JrConnection::new();
+            let client_transport = sacp::ByteStreams::new(client_writer, client_reader);
+            let client = JrHandlerChain::new();
 
             tokio::task::spawn_local(async move {
                 server.serve(server_transport).await.ok();
             });
 
             let result = client
-                .with_client(client_transport, async |cx| -> Result<(), sacp::Error> {
+                .serve_with(client_transport, async |cx| -> Result<(), sacp::Error> {
                     let request = OptionalParamsRequest { value: None };
 
                     let result: Result<SimpleResponse, _> = recv(cx.send_request(request)).await;
@@ -243,8 +243,8 @@ async fn test_server_shutdown() {
         .run_until(async {
             let (server_reader, server_writer, client_reader, client_writer) = setup_test_streams();
 
-            let server_transport = sacp::ViaBytes::new(server_writer, server_reader);
-            let server = JrConnection::new().on_receive_request(
+            let server_transport = sacp::ByteStreams::new(server_writer, server_reader);
+            let server = JrHandlerChain::new().on_receive_request(
                 async |_request: EmptyRequest, request_cx: JrRequestCx<SimpleResponse>| {
                     request_cx.respond(SimpleResponse {
                         result: "Got empty request".to_string(),
@@ -252,8 +252,8 @@ async fn test_server_shutdown() {
                 },
             );
 
-            let client_transport = sacp::ViaBytes::new(client_writer, client_reader);
-            let client = JrConnection::new();
+            let client_transport = sacp::ByteStreams::new(client_writer, client_reader);
+            let client = JrHandlerChain::new();
 
             let server_handle = tokio::task::spawn_local(async move {
                 server.serve(server_transport).await.ok();
@@ -261,7 +261,7 @@ async fn test_server_shutdown() {
 
             let client_result = tokio::task::spawn_local(async move {
                 client
-                    .with_client(client_transport, async |cx| -> Result<(), sacp::Error> {
+                    .serve_with(client_transport, async |cx| -> Result<(), sacp::Error> {
                         let request = EmptyRequest;
 
                         // Send request and get future for response
@@ -312,8 +312,8 @@ async fn test_client_disconnect() {
             let server_reader = server_reader.compat();
             let server_writer = server_writer.compat_write();
 
-            let server_transport = sacp::ViaBytes::new(server_writer, server_reader);
-            let server = JrConnection::new().on_receive_request(
+            let server_transport = sacp::ByteStreams::new(server_writer, server_reader);
+            let server = JrHandlerChain::new().on_receive_request(
                 async |_request: EmptyRequest, request_cx: JrRequestCx<SimpleResponse>| {
                     request_cx.respond(SimpleResponse {
                         result: "Got empty request".to_string(),

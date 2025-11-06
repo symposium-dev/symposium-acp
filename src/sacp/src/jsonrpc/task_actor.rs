@@ -1,17 +1,53 @@
-use std::{panic::Location, pin::Pin};
+use std::panic::Location;
 
 use futures::{
     StreamExt,
     channel::mpsc,
+    future::BoxFuture,
     stream::{FusedStream, FuturesUnordered},
 };
 
 use crate::JrConnectionCx;
 
+pub(crate) struct Task<'scope> {
+    location: &'static Location<'static>,
+    task_future: BoxFuture<'scope, Result<(), crate::Error>>,
+}
+
+impl<'scope> Task<'scope> {
+    pub fn new(
+        location: &'static Location<'static>,
+        task_future: impl Future<Output = Result<(), crate::Error>> + Send + 'scope,
+    ) -> Self {
+        Task {
+            location,
+            task_future: Box::pin(task_future),
+        }
+    }
+
+    /// Return a new task that executes with the given name
+    fn named(self, name: Option<String>) -> Task<'scope> {
+        if let Some(name) = name {
+            let Task {
+                location,
+                task_future,
+            } = self;
+            Task {
+                location,
+                task_future: Box::pin(crate::util::instrumented_with_connection_name(
+                    name,
+                    task_future,
+                )),
+            }
+        } else {
+            self
+        }
+    }
+}
+
 /// The "task actor" manages other tasks
 pub(super) async fn task_actor(
-    mut task_rx: mpsc::UnboundedReceiver<Task>,
-    cx: &JrConnectionCx,
+    mut task_rx: mpsc::UnboundedReceiver<Task<'_>>,
 ) -> Result<(), crate::Error> {
     let mut futures = FuturesUnordered::new();
 
@@ -19,7 +55,7 @@ pub(super) async fn task_actor(
         // If we have no futures to run, wait until we do.
         if futures.is_empty() {
             match task_rx.next().await {
-                Some(task) => futures.push(execute_task(task, cx.clone())),
+                Some(task) => futures.push(execute_task(task)),
                 None => return Ok(()),
             }
             continue;
@@ -41,16 +77,19 @@ pub(super) async fn task_actor(
 
             task = task_rx.next() => {
                 if let Some(task) = task {
-                    futures.push(execute_task(task, cx.clone()));
+                    futures.push(execute_task(task));
                 }
             }
         }
     }
 }
 
-async fn execute_task(task: Task, cx: JrConnectionCx) -> Result<(), crate::Error> {
-    let Task { location, task_fn } = task;
-    task_fn.run(cx).await.map_err(|err| {
+async fn execute_task(task: Task<'_>) -> Result<(), crate::Error> {
+    let Task {
+        location,
+        task_future,
+    } = task;
+    task_future.await.map_err(|err| {
         let data = err.data.clone();
         err.with_data(serde_json::json! {
             {
@@ -61,45 +100,44 @@ async fn execute_task(task: Task, cx: JrConnectionCx) -> Result<(), crate::Error
     })
 }
 
-pub(crate) struct Task {
-    location: &'static Location<'static>,
-    task_fn: Box<dyn TaskFn + Send>,
+pub(crate) struct PendingTask<'scope> {
+    task_fn: Box<dyn PendingTaskFn<'scope>>,
 }
 
-impl Task {
-    pub fn new<F, Fut>(location: &'static Location<'static>, task_function: F) -> Self
+impl<'scope> PendingTask<'scope> {
+    pub fn new<Fut>(
+        location: &'static Location<'static>,
+        task_function: impl FnOnce(JrConnectionCx) -> Fut + Send + 'scope,
+    ) -> Self
     where
-        F: FnOnce(JrConnectionCx) -> Fut + Send + 'static,
-        Fut: Future<Output = Result<(), crate::Error>> + Send + 'static,
+        Fut: Future<Output = Result<(), crate::Error>> + Send + 'scope,
     {
-        Task {
-            location,
-            task_fn: Box::new(FnOnceTask(task_function)),
+        PendingTask {
+            task_fn: Box::new(move |cx| Task::new(location, task_function(cx))),
         }
+    }
+
+    /// Return a new pending task that will execute with the given name
+    pub fn named(self, name: Option<String>) -> Self {
+        PendingTask {
+            task_fn: Box::new(move |cx| self.into_task(cx).named(name)),
+        }
+    }
+
+    pub fn into_task(self, cx: JrConnectionCx) -> Task<'scope> {
+        self.task_fn.into_task(cx)
     }
 }
 
-trait TaskFn {
-    fn run(
-        self: Box<Self>,
-        cx: JrConnectionCx,
-    ) -> Pin<Box<dyn Future<Output = Result<(), crate::Error>>>>;
+trait PendingTaskFn<'scope>: 'scope + Send {
+    fn into_task(self: Box<Self>, cx: JrConnectionCx) -> Task<'scope>;
 }
 
-struct FnOnceTask<F, Fut>(F)
+impl<'scope, F> PendingTaskFn<'scope> for F
 where
-    F: FnOnce(JrConnectionCx) -> Fut + Send + 'static,
-    Fut: Future<Output = Result<(), crate::Error>> + Send + 'static;
-
-impl<F, Fut> TaskFn for FnOnceTask<F, Fut>
-where
-    F: FnOnce(JrConnectionCx) -> Fut + Send + 'static,
-    Fut: Future<Output = Result<(), crate::Error>> + Send + 'static,
+    F: FnOnce(JrConnectionCx) -> Task<'scope> + 'scope + Send,
 {
-    fn run(
-        self: Box<Self>,
-        cx: JrConnectionCx,
-    ) -> Pin<Box<dyn Future<Output = Result<(), crate::Error>>>> {
-        Box::pin(self.0(cx))
+    fn into_task(self: Box<Self>, cx: JrConnectionCx) -> Task<'scope> {
+        (*self)(cx)
     }
 }

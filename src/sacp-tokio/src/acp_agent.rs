@@ -148,7 +148,7 @@ impl Drop for ChildHolder {
 
 impl sacp::IntoJrTransport for AcpAgent {
     fn into_jr_transport(
-        self,
+        self: Box<Self>,
         cx: &sacp::JrConnectionCx,
         outgoing_rx: futures::channel::mpsc::UnboundedReceiver<jsonrpcmsg::Message>,
         incoming_tx: futures::channel::mpsc::UnboundedSender<jsonrpcmsg::Message>,
@@ -159,8 +159,8 @@ impl sacp::IntoJrTransport for AcpAgent {
         cx.spawn(ChildHolder { _child: child })?;
 
         // Create the ViaBytes transport and set it up
-        let transport = sacp::ViaBytes::new(child_stdin.compat_write(), child_stdout.compat());
-        transport.into_jr_transport(cx, outgoing_rx, incoming_tx)
+        let transport = sacp::ByteStreams::new(child_stdin.compat_write(), child_stdout.compat());
+        Box::new(transport).into_jr_transport(cx, outgoing_rx, incoming_tx)
     }
 }
 

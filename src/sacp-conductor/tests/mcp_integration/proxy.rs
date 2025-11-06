@@ -1,7 +1,7 @@
 //! Proxy component that provides MCP tools
 
 use futures::{AsyncRead, AsyncWrite};
-use sacp::{JrConnection, JrConnectionCx};
+use sacp::{JrConnectionCx, JrHandlerChain};
 use sacp_conductor::component::{Cleanup, ComponentProvider};
 use sacp_proxy::{AcpProxyExt, McpServiceRegistry};
 use std::pin::Pin;
@@ -17,9 +17,9 @@ impl ComponentProvider for ProxyComponentProvider {
         outgoing_bytes: Pin<Box<dyn AsyncWrite + Send>>,
         incoming_bytes: Pin<Box<dyn AsyncRead + Send>>,
     ) -> Result<Cleanup, sacp::Error> {
-        let transport = sacp::ViaBytes::new(outgoing_bytes, incoming_bytes);
+        let transport = sacp::ByteStreams::new(outgoing_bytes, incoming_bytes);
         cx.spawn(
-            JrConnection::new()
+            JrHandlerChain::new()
                 .name("proxy-component")
                 .provide_mcp(
                     McpServiceRegistry::default().with_rmcp_server("test", TestMcpServer::new)?,

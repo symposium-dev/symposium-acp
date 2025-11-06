@@ -12,7 +12,7 @@
 //! ```
 
 use clap::Parser;
-use sacp::JrConnection;
+use sacp::JrHandlerChain;
 use sacp::schema::{
     ContentBlock, InitializeRequest, NewSessionRequest, PromptRequest, RequestPermissionOutcome,
     RequestPermissionRequest, RequestPermissionResponse, SessionNotification, TextContent,
@@ -82,8 +82,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let (child_stdin, child_stdout, mut child) = spawn_agent_process(command, args)?;
 
     // Create transport and connection
-    let transport = sacp::ViaBytes::new(child_stdin.compat_write(), child_stdout.compat());
-    let connection = JrConnection::new();
+    let transport = sacp::ByteStreams::new(child_stdin.compat_write(), child_stdout.compat());
+    let connection = JrHandlerChain::new();
 
     // Run the client
     connection
@@ -110,7 +110,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
             }
         })
-        .with_client(transport, |cx: sacp::JrConnectionCx| async move {
+        .serve_with(transport, |cx: sacp::JrConnectionCx| async move {
             // Initialize the agent
             eprintln!("🤝 Initializing agent...");
             let init_response = cx

@@ -8,7 +8,7 @@
 
 use futures::{AsyncRead, AsyncWrite};
 use sacp::schema::{AgentCapabilities, InitializeRequest, InitializeResponse};
-use sacp::{JrConnection, JrConnectionCx, MetaCapabilityExt, Proxy};
+use sacp::{JrConnectionCx, JrHandlerChain, MetaCapabilityExt, Proxy};
 use sacp_conductor::component::{Cleanup, ComponentProvider};
 use sacp_conductor::conductor::Conductor;
 use sacp_proxy::JrCxExt;
@@ -80,8 +80,8 @@ impl ComponentProvider for InitComponentProvider {
     ) -> Result<Cleanup, sacp::Error> {
         let config = Arc::clone(&self.config);
         cx.spawn(async move {
-            let transport = sacp::ViaBytes::new(outgoing_bytes, incoming_bytes);
-            JrConnection::new()
+            let transport = sacp::ByteStreams::new(outgoing_bytes, incoming_bytes);
+            JrHandlerChain::new()
                 .name("init-component-provider")
                 .on_receive_request(async move |mut request: InitializeRequest, request_cx| {
                     let has_proxy_capability = request.has_meta_capability(Proxy);
@@ -129,9 +129,9 @@ async fn run_test_with_components(
     let (editor_out, conductor_in) = duplex(1024);
     let (conductor_out, editor_in) = duplex(1024);
 
-    let transport = sacp::ViaBytes::new(editor_out.compat_write(), editor_in.compat());
+    let transport = sacp::ByteStreams::new(editor_out.compat_write(), editor_in.compat());
 
-    JrConnection::new()
+    JrHandlerChain::new()
         .name("editor-to-connector")
         .with_spawned(async move {
             Conductor::run(
@@ -142,7 +142,7 @@ async fn run_test_with_components(
             )
             .await
         })
-        .with_client(transport, editor_task)
+        .serve_with(transport, editor_task)
         .await
 }
 

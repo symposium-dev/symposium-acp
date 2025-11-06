@@ -3,7 +3,7 @@ use std::{collections::HashMap, net::SocketAddr};
 use futures::{SinkExt, StreamExt as _, channel::mpsc};
 use sacp;
 use sacp::schema::McpServer;
-use sacp::{JrConnection, JrConnectionCx, MessageAndCx};
+use sacp::{JrConnectionCx, JrHandlerChain, MessageAndCx};
 use sacp_proxy::McpDisconnectNotification;
 use tokio::net::TcpStream;
 use tokio_util::compat::{TokioAsyncReadCompatExt as _, TokioAsyncWriteCompatExt as _};
@@ -211,9 +211,9 @@ impl McpBridgeConnectionActor {
         // Establish bidirectional JSON-RPC connection
         // The bridge will send MCP requests (tools/call, etc.) to the conductor
         // The conductor can also send responses back
-        let transport = sacp::ViaBytes::new(write_half.compat_write(), read_half.compat());
+        let transport = sacp::ByteStreams::new(write_half.compat_write(), read_half.compat());
 
-        let result = JrConnection::new()
+        let result = JrHandlerChain::new()
             .name(format!("mpc-client-to-conductor({connection_id})"))
             // When we receive a message from the MCP client, forward it to the conductor
             .on_receive_message({
@@ -230,7 +230,8 @@ impl McpBridgeConnectionActor {
                 }
             })
             // When we receive messages from the conductor, forward them to the MCP client
-            .with_client(transport, async move |mcp_client_cx| {
+            .connect_to(transport)?
+            .with_client(async move |mcp_client_cx| {
                 while let Some(message) = self.to_mcp_client_rx.next().await {
                     mcp_client_cx.send_proxied_message(message)?;
                 }

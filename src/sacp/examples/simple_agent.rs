@@ -1,10 +1,10 @@
 use sacp::schema::{AgentCapabilities, InitializeRequest, InitializeResponse};
-use sacp::{JrConnection, MessageAndCx, UntypedMessage};
+use sacp::{JrHandlerChain, MessageAndCx, UntypedMessage};
 use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
 
 #[tokio::main]
 async fn main() -> Result<(), sacp::Error> {
-    JrConnection::new()
+    JrHandlerChain::new()
         .name("my-agent") // for debugging
         .on_receive_request(async move |initialize: InitializeRequest, request_cx| {
             // Respond to initialize successfully
@@ -27,7 +27,7 @@ async fn main() -> Result<(), sacp::Error> {
                 message.respond_with_error(sacp::util::internal_error("TODO"))
             },
         )
-        .serve(sacp::ViaBytes::new(
+        .serve(sacp::ByteStreams::new(
             tokio::io::stdout().compat_write(),
             tokio::io::stdin().compat(),
         ))

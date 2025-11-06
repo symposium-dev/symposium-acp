@@ -20,7 +20,7 @@
 //! yopo "Hello!" '{"type":"stdio","name":"my-agent","command":"python","args":["agent.py"],"env":[]}'
 //! ```
 
-use sacp::JrConnection;
+use sacp::JrHandlerChain;
 use sacp::schema::{
     ContentBlock, InitializeRequest, NewSessionRequest, PromptRequest, RequestPermissionOutcome,
     RequestPermissionRequest, RequestPermissionResponse, SessionNotification, TextContent,
@@ -58,10 +58,31 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     eprintln!("🚀 Spawning agent and connecting...");
 
     // Run the client - AcpAgent implements IntoJrTransport
-    JrConnection::new()
+    JrHandlerChain::new()
         .on_receive_notification(async move |notification: SessionNotification, _cx| {
             // Print session updates to stdout (so 2>/dev/null shows only agent output)
-            println!("{:?}", notification.update);
+            match notification.update {
+                sacp::schema::SessionUpdate::AgentMessageChunk(content_chunk) => {
+                    match content_chunk.content {
+                        ContentBlock::Text(TextContent {
+                            annotations: _,
+                            text,
+                            meta: _,
+                        }) => print!("{text}"),
+                        ContentBlock::Image(_) => {}
+                        ContentBlock::Audio(_) => {}
+                        ContentBlock::ResourceLink(_) => {}
+                        ContentBlock::Resource(_) => {}
+                    }
+                }
+                sacp::schema::SessionUpdate::UserMessageChunk(_) => {}
+                sacp::schema::SessionUpdate::AgentThoughtChunk(_) => {}
+                sacp::schema::SessionUpdate::ToolCall(_) => {}
+                sacp::schema::SessionUpdate::ToolCallUpdate(_) => {}
+                sacp::schema::SessionUpdate::Plan(_) => {}
+                sacp::schema::SessionUpdate::AvailableCommandsUpdate(_) => {}
+                sacp::schema::SessionUpdate::CurrentModeUpdate(_) => {}
+            }
             Ok(())
         })
         .on_receive_request(async move |request: RequestPermissionRequest, request_cx| {
@@ -82,7 +103,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
             }
         })
-        .with_client(agent, |cx: sacp::JrConnectionCx| async move {
+        .connect_to(agent)?
+        .with_client(|cx: sacp::JrConnectionCx| async move {
             // Initialize the agent
             eprintln!("🤝 Initializing agent...");
             let init_response = cx
@@ -132,6 +154,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             Ok(())
         })
         .await?;
+
+    println!();
 
     Ok(())
 }

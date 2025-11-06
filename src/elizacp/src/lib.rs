@@ -2,7 +2,7 @@ pub mod eliza;
 
 use anyhow::Result;
 use eliza::Eliza;
-use sacp::JrConnection;
+use sacp::JrHandlerChain;
 use sacp::schema::{
     AgentCapabilities, ContentBlock, ContentChunk, InitializeRequest, InitializeResponse,
     LoadSessionRequest, LoadSessionResponse, NewSessionRequest, NewSessionResponse, PromptRequest,
@@ -150,9 +150,9 @@ where
     let agent = ElizaAgent::new();
 
     // Set up JSON-RPC connection
-    let transport = sacp::ViaBytes::new(stdout, stdin);
+    let transport = sacp::ByteStreams::new(stdout, stdin);
 
-    JrConnection::new()
+    JrHandlerChain::new()
         .name("elizacp")
         .on_receive_request({
             async |initialize: InitializeRequest, request_cx| {
@@ -190,7 +190,8 @@ where
                 agent.handle_prompt_request(request, request_cx).await
             }
         })
-        .serve(transport)
+        .connect_to(transport)?
+        .serve()
         .await?;
 
     Ok(())

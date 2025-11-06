@@ -74,7 +74,9 @@
 //! - **[sacp](https://crates.io/crates/sacp)** - Core ACP SDK
 //! - **[sacp-tokio](https://crates.io/crates/sacp-tokio)** - Tokio utilities for process spawning
 
-use crate::{component::CommandComponentProvider, conductor::Conductor};
+use std::str::FromStr;
+
+use crate::conductor::Conductor;
 
 /// Component abstraction for spawning and managing proxies/agents
 pub mod component;
@@ -84,8 +86,7 @@ pub mod conductor;
 mod mcp_bridge;
 
 use clap::{Parser, Subcommand};
-use tokio::io::{stdin, stdout};
-use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
+use sacp_tokio::{AcpAgent, Stdio};
 
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
@@ -118,10 +119,14 @@ impl ConductorArgs {
             ConductorCommand::Agent { name, proxies } => {
                 let providers = proxies
                     .into_iter()
-                    .map(|s| CommandComponentProvider::new(s))
-                    .collect();
+                    .map(|s| AcpAgent::from_str(&s))
+                    .collect::<Result<Vec<_>, sacp::Error>>()?;
 
-                Conductor::run(name, stdout().compat_write(), stdin().compat(), providers).await
+                Conductor::new(name, providers, None)
+                    .into_handler_chain()
+                    .connect_to(Stdio::default())?
+                    .serve()
+                    .await
             }
             ConductorCommand::Mcp { port } => mcp_bridge::run_mcp_bridge(port).await,
         }
