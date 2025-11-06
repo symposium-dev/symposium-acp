@@ -2,22 +2,23 @@
 
 // Types re-exported from crate root
 use serde::{Deserialize, Serialize};
-use std::convert::Infallible;
 use std::fmt::Debug;
 use std::panic::Location;
 
 use boxfnonce::SendBoxFnOnce;
 use futures::channel::{mpsc, oneshot};
-use futures::future::Either;
+use futures::future::{self};
 use futures::{AsyncRead, AsyncWrite, FutureExt};
 
 mod actors;
 pub(crate) mod handlers;
+mod task_actor;
 
-use crate::jsonrpc::actors::Task;
+use crate::handler::IntoJrMessageHandler;
 use crate::jsonrpc::handlers::{
-    ChainHandler, MessageHandler, NotificationHandler, NullHandler, RequestHandler,
+    ChainedHandler, MessageHandler, NotificationHandler, NullHandler, RequestHandler,
 };
+use crate::jsonrpc::task_actor::Task;
 
 /// A JSON-RPC connection that can act as either a server, client, or both.
 ///
@@ -314,23 +315,14 @@ use crate::jsonrpc::handlers::{
 /// # }
 /// ```
 #[must_use]
-pub struct JrConnection<H: JrHandler> {
+pub struct JrConnection<H: IntoJrMessageHandler> {
     name: Option<String>,
-
-    /// Where the "outgoing messages" actor will receive messages.
-    outgoing_rx: mpsc::UnboundedReceiver<OutgoingMessage>,
-
-    /// Sender to send messages to the "outgoing message" actor.
-    outgoing_tx: mpsc::UnboundedSender<OutgoingMessage>,
 
     /// Handler for incoming messages.
     handler: H,
 
-    /// Receiver for new tasks.
-    new_task_rx: mpsc::UnboundedReceiver<Task>,
-
-    /// Sender to send messages to the "new task" actor.
-    new_task_tx: mpsc::UnboundedSender<Task>,
+    /// Pending tasks
+    spawned_tasks: Vec<Task>,
 }
 
 impl JrConnection<NullHandler> {
@@ -338,20 +330,15 @@ impl JrConnection<NullHandler> {
     /// This type follows a builder pattern; use other methods to configure and then invoke
     /// [`Self::serve`] (to use as a server) or [`Self::with_client`] to use as a client.
     pub fn new() -> Self {
-        let (outgoing_tx, outgoing_rx) = mpsc::unbounded();
-        let (new_task_tx, new_task_rx) = mpsc::unbounded();
         Self {
             name: None,
-            outgoing_rx,
-            outgoing_tx,
             handler: NullHandler::default(),
-            new_task_rx,
-            new_task_tx,
+            spawned_tasks: Default::default(),
         }
     }
 }
 
-impl<H: JrHandler> JrConnection<H> {
+impl<H: IntoJrMessageHandler> JrConnection<H> {
     /// Set the "name" of this connection -- used only for debugging logs.
     pub fn name(mut self, name: impl ToString) -> Self {
         self.name = Some(name.to_string());
@@ -362,20 +349,15 @@ impl<H: JrHandler> JrConnection<H> {
     ///
     /// Prefer [`Self::on_receive_request`] or [`Self::on_receive_notification`].
     /// This is a low-level method that is not intended for general use.
-    pub fn chain_handler<H1: JrHandler, E>(
+    pub fn with_chained_handler<H1: IntoJrMessageHandler>(
         self,
-        handler: impl IntoJrHandler<Handler = H1, Error = E>,
-    ) -> Result<JrConnection<ChainHandler<H, H1>>, E> {
-        let cx = self.connection_cx();
-        let handler1 = handler.into_jr_handler(cx)?;
-        Ok(JrConnection {
+        handler: H1,
+    ) -> JrConnection<ChainedHandler<H, H1>> {
+        JrConnection {
             name: self.name,
-            handler: ChainHandler::new(self.handler, handler1),
-            outgoing_rx: self.outgoing_rx,
-            outgoing_tx: self.outgoing_tx,
-            new_task_rx: self.new_task_rx,
-            new_task_tx: self.new_task_tx,
-        })
+            handler: ChainedHandler::new(self.handler, handler),
+            spawned_tasks: self.spawned_tasks,
+        }
     }
 
     /// Register a handler for messages that can be either requests OR notifications.
@@ -417,20 +399,13 @@ impl<H: JrHandler> JrConnection<H> {
     pub fn on_receive_message<R, N, F>(
         self,
         op: F,
-    ) -> JrConnection<ChainHandler<H, MessageHandler<R, N, F>>>
+    ) -> JrConnection<ChainedHandler<H, MessageHandler<R, N, F>>>
     where
         R: JrRequest,
         N: JrNotification,
         F: AsyncFnMut(MessageAndCx<R, N>) -> Result<(), crate::Error>,
     {
-        JrConnection {
-            name: self.name,
-            handler: ChainHandler::new(self.handler, MessageHandler::new(op)),
-            outgoing_rx: self.outgoing_rx,
-            outgoing_tx: self.outgoing_tx,
-            new_task_rx: self.new_task_rx,
-            new_task_tx: self.new_task_tx,
-        }
+        self.with_chained_handler(MessageHandler::new(op))
     }
 
     /// Register a handler for JSON-RPC requests of type `R`.
@@ -472,19 +447,12 @@ impl<H: JrHandler> JrConnection<H> {
     pub fn on_receive_request<R, F>(
         self,
         op: F,
-    ) -> JrConnection<ChainHandler<H, RequestHandler<R, F>>>
+    ) -> JrConnection<ChainedHandler<H, RequestHandler<R, F>>>
     where
         R: JrRequest,
         F: AsyncFnMut(R, JrRequestCx<R::Response>) -> Result<(), crate::Error>,
     {
-        JrConnection {
-            name: self.name,
-            handler: ChainHandler::new(self.handler, RequestHandler::new(op)),
-            outgoing_rx: self.outgoing_rx,
-            outgoing_tx: self.outgoing_tx,
-            new_task_rx: self.new_task_rx,
-            new_task_tx: self.new_task_tx,
-        }
+        self.with_chained_handler(RequestHandler::new(op))
     }
 
     /// Register a handler for JSON-RPC notifications of type `N`.
@@ -526,40 +494,25 @@ impl<H: JrHandler> JrConnection<H> {
     pub fn on_receive_notification<N, F>(
         self,
         op: F,
-    ) -> JrConnection<ChainHandler<H, NotificationHandler<N, F>>>
+    ) -> JrConnection<ChainedHandler<H, NotificationHandler<N, F>>>
     where
         N: JrNotification,
         F: AsyncFnMut(N, JrConnectionCx) -> Result<(), crate::Error>,
     {
-        JrConnection {
-            name: self.name,
-            handler: ChainHandler::new(self.handler, NotificationHandler::new(op)),
-            outgoing_rx: self.outgoing_rx,
-            outgoing_tx: self.outgoing_tx,
-            new_task_rx: self.new_task_rx,
-            new_task_tx: self.new_task_tx,
-        }
-    }
-
-    /// Returns a [`JrConnectionCx`] that allows you to send requests over the connection
-    /// and receive responses.
-    ///
-    /// **Warning:** This method is provided for use during setup and construction.
-    /// It returns a [`JrConnectionCx`] that you can use later to send requests
-    /// or to spawn tasks. But if you do not invoke [`Self::serve`] or [`Self::with_client`],
-    /// the server will not be running, and those messages will not be received.
-    pub fn connection_cx(&self) -> JrConnectionCx {
-        JrConnectionCx::new(self.outgoing_tx.clone(), self.new_task_tx.clone())
+        self.with_chained_handler(NotificationHandler::new(op))
     }
 
     /// Enqueue a task to run once the connection is actively serving traffic.
     #[track_caller]
-    pub fn with_spawned(
-        self,
-        task: impl Future<Output = Result<(), crate::Error>> + Send + 'static,
-    ) -> Self {
-        let json_rpc_cx = self.connection_cx();
-        json_rpc_cx.spawn(task).expect("spawning failed");
+    pub fn with_spawned<F>(
+        mut self,
+        task: impl FnOnce(JrConnectionCx) -> F + Send + 'static,
+    ) -> Self
+    where
+        F: Future<Output = Result<(), crate::Error>> + Send + 'static,
+    {
+        let location = Location::caller();
+        self.spawned_tasks.push(Task::new(location, task));
         self
     }
 
@@ -599,49 +552,9 @@ impl<H: JrHandler> JrConnection<H> {
     /// # Ok(())
     /// # }
     /// ```
-    pub async fn serve<T: IntoJrTransport>(self, transport: T) -> Result<(), crate::Error> {
-        let (reply_tx, reply_rx) = mpsc::unbounded();
-        let json_rpc_cx = JrConnectionCx::new(self.outgoing_tx, self.new_task_tx);
-
-        // Create channels for protocol/transport boundary
-        let (transport_outgoing_tx, transport_outgoing_rx) = mpsc::unbounded();
-        let (transport_incoming_tx, transport_incoming_rx) = mpsc::unbounded();
-
-        // Set up the transport layer
-        transport.into_jr_transport(&json_rpc_cx, transport_outgoing_rx, transport_incoming_tx)?;
-
-        futures::select!(
-            // Protocol layer: OutgoingMessage → jsonrpcmsg::Message
-            r = actors::outgoing_protocol_actor(
-                &self.name,
-                self.outgoing_rx,
-                reply_tx.clone(),
-                transport_outgoing_tx,
-            ).fuse() => {
-                tracing::trace!(?r, "outgoing protocol actor terminated");
-                r?;
-            }
-            // Protocol layer: jsonrpcmsg::Message → handler/reply routing
-            r = actors::incoming_protocol_actor(
-                &self.name,
-                &json_rpc_cx,
-                transport_incoming_rx,
-                reply_tx,
-                self.handler,
-            ).fuse() => {
-                tracing::trace!(?r, "incoming protocol actor terminated");
-                r?;
-            }
-            r = actors::reply_actor(reply_rx).fuse() => {
-                tracing::trace!(?r, "reply actor terminated");
-                r?;
-            }
-            r = actors::task_actor(self.new_task_rx).fuse() => {
-                tracing::trace!(?r, "task actor terminated");
-                r?;
-            }
-        );
-        Ok(())
+    pub async fn serve(self, transport: impl IntoJrTransport) -> Result<(), crate::Error> {
+        self.with_client(transport, async move |_cx| future::pending().await)
+            .await
     }
 
     /// Run the connection in client mode, both handling incoming messages and sending your own.
@@ -702,22 +615,78 @@ impl<H: JrHandler> JrConnection<H> {
     /// # Errors
     ///
     /// Returns an error if the connection closes before `main_fn` completes.
-    pub async fn with_client<T: IntoJrTransport>(
+    pub async fn with_client(
         self,
-        transport: T,
+        transport: impl IntoJrTransport,
         main_fn: impl AsyncFnOnce(JrConnectionCx) -> Result<(), crate::Error>,
     ) -> Result<(), crate::Error> {
-        let cx = self.connection_cx();
+        let (reply_tx, reply_rx) = mpsc::unbounded();
+        let (outgoing_tx, outgoing_rx) = mpsc::unbounded();
+        let (new_task_tx, new_task_rx) = mpsc::unbounded();
+        let connection_cx = JrConnectionCx::new(outgoing_tx, new_task_tx);
 
-        // Run the server + the main function until one terminates.
-        // We EXPECT the main function to be the one to terminate
-        // except in case of error.
-        let result =
-            futures::future::select(Box::pin(self.serve(transport)), Box::pin(main_fn(cx))).await;
+        // Create channels for protocol/transport boundary
+        let (transport_outgoing_tx, transport_outgoing_rx) = mpsc::unbounded();
+        let (transport_incoming_tx, transport_incoming_rx) = mpsc::unbounded();
 
-        match result {
-            Either::Left((result, _)) | Either::Right((result, _)) => result,
+        // Create the transport layer
+        transport.into_jr_transport(
+            &connection_cx,
+            transport_outgoing_rx,
+            transport_incoming_tx,
+        )?;
+
+        // Create the message handler
+        let handler = self.handler.into_jr_message_handler(&connection_cx)?;
+
+        futures::select!(
+            // Protocol layer: OutgoingMessage → jsonrpcmsg::Message
+            r = actors::outgoing_protocol_actor(
+                &self.name,
+                outgoing_rx,
+                reply_tx.clone(),
+                transport_outgoing_tx,
+            ).fuse() => {
+                tracing::trace!(?r, "outgoing protocol actor terminated");
+                r?;
+            }
+            // Protocol layer: jsonrpcmsg::Message → handler/reply routing
+            r = actors::incoming_protocol_actor(
+                &self.name,
+                &connection_cx,
+                transport_incoming_rx,
+                reply_tx,
+                handler,
+            ).fuse() => {
+                tracing::trace!(?r, "incoming protocol actor terminated");
+                r?;
+            }
+            r = actors::reply_actor(reply_rx).fuse() => {
+                tracing::trace!(?r, "reply actor terminated");
+                r?;
+            }
+            r = task_actor::task_actor(new_task_rx, &connection_cx).fuse() => {
+                tracing::trace!(?r, "task actor terminated");
+                r?;
+            }
+            r = main_fn(connection_cx.clone()).fuse() => {
+                tracing::trace!(?r, "main actor terminated");
+                r?;
+            }
+        );
+        Ok(())
+    }
+}
+
+impl<H: IntoJrMessageHandler> IntoJrMessageHandler for JrConnection<H> {
+    type Handler = H::Handler;
+
+    fn into_jr_message_handler(self, cx: &JrConnectionCx) -> Result<Self::Handler, crate::Error> {
+        for task in self.spawned_tasks {
+            cx.spawn_task(task)?;
         }
+
+        self.handler.into_jr_message_handler(cx)
     }
 }
 
@@ -766,57 +735,6 @@ enum OutgoingMessage {
 
     /// Send a generalized error message
     Error { error: crate::Error },
-}
-
-/// Handlers are invoked when new messages arrive at the [`JrConnection`].
-/// They have a chance to inspect the method and parameters and decide whether to "claim" the request
-/// (i.e., handle it). If they do not claim it, the request will be passed to the next handler.
-#[allow(async_fn_in_trait)]
-pub trait JrHandler {
-    /// Attempt to claim an incoming message (request or notification).
-    ///
-    /// # Important: do not block
-    ///
-    /// The server will not process new messages until this handler returns.
-    /// You should avoid blocking in this callback unless you wish to block the server (e.g., for rate limiting).
-    /// The recommended approach to manage expensive operations is to the [`JrConnectionCx::spawn`] method available on the message context.
-    ///
-    /// # Parameters
-    ///
-    /// * `cx` - The context of the request. This gives access to the request ID and the method name and is used to send a reply; can also be used to send other messages to the other party.
-    /// * `params` - The parameters of the request.
-    ///
-    /// # Returns
-    ///
-    /// * `Ok(Handled::Yes)` if the message was claimed. It will not be propagated further.
-    /// * `Ok(Handled::No(message))` if not; the (possibly changed) message will be passed to the remaining handlers.
-    /// * `Err` if an internal error occurs (this will bring down the server).
-    async fn handle_message(
-        &mut self,
-        message: MessageAndCx,
-    ) -> Result<Handled<MessageAndCx>, crate::Error>;
-
-    /// Returns a debug description of the handler chain for diagnostics
-    fn describe_chain(&self) -> impl std::fmt::Debug;
-}
-
-/// Handlers are invoked when new messages arrive at the [`JrConnection`].
-/// They have a chance to inspect the method and parameters and decide whether to "claim" the request
-/// (i.e., handle it). If they do not claim it, the request will be passed to the next handler.
-pub trait IntoJrHandler {
-    type Handler: JrHandler;
-    type Error;
-
-    fn into_jr_handler(self, cx: JrConnectionCx) -> Result<Self::Handler, Self::Error>;
-}
-
-impl<T: JrHandler> IntoJrHandler for T {
-    type Handler = T;
-    type Error = Infallible;
-
-    fn into_jr_handler(self, _cx: JrConnectionCx) -> Result<Self::Handler, Self::Error> {
-        Ok(self)
-    }
 }
 
 /// Return type from JrHandler; indicates whether the request was handled or not.
@@ -944,16 +862,21 @@ impl JrConnectionCx {
     ///
     /// If the spawned task returns an error, the entire server will shut down.
     #[track_caller]
-    pub fn spawn(
+    pub fn spawn<F>(
         &self,
-        future: impl Future<Output = Result<(), crate::Error>> + Send + 'static,
-    ) -> Result<(), crate::Error> {
+        task_fn: impl FnOnce(JrConnectionCx) -> F + Send + 'static,
+    ) -> Result<(), crate::Error>
+    where
+        F: Future<Output = Result<(), crate::Error>> + Send + 'static,
+    {
+        let location = std::panic::Location::caller();
+        self.spawn_task(Task::new(location, task_fn))
+    }
+
+    fn spawn_task(&self, task: Task) -> Result<(), crate::Error> {
         self.task_tx
-            .unbounded_send(Task {
-                location: Location::caller(),
-                future: Box::pin(future),
-            })
-            .map_err(crate::Error::into_internal_error)
+            .unbounded_send(task)
+            .map_err(crate::util::internal_error)
     }
 
     /// Send a request/notification and forward the response appropriately.
@@ -1856,7 +1779,7 @@ impl<R: JrResponsePayload> JrResponse<R> {
     {
         let connection_cx = self.connection_cx.clone();
         let block_task = self.block_task();
-        connection_cx.spawn(async move { task(block_task.await).await })
+        connection_cx.spawn(async move |_| task(block_task.await).await)
     }
 }
 
@@ -1917,19 +1840,15 @@ where
         let connection_name = None; // TODO: get connection name from cx?
 
         // Spawn transport outgoing actor: jsonrpcmsg::Message → serialize → bytes
-        cx.spawn(actors::transport_outgoing_actor(
-            connection_name.clone(),
-            outgoing_rx,
-            self.outgoing,
-        ))?;
+        cx.spawn({
+            let connection_name = connection_name.clone();
+            move |_cx| actors::transport_outgoing_actor(connection_name, outgoing_rx, self.outgoing)
+        })?;
 
         // Spawn transport incoming actor: bytes → parse → jsonrpcmsg::Message
-        cx.spawn(actors::transport_incoming_actor(
-            connection_name,
-            cx.clone(),
-            self.incoming,
-            incoming_tx,
-        ))?;
+        cx.spawn(move |cx| {
+            actors::transport_incoming_actor(connection_name, cx, self.incoming, incoming_tx)
+        })?;
 
         Ok(())
     }

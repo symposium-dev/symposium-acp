@@ -1,5 +1,4 @@
 use std::collections::HashMap;
-use std::panic::Location;
 use std::pin::pin;
 
 // Types re-exported from crate root
@@ -9,78 +8,18 @@ use futures::AsyncWrite;
 use futures::AsyncWriteExt as _;
 use futures::StreamExt;
 use futures::channel::mpsc;
-use futures::future::BoxFuture;
 use futures::io::BufReader;
-use futures::stream::FusedStream;
-use futures::stream::FuturesUnordered;
 use uuid::Uuid;
 
 use crate::MessageAndCx;
 use crate::UntypedMessage;
+use crate::handler::JrMessageHandler;
 use crate::jsonrpc::JrConnectionCx;
-use crate::jsonrpc::JrHandler;
 use crate::jsonrpc::JrRequestCx;
 use crate::jsonrpc::OutgoingMessage;
 use crate::jsonrpc::ReplyMessage;
 
 use super::Handled;
-
-pub(crate) struct Task {
-    pub location: &'static Location<'static>,
-    pub future: BoxFuture<'static, Result<(), crate::Error>>,
-}
-
-/// The "task actor" manages other tasks
-pub(super) async fn task_actor(
-    mut task_rx: mpsc::UnboundedReceiver<Task>,
-) -> Result<(), crate::Error> {
-    let mut futures = FuturesUnordered::new();
-
-    loop {
-        // If we have no futures to run, wait until we do.
-        if futures.is_empty() {
-            match task_rx.next().await {
-                Some(task) => futures.push(execute_task(task)),
-                None => return Ok(()),
-            }
-            continue;
-        }
-
-        // If there are no more tasks coming in, just drain our queue and return.
-        if task_rx.is_terminated() {
-            while let Some(result) = futures.next().await {
-                result?;
-            }
-            return Ok(());
-        }
-
-        // Otherwise, run futures until we get a request for a new task.
-        futures::select! {
-            result = futures.next() => if let Some(result) = result {
-                result?;
-            },
-
-            task = task_rx.next() => {
-                if let Some(task) = task {
-                    futures.push(execute_task(task));
-                }
-            }
-        }
-    }
-}
-
-async fn execute_task(task: Task) -> Result<(), crate::Error> {
-    let Task { location, future } = task;
-    future.await.map_err(|err| {
-        let data = err.data.clone();
-        err.with_data(serde_json::json! {
-            {
-                "spawned_at": format!("{}:{}:{}", location.file(), location.line(), location.column()),
-                "data": data,
-            }
-        })
-    })
-}
 
 /// The "reply actor" manages a queue of pending replies.
 pub(super) async fn reply_actor(
@@ -298,7 +237,7 @@ pub(super) async fn incoming_protocol_actor(
     json_rpc_cx: &JrConnectionCx,
     mut transport_rx: mpsc::UnboundedReceiver<jsonrpcmsg::Message>,
     reply_tx: mpsc::UnboundedSender<ReplyMessage>,
-    mut handler: impl JrHandler,
+    mut handler: impl JrMessageHandler,
 ) -> Result<(), crate::Error> {
     while let Some(message) = transport_rx.next().await {
         match message {
@@ -374,7 +313,7 @@ async fn dispatch_request(
     connection_name: &Option<String>,
     json_rpc_cx: &JrConnectionCx,
     request: jsonrpcmsg::Request,
-    handler: &mut impl JrHandler,
+    handler: &mut impl JrMessageHandler,
 ) -> Result<(), crate::Error> {
     tracing::debug!(
         ?request,

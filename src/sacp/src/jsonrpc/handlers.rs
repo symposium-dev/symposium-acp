@@ -1,4 +1,4 @@
-use crate::jsonrpc::{Handled, JrHandler};
+use crate::jsonrpc::Handled;
 use crate::{JrConnectionCx, JrNotification, JrRequest, MessageAndCx};
 // Types re-exported from crate root
 use std::marker::PhantomData;
@@ -6,11 +6,53 @@ use std::ops::AsyncFnMut;
 
 use super::JrRequestCx;
 
+/// Handlers are invoked when new messages arrive at the [`JrConnection`].
+/// They have a chance to inspect the method and parameters and decide whether to "claim" the request
+/// (i.e., handle it). If they do not claim it, the request will be passed to the next handler.
+#[allow(async_fn_in_trait)]
+pub trait JrMessageHandler {
+    /// Attempt to claim an incoming message (request or notification).
+    ///
+    /// # Important: do not block
+    ///
+    /// The server will not process new messages until this handler returns.
+    /// You should avoid blocking in this callback unless you wish to block the server (e.g., for rate limiting).
+    /// The recommended approach to manage expensive operations is to the [`JrConnectionCx::spawn`] method available on the message context.
+    ///
+    /// # Parameters
+    ///
+    /// * `cx` - The context of the request. This gives access to the request ID and the method name and is used to send a reply; can also be used to send other messages to the other party.
+    /// * `params` - The parameters of the request.
+    ///
+    /// # Returns
+    ///
+    /// * `Ok(Handled::Yes)` if the message was claimed. It will not be propagated further.
+    /// * `Ok(Handled::No(message))` if not; the (possibly changed) message will be passed to the remaining handlers.
+    /// * `Err` if an internal error occurs (this will bring down the server).
+    async fn handle_message(
+        &mut self,
+        message: MessageAndCx,
+    ) -> Result<Handled<MessageAndCx>, crate::Error>;
+
+    /// Returns a debug description of the handler chain for diagnostics
+    fn describe_chain(&self) -> impl std::fmt::Debug;
+}
+
+/// Handlers are invoked when new messages arrive at the [`JrConnection`].
+/// They have a chance to inspect the method and parameters and decide whether to "claim" the request
+/// (i.e., handle it). If they do not claim it, the request will be passed to the next handler.
+#[expect(missing_docs)]
+pub trait IntoJrMessageHandler {
+    type Handler: JrMessageHandler;
+
+    fn into_jr_message_handler(self, cx: &JrConnectionCx) -> Result<Self::Handler, crate::Error>;
+}
+
 /// Null handler that accepts no messages.
 #[derive(Default)]
 pub struct NullHandler {}
 
-impl JrHandler for NullHandler {
+impl JrMessageHandler for NullHandler {
     fn describe_chain(&self) -> impl std::fmt::Debug {
         "(null)"
     }
@@ -20,6 +62,14 @@ impl JrHandler for NullHandler {
         message: MessageAndCx,
     ) -> Result<Handled<MessageAndCx>, crate::Error> {
         Ok(Handled::No(message))
+    }
+}
+
+impl IntoJrMessageHandler for NullHandler {
+    type Handler = Self;
+
+    fn into_jr_message_handler(self, _cx: &JrConnectionCx) -> Result<Self::Handler, crate::Error> {
+        Ok(self)
     }
 }
 
@@ -47,7 +97,19 @@ where
     }
 }
 
-impl<R, F> JrHandler for RequestHandler<R, F>
+impl<R, F> IntoJrMessageHandler for RequestHandler<R, F>
+where
+    R: JrRequest,
+    F: AsyncFnMut(R, JrRequestCx<R::Response>) -> Result<(), crate::Error>,
+{
+    type Handler = Self;
+
+    fn into_jr_message_handler(self, _cx: &JrConnectionCx) -> Result<Self::Handler, crate::Error> {
+        Ok(self)
+    }
+}
+
+impl<R, F> JrMessageHandler for RequestHandler<R, F>
 where
     R: JrRequest,
     F: AsyncFnMut(R, JrRequestCx<R::Response>) -> Result<(), crate::Error>,
@@ -113,7 +175,19 @@ where
     }
 }
 
-impl<R, F> JrHandler for NotificationHandler<R, F>
+impl<R, F> IntoJrMessageHandler for NotificationHandler<R, F>
+where
+    R: JrNotification,
+    F: AsyncFnMut(R, JrConnectionCx) -> Result<(), crate::Error>,
+{
+    type Handler = Self;
+
+    fn into_jr_message_handler(self, _cx: &JrConnectionCx) -> Result<Self::Handler, crate::Error> {
+        Ok(self)
+    }
+}
+
+impl<R, F> JrMessageHandler for NotificationHandler<R, F>
 where
     R: JrNotification,
     F: AsyncFnMut(R, JrConnectionCx) -> Result<(), crate::Error>,
@@ -185,7 +259,20 @@ where
     }
 }
 
-impl<R, N, F> JrHandler for MessageHandler<R, N, F>
+impl<R, N, F> IntoJrMessageHandler for MessageHandler<R, N, F>
+where
+    R: JrRequest,
+    N: JrNotification,
+    F: AsyncFnMut(MessageAndCx<R, N>) -> Result<(), crate::Error>,
+{
+    type Handler = Self;
+
+    fn into_jr_message_handler(self, _cx: &JrConnectionCx) -> Result<Self::Handler, crate::Error> {
+        Ok(self)
+    }
+}
+
+impl<R, N, F> JrMessageHandler for MessageHandler<R, N, F>
 where
     R: JrRequest,
     N: JrNotification,
@@ -259,30 +346,35 @@ where
 }
 
 /// Chains two handlers together, trying the first handler and falling back to the second
-pub struct ChainHandler<H1, H2>
-where
-    H1: JrHandler,
-    H2: JrHandler,
-{
+pub struct ChainedHandler<H1, H2> {
     handler1: H1,
     handler2: H2,
 }
 
-impl<H1, H2> ChainHandler<H1, H2>
-where
-    H1: JrHandler,
-    H2: JrHandler,
-{
+impl<H1, H2> ChainedHandler<H1, H2> {
     /// Creates a new chain handler
     pub fn new(handler1: H1, handler2: H2) -> Self {
         Self { handler1, handler2 }
     }
 }
 
-impl<H1, H2> JrHandler for ChainHandler<H1, H2>
+impl<H1: IntoJrMessageHandler, H2: IntoJrMessageHandler> IntoJrMessageHandler
+    for ChainedHandler<H1, H2>
+{
+    type Handler = ChainedHandler<H1::Handler, H2::Handler>;
+
+    fn into_jr_message_handler(self, cx: &JrConnectionCx) -> Result<Self::Handler, crate::Error> {
+        Ok(ChainedHandler {
+            handler1: self.handler1.into_jr_message_handler(cx)?,
+            handler2: self.handler2.into_jr_message_handler(cx)?,
+        })
+    }
+}
+
+impl<H1, H2> JrMessageHandler for ChainedHandler<H1, H2>
 where
-    H1: JrHandler,
-    H2: JrHandler,
+    H1: JrMessageHandler,
+    H2: JrMessageHandler,
 {
     fn describe_chain(&self) -> impl std::fmt::Debug {
         return DebugImpl {
@@ -295,7 +387,7 @@ where
             handler2: &'h H2,
         }
 
-        impl<H1: JrHandler, H2: JrHandler> std::fmt::Debug for DebugImpl<'_, H1, H2> {
+        impl<H1: JrMessageHandler, H2: JrMessageHandler> std::fmt::Debug for DebugImpl<'_, H1, H2> {
             fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
                 write!(
                     f,

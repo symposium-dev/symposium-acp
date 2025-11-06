@@ -3,10 +3,10 @@ use futures::{FutureExt, future::BoxFuture};
 use futures::{SinkExt, StreamExt};
 use fxhash::FxHashMap;
 use rmcp::ServiceExt;
+use sacp::handler::JrMessageHandler;
 use sacp::schema::NewSessionRequest;
 use sacp::{
-    Handled, JrConnection, JrConnectionCx, JrHandler, JrMessage, JrRequestCx, MessageAndCx,
-    UntypedMessage,
+    Handled, JrConnection, JrConnectionCx, JrMessage, JrRequestCx, MessageAndCx, UntypedMessage,
 };
 use std::pin::Pin;
 use std::sync::{Arc, Mutex};
@@ -229,7 +229,7 @@ impl McpServiceRegistry {
         // Every request/notification that is sent over `mcp_server_tx` we will
         // send to the MCP server.
         let spawn_results = request_cx
-            .spawn({
+            .spawn(move |_| {
                 let transport =
                     sacp::ViaBytes::new(mcp_client_write.compat_write(), mcp_client_read.compat());
 
@@ -273,7 +273,7 @@ impl McpServiceRegistry {
             })
             .and_then(|()| {
                 // Spawn MCP server task
-                request_cx.spawn(async move {
+                request_cx.spawn(async move |_| {
                     registered_server
                         .spawn
                         .spawn(Box::pin(mcp_server_write), Box::pin(mcp_server_read))
@@ -406,7 +406,7 @@ impl McpServiceRegistry {
     }
 }
 
-impl JrHandler for McpServiceRegistry {
+impl JrMessageHandler for McpServiceRegistry {
     fn describe_chain(&self) -> impl std::fmt::Debug {
         "McpServiceRegistry"
     }

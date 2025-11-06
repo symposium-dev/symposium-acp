@@ -1,8 +1,8 @@
-use sacp::handler::ChainHandler;
+use sacp::handler::{ChainedHandler, IntoJrMessageHandler, JrMessageHandler};
 use sacp::schema::{InitializeRequest, InitializeResponse};
 use sacp::{
-    Handled, JrConnection, JrConnectionCx, JrHandler, JrMessage, JrNotification, JrRequest,
-    JrRequestCx, MessageAndCx, MetaCapabilityExt, Proxy, UntypedMessage,
+    Handled, JrConnection, JrConnectionCx, JrMessage, JrNotification, JrRequest, JrRequestCx,
+    MessageAndCx, MetaCapabilityExt, Proxy, UntypedMessage,
 };
 use serde::{Deserialize, Serialize};
 use std::marker::PhantomData;
@@ -124,7 +124,7 @@ impl<Req: JrNotification> JrNotification for SuccessorNotification<Req> {}
 // ============================================================
 
 /// Extension trait for JrConnection that adds proxy-specific functionality
-pub trait AcpProxyExt<H: JrHandler> {
+pub trait AcpProxyExt<H: JrMessageHandler> {
     /// Adds a handler for requests received from the successor component.
     ///
     /// The provided handler will receive unwrapped ACP messages - the
@@ -150,7 +150,7 @@ pub trait AcpProxyExt<H: JrHandler> {
     fn on_receive_request_from_successor<R, F>(
         self,
         op: F,
-    ) -> JrConnection<ChainHandler<H, RequestFromSuccessorHandler<R, F>>>
+    ) -> JrConnection<ChainedHandler<H, RequestFromSuccessorHandler<R, F>>>
     where
         R: JrRequest,
         F: AsyncFnMut(R, JrRequestCx<R::Response>) -> Result<(), sacp::Error>;
@@ -180,7 +180,7 @@ pub trait AcpProxyExt<H: JrHandler> {
     fn on_receive_notification_from_successor<N, F>(
         self,
         op: F,
-    ) -> JrConnection<ChainHandler<H, NotificationFromSuccessorHandler<N, F>>>
+    ) -> JrConnection<ChainedHandler<H, NotificationFromSuccessorHandler<N, F>>>
     where
         N: JrNotification,
         F: AsyncFnMut(N, JrConnectionCx) -> Result<(), sacp::Error>;
@@ -194,7 +194,7 @@ pub trait AcpProxyExt<H: JrHandler> {
     fn on_receive_message_from_successor<R, N, F>(
         self,
         op: F,
-    ) -> JrConnection<ChainHandler<H, MessageFromSuccessorHandler<R, N, F>>>
+    ) -> JrConnection<ChainedHandler<H, MessageFromSuccessorHandler<R, N, F>>>
     where
         R: JrRequest,
         N: JrNotification,
@@ -202,7 +202,7 @@ pub trait AcpProxyExt<H: JrHandler> {
 
     /// Installs a proxy layer that proxies all requests/notifications to/from the successor.
     /// This is typically the last component in the chain.
-    fn proxy(self) -> JrConnection<ChainHandler<H, ProxyHandler>>;
+    fn proxy(self) -> JrConnection<ChainedHandler<H, ProxyHandler>>;
 
     /// Provide MCP servers to downstream successors.
     /// This layer will modify `session/new` requests to include those MCP servers
@@ -210,19 +210,19 @@ pub trait AcpProxyExt<H: JrHandler> {
     fn provide_mcp(
         self,
         registry: impl AsRef<McpServiceRegistry>,
-    ) -> JrConnection<ChainHandler<H, McpServiceRegistry>>;
+    ) -> JrConnection<ChainedHandler<H, McpServiceRegistry>>;
 }
 
-impl<H: JrHandler> AcpProxyExt<H> for JrConnection<H> {
+impl<H: JrMessageHandler> AcpProxyExt<H> for JrConnection<H> {
     fn on_receive_request_from_successor<R, F>(
         self,
         op: F,
-    ) -> JrConnection<ChainHandler<H, RequestFromSuccessorHandler<R, F>>>
+    ) -> JrConnection<ChainedHandler<H, RequestFromSuccessorHandler<R, F>>>
     where
         R: JrRequest,
         F: AsyncFnMut(R, JrRequestCx<R::Response>) -> Result<(), sacp::Error>,
     {
-        match self.chain_handler(RequestFromSuccessorHandler::new(op)) {
+        match self.with_chained_handler(RequestFromSuccessorHandler::new(op)) {
             Ok(v) => v,
         }
     }
@@ -230,12 +230,12 @@ impl<H: JrHandler> AcpProxyExt<H> for JrConnection<H> {
     fn on_receive_notification_from_successor<N, F>(
         self,
         op: F,
-    ) -> JrConnection<ChainHandler<H, NotificationFromSuccessorHandler<N, F>>>
+    ) -> JrConnection<ChainedHandler<H, NotificationFromSuccessorHandler<N, F>>>
     where
         N: JrNotification,
         F: AsyncFnMut(N, JrConnectionCx) -> Result<(), sacp::Error>,
     {
-        match self.chain_handler(NotificationFromSuccessorHandler::new(op)) {
+        match self.with_chained_handler(NotificationFromSuccessorHandler::new(op)) {
             Ok(v) => v,
         }
     }
@@ -243,19 +243,19 @@ impl<H: JrHandler> AcpProxyExt<H> for JrConnection<H> {
     fn on_receive_message_from_successor<R, N, F>(
         self,
         op: F,
-    ) -> JrConnection<ChainHandler<H, MessageFromSuccessorHandler<R, N, F>>>
+    ) -> JrConnection<ChainedHandler<H, MessageFromSuccessorHandler<R, N, F>>>
     where
         R: JrRequest,
         N: JrNotification,
         F: AsyncFnMut(MessageAndCx<R, N>) -> Result<(), sacp::Error>,
     {
-        match self.chain_handler(MessageFromSuccessorHandler::new(op)) {
+        match self.with_chained_handler(MessageFromSuccessorHandler::new(op)) {
             Ok(v) => v,
         }
     }
 
-    fn proxy(self) -> JrConnection<ChainHandler<H, ProxyHandler>> {
-        match self.chain_handler(ProxyHandler {}) {
+    fn proxy(self) -> JrConnection<ChainedHandler<H, ProxyHandler>> {
+        match self.with_chained_handler(ProxyHandler {}) {
             Ok(v) => v,
         }
     }
@@ -263,8 +263,8 @@ impl<H: JrHandler> AcpProxyExt<H> for JrConnection<H> {
     fn provide_mcp(
         self,
         registry: impl AsRef<McpServiceRegistry>,
-    ) -> JrConnection<ChainHandler<H, McpServiceRegistry>> {
-        match self.chain_handler(registry.as_ref().clone()) {
+    ) -> JrConnection<ChainedHandler<H, McpServiceRegistry>> {
+        match self.with_chained_handler(registry.as_ref().clone()) {
             Ok(v) => v,
         }
     }
@@ -296,7 +296,20 @@ where
     }
 }
 
-impl<R, N, F> JrHandler for MessageFromSuccessorHandler<R, N, F>
+impl<R, N, F> IntoJrMessageHandler for MessageFromSuccessorHandler<R, N, F>
+where
+    R: JrRequest,
+    N: JrNotification,
+    F: AsyncFnMut(MessageAndCx<R, N>) -> Result<(), sacp::Error>,
+{
+    type Handler = Self;
+
+    fn into_jr_message_handler(self, cx: &JrConnectionCx) -> Result<Self::Handler, sacp::Error> {
+        Ok(self)
+    }
+}
+
+impl<R, N, F> JrMessageHandler for MessageFromSuccessorHandler<R, N, F>
 where
     R: JrRequest,
     N: JrNotification,
@@ -404,7 +417,7 @@ where
     }
 }
 
-impl<R, F> JrHandler for RequestFromSuccessorHandler<R, F>
+impl<R, F> JrMessageHandler for RequestFromSuccessorHandler<R, F>
 where
     R: JrRequest,
     F: AsyncFnMut(R, JrRequestCx<R::Response>) -> Result<(), sacp::Error>,
@@ -468,7 +481,7 @@ where
     }
 }
 
-impl<N, F> JrHandler for NotificationFromSuccessorHandler<N, F>
+impl<N, F> JrMessageHandler for NotificationFromSuccessorHandler<N, F>
 where
     N: JrNotification,
     F: AsyncFnMut(N, JrConnectionCx) -> Result<(), sacp::Error>,
@@ -512,7 +525,7 @@ where
 /// Handler for the "default proxy" behavior.
 pub struct ProxyHandler {}
 
-impl JrHandler for ProxyHandler {
+impl JrMessageHandler for ProxyHandler {
     fn describe_chain(&self) -> impl std::fmt::Debug {
         "proxy"
     }
