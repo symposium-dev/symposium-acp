@@ -181,6 +181,22 @@ impl Conductor {
                 Ok(())
             })
     }
+
+    /// Convenience method to run the conductor with a transport.
+    ///
+    /// This is equivalent to:
+    /// ```ignore
+    /// conductor.into_handler_chain()
+    ///     .connect_to(transport)
+    ///     .serve()
+    ///     .await
+    /// ```
+    pub async fn run(self, transport: impl IntoJrTransport) -> Result<(), sacp::Error> {
+        self.into_handler_chain()
+            .connect_to(transport)?
+            .serve()
+            .await
+    }
 }
 
 /// The conductor manages the proxy chain lifecycle and message routing.

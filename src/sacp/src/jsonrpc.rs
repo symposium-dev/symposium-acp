@@ -613,6 +613,30 @@ impl<H: JrMessageHandler> JrHandlerChain<H> {
             handler,
         })
     }
+
+    /// Convenience method to connect to a transport and serve.
+    ///
+    /// This is equivalent to:
+    /// ```ignore
+    /// handler_chain.connect_to(transport)?.serve().await
+    /// ```
+    pub async fn serve(self, transport: impl IntoJrTransport) -> Result<(), crate::Error> {
+        self.connect_to(transport)?.serve().await
+    }
+
+    /// Convenience method to connect to a transport and run a client function.
+    ///
+    /// This is equivalent to:
+    /// ```ignore
+    /// handler_chain.connect_to(transport)?.with_client(main_fn).await
+    /// ```
+    pub async fn serve_with(
+        self,
+        transport: impl IntoJrTransport,
+        main_fn: impl AsyncFnOnce(JrConnectionCx) -> Result<(), crate::Error>,
+    ) -> Result<(), crate::Error> {
+        self.connect_to(transport)?.with_client(main_fn).await
+    }
 }
 
 pub struct JrConnection<H: JrMessageHandler> {
