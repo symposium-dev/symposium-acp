@@ -10,7 +10,6 @@ use sacp::{
         PromptRequest, PromptResponse, SessionNotification, SessionUpdate, TextContent,
     },
 };
-use std::sync::{Arc, Mutex};
 
 /// Connect to an agent, send a prompt, and collect all session update text.
 ///

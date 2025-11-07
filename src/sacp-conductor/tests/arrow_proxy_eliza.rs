@@ -24,17 +24,20 @@ async fn test_conductor_with_arrow_proxy_and_eliza() -> Result<(), sacp::Error> 
 
     // Spawn the conductor
     let conductor_handle = tokio::spawn(async move {
-        Conductor::run(
+        Conductor::new(
             "conductor".to_string(),
+            vec![arrow_proxy_agent, eliza_agent],
+            None,
+        )
+        .run(sacp::ByteStreams::new(
             conductor_write.compat_write(),
             conductor_read.compat(),
-            vec![Box::new(arrow_proxy_agent), Box::new(eliza_agent)],
-        )
+        ))
         .await
     });
 
-    // Editor side: connect and send a prompt using helper
-    let editor_handle = tokio::spawn(async move {
+    // Wait for editor to complete and get the result
+    let result = tokio::time::timeout(std::time::Duration::from_secs(30), async move {
         let result =
             yolo_prompt(editor_write.compat_write(), editor_read.compat(), "Hello").await?;
 
@@ -47,14 +50,10 @@ async fn test_conductor_with_arrow_proxy_and_eliza() -> Result<(), sacp::Error> 
         );
 
         Ok::<String, sacp::Error>(result)
-    });
-
-    // Wait for editor to complete and get the result
-    let result = tokio::time::timeout(std::time::Duration::from_secs(30), editor_handle)
-        .await
-        .expect("Test timed out")
-        .expect("Editor task panicked")
-        .expect("Editor failed");
+    })
+    .await
+    .expect("Test timed out")
+    .expect("Editor failed");
 
     tracing::info!(
         ?result,

@@ -1,11 +1,15 @@
 use sacp;
 use sacp_tokio::AcpAgent;
 use std::pin::Pin;
-use tokio_util::compat::{FuturesAsyncReadCompatExt as _, FuturesAsyncWriteCompatExt};
+use tokio_util::compat::{
+    FuturesAsyncReadCompatExt as _, FuturesAsyncWriteCompatExt, TokioAsyncReadCompatExt as _,
+    TokioAsyncWriteCompatExt as _,
+};
 
+use futures::channel::mpsc;
 use futures::{AsyncRead, AsyncWrite};
 
-use sacp::JrConnectionCx;
+use sacp::{IntoJrTransport, JrConnectionCx};
 use tokio::process::Child;
 use tracing::debug;
 
@@ -118,6 +122,35 @@ impl ComponentProvider for CommandComponentProvider {
         })?;
 
         Ok(Cleanup::KillProcess(child))
+    }
+}
+
+impl IntoJrTransport for Box<dyn ComponentProvider> {
+    fn into_jr_transport(
+        self: Box<Self>,
+        cx: &JrConnectionCx,
+        outgoing_rx: mpsc::UnboundedReceiver<jsonrpcmsg::Message>,
+        incoming_tx: mpsc::UnboundedSender<jsonrpcmsg::Message>,
+    ) -> Result<(), sacp::Error> {
+        use tokio::io::duplex;
+
+        // Create byte streams using tokio duplex channels
+        let (outgoing_write, outgoing_read) = duplex(8192);
+        let (incoming_write, incoming_read) = duplex(8192);
+
+        // Create the component with the byte streams
+        let _cleanup = self.create(
+            cx,
+            Box::pin(outgoing_write.compat_write()),
+            Box::pin(incoming_read.compat()),
+        )?;
+
+        // Delegate to ByteStreams for the transport layer
+        Box::new(sacp::ByteStreams::new(
+            incoming_write.compat_write(),
+            outgoing_read.compat(),
+        ))
+        .into_jr_transport(cx, outgoing_rx, incoming_tx)
     }
 }
 

@@ -129,7 +129,8 @@ async fn test_hello_world() {
             // Use the client to send a ping and wait for a pong
             let result = client
                 .connect_to(client_transport)
-                .serve_with(async |cx| -> std::result::Result<(), sacp::Error> {
+                .expect("Failed to connect to transport")
+                .with_client(async |cx| -> std::result::Result<(), sacp::Error> {
                     let request = PingRequest {
                         message: "hello world".to_string(),
                     };
@@ -218,7 +219,7 @@ async fn test_notification() {
             });
 
             let result = client
-                .serve_with(
+                .with_client(
                     client_transport,
                     async |cx| -> std::result::Result<(), sacp::Error> {
                         // Send a notification (no response expected)
@@ -290,7 +291,7 @@ async fn test_multiple_sequential_requests() {
             });
 
             let result = client
-                .serve_with(
+                .with_client(
                     client_transport,
                     async |cx| -> std::result::Result<(), sacp::Error> {
                         // Send multiple requests sequentially
@@ -346,7 +347,7 @@ async fn test_concurrent_requests() {
             });
 
             let result = client
-                .serve_with(
+                .with_client(
                     client_transport,
                     async |cx| -> std::result::Result<(), sacp::Error> {
                         // Send multiple requests concurrently

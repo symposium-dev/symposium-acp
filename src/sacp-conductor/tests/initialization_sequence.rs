@@ -6,13 +6,11 @@
 //! 3. Proxy components must accept the capability or initialization fails
 //! 4. Last component (agent) never receives proxy capability offer
 
-use futures::{AsyncRead, AsyncWrite};
+use futures::channel::mpsc;
 use sacp::schema::{AgentCapabilities, InitializeRequest, InitializeResponse};
-use sacp::{JrConnectionCx, JrHandlerChain, MetaCapabilityExt, Proxy};
-use sacp_conductor::component::{Cleanup, ComponentProvider};
+use sacp::{IntoJrTransport, JrConnectionCx, JrHandlerChain, MetaCapabilityExt, Proxy};
 use sacp_conductor::conductor::Conductor;
 use sacp_proxy::JrCxExt;
-use std::pin::Pin;
 use std::sync::Arc;
 use std::sync::Mutex;
 
@@ -64,23 +62,26 @@ struct InitComponentProvider {
 }
 
 impl InitComponentProvider {
-    fn new(config: &Arc<InitConfig>) -> Box<dyn ComponentProvider> {
+    fn new(config: &Arc<InitConfig>) -> Box<dyn IntoJrTransport> {
         Box::new(Self {
             config: config.clone(),
         })
     }
 }
 
-impl ComponentProvider for InitComponentProvider {
-    fn create(
-        &self,
+impl IntoJrTransport for InitComponentProvider {
+    fn into_jr_transport(
+        self: Box<Self>,
         cx: &JrConnectionCx,
-        outgoing_bytes: Pin<Box<dyn AsyncWrite + Send>>,
-        incoming_bytes: Pin<Box<dyn AsyncRead + Send>>,
-    ) -> Result<Cleanup, sacp::Error> {
+        outgoing_rx: mpsc::UnboundedReceiver<jsonrpcmsg::Message>,
+        incoming_tx: mpsc::UnboundedSender<jsonrpcmsg::Message>,
+    ) -> Result<(), sacp::Error> {
         let config = Arc::clone(&self.config);
+
         cx.spawn(async move {
-            let transport = sacp::ByteStreams::new(outgoing_bytes, incoming_bytes);
+            // Create the channel-based transport
+            let transport = sacp::Channels::new(outgoing_rx, incoming_tx);
+
             JrHandlerChain::new()
                 .name("init-component-provider")
                 .on_receive_request(async move |mut request: InitializeRequest, request_cx| {
@@ -117,12 +118,12 @@ impl ComponentProvider for InitComponentProvider {
                 .await
         })?;
 
-        Ok(Cleanup::None)
+        Ok(())
     }
 }
 
 async fn run_test_with_components(
-    components: Vec<Box<dyn ComponentProvider>>,
+    components: Vec<Box<dyn IntoJrTransport>>,
     editor_task: impl AsyncFnOnce(JrConnectionCx) -> Result<(), sacp::Error>,
 ) -> Result<(), sacp::Error> {
     // Set up editor <-> conductor communication
@@ -133,16 +134,15 @@ async fn run_test_with_components(
 
     JrHandlerChain::new()
         .name("editor-to-connector")
-        .with_spawned(async move {
-            Conductor::run(
-                "conductor".to_string(),
-                conductor_out.compat_write(),
-                conductor_in.compat(),
-                components,
-            )
-            .await
+        .with_spawned(|_cx| async move {
+            Conductor::new("conductor".to_string(), components, None)
+                .run(sacp::ByteStreams::new(
+                    conductor_out.compat_write(),
+                    conductor_in.compat(),
+                ))
+                .await
         })
-        .serve_with(transport, editor_task)
+        .with_client(transport, editor_task)
         .await
 }
 

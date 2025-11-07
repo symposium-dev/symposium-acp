@@ -331,3 +331,19 @@ async fn dispatch_request(
         }
     }
 }
+
+/// Simple channel forwarding actor for [`Channels`] transport.
+///
+/// This actor just forwards messages from one channel to another without any
+/// transformation. Used for in-process communication where no serialization is needed.
+pub(super) async fn channel_forward_actor(
+    mut rx: mpsc::UnboundedReceiver<jsonrpcmsg::Message>,
+    tx: mpsc::UnboundedSender<jsonrpcmsg::Message>,
+) -> Result<(), crate::Error> {
+    while let Some(message) = rx.next().await {
+        tx.unbounded_send(message).map_err(|_| {
+            crate::util::internal_error("Failed to forward message through channel")
+        })?;
+    }
+    Ok(())
+}

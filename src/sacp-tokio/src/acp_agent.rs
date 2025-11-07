@@ -37,14 +37,15 @@ use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
 ///
 /// Use as a transport:
 /// ```no_run
-/// # use sacp::JrConnection;
+/// # use sacp::JrHandlerChain;
 /// # use sacp_tokio::AcpAgent;
 /// # use std::str::FromStr;
 /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
 /// let agent = AcpAgent::from_str("python my_agent.py")?;
 ///
-/// JrConnection::new()
-///     .with_client(agent, |cx| async move {
+/// JrHandlerChain::new()
+///     .connect_to(agent)?
+///     .with_client(|cx| async move {
 ///         // Use the connection to communicate with the agent
 ///         Ok(())
 ///     })

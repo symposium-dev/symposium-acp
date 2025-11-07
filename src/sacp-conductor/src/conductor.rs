@@ -117,7 +117,7 @@ impl Conductor {
         }
     }
 
-    pub fn into_handler_chain(self) -> JrHandlerChain<impl JrMessageHandler> {
+    pub fn into_handler_chain(self) -> JrHandlerChain<ConductorMessageHandler> {
         let (mut conductor_tx, mut conductor_rx) = mpsc::channel(128 /* chosen arbitrarily */);
 
         let conductor_command = self.conductor_command.unwrap_or_else(|| {
@@ -128,7 +128,7 @@ impl Conductor {
             vec![argv0]
         });
 
-        let mut handler = ConductorHandler {
+        let mut state = ConductorHandlerState {
             components: Default::default(),
             bridge_listeners: Default::default(),
             bridge_connections: Default::default(),
@@ -136,50 +136,25 @@ impl Conductor {
             proxy_mode: AtomicBool::new(false),
         };
 
-        let len_components = self.providers.len();
+        JrHandlerChain::new_with(ConductorMessageHandler {
+            len_components: self.providers.len(),
+            conductor_tx: conductor_tx.clone(),
+        })
+        .name(self.name)
+        .with_spawned(async move |cx| {
+            for provider in self.providers {
+                state.launch_proxy(&cx, &mut conductor_tx, provider)?;
+            }
 
-        JrHandlerChain::new()
-            .name(self.name)
-            .on_receive_message_from_successor({
-                let mut conductor_tx = conductor_tx.clone();
-                async move |message: MessageAndCx| {
-                    // If we receive a message from our successor, we must be in proxy mode or else something odd is going on.
-                    conductor_tx
-                        .send(ConductorMessage::AgentToClient {
-                            source_component_index: len_components,
-                            message,
-                        })
-                        .await
-                        .map_err(sacp::util::internal_error)
-                }
-            })
-            // Any incoming messages from the client are client-to-agent messages targeting the first component.
-            .on_receive_message({
-                let mut conductor_tx = conductor_tx.clone();
-                async move |message: MessageAndCx| {
-                    conductor_tx
-                        .send(ConductorMessage::ClientToAgent {
-                            target_component_index: 0,
-                            message,
-                        })
-                        .await
-                        .map_err(sacp::util::internal_error)
-                }
-            })
-            .with_spawned(async move |cx| {
-                for provider in self.providers {
-                    handler.launch_proxy(&cx, &mut conductor_tx, provider)?;
-                }
-
-                // This is the "central actor" of the conductor. Most other things forward messages
-                // via `conductor_tx` into this loop. This lets us serialize the conductor's activity.
-                while let Some(message) = conductor_rx.next().await {
-                    handler
-                        .handle_conductor_message(&cx, message, &mut conductor_tx)
-                        .await?;
-                }
-                Ok(())
-            })
+            // This is the "central actor" of the conductor. Most other things forward messages
+            // via `conductor_tx` into this loop. This lets us serialize the conductor's activity.
+            while let Some(message) = conductor_rx.next().await {
+                state
+                    .handle_conductor_message(&cx, message, &mut conductor_tx)
+                    .await?;
+            }
+            Ok(())
+        })
     }
 
     /// Convenience method to run the conductor with a transport.
@@ -199,12 +174,17 @@ impl Conductor {
     }
 }
 
+pub struct ConductorMessageHandler {
+    len_components: usize,
+    conductor_tx: mpsc::Sender<ConductorMessage>,
+}
+
 /// The conductor manages the proxy chain lifecycle and message routing.
 ///
 /// It maintains connections to all components in the chain and routes messages
 /// bidirectionally between the editor, components, and agent.
 ///
-pub struct ConductorHandler {
+struct ConductorHandlerState {
     /// Manages the TCP listeners for MCP connections that will be proxied over ACP.
     bridge_listeners: McpBridgeListeners,
 
@@ -225,7 +205,49 @@ pub struct ConductorHandler {
     proxy_mode: AtomicBool,
 }
 
-impl ConductorHandler {
+impl JrMessageHandler for ConductorMessageHandler {
+    async fn handle_message(
+        &mut self,
+        message: MessageAndCx,
+    ) -> Result<sacp::Handled<MessageAndCx>, sacp::Error> {
+        JrHandlerChain::new()
+            .on_receive_message_from_successor({
+                let len_components = self.len_components;
+                let mut conductor_tx = self.conductor_tx.clone();
+                async move |message: MessageAndCx| {
+                    // If we receive a message from our successor, we must be in proxy mode or else something odd is going on.
+                    conductor_tx
+                        .send(ConductorMessage::AgentToClient {
+                            source_component_index: len_components,
+                            message,
+                        })
+                        .await
+                        .map_err(sacp::util::internal_error)
+                }
+            })
+            // Any incoming messages from the client are client-to-agent messages targeting the first component.
+            .on_receive_message({
+                let mut conductor_tx = self.conductor_tx.clone();
+                async move |message: MessageAndCx| {
+                    conductor_tx
+                        .send(ConductorMessage::ClientToAgent {
+                            target_component_index: 0,
+                            message,
+                        })
+                        .await
+                        .map_err(sacp::util::internal_error)
+                }
+            })
+            .apply(message)
+            .await
+    }
+
+    fn describe_chain(&self) -> impl std::fmt::Debug {
+        "ConductorMessageHandler"
+    }
+}
+
+impl ConductorHandlerState {
     /// Recursively spawns components and builds the proxy chain.
     ///
     /// This function implements the recursive chain building pattern:

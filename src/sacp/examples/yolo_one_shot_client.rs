@@ -110,7 +110,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
             }
         })
-        .serve_with(transport, |cx: sacp::JrConnectionCx| async move {
+        .with_client(transport, |cx: sacp::JrConnectionCx| async move {
             // Initialize the agent
             eprintln!("🤝 Initializing agent...");
             let init_response = cx

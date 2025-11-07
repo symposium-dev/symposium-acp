@@ -163,7 +163,7 @@ async fn test_empty_request() {
             });
 
             let result = client
-                .serve_with(client_transport, async |cx| -> Result<(), sacp::Error> {
+                .with_client(client_transport, async |cx| -> Result<(), sacp::Error> {
                     let request = EmptyRequest;
 
                     let result: Result<SimpleResponse, _> = recv(cx.send_request(request)).await;
@@ -213,7 +213,7 @@ async fn test_null_params() {
             });
 
             let result = client
-                .serve_with(client_transport, async |cx| -> Result<(), sacp::Error> {
+                .with_client(client_transport, async |cx| -> Result<(), sacp::Error> {
                     let request = OptionalParamsRequest { value: None };
 
                     let result: Result<SimpleResponse, _> = recv(cx.send_request(request)).await;
@@ -261,7 +261,7 @@ async fn test_server_shutdown() {
 
             let client_result = tokio::task::spawn_local(async move {
                 client
-                    .serve_with(client_transport, async |cx| -> Result<(), sacp::Error> {
+                    .with_client(client_transport, async |cx| -> Result<(), sacp::Error> {
                         let request = EmptyRequest;
 
                         // Send request and get future for response

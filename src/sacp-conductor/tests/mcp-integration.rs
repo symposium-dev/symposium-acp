@@ -53,17 +53,19 @@ async fn run_test_with_components(
 
     JrHandlerChain::new()
         .name("editor-to-connector")
-        .with_spawned(async move {
-            Conductor::run_with_command(
+        .with_spawned(|_cx| async move {
+            Conductor::new(
                 "conductor".to_string(),
-                conductor_out.compat_write(),
-                conductor_in.compat(),
                 components,
                 Some(conductor_command()),
             )
+            .run(sacp::ByteStreams::new(
+                conductor_out.compat_write(),
+                conductor_in.compat(),
+            ))
             .await
         })
-        .serve_with(transport, editor_task)
+        .with_client(transport, editor_task)
         .await
 }
 
@@ -139,20 +141,22 @@ async fn test_agent_handles_prompt() -> Result<(), sacp::Error> {
                     .map_err(|_| sacp::Error::internal_error())
             }
         })
-        .with_spawned(async move {
-            Conductor::run_with_command(
+        .with_spawned(|_cx| async move {
+            Conductor::new(
                 "mcp-integration-conductor".to_string(),
-                conductor_out.compat_write(),
-                conductor_in.compat(),
                 vec![
                     mcp_integration::proxy::create(),
                     mcp_integration::agent::create(),
                 ],
                 Some(conductor_command()),
             )
+            .run(sacp::ByteStreams::new(
+                conductor_out.compat_write(),
+                conductor_in.compat(),
+            ))
             .await
         })
-        .serve_with(transport, async |editor_cx| {
+        .with_client(transport, async |editor_cx| {
             // Initialize
             recv(editor_cx.send_request(InitializeRequest {
                 protocol_version: Default::default(),
