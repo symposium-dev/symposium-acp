@@ -9,7 +9,7 @@ mod mcp_integration;
 
 use expect_test::expect;
 use futures::{SinkExt, StreamExt, channel::mpsc};
-use sacp::JrConnection;
+use sacp::JrHandlerChain;
 use sacp::schema::{
     ContentBlock, InitializeRequest, NewSessionRequest, PromptRequest, SessionNotification,
     TextContent,
@@ -49,19 +49,23 @@ async fn run_test_with_components(
     let (editor_out, conductor_in) = duplex(1024);
     let (conductor_out, editor_in) = duplex(1024);
 
-    JrConnection::new(editor_out.compat_write(), editor_in.compat())
+    let transport = sacp::ByteStreams::new(editor_out.compat_write(), editor_in.compat());
+
+    JrHandlerChain::new()
         .name("editor-to-connector")
-        .with_spawned(async move {
-            Conductor::run_with_command(
+        .with_spawned(|_cx| async move {
+            Conductor::new(
                 "conductor".to_string(),
-                conductor_out.compat_write(),
-                conductor_in.compat(),
                 components,
                 Some(conductor_command()),
             )
+            .run(sacp::ByteStreams::new(
+                conductor_out.compat_write(),
+                conductor_in.compat(),
+            ))
             .await
         })
-        .with_client(editor_task)
+        .with_client(transport, editor_task)
         .await
 }
 
@@ -123,7 +127,9 @@ async fn test_agent_handles_prompt() -> Result<(), sacp::Error> {
     let (editor_in, editor_out) = tokio::io::split(editor);
     let (conductor_in, conductor_out) = tokio::io::split(conductor);
 
-    JrConnection::new(editor_out.compat_write(), editor_in.compat())
+    let transport = sacp::ByteStreams::new(editor_out.compat_write(), editor_in.compat());
+
+    JrHandlerChain::new()
         .name("editor-to-connector")
         .on_receive_notification({
             let mut log_tx = log_tx.clone();
@@ -135,20 +141,22 @@ async fn test_agent_handles_prompt() -> Result<(), sacp::Error> {
                     .map_err(|_| sacp::Error::internal_error())
             }
         })
-        .with_spawned(async move {
-            Conductor::run_with_command(
+        .with_spawned(|_cx| async move {
+            Conductor::new(
                 "mcp-integration-conductor".to_string(),
-                conductor_out.compat_write(),
-                conductor_in.compat(),
                 vec![
                     mcp_integration::proxy::create(),
                     mcp_integration::agent::create(),
                 ],
                 Some(conductor_command()),
             )
+            .run(sacp::ByteStreams::new(
+                conductor_out.compat_write(),
+                conductor_in.compat(),
+            ))
             .await
         })
-        .with_client(async |editor_cx| {
+        .with_client(transport, async |editor_cx| {
             // Initialize
             recv(editor_cx.send_request(InitializeRequest {
                 protocol_version: Default::default(),

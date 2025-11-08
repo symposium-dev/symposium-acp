@@ -3,3 +3,4 @@ logs
 *.log
 target
 .sparkle-space
+PLAN.md

@@ -3,10 +3,11 @@ use futures::{FutureExt, future::BoxFuture};
 use futures::{SinkExt, StreamExt};
 use fxhash::FxHashMap;
 use rmcp::ServiceExt;
+
 use sacp::schema::NewSessionRequest;
 use sacp::{
-    Handled, JrConnection, JrConnectionCx, JrHandler, JrMessage, JrRequestCx, MessageAndCx,
-    UntypedMessage,
+    Handled, JrConnectionCx, JrHandlerChain, JrMessage, JrMessageHandler, JrRequestCx,
+    MessageAndCx, UntypedMessage,
 };
 use std::pin::Pin;
 use std::sync::{Arc, Mutex};
@@ -229,45 +230,49 @@ impl McpServiceRegistry {
         // Every request/notification that is sent over `mcp_server_tx` we will
         // send to the MCP server.
         let spawn_results = request_cx
-            .spawn(
-                JrConnection::new(mcp_client_write.compat_write(), mcp_client_read.compat())
-                    .on_receive_message({
-                        let connection_id = connection_id.clone();
-                        let outer_cx = request_cx.connection_cx();
-                        async move |message: sacp::MessageAndCx| {
-                            // Wrap the message in McpOverAcp{Request,Notification} and forward to successor
-                            let wrapped = message.map(
-                                |request, request_cx| {
-                                    (
-                                        McpOverAcpRequest {
-                                            connection_id: connection_id.clone(),
-                                            request,
-                                        },
-                                        request_cx,
-                                    )
-                                },
-                                |notification, cx| {
-                                    (
-                                        McpOverAcpNotification {
-                                            connection_id: connection_id.clone(),
-                                            notification,
-                                        },
-                                        cx,
-                                    )
-                                },
-                            );
-                            outer_cx.send_proxied_message(wrapped)
-                        }
+            .spawn({
+                let connection_id = connection_id.clone();
+                let outer_cx = request_cx.clone();
+
+                let transport = sacp::ByteStreams::new(
+                    mcp_client_write.compat_write(),
+                    mcp_client_read.compat(),
+                );
+
+                JrHandlerChain::new()
+                    .on_receive_message(async move |message: sacp::MessageAndCx| {
+                        // Wrap the message in McpOverAcp{Request,Notification} and forward to successor
+                        let wrapped = message.map(
+                            |request, request_cx| {
+                                (
+                                    McpOverAcpRequest {
+                                        connection_id: connection_id.clone(),
+                                        request,
+                                    },
+                                    request_cx,
+                                )
+                            },
+                            |notification, cx| {
+                                (
+                                    McpOverAcpNotification {
+                                        connection_id: connection_id.clone(),
+                                        notification,
+                                    },
+                                    cx,
+                                )
+                            },
+                        );
+                        outer_cx.send_proxied_message(wrapped)
                     })
-                    .with_client({
-                        async move |mcp_cx| {
-                            while let Some(msg) = mcp_server_rx.next().await {
-                                mcp_cx.send_proxied_message(msg)?;
-                            }
-                            Ok(())
+                    .with_spawned(move |mcp_cx| async move {
+                        while let Some(msg) = mcp_server_rx.next().await {
+                            mcp_cx.send_proxied_message(msg)?;
                         }
-                    }),
-            )
+                        Ok(())
+                    })
+                    .connect_to(transport)?
+                    .serve()
+            })
             .and_then(|()| {
                 // Spawn MCP server task
                 request_cx.spawn(async move {
@@ -403,7 +408,7 @@ impl McpServiceRegistry {
     }
 }
 
-impl JrHandler for McpServiceRegistry {
+impl JrMessageHandler for McpServiceRegistry {
     fn describe_chain(&self) -> impl std::fmt::Debug {
         "McpServiceRegistry"
     }

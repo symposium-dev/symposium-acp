@@ -3,12 +3,13 @@
 //! Provides a simple helper function to connect to an agent, send a prompt,
 //! and collect all session updates into a string.
 
-use sacp::JrConnection;
-use sacp::schema::{
-    ContentBlock, InitializeRequest, NewSessionRequest, PromptRequest, SessionNotification,
-    SessionUpdate, TextContent,
+use sacp::{
+    JrHandlerChain,
+    schema::{
+        ContentBlock, InitializeRequest, InitializeResponse, NewSessionRequest, NewSessionResponse,
+        PromptRequest, PromptResponse, SessionNotification, SessionUpdate, TextContent,
+    },
 };
-use std::sync::{Arc, Mutex};
 
 /// Connect to an agent, send a prompt, and collect all session update text.
 ///
@@ -36,71 +37,67 @@ where
     OB: futures::AsyncWrite + Send + 'static,
     IB: futures::AsyncRead + Send + 'static,
 {
-    let collected_text = Arc::new(Mutex::new(String::new()));
+    let mut collected_text = String::new();
 
-    let connection = JrConnection::new(outgoing, incoming).name("test-client");
-
-    let cx = connection.connection_cx();
-
-    // Spawn session update collector
-    let collector_handle = tokio::spawn({
-        let collected_text = collected_text.clone();
-        async move {
-            connection
-                .on_receive_notification(async move |notif: SessionNotification, _cx| {
-                    // Collect text from AgentMessageChunk updates
-                    if let SessionUpdate::AgentMessageChunk(chunk) = &notif.update {
-                        if let ContentBlock::Text(text_content) = &chunk.content {
-                            collected_text.lock().unwrap().push_str(&text_content.text);
-                        }
-                    }
-                    Ok(())
-                })
-                .serve()
-                .await
-        }
-    });
-
-    // Initialize
-    cx.send_request(InitializeRequest {
-        protocol_version: Default::default(),
-        client_capabilities: Default::default(),
-        meta: None,
-        client_info: None,
-    })
-    .block_task()
-    .await?;
-
-    // Create session
-    let session_response = cx
-        .send_request(NewSessionRequest {
-            meta: None,
-            mcp_servers: vec![],
-            cwd: std::env::current_dir().unwrap_or_default(),
+    JrHandlerChain::new()
+        .name("test-client")
+        .on_receive_notification(async |notif: SessionNotification, _cx| {
+            // Collect text from AgentMessageChunk updates
+            if let SessionUpdate::AgentMessageChunk(chunk) = &notif.update {
+                if let ContentBlock::Text(text_content) = &chunk.content {
+                    collected_text.push_str(&text_content.text);
+                }
+            }
+            Ok(())
         })
-        .block_task()
+        .connect_to(sacp::ByteStreams::new(outgoing, incoming))?
+        .with_client(async move |cx| {
+            // Initialize
+            let InitializeResponse { .. } = cx
+                .send_request(InitializeRequest {
+                    protocol_version: Default::default(),
+                    client_capabilities: Default::default(),
+                    meta: None,
+                    client_info: None,
+                })
+                .block_task()
+                .await?;
+
+            // Create session
+            let NewSessionResponse { session_id, .. } = cx
+                .send_request(NewSessionRequest {
+                    meta: None,
+                    mcp_servers: vec![],
+                    cwd: std::env::current_dir().unwrap_or_default(),
+                })
+                .block_task()
+                .await?;
+
+            // Send prompt
+            let PromptResponse {
+                stop_reason,
+                meta: _,
+            } = cx
+                .send_request(PromptRequest {
+                    session_id,
+                    prompt: vec![ContentBlock::Text(TextContent {
+                        text: prompt.to_string(),
+                        annotations: None,
+                        meta: None,
+                    })],
+                    meta: None,
+                })
+                .block_task()
+                .await?;
+
+            match stop_reason {
+                sacp::schema::StopReason::EndTurn => Ok(()),
+                _ => Err(sacp::util::internal_error(format!(
+                    "prompt stopped early: {stop_reason:?}"
+                ))),
+            }
+        })
         .await?;
 
-    // Send prompt
-    cx.send_request(PromptRequest {
-        session_id: session_response.session_id,
-        prompt: vec![ContentBlock::Text(TextContent {
-            text: prompt.to_string(),
-            annotations: None,
-            meta: None,
-        })],
-        meta: None,
-    })
-    .block_task()
-    .await?;
-
-    // Give time for session updates to arrive
-    tokio::time::sleep(std::time::Duration::from_millis(200)).await;
-
-    // Stop the collector
-    collector_handle.abort();
-
-    // Return collected text
-    let result = collected_text.lock().unwrap().clone();
-    Ok(result)
+    Ok(collected_text)
 }

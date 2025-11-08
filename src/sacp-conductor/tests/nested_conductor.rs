@@ -100,13 +100,9 @@ impl ComponentProvider for MockInnerConductor {
 
         // Spawn the inner conductor as a task
         cx.spawn(async move {
-            Conductor::run(
-                "inner-conductor".to_string(),
-                outgoing_bytes,
-                incoming_bytes,
-                components,
-            )
-            .await?;
+            Conductor::new("inner-conductor".to_string(), components, None)
+                .run(sacp::ByteStreams::new(outgoing_bytes, incoming_bytes))
+                .await?;
             Ok(())
         })?;
 
@@ -119,7 +115,7 @@ async fn test_nested_conductor_with_arrow_proxies() -> Result<(), sacp::Error> {
     // Create the nested component chain using mock components
     // Inner conductor will manage: arrow_proxy1 -> arrow_proxy2 -> eliza
     // Outer conductor will manage: inner_conductor only
-    let inner_conductor = Box::new(MockInnerConductor::new(2));
+    let inner_conductor: Box<dyn ComponentProvider> = Box::new(MockInnerConductor::new(2));
 
     // Create duplex streams for editor <-> conductor communication
     let (editor_write, conductor_read) = duplex(8192);
@@ -127,17 +123,20 @@ async fn test_nested_conductor_with_arrow_proxies() -> Result<(), sacp::Error> {
 
     // Spawn the outer conductor with the inner conductor and eliza
     let conductor_handle = tokio::spawn(async move {
-        Conductor::run(
+        Conductor::new(
             "outer-conductor".to_string(),
+            vec![inner_conductor, Box::new(MockEliza)],
+            None,
+        )
+        .run(sacp::ByteStreams::new(
             conductor_write.compat_write(),
             conductor_read.compat(),
-            vec![inner_conductor, Box::new(MockEliza)],
-        )
+        ))
         .await
     });
 
-    // Editor side: connect and send a prompt using helper
-    let editor_handle = tokio::spawn(async move {
+    // Wait for editor to complete and get the result
+    let result = tokio::time::timeout(std::time::Duration::from_secs(30), async move {
         let result =
             yolo_prompt(editor_write.compat_write(), editor_read.compat(), "Hello").await?;
 
@@ -149,14 +148,10 @@ async fn test_nested_conductor_with_arrow_proxies() -> Result<(), sacp::Error> {
         .assert_debug_eq(&result);
 
         Ok::<String, sacp::Error>(result)
-    });
-
-    // Wait for editor to complete and get the result
-    let result = tokio::time::timeout(std::time::Duration::from_secs(30), editor_handle)
-        .await
-        .expect("Test timed out")
-        .expect("Editor task panicked")
-        .expect("Editor failed");
+    })
+    .await
+    .expect("Test timed out")
+    .expect("Editor failed");
 
     tracing::info!(
         ?result,
@@ -184,17 +179,20 @@ async fn test_nested_conductor_with_external_arrow_proxies() -> Result<(), sacp:
 
     // Spawn the outer conductor with the inner conductor and eliza as external processes
     let conductor_handle = tokio::spawn(async move {
-        Conductor::run(
+        Conductor::new(
             "outer-conductor".to_string(),
+            vec![inner_conductor, eliza],
+            None,
+        )
+        .run(sacp::ByteStreams::new(
             conductor_write.compat_write(),
             conductor_read.compat(),
-            vec![Box::new(inner_conductor), Box::new(eliza)],
-        )
+        ))
         .await
     });
 
-    // Editor side: connect and send a prompt using helper
-    let editor_handle = tokio::spawn(async move {
+    // Wait for editor to complete and get the result
+    let result = tokio::time::timeout(std::time::Duration::from_secs(30), async move {
         let result =
             yolo_prompt(editor_write.compat_write(), editor_read.compat(), "Hello").await?;
 
@@ -206,14 +204,10 @@ async fn test_nested_conductor_with_external_arrow_proxies() -> Result<(), sacp:
         .assert_debug_eq(&result);
 
         Ok::<String, sacp::Error>(result)
-    });
-
-    // Wait for editor to complete and get the result
-    let result = tokio::time::timeout(std::time::Duration::from_secs(30), editor_handle)
-        .await
-        .expect("Test timed out")
-        .expect("Editor task panicked")
-        .expect("Editor failed");
+    })
+    .await
+    .expect("Test timed out")
+    .expect("Editor failed");
 
     tracing::info!(
         ?result,

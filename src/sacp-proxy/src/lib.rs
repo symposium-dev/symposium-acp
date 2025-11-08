@@ -24,20 +24,20 @@
 //! The simplest proxy just forwards messages unchanged:
 //!
 //! ```rust,no_run
-//! use sacp::JrConnection;
+//! use sacp::JrHandlerChain;
 //! use sacp_proxy::{AcpProxyExt, McpServiceRegistry};
 //! use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
 //!
 //! # #[tokio::main]
 //! # async fn main() -> Result<(), Box<dyn std::error::Error>> {
-//! JrConnection::new(
-//!     tokio::io::stdout().compat_write(),
-//!     tokio::io::stdin().compat()
-//! )
+//! JrHandlerChain::new()
 //!     .name("my-proxy")
 //!     .provide_mcp(McpServiceRegistry::default())  // Provide MCP services
 //!     .proxy()  // Enable proxy mode
-//!     .serve()
+//!     .serve(sacp::ByteStreams::new(
+//!         tokio::io::stdout().compat_write(),
+//!         tokio::io::stdin().compat()
+//!     ))
 //!     .await?;
 //! # Ok(())
 //! # }
@@ -46,16 +46,13 @@
 //! To add MCP tools to the proxy, provide an MCP server:
 //!
 //! ```rust,no_run
-//! use sacp::JrConnection;
+//! use sacp::JrHandlerChain;
 //! use sacp_proxy::{AcpProxyExt, McpServiceRegistry};
 //! use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
 //!
 //! # #[tokio::main]
 //! # async fn main() -> Result<(), Box<dyn std::error::Error>> {
-//! JrConnection::new(
-//!     tokio::io::stdout().compat_write(),
-//!     tokio::io::stdin().compat()
-//! )
+//! JrHandlerChain::new()
 //!     .name("my-proxy")
 //!     // Add MCP servers to provide tools/resources/prompts
 //!     .provide_mcp(
@@ -63,7 +60,10 @@
 //!             // .with_rmcp_server("my-server", || MyMcpServer::new())?
 //!     )
 //!     .proxy()
-//!     .serve()
+//!     .serve(sacp::ByteStreams::new(
+//!         tokio::io::stdout().compat_write(),
+//!         tokio::io::stdin().compat()
+//!     ))
 //!     .await?;
 //! # Ok(())
 //! # }

@@ -8,7 +8,7 @@
 //! cargo run --example minimal
 //! ```
 
-use sacp::JrConnection;
+use sacp::JrHandlerChain;
 use sacp_proxy::{AcpProxyExt, McpServiceRegistry};
 use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
 
@@ -22,18 +22,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     tracing::info!("Minimal proxy starting");
 
-    // Create connection over stdio with compat layer for tokio/futures interop
-    let stdin = tokio::io::stdin().compat();
-    let stdout = tokio::io::stdout().compat_write();
-
     // Set up the proxy connection
-    JrConnection::new(stdout, stdin)
+    JrHandlerChain::new()
         .name("minimal-proxy")
         // Empty MCP registry - no tools provided
         .provide_mcp(McpServiceRegistry::default())
         // Enable proxy mode (handles capability handshake and message routing)
         .proxy()
         // Start serving
+        .connect_to(sacp::ByteStreams::new(
+            tokio::io::stdout().compat_write(),
+            tokio::io::stdin().compat(),
+        ))?
         .serve()
         .await?;
 

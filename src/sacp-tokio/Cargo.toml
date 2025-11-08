@@ -11,6 +11,7 @@ categories = ["development-tools"]
 [dependencies]
 sacp = { version = "1.0.0-alpha.1", path = "../sacp" }
 futures.workspace = true
+jsonrpcmsg.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 shell-words = "1.1"

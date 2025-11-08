@@ -7,7 +7,7 @@ use sacp::schema::{
     McpServer, NewSessionRequest, NewSessionResponse, PromptRequest, PromptResponse,
     SessionNotification, SessionUpdate, StopReason, TextContent,
 };
-use sacp::{JrConnection, JrConnectionCx, JrRequestCx};
+use sacp::{JrConnectionCx, JrHandlerChain, JrRequestCx};
 use sacp_conductor::component::{Cleanup, ComponentProvider};
 use std::{pin::Pin, sync::Arc};
 use tokio::sync::Mutex;
@@ -37,7 +37,8 @@ impl ComponentProvider for AgentComponentProvider {
         cx.spawn({
             let state = state.clone();
             async move {
-                JrConnection::new(outgoing_bytes, incoming_bytes)
+                let transport = sacp::ByteStreams::new(outgoing_bytes, incoming_bytes);
+                JrHandlerChain::new()
                     .name("agent-component")
                     .on_receive_request(async move |request: InitializeRequest, request_cx| {
                         // Simple initialization response
@@ -105,7 +106,7 @@ impl ComponentProvider for AgentComponentProvider {
                             connection_cx.spawn(Self::respond_to_prompt(state, request, request_cx))
                         }
                     })
-                    .serve()
+                    .serve(transport)
                     .await
             }
         })?;

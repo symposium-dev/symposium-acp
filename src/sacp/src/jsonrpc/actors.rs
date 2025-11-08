@@ -1,5 +1,4 @@
 use std::collections::HashMap;
-use std::panic::Location;
 use std::pin::pin;
 
 // Types re-exported from crate root
@@ -9,78 +8,18 @@ use futures::AsyncWrite;
 use futures::AsyncWriteExt as _;
 use futures::StreamExt;
 use futures::channel::mpsc;
-use futures::future::BoxFuture;
 use futures::io::BufReader;
-use futures::stream::FusedStream;
-use futures::stream::FuturesUnordered;
 use uuid::Uuid;
 
 use crate::MessageAndCx;
 use crate::UntypedMessage;
 use crate::jsonrpc::JrConnectionCx;
-use crate::jsonrpc::JrHandler;
+use crate::jsonrpc::JrMessageHandler;
 use crate::jsonrpc::JrRequestCx;
 use crate::jsonrpc::OutgoingMessage;
 use crate::jsonrpc::ReplyMessage;
 
 use super::Handled;
-
-pub(crate) struct Task {
-    pub location: &'static Location<'static>,
-    pub future: BoxFuture<'static, Result<(), crate::Error>>,
-}
-
-/// The "task actor" manages other tasks
-pub(super) async fn task_actor(
-    mut task_rx: mpsc::UnboundedReceiver<Task>,
-) -> Result<(), crate::Error> {
-    let mut futures = FuturesUnordered::new();
-
-    loop {
-        // If we have no futures to run, wait until we do.
-        if futures.is_empty() {
-            match task_rx.next().await {
-                Some(task) => futures.push(execute_task(task)),
-                None => return Ok(()),
-            }
-            continue;
-        }
-
-        // If there are no more tasks coming in, just drain our queue and return.
-        if task_rx.is_terminated() {
-            while let Some(result) = futures.next().await {
-                result?;
-            }
-            return Ok(());
-        }
-
-        // Otherwise, run futures until we get a request for a new task.
-        futures::select! {
-            result = futures.next() => if let Some(result) = result {
-                result?;
-            },
-
-            task = task_rx.next() => {
-                if let Some(task) = task {
-                    futures.push(execute_task(task));
-                }
-            }
-        }
-    }
-}
-
-async fn execute_task(task: Task) -> Result<(), crate::Error> {
-    let Task { location, future } = task;
-    future.await.map_err(|err| {
-        let data = err.data.clone();
-        err.with_data(serde_json::json! {
-            {
-                "spawned_at": format!("{}:{}:{}", location.file(), location.line(), location.column()),
-                "data": data,
-            }
-        })
-    })
-}
 
 /// The "reply actor" manages a queue of pending replies.
 pub(super) async fn reply_actor(
@@ -129,122 +68,25 @@ pub(super) async fn reply_actor(
     Ok(())
 }
 
-/// Parsing incoming messages from `incoming_bytes`.
-/// Each message will be dispatched to the appropriate layer.
+// ============================================================================
+// Split Actors for Pluggable Transport
+// ============================================================================
+
+/// Outgoing protocol actor: Converts application-level OutgoingMessage to protocol-level jsonrpcmsg::Message.
 ///
-/// # Parameters
-/// - `json_rpc_cx`: The JSON-RPC context.
-/// - `incoming_bytes`: The incoming bytes.
-/// - `reply_tx`: The reply sender.
-/// - `mut cancellation_tx`: cancellation signal; when the rx side of this channel is dropped, the actor will terminate
-/// - `layers`: The layers.
+/// This actor handles JSON-RPC protocol semantics:
+/// - Assigns unique IDs to outgoing requests
+/// - Subscribes to reply_actor for response correlation
+/// - Converts OutgoingMessage variants to jsonrpcmsg::Message
 ///
-/// # Returns
-/// - `Result<(), crate::Error>`: an error if something unrecoverable occurred
-pub(super) async fn incoming_actor(
-    connection_name: &Option<String>,
-    json_rpc_cx: &JrConnectionCx,
-    incoming_bytes: impl AsyncRead,
-    reply_tx: mpsc::UnboundedSender<ReplyMessage>,
-    mut handler: impl JrHandler,
-) -> Result<(), crate::Error> {
-    let incoming_bytes = pin!(incoming_bytes);
-    let buffered_incoming_bytes = BufReader::new(incoming_bytes);
-    let mut incoming_lines = buffered_incoming_bytes.lines();
-    while let Some(line) = incoming_lines.next().await {
-        let line = line.map_err(crate::Error::into_internal_error)?;
-        tracing::trace!(message = %line, "Received JSON-RPC message");
-        let message: Result<jsonrpcmsg::Message, _> = serde_json::from_str(&line);
-        match message {
-            Ok(msg) => match msg {
-                jsonrpcmsg::Message::Request(request) => {
-                    tracing::trace!(method = %request.method, id = ?request.id, "Handling request");
-                    dispatch_request(connection_name, json_rpc_cx, request, &mut handler).await?
-                }
-                jsonrpcmsg::Message::Response(response) => {
-                    tracing::trace!(id = ?response.id, has_result = response.result.is_some(), has_error = response.error.is_some(), "Handling response");
-                    if let Some(id) = response.id {
-                        if let Some(value) = response.result {
-                            reply_tx
-                                .unbounded_send(ReplyMessage::Dispatch(id, Ok(value)))
-                                .map_err(crate::Error::into_internal_error)?;
-                        } else if let Some(error) = response.error {
-                            // Convert jsonrpcmsg::Error to crate::Error
-                            let acp_error = crate::Error {
-                                code: error.code,
-                                message: error.message,
-                                data: error.data,
-                            };
-                            reply_tx
-                                .unbounded_send(ReplyMessage::Dispatch(id, Err(acp_error)))
-                                .map_err(crate::Error::into_internal_error)?;
-                        }
-                    }
-                }
-            },
-            Err(_) => {
-                json_rpc_cx.send_error_notification(crate::Error::parse_error())?;
-            }
-        }
-    }
-    Ok(())
-}
-
-/// Dispatches a JSON-RPC request to the handler.
-/// Report an error back to the server if it does not get handled.
-async fn dispatch_request(
-    connection_name: &Option<String>,
-    json_rpc_cx: &JrConnectionCx,
-    request: jsonrpcmsg::Request,
-    handler: &mut impl JrHandler,
-) -> Result<(), crate::Error> {
-    tracing::debug!(
-        ?request,
-        "handler_type" = ?handler.describe_chain(),
-        connection_name,
-        "dispatch_request"
-    );
-
-    let message = UntypedMessage::new(&request.method, &request.params).expect("well-formed JSON");
-
-    let message_cx = match &request.id {
-        Some(id) => MessageAndCx::Request(
-            message,
-            JrRequestCx::new(json_rpc_cx, request.method.clone(), id.clone()),
-        ),
-        None => MessageAndCx::Notification(message, json_rpc_cx.clone()),
-    };
-
-    match handler.handle_message(message_cx).await? {
-        Handled::Yes => {
-            tracing::debug!(method = request.method, ?request.id, "Handler reported: Handled::Yes");
-        }
-        Handled::No(request_cx) => {
-            tracing::debug!(method = ?request.method, ?request.id, "Handler reported: Handled::No, sending method_not_found");
-            request_cx.respond_with_error(crate::Error::method_not_found())?;
-        }
-    }
-
-    Ok(())
-}
-
-/// Actor processing outgoing messages and serializing them onto the transport.
-///
-/// # Parameters
-///
-/// * `outgoing_rx`: Receiver for outgoing messages.
-/// * `reply_tx`: Sender for reply messages.
-/// * `outgoing_bytes`: AsyncWrite for sending messages.
-pub(super) async fn outgoing_actor(
-    connection_name: &Option<String>,
+/// This is the protocol layer - it has no knowledge of how messages are transported.
+pub(super) async fn outgoing_protocol_actor(
     mut outgoing_rx: mpsc::UnboundedReceiver<OutgoingMessage>,
     reply_tx: mpsc::UnboundedSender<ReplyMessage>,
-    outgoing_bytes: impl AsyncWrite,
+    transport_tx: mpsc::UnboundedSender<jsonrpcmsg::Message>,
 ) -> Result<(), crate::Error> {
-    let mut outgoing_bytes = pin!(outgoing_bytes);
-
     while let Some(message) = outgoing_rx.next().await {
-        tracing::debug!(connection_name, ?message, "outgoing_actor");
+        tracing::debug!(?message, "outgoing_protocol_actor");
 
         // Create the message to be sent over the transport
         let json_rpc_message = match message {
@@ -297,10 +139,35 @@ pub(super) async fn outgoing_actor(
                     message: error.message,
                     data: error.data,
                 };
+                // Response with id: None means this is an error notification that couldn't be
+                // correlated to a specific request (e.g., parse error before we could read the id)
                 jsonrpcmsg::Message::Response(jsonrpcmsg::Response::error_v2(jsonrpc_error, None))
             }
         };
 
+        // Send to transport layer
+        transport_tx
+            .unbounded_send(json_rpc_message)
+            .map_err(crate::Error::into_internal_error)?;
+    }
+    Ok(())
+}
+
+/// Transport outgoing actor: Serializes jsonrpcmsg::Message and writes to byte stream.
+///
+/// This actor handles transport mechanics:
+/// - Serializes jsonrpcmsg::Message to JSON
+/// - Writes newline-delimited JSON to the stream
+/// - Handles serialization errors
+///
+/// This is the transport layer - it has no knowledge of protocol semantics (IDs, correlation, etc.).
+pub(super) async fn transport_outgoing_actor(
+    mut transport_rx: mpsc::UnboundedReceiver<jsonrpcmsg::Message>,
+    outgoing_bytes: impl AsyncWrite,
+) -> Result<(), crate::Error> {
+    let mut outgoing_bytes = pin!(outgoing_bytes);
+
+    while let Some(json_rpc_message) = transport_rx.next().await {
         match serde_json::to_vec(&json_rpc_message) {
             Ok(mut bytes) => {
                 if let Ok(msg_str) = std::str::from_utf8(&bytes) {
@@ -350,6 +217,133 @@ pub(super) async fn outgoing_actor(
                 }
             }
         };
+    }
+    Ok(())
+}
+
+/// Incoming protocol actor: Routes jsonrpcmsg::Message to reply_actor or handler.
+///
+/// This actor handles JSON-RPC protocol semantics:
+/// - Routes responses to reply_actor (for request/response correlation)
+/// - Routes requests/notifications to handler chain
+/// - Converts jsonrpcmsg::Request to UntypedMessage for handlers
+///
+/// This is the protocol layer - it has no knowledge of how messages arrived.
+pub(super) async fn incoming_protocol_actor(
+    json_rpc_cx: &JrConnectionCx,
+    mut transport_rx: mpsc::UnboundedReceiver<jsonrpcmsg::Message>,
+    reply_tx: mpsc::UnboundedSender<ReplyMessage>,
+    mut handler: impl JrMessageHandler,
+) -> Result<(), crate::Error> {
+    while let Some(message) = transport_rx.next().await {
+        match message {
+            jsonrpcmsg::Message::Request(request) => {
+                tracing::trace!(method = %request.method, id = ?request.id, "Handling request");
+                dispatch_request(json_rpc_cx, request, &mut handler).await?
+            }
+            jsonrpcmsg::Message::Response(response) => {
+                tracing::trace!(id = ?response.id, has_result = response.result.is_some(), has_error = response.error.is_some(), "Handling response");
+                if let Some(id) = response.id {
+                    if let Some(value) = response.result {
+                        reply_tx
+                            .unbounded_send(ReplyMessage::Dispatch(id, Ok(value)))
+                            .map_err(crate::Error::into_internal_error)?;
+                    } else if let Some(error) = response.error {
+                        // Convert jsonrpcmsg::Error to crate::Error
+                        let acp_error = crate::Error {
+                            code: error.code,
+                            message: error.message,
+                            data: error.data,
+                        };
+                        reply_tx
+                            .unbounded_send(ReplyMessage::Dispatch(id, Err(acp_error)))
+                            .map_err(crate::Error::into_internal_error)?;
+                    }
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Transport incoming actor: Parses bytes into jsonrpcmsg::Message.
+///
+/// This actor handles transport mechanics:
+/// - Reads newline-delimited JSON from the stream
+/// - Parses to jsonrpcmsg::Message
+/// - Handles parse errors
+///
+/// This is the transport layer - it has no knowledge of protocol semantics.
+pub(super) async fn transport_incoming_actor(
+    json_rpc_cx: JrConnectionCx,
+    incoming_bytes: impl AsyncRead,
+    transport_tx: mpsc::UnboundedSender<jsonrpcmsg::Message>,
+) -> Result<(), crate::Error> {
+    let incoming_bytes = pin!(incoming_bytes);
+    let buffered_incoming_bytes = BufReader::new(incoming_bytes);
+    let mut incoming_lines = buffered_incoming_bytes.lines();
+
+    while let Some(line) = incoming_lines.next().await {
+        let line = line.map_err(crate::Error::into_internal_error)?;
+        tracing::trace!(message = %line, "Received JSON-RPC message");
+
+        let message: Result<jsonrpcmsg::Message, _> = serde_json::from_str(&line);
+        match message {
+            Ok(msg) => {
+                transport_tx
+                    .unbounded_send(msg)
+                    .map_err(crate::Error::into_internal_error)?;
+            }
+            Err(_) => {
+                json_rpc_cx.send_error_notification(crate::Error::parse_error())?;
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Dispatches a JSON-RPC request to the handler.
+/// Report an error back to the server if it does not get handled.
+async fn dispatch_request(
+    json_rpc_cx: &JrConnectionCx,
+    request: jsonrpcmsg::Request,
+    handler: &mut impl JrMessageHandler,
+) -> Result<(), crate::Error> {
+    let message = UntypedMessage::new(&request.method, &request.params).expect("well-formed JSON");
+
+    let message_cx = match &request.id {
+        Some(id) => MessageAndCx::Request(
+            message,
+            JrRequestCx::new(json_rpc_cx, request.method.clone(), id.clone()),
+        ),
+        None => MessageAndCx::Notification(message, json_rpc_cx.clone()),
+    };
+
+    match handler.handle_message(message_cx).await? {
+        Handled::Yes => {
+            tracing::debug!(method = request.method, ?request.id, handler = ?handler.describe_chain(), "Message handled");
+            return Ok(());
+        }
+
+        Handled::No(m) => {
+            tracing::debug!(method = ?request.method, ?request.id, "No suitable handler found");
+            m.respond_with_error(crate::Error::method_not_found())
+        }
+    }
+}
+
+/// Simple channel forwarding actor for [`Channels`] transport.
+///
+/// This actor just forwards messages from one channel to another without any
+/// transformation. Used for in-process communication where no serialization is needed.
+pub(super) async fn channel_forward_actor(
+    mut rx: mpsc::UnboundedReceiver<jsonrpcmsg::Message>,
+    tx: mpsc::UnboundedSender<jsonrpcmsg::Message>,
+) -> Result<(), crate::Error> {
+    while let Some(message) = rx.next().await {
+        tx.unbounded_send(message).map_err(|_| {
+            crate::util::internal_error("Failed to forward message through channel")
+        })?;
     }
     Ok(())
 }

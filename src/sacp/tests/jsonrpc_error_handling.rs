@@ -9,7 +9,7 @@
 
 use expect_test::expect;
 use futures::{AsyncRead, AsyncWrite};
-use sacp::{JrConnection, JrMessage, JrRequestCx, JrResponse, JrResponsePayload, JrRequest};
+use sacp::{JrHandlerChain, JrMessage, JrRequest, JrRequestCx, JrResponse, JrResponsePayload};
 use serde::{Deserialize, Serialize};
 use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
 
@@ -118,11 +118,12 @@ async fn test_invalid_json() {
             let server_writer = server_writer.compat_write();
 
             // No handlers - all requests will return errors
-            let server = JrConnection::new(server_writer, server_reader);
+            let server_transport = sacp::ByteStreams::new(server_writer, server_reader);
+            let server = JrHandlerChain::new();
 
             // Spawn server
             tokio::task::spawn_local(async move {
-                let _ = server.serve().await;
+                let _ = server.serve(server_transport).await;
             });
 
             // Send invalid JSON
@@ -167,10 +168,11 @@ async fn test_incomplete_line() {
     let output = Cursor::new(Vec::new());
 
     // No handlers needed for EOF test
-    let connection = JrConnection::new(output, input);
+    let transport = sacp::ByteStreams::new(output, input);
+    let connection = JrHandlerChain::new();
 
     // The server should handle EOF mid-message gracefully
-    let result = connection.serve().await;
+    let result = connection.serve(transport).await;
 
     // Server should terminate cleanly when hitting EOF
     assert!(result.is_ok() || result.is_err());
@@ -191,17 +193,19 @@ async fn test_unknown_method() {
             let (server_reader, server_writer, client_reader, client_writer) = setup_test_streams();
 
             // No handlers - all requests will be "method not found"
-            let server = JrConnection::new(server_writer, server_reader);
-            let client = JrConnection::new(client_writer, client_reader);
+            let server_transport = sacp::ByteStreams::new(server_writer, server_reader);
+            let server = JrHandlerChain::new();
+            let client_transport = sacp::ByteStreams::new(client_writer, client_reader);
+            let client = JrHandlerChain::new();
 
             // Spawn server
             tokio::task::spawn_local(async move {
-                server.serve().await.ok();
+                server.serve(server_transport).await.ok();
             });
 
             // Send request from client
             let result = client
-                .with_client(async |cx| -> Result<(), sacp::Error> {
+                .with_client(client_transport, async |cx| -> Result<(), sacp::Error> {
                     let request = SimpleRequest {
                         message: "test".to_string(),
                     };
@@ -275,7 +279,8 @@ async fn test_handler_returns_error() {
         .run_until(async {
             let (server_reader, server_writer, client_reader, client_writer) = setup_test_streams();
 
-            let server = JrConnection::new(server_writer, server_reader).on_receive_request(
+            let server_transport = sacp::ByteStreams::new(server_writer, server_reader);
+            let server = JrHandlerChain::new().on_receive_request(
                 async |_request: ErrorRequest, request_cx: JrRequestCx<SimpleResponse>| {
                     // Explicitly return an error
                     request_cx.respond_with_error(sacp::Error::new((
@@ -285,14 +290,15 @@ async fn test_handler_returns_error() {
                 },
             );
 
-            let client = JrConnection::new(client_writer, client_reader);
+            let client_transport = sacp::ByteStreams::new(client_writer, client_reader);
+            let client = JrHandlerChain::new();
 
             tokio::task::spawn_local(async move {
-                server.serve().await.ok();
+                server.serve(server_transport).await.ok();
             });
 
             let result = client
-                .with_client(async |cx| -> Result<(), sacp::Error> {
+                .with_client(client_transport, async |cx| -> Result<(), sacp::Error> {
                     let request = ErrorRequest {
                         value: "trigger error".to_string(),
                     };
@@ -366,7 +372,8 @@ async fn test_missing_required_params() {
 
             // Handler that validates params - since EmptyRequest has no params but we're checking
             // against SimpleRequest which requires a message field, this will fail
-            let server = JrConnection::new(server_writer, server_reader).on_receive_request(
+            let server_transport = sacp::ByteStreams::new(server_writer, server_reader);
+            let server = JrHandlerChain::new().on_receive_request(
                 async |_request: EmptyRequest, request_cx: JrRequestCx<SimpleResponse>| {
                     // This will be called, but EmptyRequest parsing already succeeded
                     // The test is actually checking if EmptyRequest (no params) fails to parse as SimpleRequest
@@ -377,14 +384,15 @@ async fn test_missing_required_params() {
                 },
             );
 
-            let client = JrConnection::new(client_writer, client_reader);
+            let client_transport = sacp::ByteStreams::new(client_writer, client_reader);
+            let client = JrHandlerChain::new();
 
             tokio::task::spawn_local(async move {
-                server.serve().await.ok();
+                server.serve(server_transport).await.ok();
             });
 
             let result = client
-                .with_client(async |cx| -> Result<(), sacp::Error> {
+                .with_client(client_transport, async |cx| -> Result<(), sacp::Error> {
                     // Send request with no params (EmptyRequest has no fields)
                     let request = EmptyRequest;
 

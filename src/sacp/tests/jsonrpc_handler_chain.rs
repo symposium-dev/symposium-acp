@@ -5,7 +5,8 @@
 //! handler claims them.
 
 use sacp::{
-    JrConnection, JrMessage, JrNotification, JrRequest, JrRequestCx, JrResponse, JrResponsePayload,
+    JrHandlerChain, JrMessage, JrNotification, JrRequest, JrRequestCx, JrResponse,
+    JrResponsePayload,
 };
 use serde::{Deserialize, Serialize};
 use std::sync::{Arc, Mutex};
@@ -148,7 +149,8 @@ async fn test_multiple_handlers_different_methods() {
             let client_writer = client_writer.compat_write();
 
             // Chain both handlers
-            let server = JrConnection::new(server_writer, server_reader)
+            let server_transport = sacp::ByteStreams::new(server_writer, server_reader);
+            let server = JrHandlerChain::new()
                 .on_receive_request(
                     async |request: FooRequest, request_cx: JrRequestCx<FooResponse>| {
                         request_cx.respond(FooResponse {
@@ -163,38 +165,42 @@ async fn test_multiple_handlers_different_methods() {
                         })
                     },
                 );
-            let client = JrConnection::new(client_writer, client_reader);
+            let client_transport = sacp::ByteStreams::new(client_writer, client_reader);
+            let client = JrHandlerChain::new();
 
             tokio::task::spawn_local(async move {
-                if let Err(e) = server.serve().await {
+                if let Err(e) = server.serve(server_transport).await {
                     eprintln!("Server error: {e:?}");
                 }
             });
 
             let result = client
-                .with_client(async |cx| -> std::result::Result<(), sacp::Error> {
-                    // Test foo request
-                    let foo_response = recv(cx.send_request(FooRequest {
-                        value: "test1".to_string(),
-                    }))
-                    .await
-                    .map_err(|e| -> sacp::Error {
-                        sacp::util::internal_error(format!("Foo request failed: {e:?}"))
-                    })?;
-                    assert_eq!(foo_response.result, "foo: test1");
+                .with_client(
+                    client_transport,
+                    async |cx| -> std::result::Result<(), sacp::Error> {
+                        // Test foo request
+                        let foo_response = recv(cx.send_request(FooRequest {
+                            value: "test1".to_string(),
+                        }))
+                        .await
+                        .map_err(|e| -> sacp::Error {
+                            sacp::util::internal_error(format!("Foo request failed: {e:?}"))
+                        })?;
+                        assert_eq!(foo_response.result, "foo: test1");
 
-                    // Test bar request
-                    let bar_response = recv(cx.send_request(BarRequest {
-                        value: "test2".to_string(),
-                    }))
-                    .await
-                    .map_err(|e| -> sacp::Error {
-                        sacp::util::internal_error(format!("Bar request failed: {:?}", e))
-                    })?;
-                    assert_eq!(bar_response.result, "bar: test2");
+                        // Test bar request
+                        let bar_response = recv(cx.send_request(BarRequest {
+                            value: "test2".to_string(),
+                        }))
+                        .await
+                        .map_err(|e| -> sacp::Error {
+                            sacp::util::internal_error(format!("Bar request failed: {:?}", e))
+                        })?;
+                        assert_eq!(bar_response.result, "bar: test2");
 
-                    Ok(())
-                })
+                        Ok(())
+                    },
+                )
                 .await;
 
             assert!(result.is_ok(), "Test failed: {:?}", result);
@@ -265,7 +271,8 @@ async fn test_handler_priority_ordering() {
             // First handler in chain should get first chance
             let handled_clone1 = handled.clone();
             let handled_clone2 = handled.clone();
-            let server = JrConnection::new(server_writer, server_reader)
+            let server_transport = sacp::ByteStreams::new(server_writer, server_reader);
+            let server = JrHandlerChain::new()
                 .on_receive_request(
                     async move |request: TrackRequest, request_cx: JrRequestCx<FooResponse>| {
                         handled_clone1.lock().unwrap().push("handler1".to_string());
@@ -282,29 +289,33 @@ async fn test_handler_priority_ordering() {
                         })
                     },
                 );
-            let client = JrConnection::new(client_writer, client_reader);
+            let client_transport = sacp::ByteStreams::new(client_writer, client_reader);
+            let client = JrHandlerChain::new();
 
             tokio::task::spawn_local(async move {
-                if let Err(e) = server.serve().await {
+                if let Err(e) = server.serve(server_transport).await {
                     eprintln!("Server error: {:?}", e);
                 }
             });
 
             let result = client
-                .with_client(async |cx| -> std::result::Result<(), sacp::Error> {
-                    let response = recv(cx.send_request(TrackRequest {
-                        value: "test".to_string(),
-                    }))
-                    .await
-                    .map_err(|e| {
-                        sacp::util::internal_error(format!("Track request failed: {:?}", e))
-                    })?;
+                .with_client(
+                    client_transport,
+                    async |cx| -> std::result::Result<(), sacp::Error> {
+                        let response = recv(cx.send_request(TrackRequest {
+                            value: "test".to_string(),
+                        }))
+                        .await
+                        .map_err(|e| {
+                            sacp::util::internal_error(format!("Track request failed: {:?}", e))
+                        })?;
 
-                    // First handler should have handled it
-                    assert_eq!(response.result, "handler1: test");
+                        // First handler should have handled it
+                        assert_eq!(response.result, "handler1: test");
 
-                    Ok(())
-                })
+                        Ok(())
+                    },
+                )
                 .await;
 
             assert!(result.is_ok(), "Test failed: {:?}", result);
@@ -418,7 +429,8 @@ async fn test_fallthrough_behavior() {
             // Handler1 only handles "method1", Handler2 only handles "method2"
             let handled_clone1 = handled.clone();
             let handled_clone2 = handled.clone();
-            let server = JrConnection::new(server_writer, server_reader)
+            let server_transport = sacp::ByteStreams::new(server_writer, server_reader);
+            let server = JrHandlerChain::new()
                 .on_receive_request(
                     async move |request: Method1Request, request_cx: JrRequestCx<FooResponse>| {
                         handled_clone1.lock().unwrap().push("method1".to_string());
@@ -435,29 +447,33 @@ async fn test_fallthrough_behavior() {
                         })
                     },
                 );
-            let client = JrConnection::new(client_writer, client_reader);
+            let client_transport = sacp::ByteStreams::new(client_writer, client_reader);
+            let client = JrHandlerChain::new();
 
             tokio::task::spawn_local(async move {
-                if let Err(e) = server.serve().await {
+                if let Err(e) = server.serve(server_transport).await {
                     eprintln!("Server error: {:?}", e);
                 }
             });
 
             let result = client
-                .with_client(async |cx| -> std::result::Result<(), sacp::Error> {
-                    // Send method2 - should fallthrough handler1 to handler2
-                    let response = recv(cx.send_request(Method2Request {
-                        value: "fallthrough".to_string(),
-                    }))
-                    .await
-                    .map_err(|e| {
-                        sacp::util::internal_error(format!("Method2 request failed: {:?}", e))
-                    })?;
+                .with_client(
+                    client_transport,
+                    async |cx| -> std::result::Result<(), sacp::Error> {
+                        // Send method2 - should fallthrough handler1 to handler2
+                        let response = recv(cx.send_request(Method2Request {
+                            value: "fallthrough".to_string(),
+                        }))
+                        .await
+                        .map_err(|e| {
+                            sacp::util::internal_error(format!("Method2 request failed: {:?}", e))
+                        })?;
 
-                    assert_eq!(response.result, "method2: fallthrough");
+                        assert_eq!(response.result, "method2: fallthrough");
 
-                    Ok(())
-                })
+                        Ok(())
+                    },
+                )
                 .await;
 
             assert!(result.is_ok(), "Test failed: {:?}", result);
@@ -491,34 +507,39 @@ async fn test_no_handler_claims() {
             let client_writer = client_writer.compat_write();
 
             // Handler that only handles "foo"
-            let server = JrConnection::new(server_writer, server_reader).on_receive_request(
+            let server_transport = sacp::ByteStreams::new(server_writer, server_reader);
+            let server = JrHandlerChain::new().on_receive_request(
                 async |request: FooRequest, request_cx: JrRequestCx<FooResponse>| {
                     request_cx.respond(FooResponse {
                         result: format!("foo: {}", request.value),
                     })
                 },
             );
-            let client = JrConnection::new(client_writer, client_reader);
+            let client_transport = sacp::ByteStreams::new(client_writer, client_reader);
+            let client = JrHandlerChain::new();
 
             tokio::task::spawn_local(async move {
-                if let Err(e) = server.serve().await {
+                if let Err(e) = server.serve(server_transport).await {
                     eprintln!("Server error: {:?}", e);
                 }
             });
 
             let result = client
-                .with_client(async |cx| -> std::result::Result<(), sacp::Error> {
-                    // Send "bar" request which no handler claims
-                    let response_result = recv(cx.send_request(BarRequest {
-                        value: "unclaimed".to_string(),
-                    }))
-                    .await;
+                .with_client(
+                    client_transport,
+                    async |cx| -> std::result::Result<(), sacp::Error> {
+                        // Send "bar" request which no handler claims
+                        let response_result = recv(cx.send_request(BarRequest {
+                            value: "unclaimed".to_string(),
+                        }))
+                        .await;
 
-                    // Should get an error (method not found)
-                    assert!(response_result.is_err());
+                        // Should get an error (method not found)
+                        assert!(response_result.is_err());
 
-                    Ok(())
-                })
+                        Ok(())
+                    },
+                )
                 .await;
 
             assert!(result.is_ok(), "Test failed: {:?}", result);
@@ -586,34 +607,42 @@ async fn test_handler_claims_notification() {
 
             // EventHandler claims notifications
             let events_clone = events.clone();
-            let server = JrConnection::new(server_writer, server_reader).on_receive_notification(
+            let server_transport = sacp::ByteStreams::new(server_writer, server_reader);
+            let server = JrHandlerChain::new().on_receive_notification(
                 async move |notification: EventNotification, _notification_cx| {
                     events_clone.lock().unwrap().push(notification.event);
                     Ok(())
                 },
             );
-            let client = JrConnection::new(client_writer, client_reader);
+            let client_transport = sacp::ByteStreams::new(client_writer, client_reader);
+            let client = JrHandlerChain::new();
 
             tokio::task::spawn_local(async move {
-                if let Err(e) = server.serve().await {
+                if let Err(e) = server.serve(server_transport).await {
                     eprintln!("Server error: {:?}", e);
                 }
             });
 
             let result = client
-                .with_client(async |cx| -> std::result::Result<(), sacp::Error> {
-                    cx.send_notification(EventNotification {
-                        event: "test_event".to_string(),
-                    })
-                    .map_err(|e| {
-                        sacp::util::internal_error(format!("Failed to send notification: {:?}", e))
-                    })?;
+                .with_client(
+                    client_transport,
+                    async |cx| -> std::result::Result<(), sacp::Error> {
+                        cx.send_notification(EventNotification {
+                            event: "test_event".to_string(),
+                        })
+                        .map_err(|e| {
+                            sacp::util::internal_error(format!(
+                                "Failed to send notification: {:?}",
+                                e
+                            ))
+                        })?;
 
-                    // Give server time to process
-                    tokio::time::sleep(Duration::from_millis(100)).await;
+                        // Give server time to process
+                        tokio::time::sleep(Duration::from_millis(100)).await;
 
-                    Ok(())
-                })
+                        Ok(())
+                    },
+                )
                 .await;
 
             assert!(result.is_ok(), "Test failed: {:?}", result);

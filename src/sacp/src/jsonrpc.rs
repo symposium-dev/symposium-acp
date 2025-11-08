@@ -7,23 +7,55 @@ use std::panic::Location;
 
 use boxfnonce::SendBoxFnOnce;
 use futures::channel::{mpsc, oneshot};
-use futures::future::Either;
+use futures::future::{self, BoxFuture};
 use futures::{AsyncRead, AsyncWrite, FutureExt};
 
 mod actors;
 pub(crate) mod handlers;
+mod task_actor;
 
-use crate::jsonrpc::actors::Task;
-use crate::jsonrpc::handlers::{
-    ChainHandler, MessageHandler, NotificationHandler, NullHandler, RequestHandler,
-};
+use crate::handler::{ChainedHandler, NamedHandler};
+use crate::jsonrpc::handlers::{MessageHandler, NotificationHandler, NullHandler, RequestHandler};
+use crate::jsonrpc::task_actor::{PendingTask, Task};
+
+/// Handlers are invoked when new messages arrive at the [`JrConnection`].
+/// They have a chance to inspect the method and parameters and decide whether to "claim" the request
+/// (i.e., handle it). If they do not claim it, the request will be passed to the next handler.
+#[allow(async_fn_in_trait)]
+pub trait JrMessageHandler {
+    /// Attempt to claim an incoming message (request or notification).
+    ///
+    /// # Important: do not block
+    ///
+    /// The server will not process new messages until this handler returns.
+    /// You should avoid blocking in this callback unless you wish to block the server (e.g., for rate limiting).
+    /// The recommended approach to manage expensive operations is to the [`JrConnectionCx::spawn`] method available on the message context.
+    ///
+    /// # Parameters
+    ///
+    /// * `cx` - The context of the request. This gives access to the request ID and the method name and is used to send a reply; can also be used to send other messages to the other party.
+    /// * `params` - The parameters of the request.
+    ///
+    /// # Returns
+    ///
+    /// * `Ok(Handled::Yes)` if the message was claimed. It will not be propagated further.
+    /// * `Ok(Handled::No(message))` if not; the (possibly changed) message will be passed to the remaining handlers.
+    /// * `Err` if an internal error occurs (this will bring down the server).
+    async fn handle_message(
+        &mut self,
+        message: MessageAndCx,
+    ) -> Result<Handled<MessageAndCx>, crate::Error>;
+
+    /// Returns a debug description of the handler chain for diagnostics
+    fn describe_chain(&self) -> impl std::fmt::Debug;
+}
 
 /// A JSON-RPC connection that can act as either a server, client, or both.
 ///
 /// `JrConnection` provides a builder-style API for creating JSON-RPC servers and clients.
-/// You start by calling [`JrConnection::new`] with your input/output streams, then add
-/// message handlers, and finally drive the connection with either [`serve`](Self::serve)
-/// or [`with_client`](Self::with_client).
+/// You start by calling [`JrConnection::new`], then add message handlers, and finally
+/// drive the connection with either [`serve`](Self::serve) or [`with_client`](Self::with_client),
+/// providing a transport implementation (e.g., [`ByteStreams`] for byte streams).
 ///
 /// # JSON-RPC Primer
 ///
@@ -57,7 +89,7 @@ use crate::jsonrpc::handlers::{
 ///         // Handle only SessionUpdate notifications
 ///         Ok(())
 ///     })
-/// # .serve().await?;
+/// # .serve(sacp_test::MockTransport).await?;
 /// # Ok(())
 /// # }
 /// ```
@@ -96,7 +128,7 @@ use crate::jsonrpc::handlers::{
 ///         MyRequests::Prompt(prompt) => { cx.respond(serde_json::json!({})) }
 ///     }
 /// })
-/// # .serve().await?;
+/// # .serve(sacp_test::MockTransport).await?;
 /// # Ok(())
 /// # }
 /// ```
@@ -122,7 +154,7 @@ use crate::jsonrpc::handlers::{
 ///         }
 ///     }
 /// })
-/// # .serve().await?;
+/// # .serve(sacp_test::MockTransport).await?;
 /// # Ok(())
 /// # }
 /// ```
@@ -160,7 +192,7 @@ use crate::jsonrpc::handlers::{
 ///         // This runs for any message not handled above
 ///         msg.respond_with_error(sacp::util::internal_error("unknown method"))
 ///     })
-/// # .serve().await?;
+/// # .serve(sacp_test::MockTransport).await?;
 /// # Ok(())
 /// # }
 /// ```
@@ -196,7 +228,7 @@ use crate::jsonrpc::handlers::{
 ///     // Respond immediately without blocking
 ///     cx.respond(AnalysisStarted { job_id: 42 })
 /// })
-/// # .serve().await?;
+/// # .serve(sacp_test::MockTransport).await?;
 /// # Ok(())
 /// # }
 /// ```
@@ -238,7 +270,7 @@ use crate::jsonrpc::handlers::{
 ///     .on_receive_request(async |req: MyRequest, cx| {
 ///         cx.respond(MyResponse { status: "ok".into() })
 ///     })
-///     .serve()  // Runs until connection closes or error occurs
+///     .serve(MockTransport)  // Runs until connection closes or error occurs
 ///     .await?;
 /// # Ok(())
 /// # }
@@ -261,7 +293,7 @@ use crate::jsonrpc::handlers::{
 ///     .on_receive_request(async |req: MyRequest, cx| {
 ///         cx.respond(MyResponse { status: "ok".into() })
 ///     })
-///     .with_client(async |cx| {
+///     .with_client(MockTransport, async |cx| {
 ///         // You can send requests to the other side
 ///         let response = cx.send_request(InitializeRequest::make())
 ///             .block_task()
@@ -283,13 +315,17 @@ use crate::jsonrpc::handlers::{
 /// # Example: Complete Agent
 ///
 /// ```no_run
-/// # use sacp::JrConnection;
+/// # use sacp::JrHandlerChain;
+/// # use sacp::ByteStreams;
 /// # use sacp::schema::{InitializeRequest, InitializeResponse, PromptRequest, PromptResponse, SessionNotification};
 /// # use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
 /// # async fn example() -> Result<(), sacp::Error> {
-/// let stdout = tokio::io::stdout().compat_write();
-/// let stdin = tokio::io::stdin().compat();
-/// JrConnection::new(stdout, stdin)
+/// let transport = ByteStreams::new(
+///     tokio::io::stdout().compat_write(),
+///     tokio::io::stdin().compat(),
+/// );
+///
+/// JrHandlerChain::new()
 ///     .name("my-agent")  // Optional: for debugging logs
 ///     .on_receive_request(async |init: InitializeRequest, cx| {
 ///         let response: InitializeResponse = todo!();
@@ -304,58 +340,41 @@ use crate::jsonrpc::handlers::{
 ///         let response: PromptResponse = todo!();
 ///         cx.respond(response)
 ///     })
-///     .serve()
+///     .serve(transport)
 ///     .await?;
 /// # Ok(())
 /// # }
 /// ```
 #[must_use]
-pub struct JrConnection<OB: AsyncWrite, IB: AsyncRead, H: JrHandler> {
+pub struct JrHandlerChain<H: JrMessageHandler> {
     name: Option<String>,
-
-    /// Where to send bytes to communicate to the other side
-    outgoing_bytes: OB,
-
-    /// Where to read bytes from the other side
-    incoming_bytes: IB,
-
-    /// Where the "outgoing messages" actor will receive messages.
-    outgoing_rx: mpsc::UnboundedReceiver<OutgoingMessage>,
-
-    /// Sender to send messages to the "outgoing message" actor.
-    outgoing_tx: mpsc::UnboundedSender<OutgoingMessage>,
 
     /// Handler for incoming messages.
     handler: H,
 
-    /// Receiver for new tasks.
-    new_task_rx: mpsc::UnboundedReceiver<Task>,
-
-    /// Sender to send messages to the "new task" actor.
-    new_task_tx: mpsc::UnboundedSender<Task>,
+    /// Pending tasks
+    pending_tasks: Vec<PendingTask>,
 }
 
-impl<OB: AsyncWrite, IB: AsyncRead> JrConnection<OB, IB, NullHandler> {
-    /// Create a new JrConnection that will read and write from the given streams.
+impl JrHandlerChain<NullHandler> {
+    /// Create a new JrConnection.
     /// This type follows a builder pattern; use other methods to configure and then invoke
     /// [`Self::serve`] (to use as a server) or [`Self::with_client`] to use as a client.
-    pub fn new(outgoing_bytes: OB, incoming_bytes: IB) -> Self {
-        let (outgoing_tx, outgoing_rx) = mpsc::unbounded();
-        let (new_task_tx, new_task_rx) = mpsc::unbounded();
-        Self {
-            name: None,
-            outgoing_bytes,
-            incoming_bytes,
-            outgoing_rx,
-            outgoing_tx,
-            handler: NullHandler::default(),
-            new_task_rx,
-            new_task_tx,
-        }
+    pub fn new() -> Self {
+        Self::new_with(NullHandler::default())
     }
 }
 
-impl<OB: AsyncWrite, IB: AsyncRead, H: JrHandler> JrConnection<OB, IB, H> {
+impl<H: JrMessageHandler> JrHandlerChain<H> {
+    /// Create a new handler chain with the given handler.
+    pub fn new_with(handler: H) -> Self {
+        Self {
+            name: Default::default(),
+            handler,
+            pending_tasks: Default::default(),
+        }
+    }
+
     /// Set the "name" of this connection -- used only for debugging logs.
     pub fn name(mut self, name: impl ToString) -> Self {
         self.name = Some(name.to_string());
@@ -366,20 +385,57 @@ impl<OB: AsyncWrite, IB: AsyncRead, H: JrHandler> JrConnection<OB, IB, H> {
     ///
     /// Prefer [`Self::on_receive_request`] or [`Self::on_receive_notification`].
     /// This is a low-level method that is not intended for general use.
-    pub fn chain_handler<H1: JrHandler>(
-        self,
-        handler: H1,
-    ) -> JrConnection<OB, IB, ChainHandler<H, H1>> {
-        JrConnection {
+    pub fn with_handler_chain<H1>(
+        mut self,
+        handler_chain: JrHandlerChain<H1>,
+    ) -> JrHandlerChain<ChainedHandler<H, NamedHandler<H1>>>
+    where
+        H1: JrMessageHandler,
+    {
+        self.pending_tasks.extend(
+            handler_chain
+                .pending_tasks
+                .into_iter()
+                .map(|t| t.named(handler_chain.name.clone())),
+        );
+
+        JrHandlerChain {
             name: self.name,
-            handler: ChainHandler::new(self.handler, handler),
-            outgoing_bytes: self.outgoing_bytes,
-            incoming_bytes: self.incoming_bytes,
-            outgoing_rx: self.outgoing_rx,
-            outgoing_tx: self.outgoing_tx,
-            new_task_rx: self.new_task_rx,
-            new_task_tx: self.new_task_tx,
+            handler: ChainedHandler::new(
+                self.handler,
+                NamedHandler::new(handler_chain.name, handler_chain.handler),
+            ),
+            pending_tasks: self.pending_tasks,
         }
+    }
+
+    /// Add a new [`JrHandler`] to the chain.
+    ///
+    /// Prefer [`Self::on_receive_request`] or [`Self::on_receive_notification`].
+    /// This is a low-level method that is not intended for general use.
+    pub fn with_handler<H1>(self, handler: H1) -> JrHandlerChain<ChainedHandler<H, H1>>
+    where
+        H1: JrMessageHandler,
+    {
+        JrHandlerChain {
+            name: self.name,
+            handler: ChainedHandler::new(self.handler, handler),
+            pending_tasks: self.pending_tasks,
+        }
+    }
+
+    /// Enqueue a task to run once the connection is actively serving traffic.
+    #[track_caller]
+    pub fn with_spawned<F>(
+        mut self,
+        task: impl FnOnce(JrConnectionCx) -> F + Send + 'static,
+    ) -> Self
+    where
+        F: Future<Output = Result<(), crate::Error>> + Send + 'static,
+    {
+        let location = Location::caller();
+        self.pending_tasks.push(PendingTask::new(location, task));
+        self
     }
 
     /// Register a handler for messages that can be either requests OR notifications.
@@ -410,7 +466,7 @@ impl<OB: AsyncWrite, IB: AsyncRead, H: JrHandler> JrConnection<OB, IB, H> {
     ///         }
     ///     }
     /// })
-    /// # .serve().await?;
+    /// # .serve(sacp_test::MockTransport).await?;
     /// # Ok(())
     /// # }
     /// ```
@@ -421,22 +477,13 @@ impl<OB: AsyncWrite, IB: AsyncRead, H: JrHandler> JrConnection<OB, IB, H> {
     pub fn on_receive_message<R, N, F>(
         self,
         op: F,
-    ) -> JrConnection<OB, IB, ChainHandler<H, MessageHandler<R, N, F>>>
+    ) -> JrHandlerChain<ChainedHandler<H, MessageHandler<R, N, F>>>
     where
         R: JrRequest,
         N: JrNotification,
-        F: AsyncFnMut(MessageAndCx<R, N>) -> Result<(), crate::Error>,
+        F: AsyncFnMut(MessageAndCx<R, N>) -> Result<(), crate::Error> + Send,
     {
-        JrConnection {
-            name: self.name,
-            handler: ChainHandler::new(self.handler, MessageHandler::new(op)),
-            outgoing_bytes: self.outgoing_bytes,
-            incoming_bytes: self.incoming_bytes,
-            outgoing_rx: self.outgoing_rx,
-            outgoing_tx: self.outgoing_tx,
-            new_task_rx: self.new_task_rx,
-            new_task_tx: self.new_task_tx,
-        }
+        self.with_handler(MessageHandler::new(op))
     }
 
     /// Register a handler for JSON-RPC requests of type `R`.
@@ -453,9 +500,9 @@ impl<OB: AsyncWrite, IB: AsyncRead, H: JrHandler> JrConnection<OB, IB, H> {
     /// # Example
     ///
     /// ```
-    /// # use sacp::JrConnection;
+    /// # use sacp::JrHandlerChain;
     /// # use sacp::schema::{PromptRequest, PromptResponse, SessionNotification};
-    /// # fn example(connection: JrConnection<impl futures::AsyncWrite, impl futures::AsyncRead, impl sacp::JrHandler>) {
+    /// # fn example(connection: JrHandlerChain<impl sacp::JrMessageHandler>) {
     /// connection.on_receive_request(async |request: PromptRequest, request_cx| {
     ///     // Send a notification while processing
     ///     let notif: SessionNotification = todo!();
@@ -478,21 +525,12 @@ impl<OB: AsyncWrite, IB: AsyncRead, H: JrHandler> JrConnection<OB, IB, H> {
     pub fn on_receive_request<R, F>(
         self,
         op: F,
-    ) -> JrConnection<OB, IB, ChainHandler<H, RequestHandler<R, F>>>
+    ) -> JrHandlerChain<ChainedHandler<H, RequestHandler<R, F>>>
     where
         R: JrRequest,
-        F: AsyncFnMut(R, JrRequestCx<R::Response>) -> Result<(), crate::Error>,
+        F: AsyncFnMut(R, JrRequestCx<R::Response>) -> Result<(), crate::Error> + Send,
     {
-        JrConnection {
-            name: self.name,
-            handler: ChainHandler::new(self.handler, RequestHandler::new(op)),
-            outgoing_bytes: self.outgoing_bytes,
-            incoming_bytes: self.incoming_bytes,
-            outgoing_rx: self.outgoing_rx,
-            outgoing_tx: self.outgoing_tx,
-            new_task_rx: self.new_task_rx,
-            new_task_tx: self.new_task_tx,
-        }
+        self.with_handler(RequestHandler::new(op))
     }
 
     /// Register a handler for JSON-RPC notifications of type `N`.
@@ -522,7 +560,7 @@ impl<OB: AsyncWrite, IB: AsyncRead, H: JrHandler> JrConnection<OB, IB, H> {
     ///
     ///     Ok(())
     /// })
-    /// # .serve().await?;
+    /// # .serve(sacp_test::MockTransport).await?;
     /// # Ok(())
     /// # }
     /// ```
@@ -534,108 +572,148 @@ impl<OB: AsyncWrite, IB: AsyncRead, H: JrHandler> JrConnection<OB, IB, H> {
     pub fn on_receive_notification<N, F>(
         self,
         op: F,
-    ) -> JrConnection<OB, IB, ChainHandler<H, NotificationHandler<N, F>>>
+    ) -> JrHandlerChain<ChainedHandler<H, NotificationHandler<N, F>>>
     where
         N: JrNotification,
-        F: AsyncFnMut(N, JrConnectionCx) -> Result<(), crate::Error>,
+        F: AsyncFnMut(N, JrConnectionCx) -> Result<(), crate::Error> + Send,
     {
-        JrConnection {
-            name: self.name,
-            handler: ChainHandler::new(self.handler, NotificationHandler::new(op)),
-            outgoing_bytes: self.outgoing_bytes,
-            incoming_bytes: self.incoming_bytes,
-            outgoing_rx: self.outgoing_rx,
-            outgoing_tx: self.outgoing_tx,
-            new_task_rx: self.new_task_rx,
-            new_task_tx: self.new_task_tx,
-        }
+        self.with_handler(NotificationHandler::new(op))
     }
 
-    /// Returns a [`JrConnectionCx`] that allows you to send requests over the connection
-    /// and receive responses.
-    ///
-    /// **Warning:** This method is provided for use during setup and construction.
-    /// It returns a [`JrConnectionCx`] that you can use later to send requests
-    /// or to spawn tasks. But if you do not invoke [`Self::serve`] or [`Self::with_client`],
-    /// the server will not be running, and those messages will not be received.
-    pub fn connection_cx(&self) -> JrConnectionCx {
-        JrConnectionCx::new(self.outgoing_tx.clone(), self.new_task_tx.clone())
-    }
-
-    /// Enqueue a task to run once the connection is actively serving traffic.
-    #[track_caller]
-    pub fn with_spawned(
+    /// Connect these handlers to a transport layer.
+    /// The resulting connection must then be either [served](`JrConnection::serve`) or [used as a client](`JrConnection::with_client`).
+    pub fn connect_to(
         self,
-        task: impl Future<Output = Result<(), crate::Error>> + Send + 'static,
-    ) -> Self {
-        let json_rpc_cx = self.connection_cx();
-        json_rpc_cx.spawn(task).expect("spawning failed");
-        self
+        transport: impl IntoJrTransport,
+    ) -> Result<JrConnection<H>, crate::Error> {
+        let Self {
+            name,
+            handler,
+            pending_tasks,
+        } = self;
+
+        let (outgoing_tx, outgoing_rx) = mpsc::unbounded();
+        let (new_task_tx, new_task_rx) = mpsc::unbounded();
+        let cx = JrConnectionCx::new(outgoing_tx, new_task_tx);
+
+        // Create channels for protocol/transport boundary
+        let (transport_outgoing_tx, transport_outgoing_rx) = mpsc::unbounded();
+        let (transport_incoming_tx, transport_incoming_rx) = mpsc::unbounded();
+
+        // Create the transport layer
+        Box::new(transport).into_jr_transport(&cx, transport_outgoing_rx, transport_incoming_tx)?;
+
+        // Spawn pending tasks
+        for pending_task in pending_tasks {
+            let task = pending_task.into_task(cx.clone());
+            cx.spawn_task(task)?;
+        }
+
+        Ok(JrConnection {
+            cx,
+            name,
+            outgoing_rx,
+            new_task_rx,
+            transport_outgoing_tx,
+            transport_incoming_rx,
+            handler,
+        })
     }
 
-    /// Run the connection in server mode, processing incoming messages until the connection closes.
+    /// Apply the handlers to a single message. Useful for implementing handlers.
+    pub async fn apply(
+        &mut self,
+        message: MessageAndCx,
+    ) -> Result<Handled<MessageAndCx>, crate::Error> {
+        self.handler.handle_message(message).await
+    }
+
+    /// Convenience method to connect to a transport and serve.
     ///
-    /// This drives the connection by continuously reading messages from the input stream
+    /// This is equivalent to:
+    /// ```ignore
+    /// handler_chain.connect_to(transport)?.serve().await
+    /// ```
+    pub async fn serve(self, transport: impl IntoJrTransport) -> Result<(), crate::Error> {
+        self.connect_to(transport)?.serve().await
+    }
+
+    /// Convenience method to connect to a transport and run a client function.
+    ///
+    /// This is equivalent to:
+    /// ```ignore
+    /// handler_chain.connect_to(transport)?.with_client(main_fn).await
+    /// ```
+    pub async fn with_client(
+        self,
+        transport: impl IntoJrTransport,
+        main_fn: impl AsyncFnOnce(JrConnectionCx) -> Result<(), crate::Error>,
+    ) -> Result<(), crate::Error> {
+        self.connect_to(transport)?.with_client(main_fn).await
+    }
+}
+
+/// A JSON-RPC connection with an active transport.
+///
+/// This type represents a `JrHandlerChain` that has been connected to a transport
+/// via `connect_to()`. It can be driven in two modes:
+///
+/// - [`serve()`](Self::serve) - Run as a server, handling incoming messages until the connection closes
+/// - [`with_client()`](Self::with_client) - Run with client logic, allowing you to send requests/notifications
+///
+/// Most users won't construct this directly - instead use `JrHandlerChain::connect_to()` or
+/// `JrHandlerChain::serve()` for convenience.
+pub struct JrConnection<H: JrMessageHandler> {
+    cx: JrConnectionCx,
+    name: Option<String>,
+    outgoing_rx: mpsc::UnboundedReceiver<OutgoingMessage>,
+    new_task_rx: mpsc::UnboundedReceiver<Task>,
+    transport_outgoing_tx: mpsc::UnboundedSender<jsonrpcmsg::Message>,
+    transport_incoming_rx: mpsc::UnboundedReceiver<jsonrpcmsg::Message>,
+    handler: H,
+}
+
+impl<H: JrMessageHandler> JrConnection<H> {
+    /// Run the connection in server mode with the provided transport.
+    ///
+    /// This drives the connection by continuously processing messages from the transport
     /// and dispatching them to your registered handlers. The connection will run until:
-    /// - The input stream closes (EOF)
+    /// - The transport closes (e.g., EOF on byte streams)
     /// - An error occurs
     /// - One of your handlers returns an error
+    ///
+    /// The transport is responsible for serializing and deserializing `jsonrpcmsg::Message`
+    /// values to/from the underlying I/O mechanism (byte streams, channels, etc.).
     ///
     /// Use this mode when you only need to respond to incoming messages and don't need
     /// to initiate your own requests. If you need to send requests to the other side,
     /// use [`with_client`](Self::with_client) instead.
     ///
-    /// # Example
+    /// # Example: Byte Stream Transport
     ///
     /// ```no_run
+    /// # use sacp::JrHandlerChain;
+    /// # use sacp::ByteStreams;
+    /// # use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
     /// # use sacp_test::*;
-    /// # use std::pin::Pin;
     /// # async fn example() -> Result<(), sacp::Error> {
-    /// # let stdout: Pin<Box<dyn futures::AsyncWrite + Send>> = Box::pin(futures::io::Cursor::new(Vec::new()));
-    /// # let stdin: Pin<Box<dyn futures::AsyncRead + Send>> = Box::pin(futures::io::Cursor::new(Vec::new()));
-    /// sacp::JrConnection::new(stdout, stdin)
+    /// let transport = ByteStreams::new(
+    ///     tokio::io::stdout().compat_write(),
+    ///     tokio::io::stdin().compat(),
+    /// );
+    ///
+    /// JrHandlerChain::new()
     ///     .on_receive_request(async |req: MyRequest, cx| {
-    ///         // Handle requests...
     ///         cx.respond(MyResponse { status: "ok".into() })
     ///     })
-    ///     .serve()  // Run until connection closes
+    ///     .serve(transport)
     ///     .await?;
     /// # Ok(())
     /// # }
     /// ```
     pub async fn serve(self) -> Result<(), crate::Error> {
-        let (reply_tx, reply_rx) = mpsc::unbounded();
-        let json_rpc_cx = JrConnectionCx::new(self.outgoing_tx, self.new_task_tx);
-        futures::select!(
-            r = actors::outgoing_actor(
-                &self.name,
-                self.outgoing_rx,
-                reply_tx.clone(),
-                self.outgoing_bytes,
-            ).fuse() => {
-                tracing::trace!(?r, "outgoing actor terminated");
-                r?;
-            }
-            r = actors::incoming_actor(
-                &self.name,
-                &json_rpc_cx,
-                self.incoming_bytes,
-                reply_tx,
-                self.handler,
-            ).fuse() => {
-                tracing::trace!(?r, "incoming actor terminated");
-                r?;
-            }
-            r = actors::reply_actor(reply_rx).fuse() => {
-                tracing::trace!(?r, "reply actor terminated");
-                r?;
-            }
-            r = actors::task_actor(self.new_task_rx).fuse() => {
-                tracing::trace!(?r, "task actor terminated");
-                r?;
-            }
-        );
-        Ok(())
+        self.with_client(async move |_cx| future::pending().await)
+            .await
     }
 
     /// Run the connection in client mode, both handling incoming messages and sending your own.
@@ -654,17 +732,23 @@ impl<OB: AsyncWrite, IB: AsyncRead, H: JrHandler> JrConnection<OB, IB, H> {
     /// # Example
     ///
     /// ```no_run
-    /// # use sacp_test::*;
+    /// # use sacp::JrHandlerChain;
+    /// # use sacp::ByteStreams;
     /// # use sacp::schema::InitializeRequest;
-    /// # use std::pin::Pin;
+    /// # use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
+    /// # use sacp_test::*;
     /// # async fn example() -> Result<(), sacp::Error> {
-    /// # let stdout: Pin<Box<dyn futures::AsyncWrite + Send>> = Box::pin(futures::io::Cursor::new(Vec::new()));
-    /// # let stdin: Pin<Box<dyn futures::AsyncRead + Send>> = Box::pin(futures::io::Cursor::new(Vec::new()));
-    /// sacp::JrConnection::new(stdout, stdin)
+    /// let transport = ByteStreams::new(
+    ///     tokio::io::stdout().compat_write(),
+    ///     tokio::io::stdin().compat(),
+    /// );
+    ///
+    /// JrHandlerChain::new()
     ///     .on_receive_request(async |req: MyRequest, cx| {
     ///         // Handle incoming requests in the background
     ///         cx.respond(MyResponse { status: "ok".into() })
     ///     })
+    ///     .connect_to(transport)?
     ///     .with_client(async |cx| {
     ///         // Initialize the protocol
     ///         let init_response = cx.send_request(InitializeRequest::make())
@@ -686,6 +770,7 @@ impl<OB: AsyncWrite, IB: AsyncRead, H: JrHandler> JrConnection<OB, IB, H> {
     ///
     /// # Parameters
     ///
+    /// - `transport`: The transport implementation for sending/receiving messages
     /// - `main_fn`: Your client logic. Receives a [`JrConnectionCx`] for sending messages.
     ///
     /// # Errors
@@ -695,16 +780,54 @@ impl<OB: AsyncWrite, IB: AsyncRead, H: JrHandler> JrConnection<OB, IB, H> {
         self,
         main_fn: impl AsyncFnOnce(JrConnectionCx) -> Result<(), crate::Error>,
     ) -> Result<(), crate::Error> {
-        let cx = self.connection_cx();
+        let JrConnection {
+            cx,
+            name,
+            outgoing_rx,
+            new_task_rx,
+            handler,
+            transport_outgoing_tx,
+            transport_incoming_rx,
+        } = self;
+        let (reply_tx, reply_rx) = mpsc::unbounded();
 
-        // Run the server + the main function until one terminates.
-        // We EXPECT the main function to be the one to terminate
-        // except in case of error.
-        let result = futures::future::select(Box::pin(self.serve()), Box::pin(main_fn(cx))).await;
-
-        match result {
-            Either::Left((result, _)) | Either::Right((result, _)) => result,
-        }
+        crate::util::instrument_with_connection_name(name, async move {
+            futures::select!(
+                // Protocol layer: OutgoingMessage → jsonrpcmsg::Message
+                r = actors::outgoing_protocol_actor(
+                    outgoing_rx,
+                    reply_tx.clone(),
+                    transport_outgoing_tx,
+                ).fuse() => {
+                    tracing::trace!(?r, "outgoing protocol actor terminated");
+                    r?;
+                }
+                // Protocol layer: jsonrpcmsg::Message → handler/reply routing
+                r = actors::incoming_protocol_actor(
+                    &cx,
+                    transport_incoming_rx,
+                    reply_tx,
+                    handler,
+                ).fuse() => {
+                    tracing::trace!(?r, "incoming protocol actor terminated");
+                    r?;
+                }
+                r = actors::reply_actor(reply_rx).fuse() => {
+                    tracing::trace!(?r, "reply actor terminated");
+                    r?;
+                }
+                r = task_actor::task_actor(new_task_rx).fuse() => {
+                    tracing::trace!(?r, "task actor terminated");
+                    r?;
+                }
+                r = main_fn(cx.clone()).fuse() => {
+                    tracing::trace!(?r, "main actor terminated");
+                    r?;
+                }
+            );
+            Ok(())
+        })
+        .await
     }
 }
 
@@ -755,38 +878,6 @@ enum OutgoingMessage {
     Error { error: crate::Error },
 }
 
-/// Handlers are invoked when new messages arrive at the [`JrConnection`].
-/// They have a chance to inspect the method and parameters and decide whether to "claim" the request
-/// (i.e., handle it). If they do not claim it, the request will be passed to the next handler.
-#[allow(async_fn_in_trait)]
-pub trait JrHandler {
-    /// Attempt to claim an incoming message (request or notification).
-    ///
-    /// # Important: do not block
-    ///
-    /// The server will not process new messages until this handler returns.
-    /// You should avoid blocking in this callback unless you wish to block the server (e.g., for rate limiting).
-    /// The recommended approach to manage expensive operations is to the [`JrConnectionCx::spawn`] method available on the message context.
-    ///
-    /// # Parameters
-    ///
-    /// * `cx` - The context of the request. This gives access to the request ID and the method name and is used to send a reply; can also be used to send other messages to the other party.
-    /// * `params` - The parameters of the request.
-    ///
-    /// # Returns
-    ///
-    /// * `Ok(Handled::Yes)` if the message was claimed. It will not be propagated further.
-    /// * `Ok(Handled::No(message))` if not; the (possibly changed) message will be passed to the remaining handlers.
-    /// * `Err` if an internal error occurs (this will bring down the server).
-    async fn handle_message(
-        &mut self,
-        message: MessageAndCx,
-    ) -> Result<Handled<MessageAndCx>, crate::Error>;
-
-    /// Returns a debug description of the handler chain for diagnostics
-    fn describe_chain(&self) -> impl std::fmt::Debug;
-}
-
 /// Return type from JrHandler; indicates whether the request was handled or not.
 #[must_use]
 pub enum Handled<T> {
@@ -796,21 +887,95 @@ pub enum Handled<T> {
     No(T),
 }
 
-/// Connection context used to send requests/notifications to the other side.
+/// Trait for types that can provide transport for JSON-RPC messages.
 ///
-/// This context is provided to notification handlers and is also accessible from
-/// request handlers (via `Deref` on [`JrRequestCx`]).
+/// Implementations of this trait bridge between the internal protocol channels
+/// (which carry `jsonrpcmsg::Message`) and the actual I/O mechanism (byte streams,
+/// in-process channels, network sockets, etc.).
 ///
-/// # Primary Uses
+/// The transport layer is responsible only for moving `jsonrpcmsg::Message` in and out.
+/// It has no knowledge of protocol semantics like request/response correlation, ID assignment,
+/// or handler dispatch - those are handled by the protocol layer in `JrConnection`.
 ///
-/// * **Send requests** - [`send_request`](Self::send_request) sends a request and returns
-///   a [`JrResponse`] that lets you handle the response without blocking the event loop
-/// * **Send notifications** - [`send_notification`](Self::send_notification) sends fire-and-forget
-///   messages
-/// * **Spawn concurrent tasks** - [`spawn`](Self::spawn) runs tasks concurrently to avoid
-///   blocking the event loop
+/// # Example
 ///
-/// # Event Loop Considerations
+/// See [`ByteStreams`] for the standard byte stream implementation.
+pub trait IntoJrTransport: Send {
+    /// Set up the transport by spawning actors that bridge the connection's internal
+    /// message channels with the actual transport I/O (byte streams, other processes, etc.).
+    ///
+    /// # Understanding the Channel Directions
+    ///
+    /// The parameters represent the connection's perspective:
+    ///
+    /// - **`outgoing_rx`**: Messages the connection wants to **send out** to the remote side.
+    ///   The transport receives these and writes them to the underlying I/O.
+    ///
+    ///   ```text
+    ///   Connection → outgoing_rx → Transport → [network/stdio/etc] → Remote
+    ///   ```
+    ///
+    /// - **`incoming_tx`**: Messages the transport has **received from** the remote side.
+    ///   The transport reads from the underlying I/O and sends them here.
+    ///
+    ///   ```text
+    ///   Remote → [network/stdio/etc] → Transport → incoming_tx → Connection
+    ///   ```
+    ///
+    /// # Implementation Pattern
+    ///
+    /// Implementations should use `cx.spawn()` to launch transport actors that:
+    ///
+    /// 1. **Outgoing actor**: Read from `outgoing_rx` → serialize/encode → write to transport
+    /// 2. **Incoming actor**: Read from transport → deserialize/decode → send to `incoming_tx`
+    ///
+    /// See [`ByteStreams`] for an example that handles serialization/deserialization,
+    /// or [`Channels`] for a simpler in-process transport that just forwards messages.
+    ///
+    /// # Parameters
+    ///
+    /// - `cx`: Connection context for spawning tasks
+    /// - `outgoing_rx`: Receives messages the connection wants to send out
+    /// - `incoming_tx`: Sends messages received from the remote side to the connection
+    ///
+    /// # Returns
+    ///
+    /// Returns immediately after spawning the transport actors. The actual I/O happens
+    /// asynchronously in the spawned tasks.
+    fn into_jr_transport(
+        self: Box<Self>,
+        cx: &JrConnectionCx,
+        outgoing_rx: mpsc::UnboundedReceiver<jsonrpcmsg::Message>,
+        incoming_tx: mpsc::UnboundedSender<jsonrpcmsg::Message>,
+    ) -> Result<(), crate::Error>;
+}
+
+impl IntoJrTransport for Box<dyn IntoJrTransport> {
+    fn into_jr_transport(
+        self: Box<Self>,
+        cx: &JrConnectionCx,
+        outgoing_rx: mpsc::UnboundedReceiver<jsonrpcmsg::Message>,
+        incoming_tx: mpsc::UnboundedSender<jsonrpcmsg::Message>,
+    ) -> Result<(), crate::Error> {
+        <dyn IntoJrTransport>::into_jr_transport(*self, cx, outgoing_rx, incoming_tx)
+    }
+}
+
+/// Connection context for sending messages and spawning tasks.
+///
+/// This is the primary handle for interacting with the JSON-RPC connection from
+/// within handler callbacks. You can use it to:
+///
+/// * Send requests and notifications to the other side
+/// * Spawn concurrent tasks that run alongside the connection
+/// * Respond to requests (via [`JrRequestCx`] which wraps this)
+///
+/// # Cloning
+///
+/// `JrConnectionCx` is cheaply cloneable - all clones refer to the same underlying connection.
+/// This makes it easy to share across async tasks.
+///
+/// # Event Loop and Concurrency
 ///
 /// Handler callbacks run on the event loop, which means the connection cannot process new
 /// messages while your handler is running. Use [`spawn`](Self::spawn) to offload any
@@ -864,7 +1029,7 @@ impl JrConnectionCx {
     ///     // Respond immediately
     ///     cx.respond(ProcessResponse { result: "started".into() })
     /// })
-    /// # .serve().await?;
+    /// # .serve(sacp_test::MockTransport).await?;
     /// # Ok(())
     /// # }
     /// ```
@@ -875,14 +1040,65 @@ impl JrConnectionCx {
     #[track_caller]
     pub fn spawn(
         &self,
-        future: impl Future<Output = Result<(), crate::Error>> + Send + 'static,
+        task: impl IntoFuture<Output = Result<(), crate::Error>, IntoFuture: Send + 'static>,
     ) -> Result<(), crate::Error> {
+        let location = std::panic::Location::caller();
+        let task = task.into_future();
+        self.spawn_task(Task::new(location, task))
+    }
+
+    fn spawn_task(&self, task: Task) -> Result<(), crate::Error> {
         self.task_tx
-            .unbounded_send(Task {
-                location: Location::caller(),
-                future: Box::pin(future),
-            })
-            .map_err(crate::Error::into_internal_error)
+            .unbounded_send(task)
+            .map_err(crate::util::internal_error)
+    }
+
+    /// Spawn a JSON-RPC connection in the background and return a [`JrConnectionCx`] for sending messages to it.
+    ///
+    /// This is useful for creating multiple connections that communicate with each other,
+    /// such as implementing proxy patterns or connecting to multiple backend services.
+    ///
+    /// # Arguments
+    ///
+    /// - `connection`: The `JrConnection` to spawn (typically created via `JrHandlerChain::connect_to()`)
+    /// - `serve_future`: A function that drives the connection (usually `|c| Box::pin(c.serve())`)
+    ///
+    /// # Returns
+    ///
+    /// A `JrConnectionCx` that you can use to send requests and notifications to the spawned connection.
+    ///
+    /// # Example: Proxying to a backend connection
+    ///
+    /// ```
+    /// # use sacp::{JrHandlerChain, JrConnectionCx};
+    /// # use sacp_test::*;
+    /// # async fn example(cx: JrConnectionCx) -> Result<(), sacp::Error> {
+    /// // Set up a backend connection
+    /// let backend = JrHandlerChain::new()
+    ///     .on_receive_request(async |req: MyRequest, request_cx| {
+    ///         request_cx.respond(MyResponse { status: "ok".into() })
+    ///     })
+    ///     .connect_to(MockTransport)?;
+    ///
+    /// // Spawn it and get a context to send requests to it
+    /// let backend_cx = cx.spawn_connection(backend, |c| Box::pin(c.serve()))?;
+    ///
+    /// // Now you can forward requests to the backend
+    /// let response = backend_cx.send_request(MyRequest {}).block_task().await?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    #[track_caller]
+    pub fn spawn_connection<H: JrMessageHandler>(
+        &self,
+        connection: JrConnection<H>,
+        serve_future: impl FnOnce(JrConnection<H>) -> BoxFuture<'static, Result<(), crate::Error>>,
+    ) -> Result<JrConnectionCx, crate::Error> {
+        let cx = connection.cx.clone();
+        let future = serve_future(connection);
+        let task = Task::new(std::panic::Location::caller(), future);
+        self.spawn_task(task)?;
+        Ok(cx)
     }
 
     /// Send a request/notification and forward the response appropriately.
@@ -1073,7 +1289,7 @@ impl JrConnectionCx {
 ///     // Respond to the request
 ///     cx.respond(ProcessResponse { result })
 /// })
-/// # .serve().await?;
+/// # .serve(sacp_test::MockTransport).await?;
 /// # Ok(())
 /// # }
 /// ```
@@ -1221,7 +1437,7 @@ impl<T: JrResponsePayload> JrRequestCx<T> {
 }
 
 /// Common bounds for any JSON-RPC message.
-pub trait JrMessage: 'static + Debug + Sized {
+pub trait JrMessage: 'static + Debug + Sized + Send {
     /// The parameters for the request.
     fn into_untyped_message(self) -> Result<UntypedMessage, crate::Error>;
 
@@ -1478,7 +1694,7 @@ impl JrNotification for UntypedMessage {}
 ///         .await?;
 ///     cx.respond(response)
 /// })
-/// # .serve().await?;
+/// # .serve(sacp_test::MockTransport).await?;
 /// # Ok(())
 /// # }
 /// ```
@@ -1535,20 +1751,31 @@ impl<R: JrResponsePayload> JrResponse<R> {
     ///
     /// # Example: Proxying requests
     ///
-    /// ```no_run
+    /// ```
+    /// # use sacp::{JrHandlerChain, JrConnectionCx};
     /// # use sacp_test::*;
-    /// # async fn example() -> Result<(), sacp::Error> {
-    /// # let connection = mock_connection();
-    /// # let other_connection = connection.connection_cx();
-    /// connection.on_receive_request(async |req: ProxyRequest, request_cx| {
-    ///     // Forward the request to another connection and proxy the response back
-    ///     other_connection.send_request(req.inner_request)
-    ///         .forward_to_request_cx(request_cx)?;
+    /// # async fn example(cx: JrConnectionCx) -> Result<(), sacp::Error> {
+    /// // Set up backend connection
+    /// let backend = JrHandlerChain::new()
+    ///     .on_receive_request(async |req: MyRequest, request_cx| {
+    ///         request_cx.respond(MyResponse { status: "ok".into() })
+    ///     })
+    ///     .connect_to(MockTransport)?;
     ///
-    ///     // The response will be automatically forwarded when it arrives
-    ///     Ok(())
-    /// })
-    /// # .serve().await?;
+    /// // Spawn backend and get a context to send to it
+    /// let backend_cx = cx.spawn_connection(backend, |c| Box::pin(c.serve()))?;
+    ///
+    /// // Set up proxy that forwards requests to backend
+    /// JrHandlerChain::new()
+    ///     .on_receive_request({
+    ///         let backend_cx = backend_cx.clone();
+    ///         async move |req: MyRequest, request_cx| {
+    ///             // Forward the request to backend and proxy the response back
+    ///             backend_cx.send_request(req)
+    ///                 .forward_to_request_cx(request_cx)?;
+    ///             Ok(())
+    ///         }
+    ///     });
     /// # Ok(())
     /// # }
     /// ```
@@ -1604,7 +1831,7 @@ impl<R: JrResponsePayload> JrResponse<R> {
     ///     // Respond immediately
     ///     cx.respond(MyResponse { status: "ok".into() })
     /// })
-    /// # .serve().await?;
+    /// # .serve(sacp_test::MockTransport).await?;
     /// # Ok(())
     /// # }
     /// ```
@@ -1623,7 +1850,7 @@ impl<R: JrResponsePayload> JrResponse<R> {
     ///
     ///     cx.respond(MyResponse { status: response.value })
     /// })
-    /// # .serve().await?;
+    /// # .serve(sacp_test::MockTransport).await?;
     /// # Ok(())
     /// # }
     /// ```
@@ -1686,7 +1913,7 @@ impl<R: JrResponsePayload> JrResponse<R> {
     ///
     ///     Ok(())
     /// })
-    /// # .serve().await?;
+    /// # .serve(sacp_test::MockTransport).await?;
     /// # Ok(())
     /// # }
     /// ```
@@ -1750,7 +1977,7 @@ impl<R: JrResponsePayload> JrResponse<R> {
     ///     // Handler continues immediately without waiting
     ///     cx.respond(MyResponse { status: "processing".into() })
     /// })
-    /// # .serve().await?;
+    /// # .serve(sacp_test::MockTransport).await?;
     /// # Ok(())
     /// # }
     /// ```
@@ -1793,4 +2020,165 @@ const COMMUNICATION_FAILURE: i32 = -32000;
 
 fn communication_failure(err: impl ToString) -> crate::Error {
     crate::Error::new((COMMUNICATION_FAILURE, err.to_string()))
+}
+
+// ============================================================================
+// IntoJrConnectionTransport Implementations
+// ============================================================================
+
+/// Byte stream transport for JSON-RPC messages.
+///
+/// This transport serializes `jsonrpcmsg::Message` to/from newline-delimited JSON
+/// over byte streams (AsyncRead + AsyncWrite).
+///
+/// # Example
+///
+/// ```no_run
+/// use sacp::ByteStreams;
+/// use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
+///
+/// # async fn example() -> Result<(), sacp::Error> {
+/// let transport = ByteStreams::new(
+///     tokio::io::stdout().compat_write(),
+///     tokio::io::stdin().compat(),
+/// );
+/// # Ok(())
+/// # }
+/// ```
+pub struct ByteStreams<OB, IB> {
+    /// Outgoing byte stream (where we write serialized messages)
+    pub outgoing: OB,
+    /// Incoming byte stream (where we read and parse messages)
+    pub incoming: IB,
+}
+
+impl<OB, IB> ByteStreams<OB, IB>
+where
+    OB: AsyncWrite + Send + 'static,
+    IB: AsyncRead + Send + 'static,
+{
+    /// Create a new byte stream transport.
+    pub fn new(outgoing: OB, incoming: IB) -> Self {
+        Self { outgoing, incoming }
+    }
+}
+
+impl<OB, IB> IntoJrTransport for ByteStreams<OB, IB>
+where
+    OB: AsyncWrite + Send + 'static,
+    IB: AsyncRead + Send + 'static,
+{
+    fn into_jr_transport(
+        self: Box<Self>,
+        cx: &JrConnectionCx,
+        outgoing_rx: mpsc::UnboundedReceiver<jsonrpcmsg::Message>,
+        incoming_tx: mpsc::UnboundedSender<jsonrpcmsg::Message>,
+    ) -> Result<(), crate::Error> {
+        let Self { outgoing, incoming } = *self;
+
+        // Spawn transport outgoing actor: jsonrpcmsg::Message → serialize → bytes
+        cx.spawn(actors::transport_outgoing_actor(outgoing_rx, outgoing))?;
+
+        // Spawn transport incoming actor: bytes → parse → jsonrpcmsg::Message
+        cx.spawn(actors::transport_incoming_actor(
+            cx.clone(),
+            incoming,
+            incoming_tx,
+        ))?;
+
+        Ok(())
+    }
+}
+
+/// A transport that directly uses message channels without byte stream serialization.
+///
+/// This is useful for in-process connections where you want to avoid the overhead
+/// of serializing and deserializing messages through byte streams. Instead, messages
+/// are passed directly through channels, which is ideal for testing or connecting
+/// components within the same process.
+///
+/// # Channel Wiring
+///
+/// `Channels` bridges two pairs of message channels:
+///
+/// ```text
+/// Connection A                    Channels Transport                    Connection B
+/// ────────────                    ──────────────────                    ────────────
+///
+///   outgoing_tx ──→ outgoing_rx ──→ remote_incoming_tx ──→ incoming_rx
+///
+///   incoming_rx ←── incoming_tx ←── remote_outgoing_rx ←── outgoing_tx
+/// ```
+///
+/// # Example
+///
+/// ```no_run
+/// # use sacp::{Channels, JrHandlerChain};
+/// # use futures::channel::mpsc;
+/// # async fn example() -> Result<(), sacp::Error> {
+/// // Create channel pairs for bidirectional communication
+/// let (a_to_b_tx, a_to_b_rx) = mpsc::unbounded();
+/// let (b_to_a_tx, b_to_a_rx) = mpsc::unbounded();
+///
+/// // Connection A uses Channels transport that connects to B
+/// let transport_a = Channels::new(a_to_b_rx, b_to_a_tx);
+///
+/// JrHandlerChain::new()
+///     .name("connection-a")
+///     .serve(transport_a)
+///     .await?;
+/// # Ok(())
+/// # }
+/// ```
+pub struct Channels {
+    /// Receives messages from the remote side (to be sent to our connection's incoming_tx)
+    pub remote_outgoing_rx: mpsc::UnboundedReceiver<jsonrpcmsg::Message>,
+    /// Sends messages to the remote side (receives from our connection's outgoing_rx)
+    pub remote_incoming_tx: mpsc::UnboundedSender<jsonrpcmsg::Message>,
+}
+
+impl Channels {
+    /// Create a new channel-based transport.
+    ///
+    /// # Parameters
+    ///
+    /// - `remote_outgoing_rx`: Receives messages from the remote side
+    /// - `remote_incoming_tx`: Sends messages to the remote side
+    pub fn new(
+        remote_outgoing_rx: mpsc::UnboundedReceiver<jsonrpcmsg::Message>,
+        remote_incoming_tx: mpsc::UnboundedSender<jsonrpcmsg::Message>,
+    ) -> Self {
+        Self {
+            remote_outgoing_rx,
+            remote_incoming_tx,
+        }
+    }
+}
+
+impl IntoJrTransport for Channels {
+    fn into_jr_transport(
+        self: Box<Self>,
+        cx: &JrConnectionCx,
+        outgoing_rx: mpsc::UnboundedReceiver<jsonrpcmsg::Message>,
+        incoming_tx: mpsc::UnboundedSender<jsonrpcmsg::Message>,
+    ) -> Result<(), crate::Error> {
+        let Self {
+            remote_outgoing_rx,
+            remote_incoming_tx,
+        } = *self;
+
+        // Spawn outgoing actor: forward messages from connection to remote
+        cx.spawn(actors::channel_forward_actor(
+            outgoing_rx,
+            remote_incoming_tx,
+        ))?;
+
+        // Spawn incoming actor: forward messages from remote to connection
+        cx.spawn(actors::channel_forward_actor(
+            remote_outgoing_rx,
+            incoming_tx,
+        ))?;
+
+        Ok(())
+    }
 }

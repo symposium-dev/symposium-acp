@@ -1,16 +1,17 @@
-use crate::jsonrpc::{Handled, JrHandler};
+use crate::jsonrpc::{Handled, JrMessageHandler};
 use crate::{JrConnectionCx, JrNotification, JrRequest, MessageAndCx};
 // Types re-exported from crate root
+use super::JrRequestCx;
 use std::marker::PhantomData;
 use std::ops::AsyncFnMut;
 
-use super::JrRequestCx;
-
 /// Null handler that accepts no messages.
 #[derive(Default)]
-pub struct NullHandler {}
+pub struct NullHandler {
+    _private: (),
+}
 
-impl JrHandler for NullHandler {
+impl JrMessageHandler for NullHandler {
     fn describe_chain(&self) -> impl std::fmt::Debug {
         "(null)"
     }
@@ -47,7 +48,7 @@ where
     }
 }
 
-impl<R, F> JrHandler for RequestHandler<R, F>
+impl<R, F> JrMessageHandler for RequestHandler<R, F>
 where
     R: JrRequest,
     F: AsyncFnMut(R, JrRequestCx<R::Response>) -> Result<(), crate::Error>,
@@ -113,7 +114,7 @@ where
     }
 }
 
-impl<R, F> JrHandler for NotificationHandler<R, F>
+impl<R, F> JrMessageHandler for NotificationHandler<R, F>
 where
     R: JrNotification,
     F: AsyncFnMut(R, JrConnectionCx) -> Result<(), crate::Error>,
@@ -185,7 +186,7 @@ where
     }
 }
 
-impl<R, N, F> JrHandler for MessageHandler<R, N, F>
+impl<R, N, F> JrMessageHandler for MessageHandler<R, N, F>
 where
     R: JrRequest,
     N: JrNotification,
@@ -259,30 +260,63 @@ where
 }
 
 /// Chains two handlers together, trying the first handler and falling back to the second
-pub struct ChainHandler<H1, H2>
+pub struct NamedHandler<H> {
+    name: Option<String>,
+    handler: H,
+}
+
+impl<H> NamedHandler<H> {
+    /// Creates a new named handler
+    pub fn new(name: Option<String>, handler: H) -> Self {
+        Self { name, handler }
+    }
+}
+
+impl<H> JrMessageHandler for NamedHandler<H>
 where
-    H1: JrHandler,
-    H2: JrHandler,
+    H: JrMessageHandler,
 {
+    fn describe_chain(&self) -> impl std::fmt::Debug {
+        format!(
+            "NamedHandler({:?}, {:?})",
+            self.name,
+            self.handler.describe_chain()
+        )
+    }
+
+    async fn handle_message(
+        &mut self,
+        message: MessageAndCx,
+    ) -> Result<Handled<MessageAndCx>, crate::Error> {
+        if let Some(name) = &self.name {
+            crate::util::instrumented_with_connection_name(
+                name.clone(),
+                self.handler.handle_message(message),
+            )
+            .await
+        } else {
+            self.handler.handle_message(message).await
+        }
+    }
+}
+
+/// Chains two handlers together, trying the first handler and falling back to the second
+pub struct ChainedHandler<H1, H2> {
     handler1: H1,
     handler2: H2,
 }
 
-impl<H1, H2> ChainHandler<H1, H2>
-where
-    H1: JrHandler,
-    H2: JrHandler,
-{
+impl<H1, H2> ChainedHandler<H1, H2> {
     /// Creates a new chain handler
     pub fn new(handler1: H1, handler2: H2) -> Self {
         Self { handler1, handler2 }
     }
 }
 
-impl<H1, H2> JrHandler for ChainHandler<H1, H2>
+impl<H1, H2> JrMessageHandler for ChainedHandler<H1, H2>
 where
-    H1: JrHandler,
-    H2: JrHandler,
+    H1: JrMessageHandler,
+    H2: JrMessageHandler,
 {
     fn describe_chain(&self) -> impl std::fmt::Debug {
         return DebugImpl {
@@ -295,7 +329,7 @@ where
             handler2: &'h H2,
         }
 
-        impl<H1: JrHandler, H2: JrHandler> std::fmt::Debug for DebugImpl<'_, H1, H2> {
+        impl<H1: JrMessageHandler, H2: JrMessageHandler> std::fmt::Debug for DebugImpl<'_, H1, H2> {
             fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
                 write!(
                     f,
