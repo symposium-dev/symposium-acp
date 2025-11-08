@@ -137,7 +137,6 @@ impl Conductor {
         };
 
         JrHandlerChain::new_with(ConductorMessageHandler {
-            len_components: self.providers.len(),
             conductor_tx: conductor_tx.clone(),
         })
         .name(self.name)
@@ -175,7 +174,6 @@ impl Conductor {
 }
 
 pub struct ConductorMessageHandler {
-    len_components: usize,
     conductor_tx: mpsc::Sender<ConductorMessage>,
 }
 
@@ -212,13 +210,12 @@ impl JrMessageHandler for ConductorMessageHandler {
     ) -> Result<sacp::Handled<MessageAndCx>, sacp::Error> {
         JrHandlerChain::new()
             .on_receive_message_from_successor({
-                let len_components = self.len_components;
                 let mut conductor_tx = self.conductor_tx.clone();
                 async move |message: MessageAndCx| {
                     // If we receive a message from our successor, we must be in proxy mode or else something odd is going on.
                     conductor_tx
                         .send(ConductorMessage::AgentToClient {
-                            source_component_index: len_components,
+                            source_component_index: SourceComponentIndex::ConductorSuccessor,
                             message,
                         })
                         .await
@@ -303,7 +300,9 @@ impl ConductorHandlerState {
                 async move |message_cx: MessageAndCx<UntypedMessage, UntypedMessage>| {
                     conductor_tx
                         .send(ConductorMessage::AgentToClient {
-                            source_component_index: component_index,
+                            source_component_index: SourceComponentIndex::Component(
+                                component_index,
+                            ),
                             message: message_cx,
                         })
                         .await
@@ -433,7 +432,11 @@ impl ConductorHandlerState {
                         )
                     },
                 );
-                self.send_message_to_predecessor_of(client, self.components.len() - 1, wrapped)
+                self.send_message_to_predecessor_of(
+                    client,
+                    SourceComponentIndex::Component(self.components.len() - 1),
+                    wrapped,
+                )
             }
 
             // MCP client disconnected. Remove it from our map and send the
@@ -462,30 +465,41 @@ impl ConductorHandlerState {
     fn send_message_to_predecessor_of<Req: JrRequest, N: JrNotification>(
         &mut self,
         client: &JrConnectionCx,
-        source_component_index: usize,
+        source_component_index: SourceComponentIndex,
         message: MessageAndCx<Req, N>,
     ) -> Result<(), sacp::Error>
     where
         Req::Response: Send,
     {
-        if source_component_index == 0 {
-            client.send_proxied_message(message)
-        } else {
-            // If message is coming from the conductor's successor,
-            // check whether we have proxy capability and error otherwise.
-            if source_component_index == self.components.len() {
+        match source_component_index {
+            SourceComponentIndex::Component(0) => client.send_proxied_message(message),
+            SourceComponentIndex::ConductorSuccessor => {
+                // If message is coming from the conductor's successor,
+                // check whether we have proxy capability and error otherwise.
                 if !self.proxy_mode.load(Ordering::Relaxed) {
                     return Err(sacp::Error::invalid_request().with_data("cannot accept successor message when not initialized with proxy capability"));
                 }
-            }
 
-            let wrapped = message.map(
-                |request, request_cx| (SuccessorRequest { request }, request_cx),
-                |notification, notification_cx| {
-                    (SuccessorNotification { notification }, notification_cx)
-                },
-            );
-            self.components[source_component_index - 1].send_proxied_message(wrapped)
+                // Message from conductor's successor goes to the last component (the conductor's successor's predecessor)
+                let wrapped = message.map(
+                    |request, request_cx| (SuccessorRequest { request }, request_cx),
+                    |notification, notification_cx| {
+                        (SuccessorNotification { notification }, notification_cx)
+                    },
+                );
+                // components.len() - 1 is the last component index, which is the predecessor of the conductor's successor
+                self.components[self.components.len() - 1].send_proxied_message(wrapped)
+            }
+            SourceComponentIndex::Component(index) => {
+                // Message from component at `index` goes to component at `index - 1`
+                let wrapped = message.map(
+                    |request, request_cx| (SuccessorRequest { request }, request_cx),
+                    |notification, notification_cx| {
+                        (SuccessorNotification { notification }, notification_cx)
+                    },
+                );
+                self.components[index - 1].send_proxied_message(wrapped)
+            }
         }
     }
 
@@ -782,6 +796,24 @@ impl ConductorHandlerState {
     }
 }
 
+/// Identifies the source of an agent-to-client message.
+///
+/// This enum handles the fact that the conductor may receive messages from two different sources:
+/// 1. From one of its managed components (identified by index)
+/// 2. From the conductor's own successor in a larger proxy chain (when in proxy mode)
+#[derive(Debug, Clone, Copy)]
+pub enum SourceComponentIndex {
+    /// Message from the conductor's own successor (only valid in proxy mode).
+    ///
+    /// When the conductor itself acts as a proxy in a larger chain, it may receive
+    /// messages from the next component beyond its managed chain. This variant represents
+    /// that case, where the actual component index will be `self.components.len()`.
+    ConductorSuccessor,
+
+    /// Message from a specific component at the given index in the managed chain.
+    Component(usize),
+}
+
 /// Messages sent to the conductor's main event loop for routing.
 ///
 /// These messages enable the conductor to route communication between:
@@ -803,7 +835,7 @@ pub enum ConductorMessage {
     /// A message (request or notification) sent by a component to its client.
     /// This message will be forwarded "as is" to its client.
     AgentToClient {
-        source_component_index: usize,
+        source_component_index: SourceComponentIndex,
         message: MessageAndCx,
     },
 
