@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.0-alpha.2](https://github.com/symposium-dev/symposium-acp/compare/yopo-v1.0.0-alpha.1...yopo-v1.0.0-alpha.2) - 2025-11-08
+
+### Other
+
+- Merge pull request #16 from nikomatsakis/main
+- wip wip wip
+- [**breaking**] remove Unpin bounds and simplify transport API
+
 ## [1.0.0-alpha.1](https://github.com/symposium-dev/symposium-acp/releases/tag/yopo-v1.0.0-alpha.1) - 2025-11-05
 
 ### Added
