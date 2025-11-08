@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.0-alpha.2](https://github.com/symposium-dev/symposium-acp/compare/sacp-proxy-v1.0.0-alpha.1...sacp-proxy-v1.0.0-alpha.2) - 2025-11-08
+
+### Other
+
+- fix doctests for API refactoring
+- wip wip wip
+- wipwipwip
+- introduce a `IntoJrHandler` trait
+- [**breaking**] remove Unpin bounds and simplify transport API
+
 ## [0.1.2](https://github.com/symposium-dev/symposium-acp/compare/sacp-proxy-v0.1.1...sacp-proxy-v0.1.2) - 2025-11-04
 
 ### Fixed

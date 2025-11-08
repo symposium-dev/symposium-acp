@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.0-alpha.2](https://github.com/symposium-dev/symposium-acp/compare/sacp-tokio-v1.0.0-alpha.1...sacp-tokio-v1.0.0-alpha.2) - 2025-11-08
+
+### Other
+
+- fix doctests for API refactoring
+- wip wip wip
+- [**breaking**] remove Unpin bounds and simplify transport API
+
 ## [1.0.0-alpha](https://github.com/symposium-dev/symposium-acp/releases/tag/sacp-tokio-v1.0.0-alpha) - 2025-11-05
 
 ### Added

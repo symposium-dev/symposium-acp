@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.0-alpha.2](https://github.com/symposium-dev/symposium-acp/compare/sacp-v1.0.0-alpha.1...sacp-v1.0.0-alpha.2) - 2025-11-08
+
+### Added
+
+- *(sacp)* add convenience methods for common connection patterns
+- *(sacp)* add IntoJrConnectionTransport trait and ByteStreamTransport
+
+### Other
+
+- fix doctests for API refactoring
+- wip wip wip
+- wipwipwip
+- introduce a `IntoJrHandler` trait
+- [**breaking**] remove Unpin bounds and simplify transport API
+- *(sacp)* clarify id: None semantics and remove phase references
+- *(sacp)* split actors into protocol and transport layers
+
 ## [0.2.0](https://github.com/symposium-dev/symposium-acp/compare/sacp-v0.1.1...sacp-v0.2.0) - 2025-11-04
 
 ### Added

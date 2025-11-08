@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.0-alpha.2](https://github.com/symposium-dev/symposium-acp/compare/sacp-conductor-v1.0.0-alpha.1...sacp-conductor-v1.0.0-alpha.2) - 2025-11-08
+
+### Added
+
+- *(sacp)* add convenience methods for common connection patterns
+
+### Other
+
+- fix doctests for API refactoring
+- wip wip wip
+- wipwipwip
+- [**breaking**] remove Unpin bounds and simplify transport API
+
 ## [0.2.0](https://github.com/symposium-dev/symposium-acp/compare/sacp-conductor-v0.1.1...sacp-conductor-v0.2.0) - 2025-11-04
 
 ### Fixed
