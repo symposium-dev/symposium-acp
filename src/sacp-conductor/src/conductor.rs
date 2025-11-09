@@ -59,6 +59,58 @@
 //!
 //! The message flow ensures bidirectional communication while maintaining the
 //! abstraction that each component only knows about its immediate successor.
+//!
+//! ## Lazy Component Initialization
+//!
+//! Components are instantiated lazily when the first `initialize` request is received
+//! from the editor. This enables dynamic proxy chain construction based on client capabilities.
+//!
+//! ### Simple Usage
+//!
+//! Pass a Vec of components that implement `IntoJrTransport`:
+//!
+//! ```ignore
+//! let conductor = Conductor::new(
+//!     "my-conductor",
+//!     vec![proxy1, proxy2, agent],
+//!     None,
+//! );
+//! ```
+//!
+//! All components are spawned in order when the editor sends the first `initialize` request.
+//!
+//! ### Dynamic Component Selection
+//!
+//! Pass a closure to examine the `InitializeRequest` and dynamically construct the chain:
+//!
+//! ```ignore
+//! let conductor = Conductor::new(
+//!     "my-conductor",
+//!     |cx, conductor_tx, init_req| async move {
+//!         // Examine capabilities
+//!         let needs_auth = has_auth_capability(&init_req);
+//!
+//!         let mut components = Vec::new();
+//!         if needs_auth {
+//!             components.push(spawn_auth_proxy(&cx, &conductor_tx)?);
+//!         }
+//!         components.push(spawn_agent(&cx, &conductor_tx)?);
+//!
+//!         // Return (potentially modified) request and component list
+//!         Ok((init_req, components))
+//!     },
+//!     None,
+//! );
+//! ```
+//!
+//! The closure receives:
+//! - `cx: &JrConnectionCx` - Connection context for spawning components
+//! - `conductor_tx: &mpsc::Sender<ConductorMessage>` - Channel for message routing
+//! - `init_req: InitializeRequest` - The Initialize request from the editor
+//!
+//! And returns:
+//! - Modified `InitializeRequest` to forward downstream
+//! - `Vec<JrConnectionCx>` of spawned components
 
 use std::{
     collections::HashMap,
