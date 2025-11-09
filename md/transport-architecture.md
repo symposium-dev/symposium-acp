@@ -154,6 +154,14 @@ Incoming Protocol Actor
 Handler or Reply Actor
 ```
 
+### Message Ordering in the Conductor
+
+When the conductor forwards messages between components, it must preserve send order to prevent race conditions. The conductor achieves this by routing all message forwarding through a central message queue.
+
+**Key insight**: While the transport actors operate independently, the **conductor's routing logic** serializes all forwarding decisions through a central event loop. This ensures that even though responses use a "fast path" (reply_actor with oneshot channels) at the transport level, the decision to forward them is serialized with notification forwarding at the protocol level.
+
+Without this serialization, responses could overtake notifications when both are forwarded through proxy chains, causing the client to receive messages out of order. See [Conductor Implementation](./conductor.md#message-ordering-invariant) for details.
+
 ## Transport Trait
 
 The `IntoJrConnectionTransport` trait defines how to bridge internal channels with I/O:

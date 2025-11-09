@@ -1466,7 +1466,7 @@ pub trait JrMessage: 'static + Debug + Sized + Send {
 }
 
 /// Defines the "payload" of a successful response to a JSON-RPC request.
-pub trait JrResponsePayload: 'static + Debug + Sized {
+pub trait JrResponsePayload: 'static + Debug + Sized + Send {
     /// Convert this message into a JSON value.
     fn into_json(self, method: &str) -> Result<serde_json::Value, crate::Error>;
 
@@ -1540,6 +1540,22 @@ impl<R: JrRequest, N: JrMessage> MessageAndCx<R, N> {
         match self {
             MessageAndCx::Request(_, cx) => cx.respond_with_error(error),
             MessageAndCx::Notification(_, cx) => cx.send_error_notification(error),
+        }
+    }
+
+    /// Convert to a `JrRequestCx` that expects a JSON value
+    /// and which checks (dynamically) that the JSON value it receives
+    /// can be converted to `T`.
+    pub fn erase_to_json(self) -> Result<MessageAndCx, crate::Error> {
+        match self {
+            MessageAndCx::Request(response, request_cx) => Ok(MessageAndCx::Request(
+                response.into_untyped_message()?,
+                request_cx.erase_to_json(),
+            )),
+            MessageAndCx::Notification(notification, cx) => Ok(MessageAndCx::Notification(
+                notification.into_untyped_message()?,
+                cx,
+            )),
         }
     }
 }
@@ -1727,6 +1743,11 @@ impl JrResponse<serde_json::Value> {
 }
 
 impl<R: JrResponsePayload> JrResponse<R> {
+    /// The method of the request this is in response to.
+    pub fn method(&self) -> &str {
+        &self.method
+    }
+
     /// Create a new response that maps the result of the response to a new type.
     pub fn map<U>(
         self,

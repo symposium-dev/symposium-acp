@@ -8,20 +8,17 @@
 use jsonrpcmsg::Params;
 
 use crate::{
-    JrConnectionCx, JrNotification, JrRequest, JrRequestCx, UntypedMessage, util::json_cast,
+    Handled, JrConnectionCx, JrNotification, JrRequest, JrRequestCx, MessageAndCx, UntypedMessage,
+    util::json_cast,
 };
 
-/// Builder for pattern-matching on untyped JSON-RPC requests.
+/// Helper for pattern-matching on untyped JSON-RPC requests.
 ///
 /// Use this when you receive an [`UntypedMessage`] representing a request and want to
 /// try parsing it as different concrete types, handling whichever type matches.
 ///
-/// # Pattern
-///
-/// The typical pattern is:
-/// 1. Create a `TypeRequest` from an untyped message
-/// 2. Chain `.handle_if()` calls for each type you want to try
-/// 3. End with `.otherwise()` for messages that don't match any type
+/// This is very similar to using [`JrHandlerChain::apply`] except that each match
+/// executes immediately, which can help avoid borrow check errors.
 ///
 /// # Example
 ///
@@ -55,51 +52,82 @@ use crate::{
 /// that handler runs and subsequent handlers are skipped. If parsing fails for all types,
 /// the `otherwise` handler receives the original untyped message.
 #[must_use]
-pub struct TypeRequest {
-    state: Option<TypeMessageState>,
+pub struct MatchMessage {
+    state: Result<Handled<MessageAndCx>, crate::Error>,
 }
 
-enum TypeMessageState {
-    Unhandled(String, Option<Params>, JrRequestCx<serde_json::Value>),
-    Handled(Result<(), crate::Error>),
-}
-
-impl TypeRequest {
+impl MatchMessage {
     /// Create a new pattern matcher for the given untyped request message.
-    pub fn new(request: UntypedMessage, request_cx: JrRequestCx<serde_json::Value>) -> Self {
-        let UntypedMessage { method, params } = request;
-        let params: Option<Params> = json_cast(params).expect("valid params");
+    pub fn new(message: MessageAndCx) -> Self {
         Self {
-            state: Some(TypeMessageState::Unhandled(method, params, request_cx)),
+            state: Ok(Handled::No(message)),
         }
     }
 
-    /// Try to handle the message as type `R`.
+    /// Try to handle the message as a request of type `R`.
     ///
     /// If the message can be parsed as `R`, the handler `op` is called with the parsed
     /// request and a typed request context. If parsing fails or the message was already
     /// handled by a previous `handle_if`, this call has no effect.
     ///
     /// Returns `self` to allow chaining multiple `handle_if` calls.
-    pub async fn handle_if<R: JrRequest>(
+    pub async fn if_request<R: JrRequest>(
         mut self,
         op: impl AsyncFnOnce(R, JrRequestCx<R::Response>) -> Result<(), crate::Error>,
     ) -> Self {
-        self.state = Some(match self.state.take().expect("valid state") {
-            TypeMessageState::Unhandled(method, params, request_cx) => {
-                match R::parse_request(&method, &params) {
-                    Some(Ok(request)) => {
-                        TypeMessageState::Handled(op(request, request_cx.cast()).await)
-                    }
-
-                    Some(Err(err)) => TypeMessageState::Handled(request_cx.respond_with_error(err)),
-
-                    None => TypeMessageState::Unhandled(method, params, request_cx),
+        if let Ok(Handled::No(MessageAndCx::Request(untyped_request, untyped_request_cx))) =
+            self.state
+        {
+            match R::parse_request(untyped_request.method(), untyped_request.params()) {
+                Some(Ok(typed_request)) => match op(typed_request, untyped_request_cx.cast()).await
+                {
+                    Ok(()) => self.state = Ok(Handled::Yes),
+                    Err(err) => self.state = Err(err),
+                },
+                Some(Err(err)) => self.state = Err(err),
+                None => {
+                    self.state = Ok(Handled::No(MessageAndCx::Request(
+                        untyped_request,
+                        untyped_request_cx,
+                    )));
                 }
             }
+        }
+        self
+    }
 
-            TypeMessageState::Handled(err) => TypeMessageState::Handled(err),
-        });
+    /// Try to handle the message as a notification of type `R`.
+    ///
+    /// If the message can be parsed as `R`, the handler `op` is called with the parsed
+    /// request and notification context. If parsing fails or the message was already
+    /// handled by a previous `handle_if`, this call has no effect.
+    ///
+    /// Returns `self` to allow chaining multiple `handle_if` calls.
+    pub async fn if_notification<N: JrNotification>(
+        mut self,
+        op: impl AsyncFnOnce(N, JrConnectionCx) -> Result<(), crate::Error>,
+    ) -> Self {
+        if let Ok(Handled::No(MessageAndCx::Notification(untyped_notification, notification_cx))) =
+            self.state
+        {
+            match N::parse_notification(
+                untyped_notification.method(),
+                untyped_notification.params(),
+            ) {
+                Some(Ok(typed_notification)) => match op(typed_notification, notification_cx).await
+                {
+                    Ok(()) => self.state = Ok(Handled::Yes),
+                    Err(err) => self.state = Err(err),
+                },
+                Some(Err(err)) => self.state = Err(err),
+                None => {
+                    self.state = Ok(Handled::No(MessageAndCx::Notification(
+                        untyped_notification,
+                        notification_cx,
+                    )));
+                }
+            }
+        }
         self
     }
 
@@ -109,17 +137,13 @@ impl TypeRequest {
     /// of the typed handlers matched. You must call this method to complete the pattern
     /// matching chain and get the final result.
     pub async fn otherwise(
-        mut self,
-        op: impl AsyncFnOnce(UntypedMessage, JrRequestCx<serde_json::Value>) -> Result<(), crate::Error>,
+        self,
+        op: impl AsyncFnOnce(MessageAndCx) -> Result<(), crate::Error>,
     ) -> Result<(), crate::Error> {
-        match self.state.take().expect("valid state") {
-            TypeMessageState::Unhandled(method, params, request_cx) => {
-                match UntypedMessage::new(&method, params) {
-                    Ok(m) => op(m, request_cx).await,
-                    Err(err) => request_cx.respond_with_error(err),
-                }
-            }
-            TypeMessageState::Handled(r) => r,
+        match self.state {
+            Ok(Handled::Yes) => Ok(()),
+            Ok(Handled::No(message)) => op(message).await,
+            Err(err) => Err(err),
         }
     }
 }

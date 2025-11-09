@@ -58,6 +58,8 @@ conductor mcp 54321
 
 The conductor routes ALL messages between components. No component talks directly to another.
 
+**Message ordering**: The conductor preserves message send order by routing all forwarding decisions through a central event loop, preventing responses from overtaking notifications.
+
 **Message flow types:**
 
 1. **Editor → First Component**: Conductor forwards normal ACP messages
@@ -199,6 +201,31 @@ The conductor uses an actor-based architecture with message passing via channels
 - **Component connections**: Each component has a bidirectional JSON-RPC connection
 - **Message router**: Central actor that receives `ConductorMessage` enums and routes appropriately
 - **MCP bridge actors**: Manage MCP-over-ACP connections
+
+### Message Ordering Invariant
+
+**Critical invariant**: All messages (requests, responses, notifications) between any two endpoints must maintain their send order.
+
+The conductor ensures this invariant by routing **all** message forwarding through its central message queue (`ConductorMessage` channel). This prevents faster message types (responses) from overtaking slower ones (notifications).
+
+#### Why This Matters
+
+Without ordering preservation, a race condition can occur:
+1. Agent sends `session/update` notification
+2. Agent responds to `session/prompt` request  
+3. Response takes a fast path (reply_actor with oneshot channels)
+4. Notification takes slower path (handler pipeline)
+5. **Response arrives before notification** → client loses notification data
+
+#### Implementation
+
+The conductor uses extension traits to route all forwarding through the central queue:
+
+- `JrConnectionCxExt::send_proxied_message_via` - Routes both requests and notifications
+- `JrRequestCxExt::respond_via` - Routes responses through the queue
+- `JrResponseExt::forward_response_via` - Ensures response forwarding maintains order
+
+All message forwarding in both directions (client-to-agent and agent-to-client) flows through the conductor's central event loop, which processes `ConductorMessage` enums sequentially. This serialization ensures messages arrive in the same order they were sent.
 
 ### Message Routing Implementation
 

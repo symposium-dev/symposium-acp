@@ -1,7 +1,7 @@
 // Types re-exported from crate root
 
 mod typed;
-pub use typed::{TypeNotification, TypeRequest};
+pub use typed::{MatchMessage, TypeNotification};
 
 /// Cast from `N` to `M` by serializing/deserialization to/from JSON.
 pub fn json_cast<N, M>(params: N) -> Result<M, crate::Error>

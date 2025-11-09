@@ -46,6 +46,8 @@ The conductor uses `_proxy/successor/request` bidirectionally with different mea
 - **Proxy → Conductor**: Proxy sends `_proxy/successor/request` to send a message TO its successor (downstream)
 - **Conductor → Proxy**: Conductor sends `_proxy/successor/request` to deliver a message FROM the successor (upstream)
 
+**Important**: The conductor maintains message ordering by routing all forwarding decisions through a central event loop, preventing responses from overtaking notifications even though they use different transport paths.
+
 **Downstream flow (Proxy 1 sending to Proxy 2):**
 1. Conductor sends normal ACP request to Proxy 1
 2. Proxy 1 sends `_proxy/successor/request` to conductor (meaning "send this TO my successor")
@@ -68,8 +70,9 @@ The **conductor** is the orchestrator that manages the proxy chain. From the edi
 
 **Responsibilities:**
 1. **Process Management**: Spawns and manages component processes
-2. **Message Routing**: Routes messages through the proxy chain
+2. **Message Routing**: Routes messages through the proxy chain, preserving send order
 3. **Capability Adaptation**: Bridges between different component capabilities
+4. **Message Ordering**: Ensures all messages maintain send order when forwarded through proxy chains
 
 **Usage:**
 ```bash
