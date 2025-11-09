@@ -621,13 +621,10 @@ impl ConductorHandlerState {
         tracing::debug!(?initialize_req, "forward_initialize_request");
 
         // Lazy initialization: spawn components on first Initialize request
-        if target_component_index == 0 && self.component_list.is_some() {
+        if let Some(component_list) = self.component_list.take() {
+            assert_eq!(target_component_index, 0);
             info!("Lazy initialization: instantiating components based on Initialize request");
 
-            let component_list = self
-                .component_list
-                .take()
-                .expect("component_list was just checked");
             let (modified_req, components) = component_list
                 .instantiate_components(cx, conductor_tx, initialize_req)
                 .await?;
