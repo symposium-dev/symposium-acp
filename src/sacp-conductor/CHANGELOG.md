@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.0-alpha.3](https://github.com/symposium-dev/symposium-acp/compare/sacp-conductor-v1.0.0-alpha.2...sacp-conductor-v1.0.0-alpha.3) - 2025-11-09
+
+### Added
+
+- *(sacp-conductor)* implement lazy component initialization
+- *(sacp-conductor)* add ComponentList trait for lazy component instantiation
+
+### Fixed
+
+- *(sacp-conductor)* prevent response messages from overtaking notifications
+
+### Other
+
+- Merge pull request #18 from nikomatsakis/main
+- *(sacp-conductor)* document lazy initialization and ComponentList trait
+- *(sacp-conductor)* use if-let and assert in lazy initialization
+- *(sacp-conductor)* route all message forwarding through central queue
+- *(sacp-conductor)* decouple message handler from component count
+
 ## [1.0.0-alpha.2](https://github.com/symposium-dev/symposium-acp/compare/sacp-conductor-v1.0.0-alpha.1...sacp-conductor-v1.0.0-alpha.2) - 2025-11-08
 
 ### Added

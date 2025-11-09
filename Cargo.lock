@@ -289,7 +289,7 @@ checksum = "d0881ea181b1df73ff77ffaaf9c7544ecc11e82fba9b5f27b262a3c73a332555"
 
 [[package]]
 name = "elizacp"
-version = "1.0.0-alpha.2"
+version = "1.0.0-alpha.3"
 dependencies = [
  "agent-client-protocol-schema",
  "anyhow",
@@ -850,7 +850,7 @@ checksum = "28d3b2b1366ec20994f1fd18c3c594f05c5dd4bc44d8bb0c1c632c8d6829481f"
 
 [[package]]
 name = "sacp"
-version = "1.0.0-alpha.2"
+version = "1.0.0-alpha.3"
 dependencies = [
  "agent-client-protocol-schema",
  "anyhow",
@@ -872,7 +872,7 @@ dependencies = [
 
 [[package]]
 name = "sacp-conductor"
-version = "1.0.0-alpha.2"
+version = "1.0.0-alpha.3"
 dependencies = [
  "agent-client-protocol-schema",
  "anyhow",
@@ -900,7 +900,7 @@ dependencies = [
 
 [[package]]
 name = "sacp-proxy"
-version = "1.0.0-alpha.2"
+version = "1.0.0-alpha.3"
 dependencies = [
  "agent-client-protocol-schema",
  "chrono",
@@ -937,7 +937,7 @@ dependencies = [
 
 [[package]]
 name = "sacp-tokio"
-version = "1.0.0-alpha.2"
+version = "1.0.0-alpha.3"
 dependencies = [
  "expect-test",
  "futures",
@@ -1595,7 +1595,7 @@ checksum = "f17a85883d4e6d00e8a97c586de764dabcc06133f7f1d55dce5cdc070ad7fe59"
 
 [[package]]
 name = "yopo"
-version = "1.0.0-alpha.2"
+version = "1.0.0-alpha.3"
 dependencies = [
  "sacp",
  "sacp-tokio",
