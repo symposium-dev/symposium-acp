@@ -449,6 +449,13 @@ impl ConductorHandlerState {
                     notification,
                 )
             }
+
+            // Forward a response back to the original request context.
+            // This ensures responses are processed in order with notifications by
+            // going through the central conductor queue.
+            ConductorMessage::ForwardResponse { request_cx, result } => {
+                request_cx.respond_with_result(result)
+            }
         }
     }
 
@@ -642,9 +649,21 @@ impl ConductorHandlerState {
             .otherwise(async |request: UntypedMessage, request_cx| {
                 // Handle other types of requests here
                 // Otherwise, just send the message along "as is".
+                // Route the response back through the conductor queue to preserve ordering
+                let mut conductor_tx_clone = conductor_tx.clone();
                 self.components[target_component_index]
                     .send_request(request)
-                    .forward_to_request_cx(request_cx)
+                    .await_when_result_received(async move |result| {
+                        conductor_tx_clone
+                            .send(ConductorMessage::ForwardResponse { request_cx, result })
+                            .await
+                            .map_err(|e| {
+                                sacp::util::internal_error(format!(
+                                    "Failed to send response: {}",
+                                    e
+                                ))
+                            })
+                    })
             })
             .await
     }
@@ -790,9 +809,23 @@ impl ConductorHandlerState {
             }
         }
 
+        // Route the response back through the conductor queue to preserve ordering
+        let mut conductor_tx_clone = conductor_tx.clone();
+        let request_cx_json = request_cx.erase_to_json();
         self.components[target_component_index]
             .send_request(request)
-            .forward_to_request_cx(request_cx)
+            .await_when_result_received(async move |result| {
+                let result = result.map(|r| serde_json::to_value(r).unwrap());
+                conductor_tx_clone
+                    .send(ConductorMessage::ForwardResponse {
+                        request_cx: request_cx_json,
+                        result,
+                    })
+                    .await
+                    .map_err(|e| {
+                        sacp::util::internal_error(format!("Failed to send response: {}", e))
+                    })
+            })
     }
 }
 
@@ -878,5 +911,15 @@ pub enum ConductorMessage {
     /// Message sent when MCP client disconnects
     McpConnectionDisconnected {
         notification: McpDisconnectNotification,
+    },
+
+    /// Forward a response back to a request context.
+    ///
+    /// This variant ensures that responses are processed in order with notifications
+    /// by routing them through the conductor's central message queue rather than
+    /// responding directly.
+    ForwardResponse {
+        request_cx: JrRequestCx<serde_json::Value>,
+        result: Result<serde_json::Value, sacp::Error>,
     },
 }
