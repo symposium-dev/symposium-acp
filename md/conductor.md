@@ -227,8 +227,6 @@ The conductor uses extension traits to route all forwarding through the central 
 
 All message forwarding in both directions (client-to-agent and agent-to-client) flows through the conductor's central event loop, which processes `ConductorMessage` enums sequentially. This serialization ensures messages arrive in the same order they were sent.
 
-See `RACE_CONDITION_ANALYSIS.md` for detailed technical analysis of the race condition and fix.
-
 ### Message Routing Implementation
 
 The conductor uses a recursive spawning pattern:
