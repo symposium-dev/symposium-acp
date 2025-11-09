@@ -792,6 +792,106 @@ pub enum SourceComponentIndex {
     Component(usize),
 }
 
+/// Trait for lazy component instantiation based on the Initialize request.
+///
+/// This trait enables the conductor to defer component spawning until after
+/// receiving and examining the Initialize request from the upstream client.
+/// This allows dynamic proxy chain construction based on client capabilities.
+///
+/// # Examples
+///
+/// Simple case - spawn all components unconditionally:
+/// ```ignore
+/// let providers: Vec<Box<dyn IntoJrTransport>> = vec![proxy1, proxy2, agent];
+/// Conductor::new("my-conductor", providers, None)
+/// ```
+///
+/// Dynamic case - examine capabilities and spawn conditionally:
+/// ```ignore
+/// Conductor::new("my-conductor", |cx, init_req| async move {
+///     let needs_auth = init_req.capabilities.contains(&"auth");
+///     let mut components = Vec::new();
+///     if needs_auth {
+///         components.push(spawn_auth_proxy(&cx)?);
+///     }
+///     components.push(spawn_agent(&cx)?);
+///     Ok((init_req, components))
+/// }, None)
+/// ```
+pub trait ComponentList: Send {
+    /// Instantiate components based on the Initialize request.
+    ///
+    /// # Arguments
+    ///
+    /// * `cx` - The conductor's connection context for spawning components
+    /// * `req` - The Initialize request from the upstream client
+    ///
+    /// # Returns
+    ///
+    /// A tuple of:
+    /// * The (potentially modified) Initialize request to forward downstream
+    /// * A vector of spawned component connection contexts
+    fn instantiate_components(
+        self,
+        cx: &JrConnectionCx,
+        req: InitializeRequest,
+    ) -> futures::future::BoxFuture<
+        'static,
+        Result<(InitializeRequest, Vec<JrConnectionCx>), sacp::Error>,
+    >;
+}
+
+/// Simple implementation: spawn all components in order, don't modify the request.
+impl ComponentList for Vec<Box<dyn IntoJrTransport>> {
+    fn instantiate_components(
+        self,
+        cx: &JrConnectionCx,
+        req: InitializeRequest,
+    ) -> futures::future::BoxFuture<
+        'static,
+        Result<(InitializeRequest, Vec<JrConnectionCx>), sacp::Error>,
+    > {
+        let cx = cx.clone();
+        Box::pin(async move {
+            let mut components = Vec::new();
+
+            for (component_index, provider) in self.into_iter().enumerate() {
+                info!(component_index, "Creating component");
+
+                let connection = JrHandlerChain::new()
+                    .name(format!("conductor-to-component({})", component_index))
+                    .connect_to(provider)?;
+
+                let component_cx = cx.spawn_connection(connection, |c| Box::pin(c.serve()))?;
+                components.push(component_cx);
+            }
+
+            Ok((req, components))
+        })
+    }
+}
+
+/// Dynamic implementation: closure receives the Initialize request and returns components.
+impl<F, Fut> ComponentList for F
+where
+    F: FnOnce(JrConnectionCx, InitializeRequest) -> Fut + Send + 'static,
+    Fut: std::future::Future<Output = Result<(InitializeRequest, Vec<JrConnectionCx>), sacp::Error>>
+        + Send
+        + 'static,
+{
+    fn instantiate_components(
+        self,
+        cx: &JrConnectionCx,
+        req: InitializeRequest,
+    ) -> futures::future::BoxFuture<
+        'static,
+        Result<(InitializeRequest, Vec<JrConnectionCx>), sacp::Error>,
+    > {
+        let cx = cx.clone();
+        Box::pin(async move { self(cx, req).await })
+    }
+}
+
 /// Messages sent to the conductor's main event loop for routing.
 ///
 /// These messages enable the conductor to route communication between:
