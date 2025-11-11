@@ -4,7 +4,7 @@
 //! a proxy chain - proxies, agents, or any other ACP-speaking component.
 
 use futures::channel::mpsc;
-use sacp::{IntoJrTransport, JrConnectionCx, JsonRpcMessage};
+use sacp::{IntoJrTransport, JrConnectionCx};
 
 /// A component that can be part of a proxy chain.
 ///
@@ -50,8 +50,8 @@ pub trait Component: Send {
     fn connect_component(
         self: Box<Self>,
         cx: &JrConnectionCx,
-        predecessor_to_component_rx: mpsc::UnboundedReceiver<JsonRpcMessage>,
-        component_to_predecessor_tx: mpsc::UnboundedSender<JsonRpcMessage>,
+        predecessor_to_component_rx: mpsc::UnboundedReceiver<sacp::jsonrpcmsg::Message>,
+        component_to_predecessor_tx: mpsc::UnboundedSender<sacp::jsonrpcmsg::Message>,
     ) -> Result<(), sacp::Error>;
 }
 
@@ -63,8 +63,8 @@ impl<T: IntoJrTransport + 'static> Component for T {
     fn connect_component(
         self: Box<Self>,
         cx: &JrConnectionCx,
-        predecessor_to_component_rx: mpsc::UnboundedReceiver<JsonRpcMessage>,
-        component_to_predecessor_tx: mpsc::UnboundedSender<JsonRpcMessage>,
+        predecessor_to_component_rx: mpsc::UnboundedReceiver<sacp::jsonrpcmsg::Message>,
+        component_to_predecessor_tx: mpsc::UnboundedSender<sacp::jsonrpcmsg::Message>,
     ) -> Result<(), sacp::Error> {
         // From component's perspective:
         // - predecessor_to_component_rx is incoming messages
@@ -80,8 +80,8 @@ impl IntoJrTransport for dyn Component {
     fn into_jr_transport(
         self: Box<Self>,
         cx: &JrConnectionCx,
-        outgoing_rx: mpsc::UnboundedReceiver<JsonRpcMessage>,
-        incoming_tx: mpsc::UnboundedSender<JsonRpcMessage>,
+        outgoing_rx: mpsc::UnboundedReceiver<sacp::jsonrpcmsg::Message>,
+        incoming_tx: mpsc::UnboundedSender<sacp::jsonrpcmsg::Message>,
     ) -> Result<(), sacp::Error> {
         // From predecessor's perspective:
         // - outgoing_rx is messages to send to component (predecessor → component)

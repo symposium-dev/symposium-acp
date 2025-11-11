@@ -73,10 +73,22 @@ pub mod schema;
 pub mod util;
 
 pub use capabilities::*;
+
+/// JSON-RPC message types.
+///
+/// This module re-exports types from the `jsonrpcmsg` crate that are transitively
+/// reachable through the public API (e.g., via [`Channels`]).
+///
+/// Users of the `sacp` crate can use these types without adding a direct dependency
+/// on `jsonrpcmsg`.
+pub mod jsonrpcmsg {
+    pub use jsonrpcmsg::{Id, Message, Params, Request, Response};
+}
+
 pub use jsonrpc::{
     ByteStreams, Channels, Handled, IntoJrTransport, JrConnection, JrConnectionCx, JrHandlerChain,
     JrMessage, JrMessageHandler, JrNotification, JrRequest, JrRequestCx, JrResponse,
-    JrResponsePayload, MessageAndCx, UntypedMessage, jsonrpcmsg::Message as JsonRpcMessage,
+    JrResponsePayload, MessageAndCx, UntypedMessage,
 };
 
 // Re-export the six primary message enum types at the root

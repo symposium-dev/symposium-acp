@@ -151,8 +151,8 @@ impl sacp::IntoJrTransport for AcpAgent {
     fn into_jr_transport(
         self: Box<Self>,
         cx: &sacp::JrConnectionCx,
-        outgoing_rx: futures::channel::mpsc::UnboundedReceiver<sacp::JsonRpcMessage>,
-        incoming_tx: futures::channel::mpsc::UnboundedSender<sacp::JsonRpcMessage>,
+        outgoing_rx: futures::channel::mpsc::UnboundedReceiver<sacp::jsonrpcmsg::Message>,
+        incoming_tx: futures::channel::mpsc::UnboundedSender<sacp::jsonrpcmsg::Message>,
     ) -> Result<(), sacp::Error> {
         let (child_stdin, child_stdout, child) = self.spawn_process()?;
 

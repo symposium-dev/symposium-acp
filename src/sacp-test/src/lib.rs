@@ -13,8 +13,8 @@ impl IntoJrTransport for MockTransport {
     fn into_jr_transport(
         self: Box<MockTransport>,
         _cx: &JrConnectionCx,
-        _outgoing_rx: futures::channel::mpsc::UnboundedReceiver<sacp::JsonRpcMessage>,
-        _incoming_tx: futures::channel::mpsc::UnboundedSender<sacp::JsonRpcMessage>,
+        _outgoing_rx: futures::channel::mpsc::UnboundedReceiver<sacp::jsonrpcmsg::Message>,
+        _incoming_tx: futures::channel::mpsc::UnboundedSender<sacp::jsonrpcmsg::Message>,
     ) -> Result<(), Error> {
         panic!("MockTransport should never be used in running code - it's only for doctests")
     }

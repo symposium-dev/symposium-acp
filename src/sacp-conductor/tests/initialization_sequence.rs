@@ -9,7 +9,7 @@
 use futures::channel::mpsc;
 use sacp::schema::{AgentCapabilities, InitializeRequest, InitializeResponse};
 use sacp::{
-    IntoJrTransport, JrConnectionCx, JrHandlerChain, JsonRpcMessage, MetaCapabilityExt, Proxy,
+    IntoJrTransport, JrConnectionCx, JrHandlerChain, sacp::jsonrpcmsg::Message, MetaCapabilityExt, Proxy,
 };
 use sacp_conductor::conductor::Conductor;
 use sacp_proxy::JrCxExt;
@@ -75,8 +75,8 @@ impl IntoJrTransport for InitComponentProvider {
     fn into_jr_transport(
         self: Box<Self>,
         cx: &JrConnectionCx,
-        outgoing_rx: mpsc::UnboundedReceiver<JsonRpcMessage>,
-        incoming_tx: mpsc::UnboundedSender<JsonRpcMessage>,
+        outgoing_rx: mpsc::UnboundedReceiver<sacp::jsonrpcmsg::Message>,
+        incoming_tx: mpsc::UnboundedSender<sacp::jsonrpcmsg::Message>,
     ) -> Result<(), sacp::Error> {
         let config = Arc::clone(&self.config);
 
