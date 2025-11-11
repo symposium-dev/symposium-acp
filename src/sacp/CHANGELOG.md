@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.0-alpha.4](https://github.com/symposium-dev/symposium-acp/compare/sacp-v1.0.0-alpha.3...sacp-v1.0.0-alpha.4) - 2025-11-11
+
+### Other
+
+- unify Transport and Component traits with BoxFuture-returning signatures
+- create selective jsonrpcmsg re-export module
+- move Component trait to sacp-proxy crate
+- *(sacp)* improve IntoJrTransport and Component trait impls
+
 ## [1.0.0-alpha.3](https://github.com/symposium-dev/symposium-acp/compare/sacp-v1.0.0-alpha.2...sacp-v1.0.0-alpha.3) - 2025-11-09
 
 ### Other
