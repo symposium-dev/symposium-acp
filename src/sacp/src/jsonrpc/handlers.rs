@@ -104,7 +104,6 @@ where
 pub struct NotificationHandler<N, F>
 where
     N: JrNotification,
-    F: AsyncFnMut(N, JrConnectionCx) -> Result<(), crate::Error>,
 {
     handler: F,
     phantom: PhantomData<fn(N)>,
@@ -113,7 +112,6 @@ where
 impl<R, F> NotificationHandler<R, F>
 where
     R: JrNotification,
-    F: AsyncFnMut(R, JrConnectionCx) -> Result<(), crate::Error>,
 {
     /// Creates a new notification handler
     pub fn new(handler: F) -> Self {
@@ -124,10 +122,11 @@ where
     }
 }
 
-impl<R, F> JrMessageHandler for NotificationHandler<R, F>
+impl<R, F, T> JrMessageHandler for NotificationHandler<R, F>
 where
     R: JrNotification,
-    F: AsyncFnMut(R, JrConnectionCx) -> Result<(), crate::Error>,
+    F: AsyncFnMut(R, JrConnectionCx) -> Result<T, crate::Error>,
+    T: crate::IntoHandled<(R, JrConnectionCx)>,
 {
     async fn handle_message(
         &mut self,
@@ -141,20 +140,30 @@ where
                     "NotificationHandler::handle_message"
                 );
                 match R::parse_notification(&message.method, &message.params) {
-                    Some(Ok(req)) => {
+                    Some(Ok(notif)) => {
                         tracing::trace!(
-                            ?req,
+                            ?notif,
                             "NotificationHandler::handle_notification: parse completed"
                         );
-                        (self.handler)(req, cx).await?;
-                        Ok(Handled::Yes)
+                        let result = (self.handler)(notif, cx.clone()).await?;
+                        match result.into_handled() {
+                            Handled::Yes => Ok(Handled::Yes),
+                            Handled::No((notification, cx)) => {
+                                // Handler returned the notification back, convert to untyped
+                                let untyped = notification.into_untyped_message()?;
+                                Ok(Handled::No(MessageAndCx::Notification(untyped, cx)))
+                            }
+                        }
                     }
                     Some(Err(err)) => {
-                        tracing::trace!(?err, "RequestHandler::handle_request: parse errored");
+                        tracing::trace!(
+                            ?err,
+                            "NotificationHandler::handle_notification: parse errored"
+                        );
                         Err(err)
                     }
                     None => {
-                        tracing::trace!("RequestHandler::handle_request: parse failed");
+                        tracing::trace!("NotificationHandler::handle_notification: parse failed");
                         Ok(Handled::No(MessageAndCx::Notification(message, cx)))
                     }
                 }

@@ -574,13 +574,14 @@ impl<H: JrMessageHandler> JrHandlerChain<H> {
     ///
     /// `N` can be either a single notification type or an enum of multiple notification types.
     /// See the [type-driven dispatch](Self#type-driven-message-dispatch) section for details.
-    pub fn on_receive_notification<N, F>(
+    pub fn on_receive_notification<N, F, T>(
         self,
         op: F,
     ) -> JrHandlerChain<ChainedHandler<H, NotificationHandler<N, F>>>
     where
         N: JrNotification,
-        F: AsyncFnMut(N, JrConnectionCx) -> Result<(), crate::Error> + Send,
+        F: AsyncFnMut(N, JrConnectionCx) -> Result<T, crate::Error> + Send,
+        T: IntoHandled<(N, JrConnectionCx)>,
     {
         self.with_handler(NotificationHandler::new(op))
     }

@@ -130,17 +130,23 @@ impl MatchMessage {
         self
     }
 
-    /// Try to handle the message as a notification of type `R`.
+    /// Try to handle the message as a notification of type `N`.
     ///
-    /// If the message can be parsed as `R`, the handler `op` is called with the parsed
-    /// request and notification context. If parsing fails or the message was already
+    /// If the message can be parsed as `N`, the handler `op` is called with the parsed
+    /// notification and connection context. If parsing fails or the message was already
     /// handled by a previous `handle_if`, this call has no effect.
     ///
+    /// The handler can return either `()` (which becomes `Handled::Yes`) or an explicit
+    /// `Handled` value to control whether the message should be passed to the next handler.
+    ///
     /// Returns `self` to allow chaining multiple `handle_if` calls.
-    pub async fn if_notification<N: JrNotification>(
+    pub async fn if_notification<N: JrNotification, H>(
         mut self,
-        op: impl AsyncFnOnce(N, JrConnectionCx) -> Result<(), crate::Error>,
-    ) -> Self {
+        op: impl AsyncFnOnce(N, JrConnectionCx) -> Result<H, crate::Error>,
+    ) -> Self
+    where
+        H: crate::IntoHandled<(N, JrConnectionCx)>,
+    {
         if let Ok(Handled::No(MessageAndCx::Notification(untyped_notification, notification_cx))) =
             self.state
         {
@@ -148,11 +154,25 @@ impl MatchMessage {
                 untyped_notification.method(),
                 untyped_notification.params(),
             ) {
-                Some(Ok(typed_notification)) => match op(typed_notification, notification_cx).await
-                {
-                    Ok(()) => self.state = Ok(Handled::Yes),
-                    Err(err) => self.state = Err(err),
-                },
+                Some(Ok(typed_notification)) => {
+                    match op(typed_notification, notification_cx.clone()).await {
+                        Ok(result) => match result.into_handled() {
+                            Handled::Yes => self.state = Ok(Handled::Yes),
+                            Handled::No((notification, cx)) => {
+                                // Handler returned the notification back, convert to untyped
+                                match notification.into_untyped_message() {
+                                    Ok(untyped) => {
+                                        self.state = Ok(Handled::No(MessageAndCx::Notification(
+                                            untyped, cx,
+                                        )));
+                                    }
+                                    Err(err) => self.state = Err(err),
+                                }
+                            }
+                        },
+                        Err(err) => self.state = Err(err),
+                    }
+                }
                 Some(Err(err)) => self.state = Err(err),
                 None => {
                     self.state = Ok(Handled::No(MessageAndCx::Notification(
