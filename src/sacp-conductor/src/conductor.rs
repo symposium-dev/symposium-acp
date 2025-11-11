@@ -724,7 +724,7 @@ impl ConductorHandlerState {
                                 .map_err(sacp::util::internal_error)
                         }
                     })
-                    .connect_to(component_spec.conductor_transport())?;
+                    .connect_to(component_spec)?;
 
                 let component_cx = cx.spawn_connection(connection, |c| Box::pin(c.serve()))?;
                 spawned_components.push(component_cx);
@@ -857,17 +857,18 @@ pub enum SourceComponentIndex {
 /// This trait represents anything that the conductor can spawn and connect to
 /// in a proxy chain - typically proxies or agents that communicate via ACP.
 ///
-/// The trait is primarily about clarifying semantics: a `Component` is a thing
-/// to be connected to (from the conductor's perspective), while `IntoJrTransport`
-/// describes how to create the underlying transport mechanism.
+/// The trait provides an explicit interface for setting up bidirectional
+/// communication between the conductor and component, making the message
+/// flow directionality clear through channel naming.
 ///
-/// # Directionality
+/// # Channel Directionality
 ///
-/// The `conductor_transport()` method returns the transport from the **conductor's
-/// perspective** - this is how the conductor connects to and communicates with
-/// this component. Messages flow bidirectionally over this transport:
-/// - Downstream: conductor → component
-/// - Upstream: component → conductor
+/// The `connect_component()` method establishes bidirectional communication:
+/// - **`conductor_to_component_rx`**: Messages flowing from conductor to component
+/// - **`component_to_conductor_tx`**: Messages flowing from component back to conductor
+///
+/// The component is responsible for bridging these channels with its internal
+/// transport mechanism (stdio, network, etc.).
 ///
 /// # Examples
 ///
@@ -875,20 +876,60 @@ pub enum SourceComponentIndex {
 ///
 /// ```ignore
 /// let component: Box<dyn Component> = Box::new(AcpAgent::from_str("python proxy.py")?);
-/// let transport = component.conductor_transport();
+/// // Component can be passed directly to connect_to() via IntoJrTransport impl
 /// ```
 pub trait Component: Send {
-    /// Returns the transport the conductor should use to connect to this component.
+    /// Connects the component by bridging conductor channels with the component's transport.
     ///
-    /// This consumes the component specification and returns the actual transport
-    /// mechanism (typically stdio to a subprocess, or a network connection).
-    fn conductor_transport(self: Box<Self>) -> Box<dyn IntoJrTransport>;
+    /// # Arguments
+    ///
+    /// * `cx` - The conductor's connection context for spawning tasks
+    /// * `conductor_to_component_rx` - Channel for messages from conductor to component
+    /// * `component_to_conductor_tx` - Channel for messages from component to conductor
+    ///
+    /// # Returns
+    ///
+    /// `Ok(())` if the connection was successfully established, or an error if setup failed.
+    fn connect_component(
+        self: Box<Self>,
+        cx: &JrConnectionCx,
+        conductor_to_component_rx: mpsc::UnboundedReceiver<jsonrpcmsg::Message>,
+        component_to_conductor_tx: mpsc::UnboundedSender<jsonrpcmsg::Message>,
+    ) -> Result<(), sacp::Error>;
 }
 
 /// Blanket implementation: any `IntoJrTransport` can be used as a `Component`.
+///
+/// This bridges from the explicit channel interface to the `IntoJrTransport`
+/// interface by mapping channel directions appropriately.
 impl<T: IntoJrTransport + 'static> Component for T {
-    fn conductor_transport(self: Box<Self>) -> Box<dyn IntoJrTransport> {
-        self
+    fn connect_component(
+        self: Box<Self>,
+        cx: &JrConnectionCx,
+        conductor_to_component_rx: mpsc::UnboundedReceiver<jsonrpcmsg::Message>,
+        component_to_conductor_tx: mpsc::UnboundedSender<jsonrpcmsg::Message>,
+    ) -> Result<(), sacp::Error> {
+        // From component's perspective:
+        // - conductor_to_component_rx is incoming messages
+        // - component_to_conductor_tx is outgoing messages
+        self.into_jr_transport(cx, conductor_to_component_rx, component_to_conductor_tx)
+    }
+}
+
+/// Bridge from `Component` back to `IntoJrTransport` for convenience.
+///
+/// This allows `Box<dyn Component>` to be used with `JrHandlerChain::connect_to()`.
+impl IntoJrTransport for Box<dyn Component> {
+    fn into_jr_transport(
+        self: Box<Self>,
+        cx: &JrConnectionCx,
+        outgoing_rx: mpsc::UnboundedReceiver<jsonrpcmsg::Message>,
+        incoming_tx: mpsc::UnboundedSender<jsonrpcmsg::Message>,
+    ) -> Result<(), sacp::Error> {
+        // From conductor's perspective:
+        // - outgoing_rx is messages to send to component (conductor → component)
+        // - incoming_tx is where component sends messages back (component → conductor)
+        (*self).connect_component(cx, outgoing_rx, incoming_tx)
     }
 }
 
