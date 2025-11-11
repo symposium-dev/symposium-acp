@@ -675,18 +675,66 @@ impl ConductorHandlerState {
         // Lazy initialization: spawn components on first Initialize request
         if let Some(component_list) = self.component_list.take() {
             assert_eq!(target_component_index, 0);
-            info!("Lazy initialization: instantiating components based on Initialize request");
+            info!(
+                "Lazy initialization: selecting and spawning components based on Initialize request"
+            );
 
-            let (modified_req, components) = component_list
-                .instantiate_components(cx, conductor_tx, initialize_req)
+            let (modified_req, component_specs) = component_list
+                .instantiate_components(initialize_req)
                 .await?;
 
             initialize_req = modified_req;
-            self.components = components;
+
+            // Spawn each component with the standard interception logic
+            let mut spawned_components = Vec::new();
+            for (component_index, component_spec) in component_specs.into_iter().enumerate() {
+                info!(component_index, "Spawning component");
+
+                let connection = JrHandlerChain::new()
+                    .name(format!("conductor-to-component({})", component_index))
+                    // Intercept messages sent by a proxy component to its successor.
+                    .on_receive_message({
+                        let mut conductor_tx = conductor_tx.clone();
+                        async move |message_cx: MessageAndCx<
+                            SuccessorRequest<UntypedMessage>,
+                            SuccessorNotification<UntypedMessage>,
+                        >| {
+                            conductor_tx
+                                .send(ConductorMessage::ClientToAgent {
+                                    target_component_index: component_index + 1,
+                                    message: message_cx
+                                        .map(|r, cx| (r.request, cx), |n, cx| (n.notification, cx)),
+                                })
+                                .await
+                                .map_err(sacp::util::internal_error)
+                        }
+                    })
+                    // Intercept agent-to-client messages from the component.
+                    .on_receive_message({
+                        let mut conductor_tx = conductor_tx.clone();
+                        async move |message_cx: MessageAndCx<UntypedMessage, UntypedMessage>| {
+                            conductor_tx
+                                .send(ConductorMessage::AgentToClient {
+                                    source_component_index: SourceComponentIndex::Component(
+                                        component_index,
+                                    ),
+                                    message: message_cx,
+                                })
+                                .await
+                                .map_err(sacp::util::internal_error)
+                        }
+                    })
+                    .connect_to(component_spec.conductor_transport())?;
+
+                let component_cx = cx.spawn_connection(connection, |c| Box::pin(c.serve()))?;
+                spawned_components.push(component_cx);
+            }
+
+            self.components = spawned_components;
 
             info!(
                 component_count = self.components.len(),
-                "Components instantiated"
+                "Components spawned"
             );
         }
 
@@ -804,119 +852,116 @@ pub enum SourceComponentIndex {
     Component(usize),
 }
 
-/// Trait for lazy component instantiation based on the Initialize request.
+/// A component that can be managed by the conductor.
 ///
-/// This trait enables the conductor to defer component spawning until after
-/// receiving and examining the Initialize request from the upstream client.
-/// This allows dynamic proxy chain construction based on client capabilities.
+/// This trait represents anything that the conductor can spawn and connect to
+/// in a proxy chain - typically proxies or agents that communicate via ACP.
+///
+/// The trait is primarily about clarifying semantics: a `Component` is a thing
+/// to be connected to (from the conductor's perspective), while `IntoJrTransport`
+/// describes how to create the underlying transport mechanism.
+///
+/// # Directionality
+///
+/// The `conductor_transport()` method returns the transport from the **conductor's
+/// perspective** - this is how the conductor connects to and communicates with
+/// this component. Messages flow bidirectionally over this transport:
+/// - Downstream: conductor → component
+/// - Upstream: component → conductor
 ///
 /// # Examples
 ///
-/// Simple case - spawn all components unconditionally:
+/// Most types that implement `IntoJrTransport` automatically implement `Component`:
+///
 /// ```ignore
-/// let providers: Vec<Box<dyn IntoJrTransport>> = vec![proxy1, proxy2, agent];
-/// Conductor::new("my-conductor", providers, None)
+/// let component: Box<dyn Component> = Box::new(AcpAgent::from_str("python proxy.py")?);
+/// let transport = component.conductor_transport();
+/// ```
+pub trait Component: Send {
+    /// Returns the transport the conductor should use to connect to this component.
+    ///
+    /// This consumes the component specification and returns the actual transport
+    /// mechanism (typically stdio to a subprocess, or a network connection).
+    fn conductor_transport(self: Box<Self>) -> Box<dyn IntoJrTransport>;
+}
+
+/// Blanket implementation: any `IntoJrTransport` can be used as a `Component`.
+impl<T: IntoJrTransport + 'static> Component for T {
+    fn conductor_transport(self: Box<Self>) -> Box<dyn IntoJrTransport> {
+        self
+    }
+}
+
+/// Trait for lazy component instantiation based on the Initialize request.
+///
+/// This trait enables the conductor to defer component selection until after
+/// receiving and examining the Initialize request from the upstream client.
+/// This allows dynamic proxy chain construction based on client capabilities.
+///
+/// Implementations return component specifications (things that implement `Component`),
+/// and the conductor handles spawning and wiring them together.
+///
+/// # Examples
+///
+/// Simple case - provide all components unconditionally:
+/// ```ignore
+/// let components: Vec<Box<dyn Component>> = vec![
+///     Box::new(AcpAgent::from_str("python proxy.py")?),
+///     Box::new(AcpAgent::from_str("python agent.py")?),
+/// ];
+/// Conductor::new("my-conductor", components, None)
 /// ```
 ///
-/// Dynamic case - examine capabilities and spawn conditionally:
+/// Dynamic case - examine capabilities and choose components conditionally:
 /// ```ignore
-/// Conductor::new("my-conductor", |cx, conductor_tx, init_req| async move {
+/// Conductor::new("my-conductor", |_cx, _conductor_tx, init_req| async move {
 ///     let needs_auth = init_req.capabilities.contains(&"auth");
-///     let mut components = Vec::new();
+///     let mut components: Vec<Box<dyn Component>> = Vec::new();
 ///     if needs_auth {
-///         components.push(spawn_auth_proxy(&cx, &conductor_tx)?);
+///         components.push(Box::new(AcpAgent::from_str("python auth-proxy.py")?));
 ///     }
-///     components.push(spawn_agent(&cx, &conductor_tx)?);
+///     components.push(Box::new(AcpAgent::from_str("python agent.py")?));
 ///     Ok((init_req, components))
 /// }, None)
 /// ```
 pub trait ComponentList: Send {
-    /// Instantiate components based on the Initialize request.
+    /// Select components based on the Initialize request.
     ///
     /// # Arguments
     ///
-    /// * `cx` - The conductor's connection context for spawning components
-    /// * `conductor_tx` - Channel to send messages back to the conductor's main loop
     /// * `req` - The Initialize request from the upstream client
     ///
     /// # Returns
     ///
     /// A tuple of:
     /// * The (potentially modified) Initialize request to forward downstream
-    /// * A vector of spawned component connection contexts
+    /// * A vector of component specifications to be spawned by the conductor
     fn instantiate_components(
         self: Box<Self>,
-        cx: &JrConnectionCx,
-        conductor_tx: &mpsc::Sender<ConductorMessage>,
         req: InitializeRequest,
     ) -> futures::future::BoxFuture<
         'static,
-        Result<(InitializeRequest, Vec<JrConnectionCx>), sacp::Error>,
+        Result<(InitializeRequest, Vec<Box<dyn Component>>), sacp::Error>,
     >;
 }
 
-/// Simple implementation: spawn all components in order, don't modify the request.
+/// Simple implementation: provide all components unconditionally.
 impl<T> ComponentList for Vec<T>
 where
-    T: IntoJrTransport + 'static,
+    T: Component + 'static,
 {
     fn instantiate_components(
         self: Box<Self>,
-        cx: &JrConnectionCx,
-        conductor_tx: &mpsc::Sender<ConductorMessage>,
         req: InitializeRequest,
     ) -> futures::future::BoxFuture<
         'static,
-        Result<(InitializeRequest, Vec<JrConnectionCx>), sacp::Error>,
+        Result<(InitializeRequest, Vec<Box<dyn Component>>), sacp::Error>,
     > {
-        let cx = cx.clone();
-        let conductor_tx = conductor_tx.clone();
         Box::pin(async move {
-            let mut components = Vec::new();
-
-            for (component_index, provider) in (*self).into_iter().enumerate() {
-                info!(component_index, "Creating component");
-
-                let connection = JrHandlerChain::new()
-                    .name(format!("conductor-to-component({})", component_index))
-                    // Intercept messages sent by a proxy component to its successor.
-                    .on_receive_message({
-                        let mut conductor_tx = conductor_tx.clone();
-                        async move |message_cx: MessageAndCx<
-                            SuccessorRequest<UntypedMessage>,
-                            SuccessorNotification<UntypedMessage>,
-                        >| {
-                            conductor_tx
-                                .send(ConductorMessage::ClientToAgent {
-                                    target_component_index: component_index + 1,
-                                    message: message_cx
-                                        .map(|r, cx| (r.request, cx), |n, cx| (n.notification, cx)),
-                                })
-                                .await
-                                .map_err(sacp::util::internal_error)
-                        }
-                    })
-                    // Intercept agent-to-client messages from the component.
-                    .on_receive_message({
-                        let mut conductor_tx = conductor_tx.clone();
-                        async move |message_cx: MessageAndCx<UntypedMessage, UntypedMessage>| {
-                            conductor_tx
-                                .send(ConductorMessage::AgentToClient {
-                                    source_component_index: SourceComponentIndex::Component(
-                                        component_index,
-                                    ),
-                                    message: message_cx,
-                                })
-                                .await
-                                .map_err(sacp::util::internal_error)
-                        }
-                    })
-                    .connect_to(provider)?;
-
-                let component_cx = cx.spawn_connection(connection, |c| Box::pin(c.serve()))?;
-                components.push(component_cx);
-            }
-
+            let components: Vec<Box<dyn Component>> = (*self)
+                .into_iter()
+                .map(|c| Box::new(c) as Box<dyn Component>)
+                .collect();
             Ok((req, components))
         })
     }
@@ -925,25 +970,20 @@ where
 /// Dynamic implementation: closure receives the Initialize request and returns components.
 impl<F, Fut> ComponentList for F
 where
-    F: FnOnce(JrConnectionCx, mpsc::Sender<ConductorMessage>, InitializeRequest) -> Fut
-        + Send
-        + 'static,
-    Fut: std::future::Future<Output = Result<(InitializeRequest, Vec<JrConnectionCx>), sacp::Error>>
-        + Send
+    F: FnOnce(InitializeRequest) -> Fut + Send + 'static,
+    Fut: std::future::Future<
+            Output = Result<(InitializeRequest, Vec<Box<dyn Component>>), sacp::Error>,
+        > + Send
         + 'static,
 {
     fn instantiate_components(
         self: Box<Self>,
-        cx: &JrConnectionCx,
-        conductor_tx: &mpsc::Sender<ConductorMessage>,
         req: InitializeRequest,
     ) -> futures::future::BoxFuture<
         'static,
-        Result<(InitializeRequest, Vec<JrConnectionCx>), sacp::Error>,
+        Result<(InitializeRequest, Vec<Box<dyn Component>>), sacp::Error>,
     > {
-        let cx = cx.clone();
-        let conductor_tx = conductor_tx.clone();
-        Box::pin(async move { (*self)(cx, conductor_tx, req).await })
+        Box::pin(async move { (*self)(req).await })
     }
 }
 
