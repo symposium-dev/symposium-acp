@@ -19,8 +19,8 @@ impl IntoJrTransport for Stdio {
     fn into_jr_transport(
         self: Box<Self>,
         cx: &sacp::JrConnectionCx,
-        outgoing_rx: futures::channel::mpsc::UnboundedReceiver<jsonrpcmsg::Message>,
-        incoming_tx: futures::channel::mpsc::UnboundedSender<jsonrpcmsg::Message>,
+        outgoing_rx: futures::channel::mpsc::UnboundedReceiver<sacp::JsonRpcMessage>,
+        incoming_tx: futures::channel::mpsc::UnboundedSender<sacp::JsonRpcMessage>,
     ) -> Result<(), sacp::Error> {
         Box::new(ByteStreams::new(
             tokio::io::stdout().compat_write(),

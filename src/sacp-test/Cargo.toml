@@ -6,7 +6,7 @@ edition = "2024"
 [dependencies]
 sacp = { path = "../sacp" }
 sacp-proxy = { path = "../sacp-proxy" }
-jsonrpcmsg.workspace = true
+
 serde.workspace = true
 futures.workspace = true
 serde_json.workspace = true

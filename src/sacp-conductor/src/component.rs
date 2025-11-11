@@ -129,8 +129,8 @@ impl IntoJrTransport for Box<dyn ComponentProvider> {
     fn into_jr_transport(
         self: Box<Self>,
         cx: &JrConnectionCx,
-        outgoing_rx: mpsc::UnboundedReceiver<jsonrpcmsg::Message>,
-        incoming_tx: mpsc::UnboundedSender<jsonrpcmsg::Message>,
+        outgoing_rx: mpsc::UnboundedReceiver<sacp::JsonRpcMessage>,
+        incoming_tx: mpsc::UnboundedSender<sacp::JsonRpcMessage>,
     ) -> Result<(), sacp::Error> {
         use tokio::io::duplex;
 

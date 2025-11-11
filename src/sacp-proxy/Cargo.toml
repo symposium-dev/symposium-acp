@@ -12,7 +12,7 @@ categories = ["development-tools"]
 agent-client-protocol-schema.workspace = true
 futures.workspace = true
 fxhash.workspace = true
-jsonrpcmsg.workspace = true
+
 rmcp.workspace = true
 sacp = { version = "1.0.0-alpha.3", path = "../sacp" }
 serde.workspace = true

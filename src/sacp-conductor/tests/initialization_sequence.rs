@@ -8,7 +8,9 @@
 
 use futures::channel::mpsc;
 use sacp::schema::{AgentCapabilities, InitializeRequest, InitializeResponse};
-use sacp::{IntoJrTransport, JrConnectionCx, JrHandlerChain, MetaCapabilityExt, Proxy};
+use sacp::{
+    IntoJrTransport, JrConnectionCx, JrHandlerChain, JsonRpcMessage, MetaCapabilityExt, Proxy,
+};
 use sacp_conductor::conductor::Conductor;
 use sacp_proxy::JrCxExt;
 use std::sync::Arc;
@@ -73,8 +75,8 @@ impl IntoJrTransport for InitComponentProvider {
     fn into_jr_transport(
         self: Box<Self>,
         cx: &JrConnectionCx,
-        outgoing_rx: mpsc::UnboundedReceiver<jsonrpcmsg::Message>,
-        incoming_tx: mpsc::UnboundedSender<jsonrpcmsg::Message>,
+        outgoing_rx: mpsc::UnboundedReceiver<JsonRpcMessage>,
+        incoming_tx: mpsc::UnboundedSender<JsonRpcMessage>,
     ) -> Result<(), sacp::Error> {
         let config = Arc::clone(&self.config);
 

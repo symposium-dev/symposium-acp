@@ -880,7 +880,6 @@ dependencies = [
  "elizacp",
  "expect-test",
  "futures",
- "jsonrpcmsg",
  "rmcp",
  "sacp",
  "sacp-proxy",
@@ -906,7 +905,6 @@ dependencies = [
  "chrono",
  "futures",
  "fxhash",
- "jsonrpcmsg",
  "rmcp",
  "sacp",
  "schemars",
@@ -924,7 +922,6 @@ name = "sacp-test"
 version = "1.0.0-alpha.1"
 dependencies = [
  "futures",
- "jsonrpcmsg",
  "sacp",
  "sacp-proxy",
  "serde",
@@ -941,7 +938,6 @@ version = "1.0.0-alpha.3"
 dependencies = [
  "expect-test",
  "futures",
- "jsonrpcmsg",
  "sacp",
  "serde",
  "serde_json",
