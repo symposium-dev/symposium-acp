@@ -9,13 +9,11 @@ pub mod test_client;
 /// This is only for documentation examples that don't actually run.
 pub struct MockTransport;
 
-impl IntoJrTransport for MockTransport {
-    fn into_jr_transport(
+impl Transport for MockTransport {
+    fn transport(
         self: Box<MockTransport>,
-        _cx: &JrConnectionCx,
-        _outgoing_rx: futures::channel::mpsc::UnboundedReceiver<sacp::jsonrpcmsg::Message>,
-        _incoming_tx: futures::channel::mpsc::UnboundedSender<sacp::jsonrpcmsg::Message>,
-    ) -> Result<(), Error> {
+        _channels: Channels,
+    ) -> BoxFuture<'static, Result<(), Error>> {
         panic!("MockTransport should never be used in running code - it's only for doctests")
     }
 }

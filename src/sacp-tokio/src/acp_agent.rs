@@ -147,21 +147,22 @@ impl Drop for ChildHolder {
     }
 }
 
-impl sacp::IntoJrTransport for AcpAgent {
-    fn into_jr_transport(
+impl sacp::Transport for AcpAgent {
+    fn transport(
         self: Box<Self>,
-        cx: &sacp::JrConnectionCx,
-        outgoing_rx: futures::channel::mpsc::UnboundedReceiver<sacp::jsonrpcmsg::Message>,
-        incoming_tx: futures::channel::mpsc::UnboundedSender<sacp::jsonrpcmsg::Message>,
-    ) -> Result<(), sacp::Error> {
-        let (child_stdin, child_stdout, child) = self.spawn_process()?;
+        channels: sacp::Channels,
+    ) -> sacp::BoxFuture<'static, Result<(), sacp::Error>> {
+        Box::pin(async move {
+            let (child_stdin, child_stdout, child) = self.spawn_process()?;
 
-        // Spawn a task to hold the child process alive
-        cx.spawn(ChildHolder { _child: child })?;
+            // Hold the child process - it will be killed when this future completes
+            let _child_holder = ChildHolder { _child: child };
 
-        // Create the ViaBytes transport and set it up
-        let transport = sacp::ByteStreams::new(child_stdin.compat_write(), child_stdout.compat());
-        Box::new(transport).into_jr_transport(cx, outgoing_rx, incoming_tx)
+            // Create the ByteStreams transport and run it
+            let transport =
+                sacp::ByteStreams::new(child_stdin.compat_write(), child_stdout.compat());
+            Box::new(transport).transport(channels).await
+        })
     }
 }
 

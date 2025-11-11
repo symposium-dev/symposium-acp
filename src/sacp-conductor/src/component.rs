@@ -1,15 +1,11 @@
 use sacp;
 use sacp_tokio::AcpAgent;
 use std::pin::Pin;
-use tokio_util::compat::{
-    FuturesAsyncReadCompatExt as _, FuturesAsyncWriteCompatExt, TokioAsyncReadCompatExt as _,
-    TokioAsyncWriteCompatExt as _,
-};
+use tokio_util::compat::{FuturesAsyncReadCompatExt as _, FuturesAsyncWriteCompatExt};
 
-use futures::channel::mpsc;
 use futures::{AsyncRead, AsyncWrite};
 
-use sacp::{IntoJrTransport, JrConnectionCx};
+use sacp::JrConnectionCx;
 use tokio::process::Child;
 use tracing::debug;
 
@@ -125,34 +121,20 @@ impl ComponentProvider for CommandComponentProvider {
     }
 }
 
-impl IntoJrTransport for Box<dyn ComponentProvider> {
-    fn into_jr_transport(
+// TODO: ComponentProvider needs to be refactored or removed.
+// It's only used in tests and doesn't fit well with the new Transport trait.
+// For now, this impl is commented out since it requires access to private JrConnectionCx::new.
+// Tests that use ComponentProvider will need to be updated to use the Component trait directly.
+/*
+impl sacp::Transport for Box<dyn ComponentProvider> {
+    fn transport(
         self: Box<Self>,
-        cx: &JrConnectionCx,
-        outgoing_rx: mpsc::UnboundedReceiver<sacp::jsonrpcmsg::Message>,
-        incoming_tx: mpsc::UnboundedSender<sacp::jsonrpcmsg::Message>,
-    ) -> Result<(), sacp::Error> {
-        use tokio::io::duplex;
-
-        // Create byte streams using tokio duplex channels
-        let (outgoing_write, outgoing_read) = duplex(8192);
-        let (incoming_write, incoming_read) = duplex(8192);
-
-        // Create the component with the byte streams
-        let _cleanup = self.create(
-            cx,
-            Box::pin(outgoing_write.compat_write()),
-            Box::pin(incoming_read.compat()),
-        )?;
-
-        // Delegate to ByteStreams for the transport layer
-        Box::new(sacp::ByteStreams::new(
-            incoming_write.compat_write(),
-            outgoing_read.compat(),
-        ))
-        .into_jr_transport(cx, outgoing_rx, incoming_tx)
+        channels: sacp::Channels,
+    ) -> sacp::BoxFuture<'static, Result<(), sacp::Error>> {
+        todo!("ComponentProvider needs refactoring for new Transport trait")
     }
 }
+*/
 
 impl ComponentProvider for AcpAgent {
     fn create(

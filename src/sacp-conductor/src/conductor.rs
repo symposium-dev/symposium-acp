@@ -67,7 +67,7 @@
 //!
 //! ### Simple Usage
 //!
-//! Pass a Vec of components that implement `IntoJrTransport`:
+//! Pass a Vec of components that implement `Transport`:
 //!
 //! ```ignore
 //! let conductor = Conductor::new(
@@ -122,13 +122,13 @@ use futures::{
     channel::mpsc::{self},
 };
 use sacp::{
-    IntoJrTransport, JrMessageHandler, JrResponsePayload,
-    schema::{InitializeRequest, InitializeResponse, NewSessionRequest, NewSessionResponse},
-    util::MatchMessage,
-};
-use sacp::{
     JrConnectionCx, JrHandlerChain, JrNotification, JrRequest, JrRequestCx, JrResponse,
     MessageAndCx, MetaCapabilityExt, Proxy, UntypedMessage,
+};
+use sacp::{
+    JrMessageHandler, JrResponsePayload, Transport,
+    schema::{InitializeRequest, InitializeResponse, NewSessionRequest, NewSessionResponse},
+    util::MatchMessage,
 };
 use sacp_proxy::{
     AcpProxyExt, Component, McpConnectRequest, McpConnectResponse, McpDisconnectNotification,
@@ -214,7 +214,7 @@ impl Conductor {
     ///     .serve()
     ///     .await
     /// ```
-    pub async fn run(self, transport: impl IntoJrTransport) -> Result<(), sacp::Error> {
+    pub async fn run(self, transport: impl Transport + 'static) -> Result<(), sacp::Error> {
         self.into_handler_chain()
             .connect_to(transport)?
             .serve()

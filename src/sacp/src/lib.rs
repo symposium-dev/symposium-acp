@@ -63,6 +63,8 @@
 
 /// Capability management for the `_meta.symposium` object
 mod capabilities;
+/// Component abstraction for agents and proxies
+pub mod component;
 /// JSON-RPC handler types for building custom message handlers
 pub mod handler;
 /// JSON-RPC connection and handler infrastructure
@@ -86,10 +88,15 @@ pub mod jsonrpcmsg {
 }
 
 pub use jsonrpc::{
-    ByteStreams, Channels, Handled, IntoJrTransport, JrConnection, JrConnectionCx, JrHandlerChain,
-    JrMessage, JrMessageHandler, JrNotification, JrRequest, JrRequestCx, JrResponse,
-    JrResponsePayload, MessageAndCx, UntypedMessage,
+    ByteStreams, Channels, Handled, JrConnection, JrConnectionCx, JrHandlerChain, JrMessage,
+    JrMessageHandler, JrNotification, JrRequest, JrRequestCx, JrResponse, JrResponsePayload,
+    MessageAndCx, Transport, UntypedMessage,
 };
+
+pub use component::Component;
+
+// Re-export BoxFuture for implementing Transport/Component traits
+pub use futures::future::BoxFuture;
 
 // Re-export the six primary message enum types at the root
 pub use schema::{
