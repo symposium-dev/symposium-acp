@@ -120,7 +120,6 @@ use std::{
 use futures::{
     SinkExt, StreamExt,
     channel::mpsc::{self},
-    future::BoxFuture,
 };
 use sacp::{
     JrConnectionCx, JrHandlerChain, JrNotification, JrRequest, JrRequestCx, JrResponse,
@@ -224,11 +223,8 @@ impl Conductor {
 }
 
 impl sacp::Component for Conductor {
-    fn serve(
-        self: Box<Self>,
-        channels: sacp::Channels,
-    ) -> BoxFuture<'static, Result<(), sacp::Error>> {
-        Box::pin(async move { (*self).run(channels).await })
+    async fn serve(self, channels: sacp::Channels) -> Result<(), sacp::Error> {
+        self.run(channels).await
     }
 }
 
@@ -875,9 +871,9 @@ pub enum SourceComponentIndex {
 ///
 /// Simple case - provide all components unconditionally:
 /// ```ignore
-/// let components: Vec<Box<dyn Component>> = vec![
-///     Box::new(AcpAgent::from_str("python proxy.py")?),
-///     Box::new(AcpAgent::from_str("python agent.py")?),
+/// let components: Vec<sacp::DynComponent> = vec![
+///     sacp::DynComponent::new(AcpAgent::from_str("python proxy.py")?),
+///     sacp::DynComponent::new(AcpAgent::from_str("python agent.py")?),
 /// ];
 /// Conductor::new("my-conductor", components, None)
 /// ```
@@ -886,11 +882,11 @@ pub enum SourceComponentIndex {
 /// ```ignore
 /// Conductor::new("my-conductor", |_cx, _conductor_tx, init_req| async move {
 ///     let needs_auth = init_req.capabilities.contains(&"auth");
-///     let mut components: Vec<Box<dyn Component>> = Vec::new();
+///     let mut components: Vec<sacp::DynComponent> = Vec::new();
 ///     if needs_auth {
-///         components.push(Box::new(AcpAgent::from_str("python auth-proxy.py")?));
+///         components.push(sacp::DynComponent::new(AcpAgent::from_str("python auth-proxy.py")?));
 ///     }
-///     components.push(Box::new(AcpAgent::from_str("python agent.py")?));
+///     components.push(sacp::DynComponent::new(AcpAgent::from_str("python agent.py")?));
 ///     Ok((init_req, components))
 /// }, None)
 /// ```
@@ -911,7 +907,7 @@ pub trait ComponentList: Send {
         req: InitializeRequest,
     ) -> futures::future::BoxFuture<
         'static,
-        Result<(InitializeRequest, Vec<Box<dyn Component>>), sacp::Error>,
+        Result<(InitializeRequest, Vec<sacp::DynComponent>), sacp::Error>,
     >;
 }
 
@@ -925,12 +921,12 @@ where
         req: InitializeRequest,
     ) -> futures::future::BoxFuture<
         'static,
-        Result<(InitializeRequest, Vec<Box<dyn Component>>), sacp::Error>,
+        Result<(InitializeRequest, Vec<sacp::DynComponent>), sacp::Error>,
     > {
         Box::pin(async move {
-            let components: Vec<Box<dyn Component>> = (*self)
+            let components: Vec<sacp::DynComponent> = (*self)
                 .into_iter()
-                .map(|c| Box::new(c) as Box<dyn Component>)
+                .map(|c| sacp::DynComponent::new(c))
                 .collect();
             Ok((req, components))
         })
@@ -942,7 +938,7 @@ impl<F, Fut> ComponentList for F
 where
     F: FnOnce(InitializeRequest) -> Fut + Send + 'static,
     Fut: std::future::Future<
-            Output = Result<(InitializeRequest, Vec<Box<dyn Component>>), sacp::Error>,
+            Output = Result<(InitializeRequest, Vec<sacp::DynComponent>), sacp::Error>,
         > + Send
         + 'static,
 {
@@ -951,7 +947,7 @@ where
         req: InitializeRequest,
     ) -> futures::future::BoxFuture<
         'static,
-        Result<(InitializeRequest, Vec<Box<dyn Component>>), sacp::Error>,
+        Result<(InitializeRequest, Vec<sacp::DynComponent>), sacp::Error>,
     > {
         Box::pin(async move { (*self)(req).await })
     }

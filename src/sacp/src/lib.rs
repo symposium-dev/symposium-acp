@@ -93,7 +93,7 @@ pub use jsonrpc::{
     MessageAndCx, Transport, UntypedMessage,
 };
 
-pub use component::Component;
+pub use component::{Component, DynComponent};
 
 // Re-export BoxFuture for implementing Transport/Component traits
 pub use futures::future::BoxFuture;

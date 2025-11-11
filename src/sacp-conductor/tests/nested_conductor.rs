@@ -17,7 +17,7 @@
 //! - Inner conductor operates in proxy mode, forwarding to eliza
 //! - Outer conductor receives the ">>" prefixed response
 
-use sacp::{BoxFuture, Channels, Component, Transport};
+use sacp::{BoxFuture, Channels, Component};
 use sacp_conductor::conductor::Conductor;
 use sacp_test::arrow_proxy::run_arrow_proxy;
 use sacp_test::test_client::yolo_prompt;
@@ -30,12 +30,9 @@ use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
 /// Runs the arrow proxy logic in-process instead of spawning a subprocess.
 struct MockArrowProxy;
 
-impl Transport for MockArrowProxy {
-    fn transport(
-        self: Box<Self>,
-        channels: Channels,
-    ) -> BoxFuture<'static, Result<(), sacp::Error>> {
-        Box::pin(async move { run_arrow_proxy(channels).await })
+impl Component for MockArrowProxy {
+    async fn serve(self, channels: Channels) -> Result<(), sacp::Error> {
+        run_arrow_proxy(channels).await
     }
 }
 
@@ -43,12 +40,9 @@ impl Transport for MockArrowProxy {
 /// Runs the Eliza agent logic in-process instead of spawning a subprocess.
 struct MockEliza;
 
-impl Transport for MockEliza {
-    fn transport(
-        self: Box<Self>,
-        channels: Channels,
-    ) -> BoxFuture<'static, Result<(), sacp::Error>> {
-        Box::pin(async move { elizacp::run_elizacp(channels).await })
+impl Component for MockEliza {
+    async fn serve(self, channels: Channels) -> Result<(), sacp::Error> {
+        elizacp::run_elizacp(channels).await
     }
 }
 
@@ -64,23 +58,18 @@ impl MockInnerConductor {
     }
 }
 
-impl Transport for MockInnerConductor {
-    fn transport(
-        self: Box<Self>,
-        channels: Channels,
-    ) -> BoxFuture<'static, Result<(), sacp::Error>> {
-        Box::pin(async move {
-            // Create mock arrow proxy components for the inner conductor
-            // This conductor is ONLY proxies - no actual agent
-            let mut components: Vec<Box<dyn Component>> = Vec::new();
-            for _ in 0..self.num_arrow_proxies {
-                components.push(Box::new(MockArrowProxy));
-            }
+impl Component for MockInnerConductor {
+    async fn serve(self, channels: Channels) -> Result<(), sacp::Error> {
+        // Create mock arrow proxy components for the inner conductor
+        // This conductor is ONLY proxies - no actual agent
+        let mut components: Vec<sacp::DynComponent> = Vec::new();
+        for _ in 0..self.num_arrow_proxies {
+            components.push(sacp::DynComponent::new(MockArrowProxy));
+        }
 
-            Conductor::new("inner-conductor".to_string(), components, None)
-                .run(channels)
-                .await
-        })
+        Conductor::new("inner-conductor".to_string(), components, None)
+            .run(channels)
+            .await
     }
 }
 
@@ -89,7 +78,7 @@ async fn test_nested_conductor_with_arrow_proxies() -> Result<(), sacp::Error> {
     // Create the nested component chain using mock components
     // Inner conductor will manage: arrow_proxy1 -> arrow_proxy2 -> eliza
     // Outer conductor will manage: inner_conductor only
-    let inner_conductor: Box<dyn Component> = Box::new(MockInnerConductor::new(2));
+    let inner_conductor = sacp::DynComponent::new(MockInnerConductor::new(2));
 
     // Create duplex streams for editor <-> conductor communication
     let (editor_write, conductor_read) = duplex(8192);
@@ -99,7 +88,7 @@ async fn test_nested_conductor_with_arrow_proxies() -> Result<(), sacp::Error> {
     let conductor_handle = tokio::spawn(async move {
         Conductor::new(
             "outer-conductor".to_string(),
-            vec![inner_conductor, Box::new(MockEliza)],
+            vec![inner_conductor, sacp::DynComponent::new(MockEliza)],
             None,
         )
         .run(sacp::ByteStreams::new(

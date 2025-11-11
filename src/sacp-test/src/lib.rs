@@ -9,11 +9,8 @@ pub mod test_client;
 /// This is only for documentation examples that don't actually run.
 pub struct MockTransport;
 
-impl Transport for MockTransport {
-    fn transport(
-        self: Box<MockTransport>,
-        _channels: Channels,
-    ) -> BoxFuture<'static, Result<(), Error>> {
+impl Component for MockTransport {
+    async fn serve(self, _channels: Channels) -> Result<(), Error> {
         panic!("MockTransport should never be used in running code - it's only for doctests")
     }
 }

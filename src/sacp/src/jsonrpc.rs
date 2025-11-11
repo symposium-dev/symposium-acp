@@ -17,6 +17,7 @@ mod actors;
 pub(crate) mod handlers;
 mod task_actor;
 
+use crate::Component;
 use crate::handler::{ChainedHandler, NamedHandler};
 use crate::jsonrpc::handlers::{MessageHandler, NotificationHandler, NullHandler, RequestHandler};
 use crate::jsonrpc::task_actor::{PendingTask, Task};
@@ -604,8 +605,7 @@ impl<H: JrMessageHandler> JrHandlerChain<H> {
         let (transport_incoming_tx, transport_incoming_rx) = mpsc::unbounded();
 
         // Create the transport layer and spawn it
-        let transport_channels =
-            Channels::new(transport_outgoing_rx, transport_incoming_tx);
+        let transport_channels = Channels::new(transport_outgoing_rx, transport_incoming_tx);
         let transport_future = Box::new(transport).transport(transport_channels);
         cx.spawn(transport_future)?;
 
@@ -913,6 +913,14 @@ pub enum Handled<T> {
 /// Implementations handle the actual I/O (byte streams, stdio, network sockets, etc.) and
 /// bridge between the message channels and the underlying transport mechanism.
 ///
+/// # ⚠️ Implementation Guidance
+///
+/// **You should typically implement [`Component`] instead of `Transport` directly.**
+///
+/// `Transport` is automatically implemented for any type that implements `Component` via a blanket
+/// implementation. The two traits have identical signatures, but `Component` is the primary abstraction
+/// used throughout the codebase (especially in conductor chains).
+///
 /// # The Two Perspectives
 ///
 /// `Transport` and [`Component`] are two views on the same underlying abstraction:
@@ -920,8 +928,7 @@ pub enum Handled<T> {
 /// - **Transport**: "I am the communication layer for an existing connection"
 /// - **Component**: "I am something that can be connected to"
 ///
-/// Both traits have identical signatures, and blanket implementations allow them to be
-/// used interchangeably.
+/// Both traits have identical signatures. Implement `Component`, and `Transport` is provided automatically.
 ///
 /// # Implementation Pattern
 ///
@@ -935,24 +942,28 @@ pub enum Handled<T> {
 /// # Example
 ///
 /// ```rust
-/// use sacp::{Transport, Channels, BoxFuture};
-/// use futures::FutureExt;
+/// use sacp::Component;
 ///
-/// struct MyTransport;
+/// struct MyComponent;
 ///
-/// impl Transport for MyTransport {
-///     fn transport(self: Box<Self>, channels: Channels) -> BoxFuture<'static, Result<(), sacp::Error>> {
-///         Box::pin(async move {
-///             // Set up I/O loops
-///             // Handle bidirectional message flow
-///             Ok(())
-///         })
+/// // Implement Component (preferred)
+/// impl Component for MyComponent {
+///     async fn serve(self, channels: sacp::Channels) -> Result<(), sacp::Error> {
+///         // Set up I/O loops
+///         // Handle bidirectional message flow
+///         Ok(())
 ///     }
 /// }
+///
+/// // Transport is automatically available via blanket impl
+/// # fn example() {
+/// let component = MyComponent;
+/// let _as_transport: Box<dyn sacp::Transport> = Box::new(component);
+/// # }
 /// ```
 ///
 /// See [`ByteStreams`] for a real implementation that handles serialization/deserialization,
-/// or [`Channels`] for a simpler in-process transport.
+/// or [`Channels`] for a simpler in-process component.
 pub trait Transport: Send {
     /// Run the transport, bridging the connection's message channels with the underlying I/O.
     ///
@@ -967,15 +978,6 @@ pub trait Transport: Send {
         self: Box<Self>,
         channels: Channels,
     ) -> BoxFuture<'static, Result<(), crate::Error>>;
-}
-
-impl<T: Transport + ?Sized> Transport for Box<T> {
-    fn transport(
-        self: Box<Self>,
-        channels: Channels,
-    ) -> BoxFuture<'static, Result<(), crate::Error>> {
-        (*self).transport(channels)
-    }
 }
 
 /// Connection context for sending messages and spawning tasks.
@@ -2101,32 +2103,27 @@ where
     }
 }
 
-impl<OB, IB> Transport for ByteStreams<OB, IB>
+impl<OB, IB> Component for ByteStreams<OB, IB>
 where
     OB: AsyncWrite + Send + 'static,
     IB: AsyncRead + Send + 'static,
 {
-    fn transport(
-        self: Box<Self>,
-        channels: Channels,
-    ) -> BoxFuture<'static, Result<(), crate::Error>> {
-        let Self { outgoing, incoming } = *self;
+    async fn serve(self, channels: Channels) -> Result<(), crate::Error> {
+        let Self { outgoing, incoming } = self;
 
-        Box::pin(async move {
-            let Channels {
-                remote_outgoing_rx,
-                remote_incoming_tx,
-            } = channels;
+        let Channels {
+            remote_outgoing_rx,
+            remote_incoming_tx,
+        } = channels;
 
-            // Run both actors concurrently
-            let outgoing_future = actors::transport_outgoing_actor(remote_outgoing_rx, outgoing);
-            let incoming_future = actors::transport_incoming_actor(incoming, remote_incoming_tx);
+        // Run both actors concurrently
+        let outgoing_future = actors::transport_outgoing_actor(remote_outgoing_rx, outgoing);
+        let incoming_future = actors::transport_incoming_actor(incoming, remote_incoming_tx);
 
-            // Wait for both to complete
-            futures::try_join!(outgoing_future, incoming_future)?;
+        // Wait for both to complete
+        futures::try_join!(outgoing_future, incoming_future)?;
 
-            Ok(())
-        })
+        Ok(())
     }
 }
 
@@ -2195,39 +2192,34 @@ impl Channels {
     }
 }
 
-impl Transport for Channels {
-    fn transport(
-        self: Box<Self>,
-        channels: Channels,
-    ) -> BoxFuture<'static, Result<(), crate::Error>> {
+impl Component for Channels {
+    async fn serve(self, channels: Channels) -> Result<(), crate::Error> {
         let Self {
             remote_outgoing_rx: outer_remote_outgoing_rx,
             remote_incoming_tx: outer_remote_incoming_tx,
-        } = *self;
+        } = self;
 
-        Box::pin(async move {
-            let Channels {
-                remote_outgoing_rx: inner_remote_outgoing_rx,
-                remote_incoming_tx: inner_remote_incoming_tx,
-            } = channels;
+        let Channels {
+            remote_outgoing_rx: inner_remote_outgoing_rx,
+            remote_incoming_tx: inner_remote_incoming_tx,
+        } = channels;
 
-            // Run both forwarding actors concurrently
-            // Outgoing: connection → outer transport (wrap in Ok since outer expects Result)
-            let outgoing_future = actors::channel_forward_result_actor(
-                inner_remote_outgoing_rx,
-                outer_remote_incoming_tx,
-            );
+        // Run both forwarding actors concurrently
+        // Outgoing: connection → outer transport (wrap in Ok since outer expects Result)
+        let outgoing_future = actors::channel_forward_result_actor(
+            inner_remote_outgoing_rx,
+            outer_remote_incoming_tx,
+        );
 
-            // Incoming: outer transport → connection (both are Result-based now)
-            let incoming_future = actors::channel_forward_result_to_result_actor(
-                outer_remote_outgoing_rx,
-                inner_remote_incoming_tx,
-            );
+        // Incoming: outer transport → connection (both are Result-based now)
+        let incoming_future = actors::channel_forward_result_to_result_actor(
+            outer_remote_outgoing_rx,
+            inner_remote_incoming_tx,
+        );
 
-            // Wait for both to complete
-            futures::try_join!(outgoing_future, incoming_future)?;
+        // Wait for both to complete
+        futures::try_join!(outgoing_future, incoming_future)?;
 
-            Ok(())
-        })
+        Ok(())
     }
 }
