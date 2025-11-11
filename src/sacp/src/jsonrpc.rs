@@ -1,5 +1,8 @@
 //! Core JSON-RPC server support.
 
+// Re-export jsonrpcmsg for use in public API
+pub use jsonrpcmsg;
+
 // Types re-exported from crate root
 use serde::{Deserialize, Serialize};
 use std::fmt::Debug;

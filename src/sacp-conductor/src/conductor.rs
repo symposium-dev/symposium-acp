@@ -131,7 +131,7 @@ use sacp::{
     MessageAndCx, MetaCapabilityExt, Proxy, UntypedMessage,
 };
 use sacp_proxy::{
-    AcpProxyExt, McpConnectRequest, McpConnectResponse, McpDisconnectNotification,
+    AcpProxyExt, Component, McpConnectRequest, McpConnectResponse, McpDisconnectNotification,
     McpOverAcpNotification, McpOverAcpRequest, SuccessorNotification, SuccessorRequest,
 };
 use tracing::{debug, info};
@@ -850,87 +850,6 @@ pub enum SourceComponentIndex {
 
     /// Message from a specific component at the given index in the managed chain.
     Component(usize),
-}
-
-/// A component that can be managed by the conductor.
-///
-/// This trait represents anything that the conductor can spawn and connect to
-/// in a proxy chain - typically proxies or agents that communicate via ACP.
-///
-/// The trait provides an explicit interface for setting up bidirectional
-/// communication between the conductor and component, making the message
-/// flow directionality clear through channel naming.
-///
-/// # Channel Directionality
-///
-/// The `connect_component()` method establishes bidirectional communication:
-/// - **`conductor_to_component_rx`**: Messages flowing from conductor to component
-/// - **`component_to_conductor_tx`**: Messages flowing from component back to conductor
-///
-/// The component is responsible for bridging these channels with its internal
-/// transport mechanism (stdio, network, etc.).
-///
-/// # Examples
-///
-/// Most types that implement `IntoJrTransport` automatically implement `Component`:
-///
-/// ```ignore
-/// let component: Box<dyn Component> = Box::new(AcpAgent::from_str("python proxy.py")?);
-/// // Component can be passed directly to connect_to() via IntoJrTransport impl
-/// ```
-pub trait Component: Send {
-    /// Connects the component by bridging conductor channels with the component's transport.
-    ///
-    /// # Arguments
-    ///
-    /// * `cx` - The conductor's connection context for spawning tasks
-    /// * `conductor_to_component_rx` - Channel for messages from conductor to component
-    /// * `component_to_conductor_tx` - Channel for messages from component to conductor
-    ///
-    /// # Returns
-    ///
-    /// `Ok(())` if the connection was successfully established, or an error if setup failed.
-    fn connect_component(
-        self: Box<Self>,
-        cx: &JrConnectionCx,
-        conductor_to_component_rx: mpsc::UnboundedReceiver<jsonrpcmsg::Message>,
-        component_to_conductor_tx: mpsc::UnboundedSender<jsonrpcmsg::Message>,
-    ) -> Result<(), sacp::Error>;
-}
-
-/// Blanket implementation: any `IntoJrTransport` can be used as a `Component`.
-///
-/// This bridges from the explicit channel interface to the `IntoJrTransport`
-/// interface by mapping channel directions appropriately.
-impl<T: IntoJrTransport + 'static> Component for T {
-    fn connect_component(
-        self: Box<Self>,
-        cx: &JrConnectionCx,
-        conductor_to_component_rx: mpsc::UnboundedReceiver<jsonrpcmsg::Message>,
-        component_to_conductor_tx: mpsc::UnboundedSender<jsonrpcmsg::Message>,
-    ) -> Result<(), sacp::Error> {
-        // From component's perspective:
-        // - conductor_to_component_rx is incoming messages
-        // - component_to_conductor_tx is outgoing messages
-        self.into_jr_transport(cx, conductor_to_component_rx, component_to_conductor_tx)
-    }
-}
-
-/// Bridge from `Component` back to `IntoJrTransport` for convenience.
-///
-/// This allows `Box<dyn Component>` to be used with `JrHandlerChain::connect_to()`.
-impl IntoJrTransport for dyn Component {
-    fn into_jr_transport(
-        self: Box<Self>,
-        cx: &JrConnectionCx,
-        outgoing_rx: mpsc::UnboundedReceiver<jsonrpcmsg::Message>,
-        incoming_tx: mpsc::UnboundedSender<jsonrpcmsg::Message>,
-    ) -> Result<(), sacp::Error> {
-        // From conductor's perspective:
-        // - outgoing_rx is messages to send to component (conductor → component)
-        // - incoming_tx is where component sends messages back (component → conductor)
-        self.connect_component(cx, outgoing_rx, incoming_tx)
-    }
 }
 
 /// Trait for lazy component instantiation based on the Initialize request.

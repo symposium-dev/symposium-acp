@@ -106,6 +106,10 @@
 //! - **[sacp-conductor](https://crates.io/crates/sacp-conductor)** - Binary for orchestrating proxy chains
 //! - **[sacp-tokio](https://crates.io/crates/sacp-tokio)** - Tokio utilities for spawning agents
 
+/// Component trait for proxy chain composition
+mod component;
+pub use component::*;
+
 /// Proxying MCP messages over ACP.
 mod mcp_over_acp;
 pub use mcp_over_acp::*;
