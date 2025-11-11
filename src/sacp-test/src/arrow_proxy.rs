@@ -3,23 +3,16 @@
 //! This proxy demonstrates basic proxy functionality by intercepting
 //! `session/update` notifications and prepending `>` to the content.
 
-use sacp::JrHandlerChain;
 use sacp::schema::{ContentBlock, ContentChunk, SessionNotification, SessionUpdate};
+use sacp::{JrHandlerChain, Transport};
 use sacp_proxy::{AcpProxyExt, McpServiceRegistry};
 
 /// Run the arrow proxy that adds `>` to each session update.
 ///
 /// # Arguments
 ///
-/// * `stdout` - Output stream to the predecessor (conductor or another proxy)
-/// * `stdin` - Input stream from the predecessor (conductor or another proxy)
-pub async fn run_arrow_proxy<OB, IB>(stdout: OB, stdin: IB) -> Result<(), sacp::Error>
-where
-    OB: futures::AsyncWrite + Send + 'static,
-    IB: futures::AsyncRead + Send + 'static,
-{
-    let transport = sacp::ByteStreams::new(stdout, stdin);
-
+/// * `transport` - Transport to the predecessor (conductor or another proxy)
+pub async fn run_arrow_proxy(transport: impl Transport + 'static) -> Result<(), sacp::Error> {
     JrHandlerChain::new()
         .name("arrow-proxy")
         // Intercept session notifications from successor (agent) and modify them

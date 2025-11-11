@@ -2,12 +2,12 @@ pub mod eliza;
 
 use anyhow::Result;
 use eliza::Eliza;
-use sacp::JrHandlerChain;
 use sacp::schema::{
     AgentCapabilities, ContentBlock, ContentChunk, InitializeRequest, InitializeResponse,
     LoadSessionRequest, LoadSessionResponse, NewSessionRequest, NewSessionResponse, PromptRequest,
     PromptResponse, SessionId, SessionNotification, SessionUpdate, StopReason, TextContent,
 };
+use sacp::{JrHandlerChain, Transport};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
@@ -142,15 +142,8 @@ fn extract_text_from_prompt(blocks: &[ContentBlock]) -> String {
 ///
 /// This is the core agent implementation that can be used both from the binary
 /// and from tests as an in-process mock component.
-pub async fn run_elizacp<OB, IB>(stdout: OB, stdin: IB) -> Result<()>
-where
-    OB: futures::AsyncWrite + Send + 'static,
-    IB: futures::AsyncRead + Send + 'static,
-{
+pub async fn run_elizacp(transport: impl Transport + 'static) -> Result<(), sacp::Error> {
     let agent = ElizaAgent::new();
-
-    // Set up JSON-RPC connection
-    let transport = sacp::ByteStreams::new(stdout, stdin);
 
     JrHandlerChain::new()
         .name("elizacp")

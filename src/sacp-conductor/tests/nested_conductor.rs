@@ -17,7 +17,7 @@
 //! - Inner conductor operates in proxy mode, forwarding to eliza
 //! - Outer conductor receives the ">>" prefixed response
 
-use sacp::{BoxFuture, Component, Transport, Channels};
+use sacp::{BoxFuture, Channels, Component, Transport};
 use sacp_conductor::conductor::Conductor;
 use sacp_test::arrow_proxy::run_arrow_proxy;
 use sacp_test::test_client::yolo_prompt;
@@ -35,29 +35,7 @@ impl Transport for MockArrowProxy {
         self: Box<Self>,
         channels: Channels,
     ) -> BoxFuture<'static, Result<(), sacp::Error>> {
-        Box::pin(async move {
-            // Create duplex streams for the arrow proxy
-            let (our_write, their_read) = duplex(8192);
-            let (their_write, our_read) = duplex(8192);
-
-            // Spawn the arrow proxy task
-            let proxy_task = tokio::spawn(async move {
-                run_arrow_proxy(their_write.compat_write(), their_read.compat()).await
-            });
-
-            // Use ByteStreams to bridge between our duplex and the Channels
-            let byte_transport =
-                sacp::ByteStreams::new(our_write.compat_write(), our_read.compat());
-
-            let result = Box::new(byte_transport).transport(channels).await;
-
-            // Wait for proxy task to complete
-            proxy_task
-                .await
-                .map_err(|_| sacp::Error::internal_error())??;
-
-            result
-        })
+        Box::pin(async move { run_arrow_proxy(channels).await })
     }
 }
 
@@ -70,31 +48,7 @@ impl Transport for MockEliza {
         self: Box<Self>,
         channels: Channels,
     ) -> BoxFuture<'static, Result<(), sacp::Error>> {
-        Box::pin(async move {
-            // Create duplex streams for eliza
-            let (our_write, their_read) = duplex(8192);
-            let (their_write, our_read) = duplex(8192);
-
-            // Spawn the eliza task
-            let eliza_task = tokio::spawn(async move {
-                elizacp::run_elizacp(their_write.compat_write(), their_read.compat())
-                    .await
-                    .map_err(|_| sacp::Error::internal_error())
-            });
-
-            // Use ByteStreams to bridge between our duplex and the Channels
-            let byte_transport =
-                sacp::ByteStreams::new(our_write.compat_write(), our_read.compat());
-
-            let result = Box::new(byte_transport).transport(channels).await;
-
-            // Wait for eliza task to complete
-            eliza_task
-                .await
-                .map_err(|_| sacp::Error::internal_error())??;
-
-            result
-        })
+        Box::pin(async move { elizacp::run_elizacp(channels).await })
     }
 }
 
@@ -123,32 +77,9 @@ impl Transport for MockInnerConductor {
                 components.push(Box::new(MockArrowProxy));
             }
 
-            // Create duplex streams for the inner conductor
-            let (our_write, their_read) = duplex(8192);
-            let (their_write, our_read) = duplex(8192);
-
-            // Spawn the conductor task
-            let conductor_task = tokio::spawn(async move {
-                Conductor::new("inner-conductor".to_string(), components, None)
-                    .run(sacp::ByteStreams::new(
-                        their_write.compat_write(),
-                        their_read.compat(),
-                    ))
-                    .await
-            });
-
-            // Use ByteStreams to bridge between our duplex and the Channels
-            let byte_transport =
-                sacp::ByteStreams::new(our_write.compat_write(), our_read.compat());
-
-            let result = Box::new(byte_transport).transport(channels).await;
-
-            // Wait for conductor task to complete
-            conductor_task
+            Conductor::new("inner-conductor".to_string(), components, None)
+                .run(channels)
                 .await
-                .map_err(|_| sacp::Error::internal_error())??;
-
-            result
         })
     }
 }

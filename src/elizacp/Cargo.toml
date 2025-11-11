@@ -29,6 +29,7 @@ tokio-util.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
 uuid.workspace = true
+sacp-tokio = { version = "1.0.0-alpha.3", path = "../sacp-tokio" }
 
 [dev-dependencies]
 expect-test.workspace = true
