@@ -17,6 +17,7 @@ sacp-proxy = { version = "1.0.0-alpha.4", path = "../sacp-proxy" }
 sacp-tokio = { version = "1.0.0-alpha.4", path = "../sacp-tokio" }
 agent-client-protocol-schema.workspace = true
 anyhow.workspace = true
+chrono.workspace = true
 clap.workspace = true
 futures.workspace = true
 
@@ -27,6 +28,7 @@ thiserror.workspace = true
 tokio.workspace = true
 tokio-util.workspace = true
 tracing.workspace = true
+tracing-appender.workspace = true
 tracing-subscriber.workspace = true
 uuid.workspace = true
 
