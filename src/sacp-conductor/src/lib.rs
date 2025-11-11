@@ -78,8 +78,6 @@ use std::str::FromStr;
 
 use crate::conductor::Conductor;
 
-/// Component abstraction for spawning and managing proxies/agents
-pub mod component;
 /// Core conductor logic for orchestrating proxy chains
 pub mod conductor;
 /// MCP bridge functionality for TCP-based MCP servers

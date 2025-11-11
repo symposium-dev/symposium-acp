@@ -77,7 +77,7 @@ impl AcpAgent {
     }
 
     /// Spawn the process and get stdio streams.
-    /// Used by JrConnectionExt::to_agent and ComponentProvider implementations.
+    /// Used internally by the Transport trait implementation.
     pub fn spawn_process(
         &self,
     ) -> Result<
