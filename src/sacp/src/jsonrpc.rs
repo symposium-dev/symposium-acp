@@ -942,19 +942,16 @@ pub enum Handled<T> {
 /// # Example
 ///
 /// ```rust
-/// use sacp::{Component, Channels, BoxFuture};
-/// use futures::FutureExt;
+/// use sacp::Component;
 ///
 /// struct MyComponent;
 ///
 /// // Implement Component (preferred)
 /// impl Component for MyComponent {
-///     fn serve(self: Box<Self>, channels: Channels) -> BoxFuture<'static, Result<(), sacp::Error>> {
-///         Box::pin(async move {
-///             // Set up I/O loops
-///             // Handle bidirectional message flow
-///             Ok(())
-///         })
+///     async fn serve(self, channels: sacp::Channels) -> Result<(), sacp::Error> {
+///         // Set up I/O loops
+///         // Handle bidirectional message flow
+///         Ok(())
 ///     }
 /// }
 ///
@@ -2111,24 +2108,22 @@ where
     OB: AsyncWrite + Send + 'static,
     IB: AsyncRead + Send + 'static,
 {
-    fn serve(self: Box<Self>, channels: Channels) -> BoxFuture<'static, Result<(), crate::Error>> {
-        let Self { outgoing, incoming } = *self;
+    async fn serve(self, channels: Channels) -> Result<(), crate::Error> {
+        let Self { outgoing, incoming } = self;
 
-        Box::pin(async move {
-            let Channels {
-                remote_outgoing_rx,
-                remote_incoming_tx,
-            } = channels;
+        let Channels {
+            remote_outgoing_rx,
+            remote_incoming_tx,
+        } = channels;
 
-            // Run both actors concurrently
-            let outgoing_future = actors::transport_outgoing_actor(remote_outgoing_rx, outgoing);
-            let incoming_future = actors::transport_incoming_actor(incoming, remote_incoming_tx);
+        // Run both actors concurrently
+        let outgoing_future = actors::transport_outgoing_actor(remote_outgoing_rx, outgoing);
+        let incoming_future = actors::transport_incoming_actor(incoming, remote_incoming_tx);
 
-            // Wait for both to complete
-            futures::try_join!(outgoing_future, incoming_future)?;
+        // Wait for both to complete
+        futures::try_join!(outgoing_future, incoming_future)?;
 
-            Ok(())
-        })
+        Ok(())
     }
 }
 
@@ -2198,35 +2193,33 @@ impl Channels {
 }
 
 impl Component for Channels {
-    fn serve(self: Box<Self>, channels: Channels) -> BoxFuture<'static, Result<(), crate::Error>> {
+    async fn serve(self, channels: Channels) -> Result<(), crate::Error> {
         let Self {
             remote_outgoing_rx: outer_remote_outgoing_rx,
             remote_incoming_tx: outer_remote_incoming_tx,
-        } = *self;
+        } = self;
 
-        Box::pin(async move {
-            let Channels {
-                remote_outgoing_rx: inner_remote_outgoing_rx,
-                remote_incoming_tx: inner_remote_incoming_tx,
-            } = channels;
+        let Channels {
+            remote_outgoing_rx: inner_remote_outgoing_rx,
+            remote_incoming_tx: inner_remote_incoming_tx,
+        } = channels;
 
-            // Run both forwarding actors concurrently
-            // Outgoing: connection → outer transport (wrap in Ok since outer expects Result)
-            let outgoing_future = actors::channel_forward_result_actor(
-                inner_remote_outgoing_rx,
-                outer_remote_incoming_tx,
-            );
+        // Run both forwarding actors concurrently
+        // Outgoing: connection → outer transport (wrap in Ok since outer expects Result)
+        let outgoing_future = actors::channel_forward_result_actor(
+            inner_remote_outgoing_rx,
+            outer_remote_incoming_tx,
+        );
 
-            // Incoming: outer transport → connection (both are Result-based now)
-            let incoming_future = actors::channel_forward_result_to_result_actor(
-                outer_remote_outgoing_rx,
-                inner_remote_incoming_tx,
-            );
+        // Incoming: outer transport → connection (both are Result-based now)
+        let incoming_future = actors::channel_forward_result_to_result_actor(
+            outer_remote_outgoing_rx,
+            inner_remote_incoming_tx,
+        );
 
-            // Wait for both to complete
-            futures::try_join!(outgoing_future, incoming_future)?;
+        // Wait for both to complete
+        futures::try_join!(outgoing_future, incoming_future)?;
 
-            Ok(())
-        })
+        Ok(())
     }
 }

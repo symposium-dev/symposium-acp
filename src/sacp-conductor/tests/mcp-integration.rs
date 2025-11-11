@@ -42,7 +42,7 @@ fn conductor_command() -> Vec<String> {
 }
 
 async fn run_test_with_components(
-    components: Vec<Box<dyn Component>>,
+    components: Vec<sacp::DynComponent>,
     editor_task: impl AsyncFnOnce(sacp::JrConnectionCx) -> Result<(), sacp::Error>,
 ) -> Result<(), sacp::Error> {
     // Set up editor <-> conductor communication

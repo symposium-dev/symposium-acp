@@ -61,21 +61,18 @@ struct InitComponent {
 }
 
 impl InitComponent {
-    fn new(config: &Arc<InitConfig>) -> Box<dyn Component> {
-        Box::new(Self {
+    fn new(config: &Arc<InitConfig>) -> sacp::DynComponent {
+        sacp::DynComponent::new(Self {
             config: config.clone(),
         })
     }
 }
 
 impl Component for InitComponent {
-    fn serve(
-        self: Box<Self>,
-        channels: Channels,
-    ) -> sacp::BoxFuture<'static, Result<(), sacp::Error>> {
+    async fn serve(self, channels: Channels) -> Result<(), sacp::Error> {
         let config = Arc::clone(&self.config);
 
-        Box::pin(async move {
+        {
             JrHandlerChain::new()
                 .name("init-component")
                 .on_receive_request(async move |mut request: InitializeRequest, request_cx| {
@@ -110,12 +107,12 @@ impl Component for InitComponent {
                 })
                 .serve(channels)
                 .await
-        })
+        }
     }
 }
 
 async fn run_test_with_components(
-    components: Vec<Box<dyn Component>>,
+    components: Vec<sacp::DynComponent>,
     editor_task: impl AsyncFnOnce(sacp::JrConnectionCx) -> Result<(), sacp::Error>,
 ) -> Result<(), sacp::Error> {
     // Set up editor <-> conductor communication
