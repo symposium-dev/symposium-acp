@@ -89,36 +89,26 @@ pub trait Component: Send {
     fn serve(self: Box<Self>, channels: Channels) -> BoxFuture<'static, Result<(), crate::Error>>;
 }
 
-/// Blanket implementation: any `Transport` can be used as a `Component`.
+/// Implementation for boxed trait objects.
 ///
-/// Since both `Channels` and `Channels` now have the same signature
-/// (both use `Result<Message, Error>` for incoming), we can directly pass through.
-impl<T: Transport + 'static> Component for T {
+/// This allows `Box<dyn Component>` to be used as a `Component`, which is necessary
+/// for storing heterogeneous collections of components.
+impl Component for Box<dyn Component> {
     fn serve(self: Box<Self>, channels: Channels) -> BoxFuture<'static, Result<(), crate::Error>> {
-        Box::pin(async move {
-            // Both Channels and Channels now have identical types,
-            // so we can convert directly
-            let transport_channels =
-                Channels::new(channels.remote_outgoing_rx, channels.remote_incoming_tx);
-            self.transport(transport_channels).await
-        })
+        (*self).serve(channels)
     }
 }
 
 /// Blanket implementation: any `Component` can be used as a `Transport`.
 ///
-/// Since both `Channels` and `Channels` now have the same signature
-/// (both use `Result<Message, Error>` for incoming), we can directly pass through.
-impl Transport for dyn Component {
+/// Since `Component` and `Transport` have identical signatures (both receive `Channels`
+/// and return `BoxFuture<Result<(), Error>>`), any component can be used as a transport.
+/// This enables using components in any context that expects a transport.
+impl<C: ?Sized + Component> Transport for C {
     fn transport(
         self: Box<Self>,
         channels: Channels,
     ) -> BoxFuture<'static, Result<(), crate::Error>> {
-        Box::pin(async move {
-            // Both Channels and Channels now have identical types,
-            // so we can convert directly
-            let channels = Channels::new(channels.remote_outgoing_rx, channels.remote_incoming_tx);
-            self.serve(channels).await
-        })
+        self.serve(channels)
     }
 }

@@ -147,8 +147,8 @@ impl Drop for ChildHolder {
     }
 }
 
-impl sacp::Transport for AcpAgent {
-    fn transport(
+impl sacp::Component for AcpAgent {
+    fn serve(
         self: Box<Self>,
         channels: sacp::Channels,
     ) -> sacp::BoxFuture<'static, Result<(), sacp::Error>> {
@@ -158,10 +158,10 @@ impl sacp::Transport for AcpAgent {
             // Hold the child process - it will be killed when this future completes
             let _child_holder = ChildHolder { _child: child };
 
-            // Create the ByteStreams transport and run it
-            let transport =
+            // Create the ByteStreams component and serve it
+            let component =
                 sacp::ByteStreams::new(child_stdin.compat_write(), child_stdout.compat());
-            Box::new(transport).transport(channels).await
+            Box::new(component).serve(channels).await
         })
     }
 }

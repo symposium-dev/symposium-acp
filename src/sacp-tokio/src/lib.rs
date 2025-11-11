@@ -7,13 +7,13 @@
 mod acp_agent;
 
 pub use acp_agent::AcpAgent;
-use sacp::{ByteStreams, Transport};
+use sacp::{ByteStreams, Component};
 use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
 
 pub struct Stdio;
 
-impl Transport for Stdio {
-    fn transport(
+impl Component for Stdio {
+    fn serve(
         self: Box<Self>,
         channels: sacp::Channels,
     ) -> sacp::BoxFuture<'static, Result<(), sacp::Error>> {
@@ -21,6 +21,6 @@ impl Transport for Stdio {
             tokio::io::stdout().compat_write(),
             tokio::io::stdin().compat(),
         ))
-        .transport(channels)
+        .serve(channels)
     }
 }

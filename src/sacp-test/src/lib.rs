@@ -9,8 +9,8 @@ pub mod test_client;
 /// This is only for documentation examples that don't actually run.
 pub struct MockTransport;
 
-impl Transport for MockTransport {
-    fn transport(
+impl Component for MockTransport {
+    fn serve(
         self: Box<MockTransport>,
         _channels: Channels,
     ) -> BoxFuture<'static, Result<(), Error>> {

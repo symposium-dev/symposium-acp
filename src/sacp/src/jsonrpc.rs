@@ -17,6 +17,7 @@ mod actors;
 pub(crate) mod handlers;
 mod task_actor;
 
+use crate::Component;
 use crate::handler::{ChainedHandler, NamedHandler};
 use crate::jsonrpc::handlers::{MessageHandler, NotificationHandler, NullHandler, RequestHandler};
 use crate::jsonrpc::task_actor::{PendingTask, Task};
@@ -604,8 +605,7 @@ impl<H: JrMessageHandler> JrHandlerChain<H> {
         let (transport_incoming_tx, transport_incoming_rx) = mpsc::unbounded();
 
         // Create the transport layer and spawn it
-        let transport_channels =
-            Channels::new(transport_outgoing_rx, transport_incoming_tx);
+        let transport_channels = Channels::new(transport_outgoing_rx, transport_incoming_tx);
         let transport_future = Box::new(transport).transport(transport_channels);
         cx.spawn(transport_future)?;
 
@@ -967,15 +967,6 @@ pub trait Transport: Send {
         self: Box<Self>,
         channels: Channels,
     ) -> BoxFuture<'static, Result<(), crate::Error>>;
-}
-
-impl<T: Transport + ?Sized> Transport for Box<T> {
-    fn transport(
-        self: Box<Self>,
-        channels: Channels,
-    ) -> BoxFuture<'static, Result<(), crate::Error>> {
-        (*self).transport(channels)
-    }
 }
 
 /// Connection context for sending messages and spawning tasks.
@@ -2101,15 +2092,12 @@ where
     }
 }
 
-impl<OB, IB> Transport for ByteStreams<OB, IB>
+impl<OB, IB> Component for ByteStreams<OB, IB>
 where
     OB: AsyncWrite + Send + 'static,
     IB: AsyncRead + Send + 'static,
 {
-    fn transport(
-        self: Box<Self>,
-        channels: Channels,
-    ) -> BoxFuture<'static, Result<(), crate::Error>> {
+    fn serve(self: Box<Self>, channels: Channels) -> BoxFuture<'static, Result<(), crate::Error>> {
         let Self { outgoing, incoming } = *self;
 
         Box::pin(async move {
@@ -2195,11 +2183,8 @@ impl Channels {
     }
 }
 
-impl Transport for Channels {
-    fn transport(
-        self: Box<Self>,
-        channels: Channels,
-    ) -> BoxFuture<'static, Result<(), crate::Error>> {
+impl Component for Channels {
+    fn serve(self: Box<Self>, channels: Channels) -> BoxFuture<'static, Result<(), crate::Error>> {
         let Self {
             remote_outgoing_rx: outer_remote_outgoing_rx,
             remote_incoming_tx: outer_remote_incoming_tx,
