@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.0-alpha.7](https://github.com/symposium-dev/symposium-acp/compare/sacp-conductor-v1.0.0-alpha.6...sacp-conductor-v1.0.0-alpha.7) - 2025-11-11
+
+### Other
+
+- Merge pull request #26 from nikomatsakis/main
+- [**breaking**] make Component trait ergonomic with async fn and introduce DynComponent
+- [**breaking**] make Component the primary trait with Transport as blanket impl
+
 ## [1.0.0-alpha.6](https://github.com/symposium-dev/symposium-acp/compare/sacp-conductor-v1.0.0-alpha.5...sacp-conductor-v1.0.0-alpha.6) - 2025-11-11
 
 ### Added
