@@ -10,10 +10,7 @@ pub use acp_agent::AcpAgent;
 use sacp::{ByteStreams, Transport};
 use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
 
-#[derive(Default)]
-pub struct Stdio {
-    _private: (),
-}
+pub struct Stdio;
 
 impl Transport for Stdio {
     fn transport(
