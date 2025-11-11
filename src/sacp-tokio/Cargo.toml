@@ -1,6 +1,6 @@
 [package]
 name = "sacp-tokio"
-version = "1.0.0-alpha.4"
+version = "1.0.0-alpha.5"
 edition = "2024"
 description = "Tokio-based utilities for SACP (Symposium's extensions to ACP)"
 license = "MIT OR Apache-2.0"
