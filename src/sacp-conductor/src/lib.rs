@@ -122,7 +122,7 @@ impl ConductorArgs {
 
                 Conductor::new(name, providers, None)
                     .into_handler_chain()
-                    .connect_to(Stdio::default())?
+                    .connect_to(Stdio)?
                     .serve()
                     .await
             }
