@@ -120,6 +120,7 @@ use std::{
 use futures::{
     SinkExt, StreamExt,
     channel::mpsc::{self},
+    future::BoxFuture,
 };
 use sacp::{
     JrConnectionCx, JrHandlerChain, JrNotification, JrRequest, JrRequestCx, JrResponse,
@@ -219,6 +220,15 @@ impl Conductor {
             .connect_to(transport)?
             .serve()
             .await
+    }
+}
+
+impl sacp::Component for Conductor {
+    fn serve(
+        self: Box<Self>,
+        channels: sacp::Channels,
+    ) -> BoxFuture<'static, Result<(), sacp::Error>> {
+        Box::pin(async move { (*self).run(channels).await })
     }
 }
 
