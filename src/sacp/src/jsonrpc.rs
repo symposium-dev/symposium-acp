@@ -913,6 +913,14 @@ pub enum Handled<T> {
 /// Implementations handle the actual I/O (byte streams, stdio, network sockets, etc.) and
 /// bridge between the message channels and the underlying transport mechanism.
 ///
+/// # ⚠️ Implementation Guidance
+///
+/// **You should typically implement [`Component`] instead of `Transport` directly.**
+///
+/// `Transport` is automatically implemented for any type that implements `Component` via a blanket
+/// implementation. The two traits have identical signatures, but `Component` is the primary abstraction
+/// used throughout the codebase (especially in conductor chains).
+///
 /// # The Two Perspectives
 ///
 /// `Transport` and [`Component`] are two views on the same underlying abstraction:
@@ -920,8 +928,7 @@ pub enum Handled<T> {
 /// - **Transport**: "I am the communication layer for an existing connection"
 /// - **Component**: "I am something that can be connected to"
 ///
-/// Both traits have identical signatures, and blanket implementations allow them to be
-/// used interchangeably.
+/// Both traits have identical signatures. Implement `Component`, and `Transport` is provided automatically.
 ///
 /// # Implementation Pattern
 ///
@@ -935,13 +942,14 @@ pub enum Handled<T> {
 /// # Example
 ///
 /// ```rust
-/// use sacp::{Transport, Channels, BoxFuture};
+/// use sacp::{Component, Channels, BoxFuture};
 /// use futures::FutureExt;
 ///
-/// struct MyTransport;
+/// struct MyComponent;
 ///
-/// impl Transport for MyTransport {
-///     fn transport(self: Box<Self>, channels: Channels) -> BoxFuture<'static, Result<(), sacp::Error>> {
+/// // Implement Component (preferred)
+/// impl Component for MyComponent {
+///     fn serve(self: Box<Self>, channels: Channels) -> BoxFuture<'static, Result<(), sacp::Error>> {
 ///         Box::pin(async move {
 ///             // Set up I/O loops
 ///             // Handle bidirectional message flow
@@ -949,10 +957,16 @@ pub enum Handled<T> {
 ///         })
 ///     }
 /// }
+///
+/// // Transport is automatically available via blanket impl
+/// # fn example() {
+/// let component = MyComponent;
+/// let _as_transport: Box<dyn sacp::Transport> = Box::new(component);
+/// # }
 /// ```
 ///
 /// See [`ByteStreams`] for a real implementation that handles serialization/deserialization,
-/// or [`Channels`] for a simpler in-process transport.
+/// or [`Channels`] for a simpler in-process component.
 pub trait Transport: Send {
     /// Run the transport, bridging the connection's message channels with the underlying I/O.
     ///
