@@ -7,7 +7,7 @@ use sacp::schema::{
     LoadSessionRequest, LoadSessionResponse, NewSessionRequest, NewSessionResponse, PromptRequest,
     PromptResponse, SessionId, SessionNotification, SessionUpdate, StopReason, TextContent,
 };
-use sacp::{JrHandlerChain, Transport};
+use sacp::{Component, JrHandlerChain};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
@@ -142,7 +142,7 @@ fn extract_text_from_prompt(blocks: &[ContentBlock]) -> String {
 ///
 /// This is the core agent implementation that can be used both from the binary
 /// and from tests as an in-process mock component.
-pub async fn run_elizacp(transport: impl Transport + 'static) -> Result<(), sacp::Error> {
+pub async fn run_elizacp(transport: impl Component + 'static) -> Result<(), sacp::Error> {
     let agent = ElizaAgent::new();
 
     JrHandlerChain::new()

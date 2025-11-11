@@ -28,7 +28,6 @@ impl JrMessageHandler for NullHandler {
 pub struct RequestHandler<R, F>
 where
     R: JrRequest,
-    F: AsyncFnMut(R, JrRequestCx<R::Response>) -> Result<(), crate::Error>,
 {
     handler: F,
     phantom: PhantomData<fn(R)>,
@@ -37,7 +36,6 @@ where
 impl<R, F> RequestHandler<R, F>
 where
     R: JrRequest,
-    F: AsyncFnMut(R, JrRequestCx<R::Response>) -> Result<(), crate::Error>,
 {
     /// Creates a new request handler
     pub fn new(handler: F) -> Self {
@@ -48,10 +46,11 @@ where
     }
 }
 
-impl<R, F> JrMessageHandler for RequestHandler<R, F>
+impl<R, F, T> JrMessageHandler for RequestHandler<R, F>
 where
     R: JrRequest,
-    F: AsyncFnMut(R, JrRequestCx<R::Response>) -> Result<(), crate::Error>,
+    F: AsyncFnMut(R, JrRequestCx<R::Response>) -> Result<T, crate::Error>,
+    T: crate::IntoHandled<(R, JrRequestCx<R::Response>)>,
 {
     async fn handle_message(
         &mut self,
@@ -67,8 +66,19 @@ where
                 match R::parse_request(&message.method, &message.params) {
                     Some(Ok(req)) => {
                         tracing::trace!(?req, "RequestHandler::handle_request: parse completed");
-                        (self.handler)(req, request_cx.cast()).await?;
-                        Ok(Handled::Yes)
+                        let typed_request_cx = request_cx.cast();
+                        let result = (self.handler)(req, typed_request_cx).await?;
+                        match result.into_handled() {
+                            Handled::Yes => Ok(Handled::Yes),
+                            Handled::No((request, request_cx)) => {
+                                // Handler returned the request back, convert to untyped
+                                let untyped = request.into_untyped_message()?;
+                                Ok(Handled::No(MessageAndCx::Request(
+                                    untyped,
+                                    request_cx.erase_to_json(),
+                                )))
+                            }
+                        }
                     }
                     Some(Err(err)) => {
                         tracing::trace!(?err, "RequestHandler::handle_request: parse errored");

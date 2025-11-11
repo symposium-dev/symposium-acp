@@ -30,29 +30,42 @@
 use futures::future::BoxFuture;
 use std::future::Future;
 
-use crate::{Channels, Transport};
+use crate::Channels;
 
-/// A component that can be run as part of a conductor's chain.
+/// A component that can participate in the Agent-Client Protocol.
 ///
-/// Components are always servers that receive [`Channels`] for bidirectional
-/// communication with their conductor. The channels carry JSON-RPC messages
-/// between the conductor and component.
+/// This trait represents anything that can communicate via JSON-RPC messages over channels -
+/// agents, proxies, in-process connections, or any ACP-speaking component. Components receive
+/// [`Channels`] for bidirectional message passing and serve on those channels until completion.
+///
+/// # Component Types
+///
+/// The trait is implemented by several built-in types representing different communication patterns:
+///
+/// - **[`ByteStreams`]**: A component communicating over byte streams (stdin/stdout, sockets, etc.)
+/// - **[`Channels`]**: A component communicating via in-process message channels (for testing or direct connections)
+/// - **[`AcpAgent`]**: An external agent running in a separate process with stdio communication
+/// - **Custom components**: Proxies, transformers, or any ACP-aware service
 ///
 /// # Implementation
 ///
-/// Implement this trait using async fn syntax:
+/// Implement this trait using async fn syntax. Most components set up a [`JrHandlerChain`]
+/// to handle incoming messages:
 ///
 /// ```rust,ignore
 /// use sacp::Component;
 /// use sacp::Channels;
 ///
-/// struct MyComponent;
+/// struct MyProxy {
+///     config: ProxyConfig,
+/// }
 ///
-/// impl Component for MyComponent {
+/// impl Component for MyProxy {
 ///     async fn serve(self, channels: Channels) -> Result<(), sacp::Error> {
 ///         sacp::JrHandlerChain::new()
-///             .name("my-component")
+///             .name("my-proxy")
 ///             .on_receive_request(async |req: MyRequest, cx| {
+///                 // Transform and forward request
 ///                 cx.respond(MyResponse { status: "ok".into() })
 ///             })
 ///             .serve(channels)
@@ -61,14 +74,21 @@ use crate::{Channels, Transport};
 /// }
 /// ```
 ///
-/// For heterogeneous collections, use [`DynComponent`]:
+/// # Heterogeneous Collections
+///
+/// For storing different component types in the same collection, use [`DynComponent`]:
 ///
 /// ```rust,ignore
 /// let components: Vec<DynComponent> = vec![
-///     DynComponent::new(Component1),
-///     DynComponent::new(Component2),
+///     DynComponent::new(proxy1),
+///     DynComponent::new(proxy2),
+///     DynComponent::new(agent),
 /// ];
 /// ```
+///
+/// [`ByteStreams`]: crate::ByteStreams
+/// [`AcpAgent`]: https://docs.rs/sacp-tokio/latest/sacp_tokio/struct.AcpAgent.html
+/// [`JrHandlerChain`]: crate::JrHandlerChain
 pub trait Component: Send + 'static {
     /// Serve this component on the given channels.
     ///
@@ -140,18 +160,5 @@ impl DynComponent {
 impl Component for DynComponent {
     async fn serve(self, channels: Channels) -> Result<(), crate::Error> {
         self.inner.serve_erased(channels).await
-    }
-}
-
-/// Blanket implementation: any `Component` can be used as a `Transport`.
-///
-/// This enables using components in any context that expects a transport.
-/// The component is automatically boxed and type-erased when used as a transport.
-impl<C: Component> Transport for C {
-    fn transport(
-        self: Box<Self>,
-        channels: Channels,
-    ) -> BoxFuture<'static, Result<(), crate::Error>> {
-        Box::pin(async move { (*self).serve(channels).await })
     }
 }

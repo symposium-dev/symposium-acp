@@ -13,11 +13,22 @@ use serde::{Deserialize, Serialize};
 use tokio::process::Child;
 use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
 
-/// Configuration for connecting to an ACP agent or proxy.
+/// A component representing an external ACP agent running in a separate process.
+///
+/// `AcpAgent` implements the [`sacp::Component`] trait for spawning and communicating with
+/// external agents or proxies via stdio. It handles process spawning, stream setup, and
+/// byte stream serialization automatically. This is the primary way to connect to agents
+/// that run as separate executables.
 ///
 /// This is a wrapper around [`sacp::schema::McpServer`] that provides convenient parsing
-/// from command-line strings or JSON configurations. It implements [`sacp::IntoJrTransport`],
-/// so it can be passed directly to [`sacp::JrConnection::serve`] or [`sacp::JrConnection::with_client`].
+/// from command-line strings or JSON configurations.
+///
+/// # Use Cases
+///
+/// - **External agents**: Connect to agents written in any language (Python, Node.js, Rust, etc.)
+/// - **Proxy chains**: Spawn intermediate proxies that transform or intercept messages
+/// - **Conductor components**: Use with [`sacp_conductor::Conductor`] to build proxy chains
+/// - **Subprocess isolation**: Run potentially untrusted code in a separate process
 ///
 /// # Examples
 ///
@@ -35,7 +46,7 @@ use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
 /// let agent = AcpAgent::from_str(r#"{"type": "stdio", "name": "my-agent", "command": "python", "args": ["my_agent.py"], "env": []}"#).unwrap();
 /// ```
 ///
-/// Use as a transport:
+/// Use as a component to connect to an external agent:
 /// ```no_run
 /// # use sacp::JrHandlerChain;
 /// # use sacp_tokio::AcpAgent;
@@ -43,16 +54,19 @@ use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
 /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
 /// let agent = AcpAgent::from_str("python my_agent.py")?;
 ///
+/// // The agent process will be spawned automatically when served
 /// JrHandlerChain::new()
 ///     .connect_to(agent)?
 ///     .with_client(|cx| async move {
-///         // Use the connection to communicate with the agent
+///         // Use the connection to communicate with the agent process
 ///         Ok(())
 ///     })
 ///     .await?;
 /// # Ok(())
 /// # }
 /// ```
+///
+/// [`sacp_conductor::Conductor`]: https://docs.rs/sacp-conductor/latest/sacp_conductor/struct.Conductor.html
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(transparent)]
 pub struct AcpAgent {
@@ -77,7 +91,7 @@ impl AcpAgent {
     }
 
     /// Spawn the process and get stdio streams.
-    /// Used internally by the Transport trait implementation.
+    /// Used internally by the Component trait implementation.
     pub fn spawn_process(
         &self,
     ) -> Result<

@@ -1,6 +1,6 @@
 //! Utilities for pattern matching on untyped JSON-RPC messages.
 //!
-//! When handling [`UntypedMessage`]s, you can use [`TypeRequest`] and [`TypeNotification`]
+//! When handling [`UntypedMessage`]s, you can use [`MatchMessage`]
 //! to create a pattern-matching flow that tries to parse messages as specific types,
 //! falling back to a default handler if no type matches.
 
@@ -17,7 +17,7 @@ use crate::{
 /// Use this when you receive an [`UntypedMessage`] representing a request and want to
 /// try parsing it as different concrete types, handling whichever type matches.
 ///
-/// This is very similar to using [`JrHandlerChain::apply`] except that each match
+/// This is very similar to using [`JrHandlerChain::apply`](`crate::JrHandlerChain::apply`) except that each match
 /// executes immediately, which can help avoid borrow check errors.
 ///
 /// # Example
@@ -82,20 +82,42 @@ impl MatchMessage {
     /// request and a typed request context. If parsing fails or the message was already
     /// handled by a previous `handle_if`, this call has no effect.
     ///
+    /// The handler can return either `()` (which becomes `Handled::Yes`) or an explicit
+    /// `Handled` value to control whether the message should be passed to the next handler.
+    ///
     /// Returns `self` to allow chaining multiple `handle_if` calls.
-    pub async fn if_request<R: JrRequest>(
+    pub async fn if_request<R: JrRequest, H>(
         mut self,
-        op: impl AsyncFnOnce(R, JrRequestCx<R::Response>) -> Result<(), crate::Error>,
-    ) -> Self {
+        op: impl AsyncFnOnce(R, JrRequestCx<R::Response>) -> Result<H, crate::Error>,
+    ) -> Self
+    where
+        H: crate::IntoHandled<(R, JrRequestCx<R::Response>)>,
+    {
         if let Ok(Handled::No(MessageAndCx::Request(untyped_request, untyped_request_cx))) =
             self.state
         {
             match R::parse_request(untyped_request.method(), untyped_request.params()) {
-                Some(Ok(typed_request)) => match op(typed_request, untyped_request_cx.cast()).await
-                {
-                    Ok(()) => self.state = Ok(Handled::Yes),
-                    Err(err) => self.state = Err(err),
-                },
+                Some(Ok(typed_request)) => {
+                    let typed_request_cx = untyped_request_cx.cast();
+                    match op(typed_request, typed_request_cx).await {
+                        Ok(result) => match result.into_handled() {
+                            Handled::Yes => self.state = Ok(Handled::Yes),
+                            Handled::No((request, request_cx)) => {
+                                // Handler returned the request back, convert to untyped
+                                match request.into_untyped_message() {
+                                    Ok(untyped) => {
+                                        self.state = Ok(Handled::No(MessageAndCx::Request(
+                                            untyped,
+                                            request_cx.erase_to_json(),
+                                        )));
+                                    }
+                                    Err(err) => self.state = Err(err),
+                                }
+                            }
+                        },
+                        Err(err) => self.state = Err(err),
+                    }
+                }
                 Some(Err(err)) => self.state = Err(err),
                 None => {
                     self.state = Ok(Handled::No(MessageAndCx::Request(
@@ -162,7 +184,7 @@ impl MatchMessage {
 
 /// Builder for pattern-matching on untyped JSON-RPC notifications.
 ///
-/// Similar to [`TypeRequest`] but for notifications (fire-and-forget messages with no response).
+/// Similar to [`MatchMessage`] but specifically for notifications (fire-and-forget messages with no response).
 ///
 /// # Pattern
 ///

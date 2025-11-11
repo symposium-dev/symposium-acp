@@ -26,8 +26,10 @@ use crate::{
 ///
 /// # Handling requests
 ///
-/// You must add the registery (or a clone of it) to the [`JrConnection`] so that it can intercept MCP requests.
-/// Typically you do this by providing it as an argument to the [`]
+/// You must add the registry (or a clone of it) to the [`JrHandlerChain`] so that it can intercept MCP requests.
+/// Typically you do this by providing it as an argument to the handler chain methods.
+///
+/// [`JrHandlerChain`]: sacp::JrHandlerChain
 #[derive(Clone, Default, Debug)]
 pub struct McpServiceRegistry {
     data: Arc<Mutex<McpServiceRegistryData>>,
