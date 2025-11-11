@@ -919,7 +919,7 @@ impl<T: IntoJrTransport + 'static> Component for T {
 /// Bridge from `Component` back to `IntoJrTransport` for convenience.
 ///
 /// This allows `Box<dyn Component>` to be used with `JrHandlerChain::connect_to()`.
-impl IntoJrTransport for Box<dyn Component> {
+impl IntoJrTransport for dyn Component {
     fn into_jr_transport(
         self: Box<Self>,
         cx: &JrConnectionCx,
@@ -929,7 +929,7 @@ impl IntoJrTransport for Box<dyn Component> {
         // From conductor's perspective:
         // - outgoing_rx is messages to send to component (conductor → component)
         // - incoming_tx is where component sends messages back (component → conductor)
-        (*self).connect_component(cx, outgoing_rx, incoming_tx)
+        self.connect_component(cx, outgoing_rx, incoming_tx)
     }
 }
 

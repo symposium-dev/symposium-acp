@@ -950,14 +950,14 @@ pub trait IntoJrTransport: Send {
     ) -> Result<(), crate::Error>;
 }
 
-impl IntoJrTransport for Box<dyn IntoJrTransport> {
+impl<T: IntoJrTransport + ?Sized> IntoJrTransport for Box<T> {
     fn into_jr_transport(
         self: Box<Self>,
         cx: &JrConnectionCx,
         outgoing_rx: mpsc::UnboundedReceiver<jsonrpcmsg::Message>,
         incoming_tx: mpsc::UnboundedSender<jsonrpcmsg::Message>,
     ) -> Result<(), crate::Error> {
-        <dyn IntoJrTransport>::into_jr_transport(*self, cx, outgoing_rx, incoming_tx)
+        T::into_jr_transport(*self, cx, outgoing_rx, incoming_tx)
     }
 }
 
