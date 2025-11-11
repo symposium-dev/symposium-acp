@@ -20,7 +20,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let stdout = tokio::io::stdout().compat_write();
 
     // Run the arrow proxy
-    run_arrow_proxy(stdout, stdin).await?;
+    run_arrow_proxy(sacp::ByteStreams::new(stdout, stdin)).await?;
 
     Ok(())
 }

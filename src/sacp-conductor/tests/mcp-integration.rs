@@ -9,12 +9,12 @@ mod mcp_integration;
 
 use expect_test::expect;
 use futures::{SinkExt, StreamExt, channel::mpsc};
+use sacp::Component;
 use sacp::JrHandlerChain;
 use sacp::schema::{
     ContentBlock, InitializeRequest, NewSessionRequest, PromptRequest, SessionNotification,
     TextContent,
 };
-use sacp_conductor::component::ComponentProvider;
 use sacp_conductor::conductor::Conductor;
 
 use tokio::io::duplex;
@@ -42,7 +42,7 @@ fn conductor_command() -> Vec<String> {
 }
 
 async fn run_test_with_components(
-    components: Vec<Box<dyn ComponentProvider>>,
+    components: Vec<Box<dyn Component>>,
     editor_task: impl AsyncFnOnce(sacp::JrConnectionCx) -> Result<(), sacp::Error>,
 ) -> Result<(), sacp::Error> {
     // Set up editor <-> conductor communication

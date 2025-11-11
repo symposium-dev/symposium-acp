@@ -1,5 +1,8 @@
 //! Core JSON-RPC server support.
 
+// Re-export jsonrpcmsg for use in public API
+pub use jsonrpcmsg;
+
 // Types re-exported from crate root
 use serde::{Deserialize, Serialize};
 use std::fmt::Debug;
@@ -584,7 +587,7 @@ impl<H: JrMessageHandler> JrHandlerChain<H> {
     /// The resulting connection must then be either [served](`JrConnection::serve`) or [used as a client](`JrConnection::with_client`).
     pub fn connect_to(
         self,
-        transport: impl IntoJrTransport,
+        transport: impl Transport + 'static,
     ) -> Result<JrConnection<H>, crate::Error> {
         let Self {
             name,
@@ -600,8 +603,11 @@ impl<H: JrMessageHandler> JrHandlerChain<H> {
         let (transport_outgoing_tx, transport_outgoing_rx) = mpsc::unbounded();
         let (transport_incoming_tx, transport_incoming_rx) = mpsc::unbounded();
 
-        // Create the transport layer
-        Box::new(transport).into_jr_transport(&cx, transport_outgoing_rx, transport_incoming_tx)?;
+        // Create the transport layer and spawn it
+        let transport_channels =
+            Channels::new(transport_outgoing_rx, transport_incoming_tx);
+        let transport_future = Box::new(transport).transport(transport_channels);
+        cx.spawn(transport_future)?;
 
         // Spawn pending tasks
         for pending_task in pending_tasks {
@@ -634,7 +640,7 @@ impl<H: JrMessageHandler> JrHandlerChain<H> {
     /// ```ignore
     /// handler_chain.connect_to(transport)?.serve().await
     /// ```
-    pub async fn serve(self, transport: impl IntoJrTransport) -> Result<(), crate::Error> {
+    pub async fn serve(self, transport: impl Transport + 'static) -> Result<(), crate::Error> {
         self.connect_to(transport)?.serve().await
     }
 
@@ -646,7 +652,7 @@ impl<H: JrMessageHandler> JrHandlerChain<H> {
     /// ```
     pub async fn with_client(
         self,
-        transport: impl IntoJrTransport,
+        transport: impl Transport + 'static,
         main_fn: impl AsyncFnOnce(JrConnectionCx) -> Result<(), crate::Error>,
     ) -> Result<(), crate::Error> {
         self.connect_to(transport)?.with_client(main_fn).await
@@ -669,7 +675,7 @@ pub struct JrConnection<H: JrMessageHandler> {
     outgoing_rx: mpsc::UnboundedReceiver<OutgoingMessage>,
     new_task_rx: mpsc::UnboundedReceiver<Task>,
     transport_outgoing_tx: mpsc::UnboundedSender<jsonrpcmsg::Message>,
-    transport_incoming_rx: mpsc::UnboundedReceiver<jsonrpcmsg::Message>,
+    transport_incoming_rx: mpsc::UnboundedReceiver<Result<jsonrpcmsg::Message, crate::Error>>,
     handler: H,
 }
 
@@ -900,64 +906,75 @@ pub enum Handled<T> {
 /// # Example
 ///
 /// See [`ByteStreams`] for the standard byte stream implementation.
-pub trait IntoJrTransport: Send {
-    /// Set up the transport by spawning actors that bridge the connection's internal
-    /// message channels with the actual transport I/O (byte streams, other processes, etc.).
-    ///
-    /// # Understanding the Channel Directions
-    ///
-    /// The parameters represent the connection's perspective:
-    ///
-    /// - **`outgoing_rx`**: Messages the connection wants to **send out** to the remote side.
-    ///   The transport receives these and writes them to the underlying I/O.
-    ///
-    ///   ```text
-    ///   Connection → outgoing_rx → Transport → [network/stdio/etc] → Remote
-    ///   ```
-    ///
-    /// - **`incoming_tx`**: Messages the transport has **received from** the remote side.
-    ///   The transport reads from the underlying I/O and sends them here.
-    ///
-    ///   ```text
-    ///   Remote → [network/stdio/etc] → Transport → incoming_tx → Connection
-    ///   ```
-    ///
-    /// # Implementation Pattern
-    ///
-    /// Implementations should use `cx.spawn()` to launch transport actors that:
-    ///
-    /// 1. **Outgoing actor**: Read from `outgoing_rx` → serialize/encode → write to transport
-    /// 2. **Incoming actor**: Read from transport → deserialize/decode → send to `incoming_tx`
-    ///
-    /// See [`ByteStreams`] for an example that handles serialization/deserialization,
-    /// or [`Channels`] for a simpler in-process transport that just forwards messages.
+
+/// A transport provides the underlying communication layer for a JSON-RPC connection.
+///
+/// This trait represents "I have a connection that needs somewhere to send/receive messages."
+/// Implementations handle the actual I/O (byte streams, stdio, network sockets, etc.) and
+/// bridge between the message channels and the underlying transport mechanism.
+///
+/// # The Two Perspectives
+///
+/// `Transport` and [`Component`] are two views on the same underlying abstraction:
+///
+/// - **Transport**: "I am the communication layer for an existing connection"
+/// - **Component**: "I am something that can be connected to"
+///
+/// Both traits have identical signatures, and blanket implementations allow them to be
+/// used interchangeably.
+///
+/// # Implementation Pattern
+///
+/// Implementations return a future that runs the transport's I/O loops. The future should:
+///
+/// 1. Set up any necessary actors or tasks for bidirectional message flow
+/// 2. Handle outgoing messages: read from `channels.remote_incoming_tx`, encode/serialize, write to transport
+/// 3. Handle incoming messages: read from transport, decode/deserialize, send to `channels.remote_outgoing_rx`
+/// 4. Run until the connection closes or an error occurs
+///
+/// # Example
+///
+/// ```rust
+/// use sacp::{Transport, Channels, BoxFuture};
+/// use futures::FutureExt;
+///
+/// struct MyTransport;
+///
+/// impl Transport for MyTransport {
+///     fn transport(self: Box<Self>, channels: Channels) -> BoxFuture<'static, Result<(), sacp::Error>> {
+///         Box::pin(async move {
+///             // Set up I/O loops
+///             // Handle bidirectional message flow
+///             Ok(())
+///         })
+///     }
+/// }
+/// ```
+///
+/// See [`ByteStreams`] for a real implementation that handles serialization/deserialization,
+/// or [`Channels`] for a simpler in-process transport.
+pub trait Transport: Send {
+    /// Run the transport, bridging the connection's message channels with the underlying I/O.
     ///
     /// # Parameters
     ///
-    /// - `cx`: Connection context for spawning tasks
-    /// - `outgoing_rx`: Receives messages the connection wants to send out
-    /// - `incoming_tx`: Sends messages received from the remote side to the connection
+    /// - `channels`: Bidirectional message channels for communication
     ///
     /// # Returns
     ///
-    /// Returns immediately after spawning the transport actors. The actual I/O happens
-    /// asynchronously in the spawned tasks.
-    fn into_jr_transport(
+    /// A future that completes when the transport closes or encounters an error.
+    fn transport(
         self: Box<Self>,
-        cx: &JrConnectionCx,
-        outgoing_rx: mpsc::UnboundedReceiver<jsonrpcmsg::Message>,
-        incoming_tx: mpsc::UnboundedSender<jsonrpcmsg::Message>,
-    ) -> Result<(), crate::Error>;
+        channels: Channels,
+    ) -> BoxFuture<'static, Result<(), crate::Error>>;
 }
 
-impl IntoJrTransport for Box<dyn IntoJrTransport> {
-    fn into_jr_transport(
+impl<T: Transport + ?Sized> Transport for Box<T> {
+    fn transport(
         self: Box<Self>,
-        cx: &JrConnectionCx,
-        outgoing_rx: mpsc::UnboundedReceiver<jsonrpcmsg::Message>,
-        incoming_tx: mpsc::UnboundedSender<jsonrpcmsg::Message>,
-    ) -> Result<(), crate::Error> {
-        <dyn IntoJrTransport>::into_jr_transport(*self, cx, outgoing_rx, incoming_tx)
+        channels: Channels,
+    ) -> BoxFuture<'static, Result<(), crate::Error>> {
+        (*self).transport(channels)
     }
 }
 
@@ -2084,30 +2101,32 @@ where
     }
 }
 
-impl<OB, IB> IntoJrTransport for ByteStreams<OB, IB>
+impl<OB, IB> Transport for ByteStreams<OB, IB>
 where
     OB: AsyncWrite + Send + 'static,
     IB: AsyncRead + Send + 'static,
 {
-    fn into_jr_transport(
+    fn transport(
         self: Box<Self>,
-        cx: &JrConnectionCx,
-        outgoing_rx: mpsc::UnboundedReceiver<jsonrpcmsg::Message>,
-        incoming_tx: mpsc::UnboundedSender<jsonrpcmsg::Message>,
-    ) -> Result<(), crate::Error> {
+        channels: Channels,
+    ) -> BoxFuture<'static, Result<(), crate::Error>> {
         let Self { outgoing, incoming } = *self;
 
-        // Spawn transport outgoing actor: jsonrpcmsg::Message → serialize → bytes
-        cx.spawn(actors::transport_outgoing_actor(outgoing_rx, outgoing))?;
+        Box::pin(async move {
+            let Channels {
+                remote_outgoing_rx,
+                remote_incoming_tx,
+            } = channels;
 
-        // Spawn transport incoming actor: bytes → parse → jsonrpcmsg::Message
-        cx.spawn(actors::transport_incoming_actor(
-            cx.clone(),
-            incoming,
-            incoming_tx,
-        ))?;
+            // Run both actors concurrently
+            let outgoing_future = actors::transport_outgoing_actor(remote_outgoing_rx, outgoing);
+            let incoming_future = actors::transport_incoming_actor(incoming, remote_incoming_tx);
 
-        Ok(())
+            // Wait for both to complete
+            futures::try_join!(outgoing_future, incoming_future)?;
+
+            Ok(())
+        })
     }
 }
 
@@ -2152,10 +2171,10 @@ where
 /// # }
 /// ```
 pub struct Channels {
-    /// Receives messages from the remote side (to be sent to our connection's incoming_tx)
+    /// Receives messages from the remote side (to be sent to our connection's incoming_tx).
     pub remote_outgoing_rx: mpsc::UnboundedReceiver<jsonrpcmsg::Message>,
-    /// Sends messages to the remote side (receives from our connection's outgoing_rx)
-    pub remote_incoming_tx: mpsc::UnboundedSender<jsonrpcmsg::Message>,
+    /// Sends messages to the remote side (receives from our connection's outgoing_rx).
+    pub remote_incoming_tx: mpsc::UnboundedSender<Result<jsonrpcmsg::Message, crate::Error>>,
 }
 
 impl Channels {
@@ -2167,7 +2186,7 @@ impl Channels {
     /// - `remote_incoming_tx`: Sends messages to the remote side
     pub fn new(
         remote_outgoing_rx: mpsc::UnboundedReceiver<jsonrpcmsg::Message>,
-        remote_incoming_tx: mpsc::UnboundedSender<jsonrpcmsg::Message>,
+        remote_incoming_tx: mpsc::UnboundedSender<Result<jsonrpcmsg::Message, crate::Error>>,
     ) -> Self {
         Self {
             remote_outgoing_rx,
@@ -2176,30 +2195,39 @@ impl Channels {
     }
 }
 
-impl IntoJrTransport for Channels {
-    fn into_jr_transport(
+impl Transport for Channels {
+    fn transport(
         self: Box<Self>,
-        cx: &JrConnectionCx,
-        outgoing_rx: mpsc::UnboundedReceiver<jsonrpcmsg::Message>,
-        incoming_tx: mpsc::UnboundedSender<jsonrpcmsg::Message>,
-    ) -> Result<(), crate::Error> {
+        channels: Channels,
+    ) -> BoxFuture<'static, Result<(), crate::Error>> {
         let Self {
-            remote_outgoing_rx,
-            remote_incoming_tx,
+            remote_outgoing_rx: outer_remote_outgoing_rx,
+            remote_incoming_tx: outer_remote_incoming_tx,
         } = *self;
 
-        // Spawn outgoing actor: forward messages from connection to remote
-        cx.spawn(actors::channel_forward_actor(
-            outgoing_rx,
-            remote_incoming_tx,
-        ))?;
+        Box::pin(async move {
+            let Channels {
+                remote_outgoing_rx: inner_remote_outgoing_rx,
+                remote_incoming_tx: inner_remote_incoming_tx,
+            } = channels;
 
-        // Spawn incoming actor: forward messages from remote to connection
-        cx.spawn(actors::channel_forward_actor(
-            remote_outgoing_rx,
-            incoming_tx,
-        ))?;
+            // Run both forwarding actors concurrently
+            // Outgoing: connection → outer transport (wrap in Ok since outer expects Result)
+            let outgoing_future = actors::channel_forward_result_actor(
+                inner_remote_outgoing_rx,
+                outer_remote_incoming_tx,
+            );
 
-        Ok(())
+            // Incoming: outer transport → connection (both are Result-based now)
+            let incoming_future = actors::channel_forward_result_to_result_actor(
+                outer_remote_outgoing_rx,
+                inner_remote_incoming_tx,
+            );
+
+            // Wait for both to complete
+            futures::try_join!(outgoing_future, incoming_future)?;
+
+            Ok(())
+        })
     }
 }

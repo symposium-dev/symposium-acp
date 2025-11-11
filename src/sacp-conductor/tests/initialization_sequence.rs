@@ -6,9 +6,8 @@
 //! 3. Proxy components must accept the capability or initialization fails
 //! 4. Last component (agent) never receives proxy capability offer
 
-use futures::channel::mpsc;
 use sacp::schema::{AgentCapabilities, InitializeRequest, InitializeResponse};
-use sacp::{IntoJrTransport, JrConnectionCx, JrHandlerChain, MetaCapabilityExt, Proxy};
+use sacp::{Channels, Component, JrHandlerChain, MetaCapabilityExt, Proxy};
 use sacp_conductor::conductor::Conductor;
 use sacp_proxy::JrCxExt;
 use std::sync::Arc;
@@ -57,33 +56,28 @@ impl InitConfig {
     }
 }
 
-struct InitComponentProvider {
+struct InitComponent {
     config: Arc<InitConfig>,
 }
 
-impl InitComponentProvider {
-    fn new(config: &Arc<InitConfig>) -> Box<dyn IntoJrTransport> {
+impl InitComponent {
+    fn new(config: &Arc<InitConfig>) -> Box<dyn Component> {
         Box::new(Self {
             config: config.clone(),
         })
     }
 }
 
-impl IntoJrTransport for InitComponentProvider {
-    fn into_jr_transport(
+impl Component for InitComponent {
+    fn serve(
         self: Box<Self>,
-        cx: &JrConnectionCx,
-        outgoing_rx: mpsc::UnboundedReceiver<jsonrpcmsg::Message>,
-        incoming_tx: mpsc::UnboundedSender<jsonrpcmsg::Message>,
-    ) -> Result<(), sacp::Error> {
+        channels: Channels,
+    ) -> sacp::BoxFuture<'static, Result<(), sacp::Error>> {
         let config = Arc::clone(&self.config);
 
-        cx.spawn(async move {
-            // Create the channel-based transport
-            let transport = sacp::Channels::new(outgoing_rx, incoming_tx);
-
+        Box::pin(async move {
             JrHandlerChain::new()
-                .name("init-component-provider")
+                .name("init-component")
                 .on_receive_request(async move |mut request: InitializeRequest, request_cx| {
                     let has_proxy_capability = request.has_meta_capability(Proxy);
                     *config.offered_proxy.lock().expect("unpoisoned") = Some(has_proxy_capability);
@@ -114,17 +108,15 @@ impl IntoJrTransport for InitComponentProvider {
                         request_cx.respond(response)
                     }
                 })
-                .serve(transport)
+                .serve(channels)
                 .await
-        })?;
-
-        Ok(())
+        })
     }
 }
 
 async fn run_test_with_components(
-    components: Vec<Box<dyn IntoJrTransport>>,
-    editor_task: impl AsyncFnOnce(JrConnectionCx) -> Result<(), sacp::Error>,
+    components: Vec<Box<dyn Component>>,
+    editor_task: impl AsyncFnOnce(sacp::JrConnectionCx) -> Result<(), sacp::Error>,
 ) -> Result<(), sacp::Error> {
     // Set up editor <-> conductor communication
     let (editor_out, conductor_in) = duplex(1024);
@@ -151,26 +143,23 @@ async fn test_single_component_no_proxy_offer() -> Result<(), sacp::Error> {
     // Create a single mock component
     let component1 = InitConfig::new(false);
 
-    run_test_with_components(
-        vec![InitComponentProvider::new(&component1)],
-        async |editor_cx| {
-            let init_response = recv(editor_cx.send_request(InitializeRequest {
-                protocol_version: Default::default(),
-                client_capabilities: Default::default(),
-                meta: None,
-                client_info: None,
-            }))
-            .await;
+    run_test_with_components(vec![InitComponent::new(&component1)], async |editor_cx| {
+        let init_response = recv(editor_cx.send_request(InitializeRequest {
+            protocol_version: Default::default(),
+            client_capabilities: Default::default(),
+            meta: None,
+            client_info: None,
+        }))
+        .await;
 
-            assert!(
-                init_response.is_ok(),
-                "Initialize should succeed: {:?}",
-                init_response
-            );
+        assert!(
+            init_response.is_ok(),
+            "Initialize should succeed: {:?}",
+            init_response
+        );
 
-            Ok::<(), sacp::Error>(())
-        },
-    )
+        Ok::<(), sacp::Error>(())
+    })
     .await?;
 
     assert_eq!(component1.read_offered_proxy(), Some(false));
@@ -186,8 +175,8 @@ async fn test_two_components() -> Result<(), sacp::Error> {
 
     run_test_with_components(
         vec![
-            InitComponentProvider::new(&component1),
-            InitComponentProvider::new(&component2),
+            InitComponent::new(&component1),
+            InitComponent::new(&component2),
         ],
         async |editor_cx| {
             let init_response = recv(editor_cx.send_request(InitializeRequest {
@@ -223,8 +212,8 @@ async fn test_proxy_component_must_respond_with_proxy() -> Result<(), sacp::Erro
 
     let result = run_test_with_components(
         vec![
-            InitComponentProvider::new(&component1),
-            InitComponentProvider::new(&component2),
+            InitComponent::new(&component1),
+            InitComponent::new(&component2),
         ],
         async |editor_cx| {
             let init_response = recv(editor_cx.send_request(InitializeRequest {
@@ -269,8 +258,8 @@ async fn test_proxy_component_must_strip_proxy_when_forwarding() -> Result<(), s
 
     let result = run_test_with_components(
         vec![
-            InitComponentProvider::new(&component1),
-            InitComponentProvider::new(&component2),
+            InitComponent::new(&component1),
+            InitComponent::new(&component2),
         ],
         async |editor_cx| {
             let init_response = recv(editor_cx.send_request(InitializeRequest {

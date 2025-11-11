@@ -23,26 +23,38 @@ use crate::{
 /// # Example
 ///
 /// ```
-/// # use sacp::{UntypedMessage, JrRequestCx};
+/// # use sacp::{MessageAndCx};
 /// # use sacp::schema::{InitializeRequest, InitializeResponse, PromptRequest, PromptResponse};
-/// # use sacp::util::TypeRequest;
-/// # async fn example(message: UntypedMessage, cx: JrRequestCx<serde_json::Value>) -> Result<(), sacp::Error> {
-/// TypeRequest::new(message, cx)
-///     .handle_if(|req: InitializeRequest, cx: JrRequestCx<InitializeResponse>| async move {
+/// # use sacp::util::MatchMessage;
+/// # async fn example(message: MessageAndCx) -> Result<(), sacp::Error> {
+/// MatchMessage::new(message)
+///     .if_request(|req: InitializeRequest, cx: sacp::JrRequestCx<InitializeResponse>| async move {
 ///         // Handle initialization
-///         let response: InitializeResponse = todo!();
+///         let response = InitializeResponse {
+///             protocol_version: req.protocol_version,
+///             agent_capabilities: Default::default(),
+///             auth_methods: vec![],
+///             meta: None,
+///             agent_info: None,
+///         };
 ///         cx.respond(response)
 ///     })
 ///     .await
-///     .handle_if(|req: PromptRequest, cx: JrRequestCx<PromptResponse>| async move {
+///     .if_request(|req: PromptRequest, cx: sacp::JrRequestCx<PromptResponse>| async move {
 ///         // Handle prompts
-///         let response: PromptResponse = todo!();
+///         let response = PromptResponse {
+///             stop_reason: sacp::schema::StopReason::EndTurn,
+///             meta: None,
+///         };
 ///         cx.respond(response)
 ///     })
 ///     .await
-///     .otherwise(|untyped: UntypedMessage, cx: JrRequestCx<serde_json::Value>| async move {
-///         // Fallback for unrecognized requests
-///         cx.respond_with_error(sacp::util::internal_error("unknown method"))
+///     .otherwise(|message| async move {
+///         // Fallback for unrecognized messages
+///         match message {
+///             MessageAndCx::Request(_, cx) => cx.respond_with_error(sacp::util::internal_error("unknown method")),
+///             MessageAndCx::Notification(_, _) => Ok(()),
+///         }
 ///     })
 ///     .await
 /// # }

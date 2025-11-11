@@ -37,8 +37,6 @@
 use anyhow::Result;
 use clap::Parser;
 use elizacp::run_elizacp;
-use tokio::io::{stdin, stdout};
-use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
 use tracing_subscriber::{EnvFilter, layer::SubscriberExt, util::SubscriberInitExt};
 
 #[derive(Parser, Debug)]
@@ -72,7 +70,7 @@ async fn main() -> Result<()> {
     tracing::info!("Elizacp starting");
 
     // Run the Eliza agent
-    run_elizacp(stdout().compat_write(), stdin().compat()).await?;
+    run_elizacp(sacp_tokio::Stdio::default()).await?;
 
     Ok(())
 }

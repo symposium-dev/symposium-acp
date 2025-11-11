@@ -1,37 +1,27 @@
 //! Proxy component that provides MCP tools
 
-use futures::{AsyncRead, AsyncWrite};
-use sacp::{JrConnectionCx, JrHandlerChain};
-use sacp_conductor::component::{Cleanup, ComponentProvider};
+use sacp::{BoxFuture, Channels, Component, JrHandlerChain};
 use sacp_proxy::{AcpProxyExt, McpServiceRegistry};
-use std::pin::Pin;
 
 use crate::mcp_integration::mcp_server::TestMcpServer;
 
-pub struct ProxyComponentProvider;
+pub struct ProxyComponent;
 
-impl ComponentProvider for ProxyComponentProvider {
-    fn create(
-        &self,
-        cx: &JrConnectionCx,
-        outgoing_bytes: Pin<Box<dyn AsyncWrite + Send>>,
-        incoming_bytes: Pin<Box<dyn AsyncRead + Send>>,
-    ) -> Result<Cleanup, sacp::Error> {
-        let transport = sacp::ByteStreams::new(outgoing_bytes, incoming_bytes);
-        cx.spawn(
+impl Component for ProxyComponent {
+    fn serve(self: Box<Self>, channels: Channels) -> BoxFuture<'static, Result<(), sacp::Error>> {
+        Box::pin(async move {
             JrHandlerChain::new()
                 .name("proxy-component")
                 .provide_mcp(
                     McpServiceRegistry::default().with_rmcp_server("test", TestMcpServer::new)?,
                 )
                 .proxy()
-                .serve(transport),
-        )?;
-
-        Ok(Cleanup::None)
+                .serve(channels)
+                .await
+        })
     }
 }
 
-pub fn create() -> Box<dyn ComponentProvider> {
-    Box::new(ProxyComponentProvider)
+pub fn create() -> Box<dyn Component> {
+    Box::new(ProxyComponent)
 }
