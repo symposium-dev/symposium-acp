@@ -162,7 +162,7 @@ impl Drop for ChildHolder {
 }
 
 impl sacp::Component for AcpAgent {
-    async fn serve(self, channels: sacp::Channels) -> Result<(), sacp::Error> {
+    async fn serve(self, client: impl sacp::Component) -> Result<(), sacp::Error> {
         let (child_stdin, child_stdout, child) = self.spawn_process()?;
 
         // Hold the child process - it will be killed when this future completes
@@ -170,7 +170,7 @@ impl sacp::Component for AcpAgent {
 
         // Create the ByteStreams component and serve it
         sacp::ByteStreams::new(child_stdin.compat_write(), child_stdout.compat())
-            .serve(channels)
+            .serve(client)
             .await
     }
 }

@@ -1,6 +1,6 @@
 use sacp::{
-    Channels, Component, Handled, JrHandlerChain, JrMessage, JrMessageHandler, JrRequest,
-    JrResponsePayload, util::MatchMessage,
+    Component, Handled, JrHandlerChain, JrMessage, JrMessageHandler, JrRequest, JrResponsePayload,
+    util::MatchMessage,
 };
 use serde::{Deserialize, Serialize};
 
@@ -82,14 +82,13 @@ async fn modify_message_en_route() -> Result<(), sacp::Error> {
     struct TestComponent;
 
     impl Component for TestComponent {
-        async fn serve(self, channels: Channels) -> Result<(), sacp::Error> {
+        async fn serve(self, client: impl Component) -> Result<(), sacp::Error> {
             JrHandlerChain::new()
                 .with_handler(PushHandler {
                     message: "b".to_string(),
                 })
                 .with_handler(EchoHandler)
-                .connect_to(channels)?
-                .serve()
+                .serve(client)
                 .await
         }
     }
@@ -148,15 +147,14 @@ async fn modify_message_en_route_inline() -> Result<(), sacp::Error> {
     struct TestComponent;
 
     impl Component for TestComponent {
-        async fn serve(self, channels: Channels) -> Result<(), sacp::Error> {
+        async fn serve(self, client: impl Component) -> Result<(), sacp::Error> {
             JrHandlerChain::new()
                 .on_receive_request(async move |mut request: EchoRequestResponse, request_cx| {
                     request.text.push("b".to_string());
                     Ok(Handled::No((request, request_cx)))
                 })
                 .with_handler(EchoHandler)
-                .connect_to(channels)?
-                .serve()
+                .serve(client)
                 .await
         }
     }
@@ -193,7 +191,7 @@ async fn modify_message_and_stop() -> Result<(), sacp::Error> {
     struct TestComponent;
 
     impl Component for TestComponent {
-        async fn serve(self, channels: Channels) -> Result<(), sacp::Error> {
+        async fn serve(self, client: impl Component) -> Result<(), sacp::Error> {
             JrHandlerChain::new()
                 .on_receive_request(async move |request: EchoRequestResponse, request_cx| {
                     request_cx.respond(request)
@@ -203,8 +201,7 @@ async fn modify_message_and_stop() -> Result<(), sacp::Error> {
                     Ok(Handled::No((request, request_cx)))
                 })
                 .with_handler(EchoHandler)
-                .connect_to(channels)?
-                .serve()
+                .serve(client)
                 .await
         }
     }

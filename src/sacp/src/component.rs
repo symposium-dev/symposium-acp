@@ -5,23 +5,22 @@
 //!
 //! ## Usage
 //!
-//! Components are always servers that communicate via message channels with their conductor.
-//! To implement a component, simply implement the trait with an async function:
+//! Components serve by forwarding to other components, creating a chain of message processors.
+//! To implement a component, implement the `serve` method:
 //!
 //! ```rust,ignore
 //! use sacp::component::Component;
-//! use sacp::Channels;
 //!
 //! struct MyProxy {
 //!     // configuration fields
 //! }
 //!
 //! impl Component for MyProxy {
-//!     async fn serve(self, channels: Channels) -> Result<(), sacp::Error> {
+//!     async fn serve(self, client: impl Component) -> Result<(), sacp::Error> {
 //!         sacp::JrHandlerChain::new()
 //!             .name("my-proxy")
 //!             // configure handlers here
-//!             .serve(channels)
+//!             .serve(client)
 //!             .await
 //!     }
 //! }
@@ -30,45 +29,51 @@
 use futures::future::BoxFuture;
 use std::future::Future;
 
-use crate::Channels;
+use crate::Channel;
 
 /// A component that can participate in the Agent-Client Protocol.
 ///
 /// This trait represents anything that can communicate via JSON-RPC messages over channels -
-/// agents, proxies, in-process connections, or any ACP-speaking component. Components receive
-/// [`Channels`] for bidirectional message passing and serve on those channels until completion.
+/// agents, proxies, in-process connections, or any ACP-speaking component.
 ///
 /// # Component Types
 ///
 /// The trait is implemented by several built-in types representing different communication patterns:
 ///
 /// - **[`ByteStreams`]**: A component communicating over byte streams (stdin/stdout, sockets, etc.)
-/// - **[`Channels`]**: A component communicating via in-process message channels (for testing or direct connections)
+/// - **[`Channel`]**: A component communicating via in-process message channels (for testing or direct connections)
 /// - **[`AcpAgent`]**: An external agent running in a separate process with stdio communication
 /// - **Custom components**: Proxies, transformers, or any ACP-aware service
 ///
-/// # Implementation
+/// # Two Ways to Serve
 ///
-/// Implement this trait using async fn syntax. Most components set up a [`JrHandlerChain`]
-/// to handle incoming messages:
+/// Components can be used in two ways:
+///
+/// 1. **`serve(client)`** - Serve by forwarding to another component (most components implement this)
+/// 2. **`into_server()`** - Convert into a channel endpoint and server future (base cases implement this)
+///
+/// Most components only need to implement `serve(client)` - the `into_server()` method has a default
+/// implementation that creates an intermediate channel and calls `serve`.
+///
+/// # Implementation Example
 ///
 /// ```rust,ignore
 /// use sacp::Component;
-/// use sacp::Channels;
 ///
 /// struct MyProxy {
 ///     config: ProxyConfig,
 /// }
 ///
 /// impl Component for MyProxy {
-///     async fn serve(self, channels: Channels) -> Result<(), sacp::Error> {
+///     async fn serve(self, client: impl Component) -> Result<(), sacp::Error> {
+///         // Set up handler chain that forwards to client
 ///         sacp::JrHandlerChain::new()
 ///             .name("my-proxy")
 ///             .on_receive_request(async |req: MyRequest, cx| {
 ///                 // Transform and forward request
 ///                 cx.respond(MyResponse { status: "ok".into() })
 ///             })
-///             .serve(channels)
+///             .serve(client)
 ///             .await
 ///     }
 /// }
@@ -90,20 +95,45 @@ use crate::Channels;
 /// [`AcpAgent`]: https://docs.rs/sacp-tokio/latest/sacp_tokio/struct.AcpAgent.html
 /// [`JrHandlerChain`]: crate::JrHandlerChain
 pub trait Component: Send + 'static {
-    /// Serve this component on the given channels.
+    /// Serve this component by forwarding to a client component.
     ///
-    /// The component should set up its handler chain and serve on the provided
-    /// channels, which connect it to its conductor.
+    /// Most components implement this method to set up their handler chain and
+    /// forward messages to the provided client.
     ///
     /// # Arguments
     ///
-    /// * `channels` - Bidirectional message channels for communicating with the conductor
+    /// * `client` - The component to forward messages to
     ///
     /// # Returns
     ///
     /// A future that resolves when the component stops serving, either successfully
     /// or with an error. The future must be `Send`.
-    fn serve(self, channels: Channels) -> impl Future<Output = Result<(), crate::Error>> + Send;
+    fn serve(self, client: impl Component)
+    -> impl Future<Output = Result<(), crate::Error>> + Send;
+
+    /// Convert this component into a channel endpoint and server future.
+    ///
+    /// This method returns:
+    /// - A `Channel` that can be used to communicate with this component
+    /// - A `BoxFuture` that runs the component's server logic
+    ///
+    /// The default implementation creates an intermediate channel pair and calls `serve`
+    /// on one endpoint while returning the other endpoint for the caller to use.
+    ///
+    /// Base cases like `Channel` and `ByteStreams` override this to avoid unnecessary copying.
+    ///
+    /// # Returns
+    ///
+    /// A tuple of `(Channel, BoxFuture)` where the channel is for the caller to use
+    /// and the future must be spawned to run the server.
+    fn into_server(self) -> (Channel, BoxFuture<'static, Result<(), crate::Error>>)
+    where
+        Self: Sized,
+    {
+        let (channel_a, channel_b) = Channel::duplex();
+        let future = Box::pin(self.serve(channel_b));
+        (channel_a, future)
+    }
 }
 
 /// Type-erased component trait for object-safe dynamic dispatch.
@@ -114,17 +144,27 @@ pub trait Component: Send + 'static {
 trait ErasedComponent: Send {
     fn serve_erased(
         self: Box<Self>,
-        channels: Channels,
+        client: Box<dyn ErasedComponent>,
     ) -> BoxFuture<'static, Result<(), crate::Error>>;
+
+    fn into_server_erased(
+        self: Box<Self>,
+    ) -> (Channel, BoxFuture<'static, Result<(), crate::Error>>);
 }
 
 /// Blanket implementation: any `Component` can be type-erased.
 impl<C: Component> ErasedComponent for C {
     fn serve_erased(
         self: Box<Self>,
-        channels: Channels,
+        client: Box<dyn ErasedComponent>,
     ) -> BoxFuture<'static, Result<(), crate::Error>> {
-        Box::pin(async move { (*self).serve(channels).await })
+        Box::pin(async move { (*self).serve(DynComponent { inner: client }).await })
+    }
+
+    fn into_server_erased(
+        self: Box<Self>,
+    ) -> (Channel, BoxFuture<'static, Result<(), crate::Error>>) {
+        (*self).into_server()
     }
 }
 
@@ -158,7 +198,13 @@ impl DynComponent {
 }
 
 impl Component for DynComponent {
-    async fn serve(self, channels: Channels) -> Result<(), crate::Error> {
-        self.inner.serve_erased(channels).await
+    async fn serve(self, client: impl Component) -> Result<(), crate::Error> {
+        self.inner
+            .serve_erased(Box::new(client) as Box<dyn ErasedComponent>)
+            .await
+    }
+
+    fn into_server(self) -> (Channel, BoxFuture<'static, Result<(), crate::Error>>) {
+        self.inner.into_server_erased()
     }
 }

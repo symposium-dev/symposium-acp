@@ -525,6 +525,7 @@ impl JrMessageHandler for ProxyHandler {
                 ) {
                     let request = result?;
                     request_cx
+                        .connection_cx()
                         .send_request(request.request)
                         .forward_to_request_cx(request_cx)?;
                     return Ok(Handled::Yes);
@@ -543,6 +544,7 @@ impl JrMessageHandler for ProxyHandler {
 
                 // If we receive any other request, send it to our successor.
                 request_cx
+                    .connection_cx()
                     .send_request_to_successor(request)
                     .forward_to_request_cx(request_cx)?;
                 Ok(Handled::Yes)
@@ -596,6 +598,7 @@ impl ProxyHandler {
 
         request = request.remove_meta_capability(Proxy);
         request_cx
+            .connection_cx()
             .send_request_to_successor(request)
             .await_when_result_received(async move |mut result| {
                 result = result.map(|r| r.add_meta_capability(Proxy));

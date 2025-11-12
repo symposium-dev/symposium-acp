@@ -13,12 +13,12 @@ use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
 pub struct Stdio;
 
 impl Component for Stdio {
-    async fn serve(self, channels: sacp::Channels) -> Result<(), sacp::Error> {
+    async fn serve(self, client: impl Component) -> Result<(), sacp::Error> {
         ByteStreams::new(
             tokio::io::stdout().compat_write(),
             tokio::io::stdin().compat(),
         )
-        .serve(channels)
+        .serve(client)
         .await
     }
 }

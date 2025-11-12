@@ -9,7 +9,6 @@ mod mcp_integration;
 
 use expect_test::expect;
 use futures::{SinkExt, StreamExt, channel::mpsc};
-use sacp::Component;
 use sacp::JrHandlerChain;
 use sacp::schema::{
     ContentBlock, InitializeRequest, NewSessionRequest, PromptRequest, SessionNotification,

@@ -83,7 +83,7 @@ pub(super) async fn reply_actor(
 pub(super) async fn outgoing_protocol_actor(
     mut outgoing_rx: mpsc::UnboundedReceiver<OutgoingMessage>,
     reply_tx: mpsc::UnboundedSender<ReplyMessage>,
-    transport_tx: mpsc::UnboundedSender<jsonrpcmsg::Message>,
+    transport_tx: mpsc::UnboundedSender<Result<jsonrpcmsg::Message, crate::Error>>,
 ) -> Result<(), crate::Error> {
     while let Some(message) = outgoing_rx.next().await {
         tracing::debug!(?message, "outgoing_protocol_actor");
@@ -145,9 +145,9 @@ pub(super) async fn outgoing_protocol_actor(
             }
         };
 
-        // Send to transport layer
+        // Send to transport layer (wrapped in Ok since transport expects Result)
         transport_tx
-            .unbounded_send(json_rpc_message)
+            .unbounded_send(Ok(json_rpc_message))
             .map_err(crate::Error::into_internal_error)?;
     }
     Ok(())
@@ -156,18 +156,21 @@ pub(super) async fn outgoing_protocol_actor(
 /// Transport outgoing actor: Serializes jsonrpcmsg::Message and writes to byte stream.
 ///
 /// This actor handles transport mechanics:
+/// - Unwraps Result<Message> from the channel
 /// - Serializes jsonrpcmsg::Message to JSON
 /// - Writes newline-delimited JSON to the stream
 /// - Handles serialization errors
 ///
 /// This is the transport layer - it has no knowledge of protocol semantics (IDs, correlation, etc.).
 pub(super) async fn transport_outgoing_actor(
-    mut transport_rx: mpsc::UnboundedReceiver<jsonrpcmsg::Message>,
+    mut transport_rx: mpsc::UnboundedReceiver<Result<jsonrpcmsg::Message, crate::Error>>,
     outgoing_bytes: impl AsyncWrite,
 ) -> Result<(), crate::Error> {
     let mut outgoing_bytes = pin!(outgoing_bytes);
 
-    while let Some(json_rpc_message) = transport_rx.next().await {
+    while let Some(message_result) = transport_rx.next().await {
+        // Unwrap the Result - errors here would be from the channel itself
+        let json_rpc_message = message_result?;
         match serde_json::to_vec(&json_rpc_message) {
             Ok(mut bytes) => {
                 if let Ok(msg_str) = std::str::from_utf8(&bytes) {
@@ -338,37 +341,4 @@ async fn dispatch_request(
             m.respond_with_error(crate::Error::method_not_found())
         }
     }
-}
-
-/// Channel forwarding actor that wraps messages in `Ok()` for Result-carrying channels.
-///
-/// This actor forwards messages from a plain message channel to a Result-carrying channel,
-/// wrapping each message in `Ok()`. Used by the [`Channels`] transport to adapt between
-/// plain message channels and the Result-based transport protocol.
-pub(super) async fn channel_forward_result_actor(
-    mut rx: mpsc::UnboundedReceiver<jsonrpcmsg::Message>,
-    tx: mpsc::UnboundedSender<Result<jsonrpcmsg::Message, crate::Error>>,
-) -> Result<(), crate::Error> {
-    while let Some(message) = rx.next().await {
-        tx.unbounded_send(Ok(message)).map_err(|_| {
-            crate::util::internal_error("Failed to forward message through channel")
-        })?;
-    }
-    Ok(())
-}
-
-/// Channel forwarding actor that forwards Result-wrapped messages directly.
-///
-/// This actor forwards messages from one Result-carrying channel to another without
-/// any transformation. Used when both sides of the channel expect Result types.
-pub(super) async fn channel_forward_result_to_result_actor(
-    mut rx: mpsc::UnboundedReceiver<jsonrpcmsg::Message>,
-    tx: mpsc::UnboundedSender<Result<jsonrpcmsg::Message, crate::Error>>,
-) -> Result<(), crate::Error> {
-    while let Some(message) = rx.next().await {
-        tx.unbounded_send(Ok(message)).map_err(|_| {
-            crate::util::internal_error("Failed to forward message through channel")
-        })?;
-    }
-    Ok(())
 }

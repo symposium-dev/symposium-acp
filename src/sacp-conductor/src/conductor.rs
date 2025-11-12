@@ -223,8 +223,8 @@ impl Conductor {
 }
 
 impl sacp::Component for Conductor {
-    async fn serve(self, channels: sacp::Channels) -> Result<(), sacp::Error> {
-        self.run(channels).await
+    async fn serve(self, client: impl sacp::Component) -> Result<(), sacp::Error> {
+        self.run(client).await
     }
 }
 
@@ -824,7 +824,7 @@ impl ConductorHandlerState {
             for mcp_server in &mut request.mcp_servers {
                 self.bridge_listeners
                     .transform_mcp_servers(
-                        &request_cx,
+                        &request_cx.connection_cx(),
                         mcp_server,
                         conductor_tx,
                         &self.conductor_command,

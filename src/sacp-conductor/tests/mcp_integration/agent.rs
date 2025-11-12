@@ -6,7 +6,7 @@ use sacp::schema::{
     McpServer, NewSessionRequest, NewSessionResponse, PromptRequest, PromptResponse,
     SessionNotification, SessionUpdate, StopReason, TextContent,
 };
-use sacp::{BoxFuture, Channels, Component, JrHandlerChain, JrRequestCx};
+use sacp::{Component, JrHandlerChain, JrRequestCx};
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
@@ -22,7 +22,7 @@ struct AgentState {
 }
 
 impl Component for AgentComponent {
-    async fn serve(self, channels: Channels) -> Result<(), sacp::Error> {
+    async fn serve(self, client: impl Component) -> Result<(), sacp::Error> {
         let state = AgentState {
             mcp_servers: Arc::new(Mutex::new(Vec::new())),
         };
@@ -95,7 +95,7 @@ impl Component for AgentComponent {
                     connection_cx.spawn(Self::respond_to_prompt(state, request, request_cx))
                 }
             })
-            .serve(channels)
+            .serve(client)
             .await
     }
 }
