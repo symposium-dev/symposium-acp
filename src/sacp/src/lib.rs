@@ -43,6 +43,108 @@
 //! # }
 //! ```
 //!
+//! ## Common Patterns
+//!
+//! ### Pattern 1: Defining Reusable Components
+//!
+//! When building agents or proxies, define a struct that implements [`Component`]. Internally, use [`JrHandlerChain`] to set up handlers:
+//!
+//! ```rust,ignore
+//! use sacp::{Component, JrHandlerChain};
+//!
+//! struct MyAgent {
+//!     config: AgentConfig,
+//! }
+//!
+//! impl Component for MyAgent {
+//!     async fn serve(self, client: impl Component) -> Result<(), sacp::Error> {
+//!         JrHandlerChain::new()
+//!             .name("my-agent")
+//!             .on_receive_request(async move |req: PromptRequest, cx| {
+//!                 // Don't block the message loop! Use await_when_* for async work
+//!                 cx.respond(self.process_prompt(req))
+//!                     .await_when_result_received(async move |response| {
+//!                         // This runs after the response is received
+//!                         log_response(&response);
+//!                         cx.respond(response)
+//!                     })
+//!             })
+//!             .serve(client)
+//!             .await
+//!     }
+//! }
+//! ```
+//!
+//! **Important:** Message handlers run on the event loop. Blocking in a handler will prevent the connection from processing new messages.
+//! Use [`JrConnectionCx::spawn`] to offload expensive work, or use the `await_when_*` methods to avoid blocking.
+//!
+//! ### Pattern 2: Custom Message Handlers
+//!
+//! For reusable message handling logic, implement [`JrMessageHandler`] and use [`MatchMessage`](crate::util::MatchMessage) for dispatching:
+//!
+//! ```rust,ignore
+//! use sacp::{JrMessageHandler, MessageAndCx, Handled};
+//! use sacp::util::MatchMessage;
+//!
+//! struct MyHandler {
+//!     state: Arc<Mutex<State>>,
+//! }
+//!
+//! impl JrMessageHandler for MyHandler {
+//!     async fn handle_message(&mut self, message: MessageAndCx)
+//!         -> Result<Handled<MessageAndCx>, sacp::Error>
+//!     {
+//!         MatchMessage::new(message)
+//!             .if_request(async |req: MyRequest, cx| {
+//!                 // Handle using self.state
+//!                 cx.respond(MyResponse { /* ... */ })
+//!             })
+//!             .await
+//!             .done()
+//!     }
+//!
+//!     fn describe_chain(&self) -> impl std::fmt::Debug { "MyHandler" }
+//! }
+//! ```
+//!
+//! ### Pattern 3: Connecting as a Client
+//!
+//! To connect to a JSON-RPC server and send requests, use `with_client`. Note the use of `async` (not `async move`)
+//! to share access to local variables:
+//!
+//! ```rust,ignore
+//! JrHandlerChain::new()
+//!     .on_receive_notification(async |notif: SessionUpdate, cx| {
+//!         // Handle notifications from the server
+//!         Ok(())
+//!     })
+//!     .with_client(sacp::ByteStreams::new(stdout, stdin), async |cx| {
+//!         // Send requests using the connection context
+//!         let response = cx.send_request(MyRequest { /* ... */ })
+//!             .block_task()
+//!             .await?;
+//!
+//!         // Can access local variables here
+//!         process_response(response);
+//!
+//!         Ok(())
+//!     })
+//!     .await
+//! ```
+//!
+//! ## Using the Request Context
+//!
+//! The request context ([`JrRequestCx`]) provided to handlers is not just for responding—it offers several capabilities:
+//!
+//! - **Respond to the request:** `cx.respond(response)` sends a response back to the caller
+//! - **Send requests to the other side:** `cx.send_request(request)` initiates a new request
+//! - **Send notifications:** `cx.send_notification(notification)` sends a fire-and-forget message
+//! - **Spawn background tasks:** `cx.spawn(future)` runs work concurrently without blocking the message loop
+//!
+//! If you need a connection context that's independent of a particular request (for example, to store in a struct for later use),
+//! use `cx.connection_cx()`. This gives you a [`JrConnectionCx`] that can spawn tasks and send messages but isn't tied to
+//! responding to a specific request.
+//!
 //! ## Learning more
 //!
 //! You can learn more in the [docs for `JrConnection`](crate::JrConnection) or on our
