@@ -1310,7 +1310,8 @@ impl JrConnectionCx {
 ///
 /// 1. **Respond to the request** - Use [`respond`](Self::respond) or
 ///    [`respond_with_result`](Self::respond_with_result) to send the response
-/// 2. **Send other messages** - Derefs to [`JrConnectionCx`], giving access to
+/// 2. **Send other messages** - Use [`connection_cx`](Self::connection_cx) to access the
+///    underlying [`JrConnectionCx`], giving access to
 ///    [`send_request`](JrConnectionCx::send_request),
 ///    [`send_notification`](JrConnectionCx::send_notification), and
 ///    [`spawn`](JrConnectionCx::spawn)
