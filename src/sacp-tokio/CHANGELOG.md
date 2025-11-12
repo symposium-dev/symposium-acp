@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.0-alpha.6](https://github.com/symposium-dev/symposium-acp/compare/sacp-tokio-v1.0.0-alpha.5...sacp-tokio-v1.0.0-alpha.6) - 2025-11-11
+
+### Other
+
+- Merge pull request #26 from nikomatsakis/main
+- [**breaking**] make Component trait ergonomic with async fn and introduce DynComponent
+- [**breaking**] make Component the primary trait with Transport as blanket impl
+
 ## [1.0.0-alpha.5](https://github.com/symposium-dev/symposium-acp/compare/sacp-tokio-v1.0.0-alpha.4...sacp-tokio-v1.0.0-alpha.5) - 2025-11-11
 
 ### Other
