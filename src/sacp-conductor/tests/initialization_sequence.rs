@@ -86,6 +86,7 @@ impl Component for InitComponent {
 
                     if config.respond_with_proxy {
                         request_cx
+                            .connection_cx()
                             .send_request_to_successor(request)
                             .await_when_result_received(async move |response| {
                                 let mut response = response?;

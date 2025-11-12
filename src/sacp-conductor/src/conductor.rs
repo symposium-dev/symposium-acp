@@ -824,7 +824,7 @@ impl ConductorHandlerState {
             for mcp_server in &mut request.mcp_servers {
                 self.bridge_listeners
                     .transform_mcp_servers(
-                        &request_cx,
+                        &request_cx.connection_cx(),
                         mcp_server,
                         conductor_tx,
                         &self.conductor_command,

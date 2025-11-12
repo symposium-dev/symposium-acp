@@ -109,14 +109,16 @@ impl ElizaAgent {
 
         tracing::debug!("Eliza response: {}", response_text);
 
-        request_cx.send_notification(SessionNotification {
-            session_id: session_id.clone(),
-            update: SessionUpdate::AgentMessageChunk(ContentChunk {
-                content: response_text.into(),
+        request_cx
+            .connection_cx()
+            .send_notification(SessionNotification {
+                session_id: session_id.clone(),
+                update: SessionUpdate::AgentMessageChunk(ContentChunk {
+                    content: response_text.into(),
+                    meta: None,
+                }),
                 meta: None,
-            }),
-            meta: None,
-        })?;
+            })?;
 
         // Complete the request
         request_cx.respond(PromptResponse {

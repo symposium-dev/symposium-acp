@@ -232,9 +232,10 @@ impl McpServiceRegistry {
         // Every request/notification that is sent over `mcp_server_tx` we will
         // send to the MCP server.
         let spawn_results = request_cx
+            .connection_cx()
             .spawn({
                 let connection_id = connection_id.clone();
-                let outer_cx = request_cx.clone();
+                let outer_cx = request_cx.connection_cx();
 
                 let transport = sacp::ByteStreams::new(
                     mcp_client_write.compat_write(),
@@ -277,7 +278,7 @@ impl McpServiceRegistry {
             })
             .and_then(|()| {
                 // Spawn MCP server task
-                request_cx.spawn(async move {
+                request_cx.connection_cx().spawn(async move {
                     registered_server
                         .spawn
                         .spawn(Box::pin(mcp_server_write), Box::pin(mcp_server_read))
@@ -386,7 +387,7 @@ impl McpServiceRegistry {
         let mut request = match result {
             Ok(request) => request,
             Err(err) => {
-                request_cx.send_error_notification(err)?;
+                request_cx.connection_cx().send_error_notification(err)?;
                 return Ok(Handled::Yes);
             }
         };
@@ -403,6 +404,7 @@ impl McpServiceRegistry {
 
         // Forward it to the successor.
         request_cx
+            .connection_cx()
             .send_request_to_successor(request)
             .forward_to_request_cx(request_cx.cast())?;
 

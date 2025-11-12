@@ -220,11 +220,11 @@ pub trait JrMessageHandler {
 /// # let connection = mock_connection();
 /// connection.on_receive_request(async |req: AnalyzeRequest, cx| {
 ///     // Clone cx for the spawned task
-///     cx.spawn({
-///         let cx = cx.clone();
+///     cx.connection_cx().spawn({
+///         let connection_cx = cx.connection_cx();
 ///         async move {
 ///             let result = expensive_analysis(&req.data).await?;
-///             cx.send_notification(AnalysisComplete { result })?;
+///             connection_cx.send_notification(AnalysisComplete { result })?;
 ///             Ok(())
 ///         }
 ///     })?;
@@ -338,7 +338,7 @@ pub trait JrMessageHandler {
 ///     .on_receive_request(async |prompt: PromptRequest, cx| {
 ///         // You can send notifications while processing a request
 ///         let notif: SessionNotification = todo!();
-///         cx.send_notification(notif)?;
+///         cx.connection_cx().send_notification(notif)?;
 ///
 ///         // Then respond to the request
 ///         let response: PromptResponse = todo!();
@@ -510,7 +510,7 @@ impl<H: JrMessageHandler> JrHandlerChain<H> {
     /// connection.on_receive_request(async |request: PromptRequest, request_cx| {
     ///     // Send a notification while processing
     ///     let notif: SessionNotification = todo!();
-    ///     request_cx.send_notification(notif)?;
+    ///     request_cx.connection_cx().send_notification(notif)?;
     ///
     ///     // Do some work...
     ///     let result = todo!("process the prompt");
@@ -1061,11 +1061,11 @@ impl JrConnectionCx {
     /// # let connection = mock_connection();
     /// connection.on_receive_request(async |req: ProcessRequest, cx| {
     ///     // Clone cx for the spawned task
-    ///     cx.spawn({
-    ///         let cx = cx.clone();
+    ///     cx.connection_cx().spawn({
+    ///         let connection_cx = cx.connection_cx();
     ///         async move {
     ///             let result = expensive_operation(&req.data).await?;
-    ///             cx.send_notification(ProcessComplete { result })?;
+    ///             connection_cx.send_notification(ProcessComplete { result })?;
     ///             Ok(())
     ///         }
     ///     })?;
@@ -1323,7 +1323,7 @@ impl JrConnectionCx {
 /// # let connection = mock_connection();
 /// connection.on_receive_request(async |req: ProcessRequest, cx| {
 ///     // Send a notification while processing
-///     cx.send_notification(StatusUpdate {
+///     cx.connection_cx().send_notification(StatusUpdate {
 ///         message: "processing".into(),
 ///     })?;
 ///
@@ -1373,14 +1373,6 @@ impl<T: JrResponsePayload> std::fmt::Debug for JrRequestCx<T> {
             .field("id", &self.id)
             .field("response_type", &std::any::type_name::<T>())
             .finish()
-    }
-}
-
-impl<T: JrResponsePayload> std::ops::Deref for JrRequestCx<T> {
-    type Target = JrConnectionCx;
-
-    fn deref(&self) -> &Self::Target {
-        &self.cx
     }
 }
 
@@ -1749,7 +1741,7 @@ impl JrNotification for UntypedMessage {}
 /// # let connection = mock_connection();
 /// // ❌ NEVER do this in a handler - blocks the event loop!
 /// connection.on_receive_request(async |req: MyRequest, cx| {
-///     let response = cx.send_request(MyRequest {})
+///     let response = cx.connection_cx().send_request(MyRequest {})
 ///         .block_task()  // This will deadlock!
 ///         .await?;
 ///     cx.respond(response)
@@ -1880,11 +1872,11 @@ impl<R: JrResponsePayload> JrResponse<R> {
     /// # let connection = mock_connection();
     /// connection.on_receive_request(async |req: MyRequest, cx| {
     ///     // Spawn a task to handle the request
-    ///     cx.spawn({
-    ///         let cx = cx.clone();
+    ///     cx.connection_cx().spawn({
+    ///         let connection_cx = cx.connection_cx();
     ///         async move {
     ///             // Safe: We're in a spawned task, not blocking the event loop
-    ///             let response = cx.send_request(OtherRequest {})
+    ///             let response = connection_cx.send_request(OtherRequest {})
     ///                 .block_task()
     ///                 .await?;
     ///
@@ -1909,7 +1901,7 @@ impl<R: JrResponsePayload> JrResponse<R> {
     /// # let connection = mock_connection();
     /// connection.on_receive_request(async |req: MyRequest, cx| {
     ///     // ❌ DEADLOCK: Handler blocks event loop, which can't process the response
-    ///     let response = cx.send_request(OtherRequest {})
+    ///     let response = cx.connection_cx().send_request(OtherRequest {})
     ///         .block_task()
     ///         .await?;
     ///
@@ -2020,15 +2012,15 @@ impl<R: JrResponsePayload> JrResponse<R> {
     /// # let connection = mock_connection();
     /// connection.on_receive_request(async |req: MyRequest, cx| {
     ///     // Send a request and schedule a callback for the response
-    ///     cx.send_request(QueryRequest { id: 22 })
+    ///     cx.connection_cx().send_request(QueryRequest { id: 22 })
     ///         .await_when_result_received({
-    ///             let cx = cx.clone();
+    ///             let connection_cx = cx.connection_cx();
     ///             async move |result| {
     ///                 match result {
     ///                     Ok(response) => {
     ///                         println!("Got response: {:?}", response);
     ///                         // Can send more messages here
-    ///                         cx.send_notification(QueryComplete {})?;
+    ///                         connection_cx.send_notification(QueryComplete {})?;
     ///                         Ok(())
     ///                 }
     ///                     Err(error) => {
