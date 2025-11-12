@@ -67,7 +67,7 @@
 //!
 //! ### Simple Usage
 //!
-//! Pass a Vec of components that implement `Transport`:
+//! Pass a Vec of components that implement `Component`:
 //!
 //! ```ignore
 //! let conductor = Conductor::new(
@@ -126,7 +126,7 @@ use sacp::{
     MessageAndCx, MetaCapabilityExt, Proxy, UntypedMessage,
 };
 use sacp::{
-    JrMessageHandler, JrResponsePayload, Transport,
+    JrMessageHandler, JrResponsePayload,
     schema::{InitializeRequest, InitializeResponse, NewSessionRequest, NewSessionResponse},
     util::MatchMessage,
 };
@@ -214,7 +214,7 @@ impl Conductor {
     ///     .serve()
     ///     .await
     /// ```
-    pub async fn run(self, transport: impl Transport + 'static) -> Result<(), sacp::Error> {
+    pub async fn run(self, transport: impl Component + 'static) -> Result<(), sacp::Error> {
         self.into_handler_chain()
             .connect_to(transport)?
             .serve()

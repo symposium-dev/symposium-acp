@@ -57,9 +57,9 @@ pub trait JrMessageHandler {
 /// A JSON-RPC connection that can act as either a server, client, or both.
 ///
 /// `JrConnection` provides a builder-style API for creating JSON-RPC servers and clients.
-/// You start by calling [`JrConnection::new`], then add message handlers, and finally
-/// drive the connection with either [`serve`](Self::serve) or [`with_client`](Self::with_client),
-/// providing a transport implementation (e.g., [`ByteStreams`] for byte streams).
+/// You start by calling [`JrHandlerChain::new`], then add message handlers, and finally
+/// drive the connection with either [`serve`](JrHandlerChain::serve) or [`with_client`](JrHandlerChain::with_client),
+/// providing a component implementation (e.g., [`ByteStreams`] for byte streams).
 ///
 /// # JSON-RPC Primer
 ///
@@ -170,7 +170,7 @@ pub trait JrMessageHandler {
 /// * [`on_receive_request`](Self::on_receive_request) - Handle JSON-RPC requests (messages expecting responses)
 /// * [`on_receive_notification`](Self::on_receive_notification) - Handle JSON-RPC notifications (fire-and-forget)
 /// * [`on_receive_message`](Self::on_receive_message) - Handle enums containing both requests and notifications
-/// * [`chain_handler`](Self::chain_handler) - Low-level primitive for maximum flexibility
+/// * [`with_handler`](Self::with_handler) - Low-level primitive for maximum flexibility
 ///
 /// ## Handler Ordering
 ///
@@ -385,7 +385,7 @@ impl<H: JrMessageHandler> JrHandlerChain<H> {
         self
     }
 
-    /// Add a new [`JrHandler`] to the chain.
+    /// Add a new [`JrMessageHandler`] to the chain.
     ///
     /// Prefer [`Self::on_receive_request`] or [`Self::on_receive_notification`].
     /// This is a low-level method that is not intended for general use.
@@ -413,7 +413,7 @@ impl<H: JrMessageHandler> JrHandlerChain<H> {
         }
     }
 
-    /// Add a new [`JrHandler`] to the chain.
+    /// Add a new [`JrMessageHandler`] to the chain.
     ///
     /// Prefer [`Self::on_receive_request`] or [`Self::on_receive_notification`].
     /// This is a low-level method that is not intended for general use.
@@ -526,13 +526,14 @@ impl<H: JrMessageHandler> JrHandlerChain<H> {
     ///
     /// `R` can be either a single request type or an enum of multiple request types.
     /// See the [type-driven dispatch](Self#type-driven-message-dispatch) section for details.
-    pub fn on_receive_request<R, F>(
+    pub fn on_receive_request<R, F, T>(
         self,
         op: F,
     ) -> JrHandlerChain<ChainedHandler<H, RequestHandler<R, F>>>
     where
         R: JrRequest,
-        F: AsyncFnMut(R, JrRequestCx<R::Response>) -> Result<(), crate::Error> + Send,
+        F: AsyncFnMut(R, JrRequestCx<R::Response>) -> Result<T, crate::Error> + Send,
+        T: IntoHandled<(R, JrRequestCx<R::Response>)>,
     {
         self.with_handler(RequestHandler::new(op))
     }
@@ -573,13 +574,14 @@ impl<H: JrMessageHandler> JrHandlerChain<H> {
     ///
     /// `N` can be either a single notification type or an enum of multiple notification types.
     /// See the [type-driven dispatch](Self#type-driven-message-dispatch) section for details.
-    pub fn on_receive_notification<N, F>(
+    pub fn on_receive_notification<N, F, T>(
         self,
         op: F,
     ) -> JrHandlerChain<ChainedHandler<H, NotificationHandler<N, F>>>
     where
         N: JrNotification,
-        F: AsyncFnMut(N, JrConnectionCx) -> Result<(), crate::Error> + Send,
+        F: AsyncFnMut(N, JrConnectionCx) -> Result<T, crate::Error> + Send,
+        T: IntoHandled<(N, JrConnectionCx)>,
     {
         self.with_handler(NotificationHandler::new(op))
     }
@@ -588,7 +590,7 @@ impl<H: JrMessageHandler> JrHandlerChain<H> {
     /// The resulting connection must then be either [served](`JrConnection::serve`) or [used as a client](`JrConnection::with_client`).
     pub fn connect_to(
         self,
-        transport: impl Transport + 'static,
+        transport: impl Component + 'static,
     ) -> Result<JrConnection<H>, crate::Error> {
         let Self {
             name,
@@ -606,7 +608,8 @@ impl<H: JrMessageHandler> JrHandlerChain<H> {
 
         // Create the transport layer and spawn it
         let transport_channels = Channels::new(transport_outgoing_rx, transport_incoming_tx);
-        let transport_future = Box::new(transport).transport(transport_channels);
+        let transport_component = crate::DynComponent::new(transport);
+        let transport_future = transport_component.serve(transport_channels);
         cx.spawn(transport_future)?;
 
         // Spawn pending tasks
@@ -626,7 +629,79 @@ impl<H: JrMessageHandler> JrHandlerChain<H> {
         })
     }
 
-    /// Apply the handlers to a single message. Useful for implementing handlers.
+    /// Apply the handler chain to a single message.
+    ///
+    /// This method processes one message through the entire handler chain, attempting to
+    /// match it against each registered handler in order. This is useful when implementing
+    /// custom message handling logic or when you need fine-grained control over message
+    /// processing.
+    ///
+    /// # Returns
+    ///
+    /// - `Ok(Handled::Claimed)` - A handler claimed and processed the message
+    /// - `Ok(Handled::Unclaimed(message))` - No handler matched the message
+    /// - `Err(_)` - A handler encountered an error while processing
+    ///
+    /// # Borrow Checker Considerations
+    ///
+    /// You may find that [`MatchMessage`] is a better choice than this method
+    /// for implementing custom handlers. It offers a very similar API to
+    /// [`JrHandlerChain`] but is structured to apply each test one at a time
+    /// (sequentially) instead of setting them all up at once. This sequential approach
+    /// often interacts better with the borrow checker, at the cost of requiring `.await`
+    /// calls between each handler and only working for processing a single message.
+    ///
+    /// # Example: Borrow Checker Challenges
+    ///
+    /// When building a handler chain with `async {}` blocks (non-move), you might encounter
+    /// borrow checker errors if multiple handlers need access to the same mutable state:
+    ///
+    /// ```compile_fail
+    /// # use sacp::{JrHandlerChain, JrRequestCx};
+    /// # use sacp::schema::{InitializeRequest, InitializeResponse};
+    /// # use sacp::schema::{PromptRequest, PromptResponse};
+    /// # async fn example() -> Result<(), sacp::Error> {
+    /// let mut state = String::from("initial");
+    ///
+    /// // This fails to compile because both handlers borrow `state` mutably,
+    /// // and the futures are set up at the same time (even though only one will run)
+    /// let chain = JrHandlerChain::new()
+    ///     .on_receive_request(async |req: InitializeRequest, cx: JrRequestCx| {
+    ///         state.push_str(" - initialized");  // First mutable borrow
+    ///         cx.respond(InitializeResponse::make())
+    ///     })
+    ///     .on_receive_request(async |req: PromptRequest, cx: JrRequestCx| {
+    ///         state.push_str(" - prompted");  // Second mutable borrow - ERROR!
+    ///         cx.respond(PromptResponse { content: vec![], stopReason: None })
+    ///     });
+    /// # Ok(())
+    /// # }
+    /// ```
+    ///
+    /// You can work around this by using `apply()` to process messages one at a time,
+    /// or use [`MatchMessage`] which provides a similar API but applies handlers sequentially:
+    ///
+    /// ```ignore
+    /// use sacp::{MessageAndCx, Handled};
+    /// use sacp::util::MatchMessage;
+    ///
+    /// async fn handle_with_state(
+    ///     message: MessageAndCx,
+    ///     state: &mut String,
+    /// ) -> Result<Handled<MessageAndCx>, sacp::Error> {
+    ///     MatchMessage::new(message)
+    ///         .on_request(async |req: InitializeRequest, cx| {
+    ///             state.push_str(" - initialized");  // Sequential - OK!
+    ///             cx.respond(InitializeResponse::make())
+    ///         })
+    ///         .on_request(async |req: PromptRequest, cx| {
+    ///             state.push_str(" - prompted");  // Sequential - OK!
+    ///             cx.respond(PromptResponse { content: vec![], stopReason: None })
+    ///         })
+    ///         .otherwise(async |msg| Ok(Handled::Unclaimed(msg)))
+    ///         .await
+    /// }
+    /// ```
     pub async fn apply(
         &mut self,
         message: MessageAndCx,
@@ -640,7 +715,7 @@ impl<H: JrMessageHandler> JrHandlerChain<H> {
     /// ```ignore
     /// handler_chain.connect_to(transport)?.serve().await
     /// ```
-    pub async fn serve(self, transport: impl Transport + 'static) -> Result<(), crate::Error> {
+    pub async fn serve(self, transport: impl Component + 'static) -> Result<(), crate::Error> {
         self.connect_to(transport)?.serve().await
     }
 
@@ -652,7 +727,7 @@ impl<H: JrMessageHandler> JrHandlerChain<H> {
     /// ```
     pub async fn with_client(
         self,
-        transport: impl Transport + 'static,
+        transport: impl Component + 'static,
         main_fn: impl AsyncFnOnce(JrConnectionCx) -> Result<(), crate::Error>,
     ) -> Result<(), crate::Error> {
         self.connect_to(transport)?.with_client(main_fn).await
@@ -893,6 +968,27 @@ pub enum Handled<T> {
     No(T),
 }
 
+/// Trait for converting handler return values into [`Handled`].
+///
+/// This trait allows handlers to return either `()` (which becomes `Handled::Yes`)
+/// or an explicit `Handled<T>` value for more control over handler chain propagation.
+pub trait IntoHandled<T> {
+    /// Convert this value into a `Handled<T>`.
+    fn into_handled(self) -> Handled<T>;
+}
+
+impl<T> IntoHandled<T> for () {
+    fn into_handled(self) -> Handled<T> {
+        Handled::Yes
+    }
+}
+
+impl<T> IntoHandled<T> for Handled<T> {
+    fn into_handled(self) -> Handled<T> {
+        self
+    }
+}
+
 /// Trait for types that can provide transport for JSON-RPC messages.
 ///
 /// Implementations of this trait bridge between the internal protocol channels
@@ -906,79 +1002,6 @@ pub enum Handled<T> {
 /// # Example
 ///
 /// See [`ByteStreams`] for the standard byte stream implementation.
-
-/// A transport provides the underlying communication layer for a JSON-RPC connection.
-///
-/// This trait represents "I have a connection that needs somewhere to send/receive messages."
-/// Implementations handle the actual I/O (byte streams, stdio, network sockets, etc.) and
-/// bridge between the message channels and the underlying transport mechanism.
-///
-/// # ⚠️ Implementation Guidance
-///
-/// **You should typically implement [`Component`] instead of `Transport` directly.**
-///
-/// `Transport` is automatically implemented for any type that implements `Component` via a blanket
-/// implementation. The two traits have identical signatures, but `Component` is the primary abstraction
-/// used throughout the codebase (especially in conductor chains).
-///
-/// # The Two Perspectives
-///
-/// `Transport` and [`Component`] are two views on the same underlying abstraction:
-///
-/// - **Transport**: "I am the communication layer for an existing connection"
-/// - **Component**: "I am something that can be connected to"
-///
-/// Both traits have identical signatures. Implement `Component`, and `Transport` is provided automatically.
-///
-/// # Implementation Pattern
-///
-/// Implementations return a future that runs the transport's I/O loops. The future should:
-///
-/// 1. Set up any necessary actors or tasks for bidirectional message flow
-/// 2. Handle outgoing messages: read from `channels.remote_incoming_tx`, encode/serialize, write to transport
-/// 3. Handle incoming messages: read from transport, decode/deserialize, send to `channels.remote_outgoing_rx`
-/// 4. Run until the connection closes or an error occurs
-///
-/// # Example
-///
-/// ```rust
-/// use sacp::Component;
-///
-/// struct MyComponent;
-///
-/// // Implement Component (preferred)
-/// impl Component for MyComponent {
-///     async fn serve(self, channels: sacp::Channels) -> Result<(), sacp::Error> {
-///         // Set up I/O loops
-///         // Handle bidirectional message flow
-///         Ok(())
-///     }
-/// }
-///
-/// // Transport is automatically available via blanket impl
-/// # fn example() {
-/// let component = MyComponent;
-/// let _as_transport: Box<dyn sacp::Transport> = Box::new(component);
-/// # }
-/// ```
-///
-/// See [`ByteStreams`] for a real implementation that handles serialization/deserialization,
-/// or [`Channels`] for a simpler in-process component.
-pub trait Transport: Send {
-    /// Run the transport, bridging the connection's message channels with the underlying I/O.
-    ///
-    /// # Parameters
-    ///
-    /// - `channels`: Bidirectional message channels for communication
-    ///
-    /// # Returns
-    ///
-    /// A future that completes when the transport closes or encounters an error.
-    fn transport(
-        self: Box<Self>,
-        channels: Channels,
-    ) -> BoxFuture<'static, Result<(), crate::Error>>;
-}
 
 /// Connection context for sending messages and spawning tasks.
 ///
@@ -1224,7 +1247,7 @@ impl JrConnectionCx {
             Err(_) => {
                 response_tx
                     .send(Err(communication_failure(format!(
-                        "failed to send outgoing request `{method}"
+                        "failed to create untyped request for `{method}"
                     ))))
                     .unwrap();
             }
@@ -2066,25 +2089,43 @@ fn communication_failure(err: impl ToString) -> crate::Error {
 // IntoJrConnectionTransport Implementations
 // ============================================================================
 
-/// Byte stream transport for JSON-RPC messages.
+/// A component that communicates over byte streams (stdin/stdout, sockets, pipes, etc.).
 ///
-/// This transport serializes `jsonrpcmsg::Message` to/from newline-delimited JSON
-/// over byte streams (AsyncRead + AsyncWrite).
+/// `ByteStreams` implements the [`Component`] trait for any pair of `AsyncRead` and `AsyncWrite`
+/// streams, handling serialization of JSON-RPC messages to/from newline-delimited JSON.
+/// This is the standard way to communicate with external processes or network connections.
+///
+/// # Use Cases
+///
+/// - **Stdio communication**: Connect to agents or proxies via stdin/stdout
+/// - **Network sockets**: TCP, Unix domain sockets, or other stream-based protocols
+/// - **Named pipes**: Cross-process communication on the same machine
+/// - **File I/O**: Reading from and writing to file descriptors
 ///
 /// # Example
+///
+/// Connecting to an agent via stdio:
 ///
 /// ```no_run
 /// use sacp::ByteStreams;
 /// use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
 ///
 /// # async fn example() -> Result<(), sacp::Error> {
-/// let transport = ByteStreams::new(
+/// let component = ByteStreams::new(
 ///     tokio::io::stdout().compat_write(),
 ///     tokio::io::stdin().compat(),
 /// );
+///
+/// // Use as a component in a handler chain
+/// sacp::JrHandlerChain::new()
+///     .name("my-client")
+///     .serve(component)
+///     .await?;
 /// # Ok(())
 /// # }
 /// ```
+///
+/// [`Component`]: crate::Component
 pub struct ByteStreams<OB, IB> {
     /// Outgoing byte stream (where we write serialized messages)
     pub outgoing: OB,
@@ -2127,19 +2168,26 @@ where
     }
 }
 
-/// A transport that directly uses message channels without byte stream serialization.
+/// A component that communicates via in-process message channels.
 ///
-/// This is useful for in-process connections where you want to avoid the overhead
-/// of serializing and deserializing messages through byte streams. Instead, messages
-/// are passed directly through channels, which is ideal for testing or connecting
-/// components within the same process.
+/// `Channels` implements the [`Component`] trait for direct message passing without
+/// byte stream serialization. This is ideal for in-process connections, testing, or
+/// when you want to wire two JSON-RPC connections together within the same process
+/// without the overhead of serialization.
+///
+/// # Use Cases
+///
+/// - **Testing**: Connect mock components for unit tests without spawning processes
+/// - **In-process composition**: Chain multiple handlers in the same process
+/// - **Bridging**: Connect two separate JSON-RPC connections together
+/// - **Performance**: Avoid serialization overhead when components are co-located
 ///
 /// # Channel Wiring
 ///
 /// `Channels` bridges two pairs of message channels:
 ///
 /// ```text
-/// Connection A                    Channels Transport                    Connection B
+/// Connection A                    Channels Component                    Connection B
 /// ────────────                    ──────────────────                    ────────────
 ///
 ///   outgoing_tx ──→ outgoing_rx ──→ remote_incoming_tx ──→ incoming_rx
@@ -2149,6 +2197,8 @@ where
 ///
 /// # Example
 ///
+/// Connecting two components in-process:
+///
 /// ```no_run
 /// # use sacp::{Channels, JrHandlerChain};
 /// # use futures::channel::mpsc;
@@ -2157,7 +2207,7 @@ where
 /// let (a_to_b_tx, a_to_b_rx) = mpsc::unbounded();
 /// let (b_to_a_tx, b_to_a_rx) = mpsc::unbounded();
 ///
-/// // Connection A uses Channels transport that connects to B
+/// // Connection A uses Channels component that connects to B
 /// let transport_a = Channels::new(a_to_b_rx, b_to_a_tx);
 ///
 /// JrHandlerChain::new()

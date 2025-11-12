@@ -88,14 +88,14 @@ pub mod jsonrpcmsg {
 }
 
 pub use jsonrpc::{
-    ByteStreams, Channels, Handled, JrConnection, JrConnectionCx, JrHandlerChain, JrMessage,
-    JrMessageHandler, JrNotification, JrRequest, JrRequestCx, JrResponse, JrResponsePayload,
-    MessageAndCx, Transport, UntypedMessage,
+    ByteStreams, Channels, Handled, IntoHandled, JrConnection, JrConnectionCx, JrHandlerChain,
+    JrMessage, JrMessageHandler, JrNotification, JrRequest, JrRequestCx, JrResponse,
+    JrResponsePayload, MessageAndCx, UntypedMessage,
 };
 
 pub use component::{Component, DynComponent};
 
-// Re-export BoxFuture for implementing Transport/Component traits
+// Re-export BoxFuture for implementing Component traits
 pub use futures::future::BoxFuture;
 
 // Re-export the six primary message enum types at the root
