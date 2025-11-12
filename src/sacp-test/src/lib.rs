@@ -10,7 +10,7 @@ pub mod test_client;
 pub struct MockTransport;
 
 impl Component for MockTransport {
-    async fn serve(self, _channels: Channels) -> Result<(), Error> {
+    async fn serve(self, _client: impl Component) -> Result<(), Error> {
         panic!("MockTransport should never be used in running code - it's only for doctests")
     }
 }

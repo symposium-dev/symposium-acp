@@ -79,7 +79,7 @@ pub use capabilities::*;
 /// JSON-RPC message types.
 ///
 /// This module re-exports types from the `jsonrpcmsg` crate that are transitively
-/// reachable through the public API (e.g., via [`Channels`]).
+/// reachable through the public API (e.g., via [`Channel`]).
 ///
 /// Users of the `sacp` crate can use these types without adding a direct dependency
 /// on `jsonrpcmsg`.
@@ -88,7 +88,7 @@ pub mod jsonrpcmsg {
 }
 
 pub use jsonrpc::{
-    ByteStreams, Channels, Handled, IntoHandled, JrConnection, JrConnectionCx, JrHandlerChain,
+    ByteStreams, Channel, Handled, IntoHandled, JrConnection, JrConnectionCx, JrHandlerChain,
     JrMessage, JrMessageHandler, JrNotification, JrRequest, JrRequestCx, JrResponse,
     JrResponsePayload, MessageAndCx, UntypedMessage,
 };

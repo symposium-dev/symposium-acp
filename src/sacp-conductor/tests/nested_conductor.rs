@@ -17,7 +17,7 @@
 //! - Inner conductor operates in proxy mode, forwarding to eliza
 //! - Outer conductor receives the ">>" prefixed response
 
-use sacp::{BoxFuture, Channels, Component};
+use sacp::Component;
 use sacp_conductor::conductor::Conductor;
 use sacp_test::arrow_proxy::run_arrow_proxy;
 use sacp_test::test_client::yolo_prompt;
@@ -31,8 +31,8 @@ use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
 struct MockArrowProxy;
 
 impl Component for MockArrowProxy {
-    async fn serve(self, channels: Channels) -> Result<(), sacp::Error> {
-        run_arrow_proxy(channels).await
+    async fn serve(self, client: impl Component) -> Result<(), sacp::Error> {
+        run_arrow_proxy(client).await
     }
 }
 
@@ -41,8 +41,8 @@ impl Component for MockArrowProxy {
 struct MockEliza;
 
 impl Component for MockEliza {
-    async fn serve(self, channels: Channels) -> Result<(), sacp::Error> {
-        elizacp::run_elizacp(channels).await
+    async fn serve(self, client: impl Component) -> Result<(), sacp::Error> {
+        elizacp::run_elizacp(client).await
     }
 }
 
@@ -59,7 +59,7 @@ impl MockInnerConductor {
 }
 
 impl Component for MockInnerConductor {
-    async fn serve(self, channels: Channels) -> Result<(), sacp::Error> {
+    async fn serve(self, client: impl Component) -> Result<(), sacp::Error> {
         // Create mock arrow proxy components for the inner conductor
         // This conductor is ONLY proxies - no actual agent
         let mut components: Vec<sacp::DynComponent> = Vec::new();
@@ -68,7 +68,7 @@ impl Component for MockInnerConductor {
         }
 
         Conductor::new("inner-conductor".to_string(), components, None)
-            .run(channels)
+            .run(client)
             .await
     }
 }

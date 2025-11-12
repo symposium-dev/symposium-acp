@@ -223,8 +223,8 @@ impl Conductor {
 }
 
 impl sacp::Component for Conductor {
-    async fn serve(self, channels: sacp::Channels) -> Result<(), sacp::Error> {
-        self.run(channels).await
+    async fn serve(self, client: impl sacp::Component) -> Result<(), sacp::Error> {
+        self.run(client).await
     }
 }
 

@@ -7,7 +7,7 @@
 //! 4. Last component (agent) never receives proxy capability offer
 
 use sacp::schema::{AgentCapabilities, InitializeRequest, InitializeResponse};
-use sacp::{Channels, Component, JrHandlerChain, MetaCapabilityExt, Proxy};
+use sacp::{Component, JrHandlerChain, MetaCapabilityExt, Proxy};
 use sacp_conductor::conductor::Conductor;
 use sacp_proxy::JrCxExt;
 use std::sync::Arc;
@@ -69,7 +69,7 @@ impl InitComponent {
 }
 
 impl Component for InitComponent {
-    async fn serve(self, channels: Channels) -> Result<(), sacp::Error> {
+    async fn serve(self, client: impl Component) -> Result<(), sacp::Error> {
         let config = Arc::clone(&self.config);
 
         {
@@ -105,7 +105,7 @@ impl Component for InitComponent {
                         request_cx.respond(response)
                     }
                 })
-                .serve(channels)
+                .serve(client)
                 .await
         }
     }
