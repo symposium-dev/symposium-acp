@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.0-alpha.9](https://github.com/symposium-dev/symposium-acp/compare/sacp-conductor-v1.0.0-alpha.8...sacp-conductor-v1.0.0-alpha.9) - 2025-11-12
+
+### Other
+
+- Merge pull request #30 from nikomatsakis/main
+- *(sacp)* remove Deref impl from JrRequestCx
+- *(sacp)* add Component::serve() and simplify channel API
+
 ## [1.0.0-alpha.8](https://github.com/symposium-dev/symposium-acp/compare/sacp-conductor-v1.0.0-alpha.7...sacp-conductor-v1.0.0-alpha.8) - 2025-11-12
 
 ### Other

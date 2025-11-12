@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.0-alpha.7](https://github.com/symposium-dev/symposium-acp/compare/sacp-v1.0.0-alpha.6...sacp-v1.0.0-alpha.7) - 2025-11-12
+
+### Other
+
+- Merge pull request #30 from nikomatsakis/main
+- *(sacp)* remove Deref impl from JrRequestCx
+- *(sacp)* add common patterns section to crate-level documentation
+- *(sacp)* add Component::serve() and simplify channel API
+
 ## [1.0.0-alpha.6](https://github.com/symposium-dev/symposium-acp/compare/sacp-v1.0.0-alpha.5...sacp-v1.0.0-alpha.6) - 2025-11-12
 
 ### Added
