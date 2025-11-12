@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.0-alpha.6](https://github.com/symposium-dev/symposium-acp/compare/sacp-v1.0.0-alpha.5...sacp-v1.0.0-alpha.6) - 2025-11-12
+
+### Added
+
+- *(sacp)* extend IntoHandled support to notification handlers
+- *(sacp)* add IntoHandled trait for flexible handler return types
+
+### Other
+
+- Merge pull request #28 from nikomatsakis/main
+- *(sacp)* add tests for IntoHandled message transformation
+
 ## [1.0.0-alpha.5](https://github.com/symposium-dev/symposium-acp/compare/sacp-v1.0.0-alpha.4...sacp-v1.0.0-alpha.5) - 2025-11-11
 
 ### Other
