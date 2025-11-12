@@ -185,6 +185,15 @@ impl MatchMessage {
         self
     }
 
+    /// Complete matching, returning `Handled::No` if no match was found.
+    pub fn done(self) -> Result<Handled<MessageAndCx>, crate::Error> {
+        match self.state {
+            Ok(Handled::Yes) => Ok(Handled::Yes),
+            Ok(Handled::No(message)) => Ok(Handled::No(message)),
+            Err(err) => Err(err),
+        }
+    }
+
     /// Handle messages that didn't match any previous `handle_if` call.
     ///
     /// This is the fallback handler that receives the original untyped message if none

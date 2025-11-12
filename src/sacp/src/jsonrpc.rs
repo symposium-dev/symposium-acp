@@ -1247,7 +1247,7 @@ impl JrConnectionCx {
             Err(_) => {
                 response_tx
                     .send(Err(communication_failure(format!(
-                        "failed to send outgoing request `{method}"
+                        "failed to create untyped request for `{method}"
                     ))))
                     .unwrap();
             }
