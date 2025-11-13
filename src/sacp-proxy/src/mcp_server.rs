@@ -1,17 +1,13 @@
 use futures::channel::mpsc;
-use futures::{FutureExt, future::BoxFuture};
 use futures::{SinkExt, StreamExt};
 use fxhash::FxHashMap;
-use rmcp::ServiceExt;
 
 use sacp::schema::NewSessionRequest;
 use sacp::{
-    Handled, JrConnectionCx, JrHandlerChain, JrMessage, JrMessageHandler, JrRequestCx,
-    MessageAndCx, UntypedMessage,
+    Channel, Component, DynComponent, Handled, JrConnectionCx, JrHandlerChain, JrMessage,
+    JrMessageHandler, JrRequestCx, MessageAndCx, UntypedMessage,
 };
-use std::pin::Pin;
 use std::sync::{Arc, Mutex};
-use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
 
 use crate::{
     JrCxExt, McpConnectRequest, McpConnectResponse, McpDisconnectNotification,
@@ -20,7 +16,8 @@ use crate::{
 
 /// Manages MCP services offered to successor proxies and agents.
 ///
-/// Use the [`Self::add_rmcp_server`] method to register MCP servers implemented using the [`rmcp`] crate.
+/// Use the [`Self::add_mcp_server`] method to register MCP servers. For rmcp-based servers,
+/// use the `sacp-rmcp` crate which provides convenient extension methods.
 ///
 /// This struct is a handle to the underlying registry. Cloning the struct produces a second handle to the same registry.
 ///
@@ -48,81 +45,38 @@ impl McpServiceRegistry {
         Self::default()
     }
 
-    /// Add the MCP server to the registry and return `self`. Useful for chaining.
-    /// Equivalent to [`Self::add_rmcp_server`].
+    /// Add an MCP server to the registry using a custom spawner.
+    ///
+    /// This is the base method for adding MCP servers. Use this if you have a custom
+    /// way to create Component instances for your MCP server.
+    ///
+    /// For rmcp-based servers, use the `sacp-rmcp` crate which provides convenient
+    /// extension methods.
     ///
     /// # Parameters
     ///
     /// - `name`: The name of the server.
-    /// - `make_service`: A function that creates the service (e.g., `YourService::new`).
-    pub fn with_rmcp_server<S>(
-        self,
-        name: impl ToString,
-        make_service: impl Fn() -> S + 'static + Send + Sync,
-    ) -> Result<Self, sacp::Error>
-    where
-        S: rmcp::Service<rmcp::RoleServer>,
-    {
-        self.add_rmcp_server(name, make_service)?;
-        Ok(self)
-    }
-
-    /// Add an MCP server implemented using the rmcp crate.
-    ///
-    /// # Parameters
-    ///
-    /// - `name`: The name of the server.
-    /// - `make_service`: A function that creates the service (e.g., `YourService::new`).
-    pub fn add_rmcp_server<S>(
+    /// - `spawner`: A trait object that can create Component instances.
+    pub fn add_mcp_server<C: Component>(
         &self,
         name: impl ToString,
-        make_service: impl Fn() -> S + 'static + Send + Sync,
-    ) -> Result<(), sacp::Error>
-    where
-        S: rmcp::Service<rmcp::RoleServer>,
-    {
-        struct SpawnRmcpService<F> {
-            make_service: F,
+        new_fn: impl Fn() -> C + Send + Sync + 'static,
+    ) -> Result<(), sacp::Error> {
+        struct FnSpawner<F> {
+            new_fn: F,
         }
 
-        impl<F, S> DynSpawnMcpServer for SpawnRmcpService<F>
+        impl<C, F> SpawnMcpServer for FnSpawner<F>
         where
-            F: Fn() -> S + Send + Sync + 'static,
-            S: rmcp::Service<rmcp::RoleServer>,
+            F: Fn() -> C + Send + Sync + 'static,
+            C: Component,
         {
-            fn spawn(
-                &self,
-                outgoing_bytes: Pin<Box<dyn tokio::io::AsyncWrite + Send>>,
-                incoming_bytes: Pin<Box<dyn tokio::io::AsyncRead + Send>>,
-            ) -> BoxFuture<'static, Result<(), sacp::Error>> {
-                let server = (self.make_service)();
-                async move {
-                    let running_server = server
-                        .serve((incoming_bytes, outgoing_bytes))
-                        .await
-                        .map_err(sacp::Error::into_internal_error)?;
-
-                    // Keep the server alive by waiting for it to finish
-                    running_server
-                        .waiting()
-                        .await
-                        .map(|_quit_reason| ())
-                        .map_err(sacp::Error::into_internal_error)
-                }
-                .boxed()
+            fn spawn(&self) -> DynComponent {
+                let component = (self.new_fn)();
+                DynComponent::new(component)
             }
         }
 
-        let name = name.to_string();
-        self.add_mcp_service(name, Arc::new(SpawnRmcpService { make_service }))
-    }
-
-    /// Internal helper for adding services, independent of how they are implemented
-    fn add_mcp_service(
-        &self,
-        name: String,
-        spawn: Arc<dyn DynSpawnMcpServer>,
-    ) -> Result<(), sacp::Error> {
         let name = name.to_string();
         if let Some(_) = self.get_registered_server_by_name(&name) {
             return Err(sacp::util::internal_error(format!(
@@ -135,7 +89,7 @@ impl McpServiceRegistry {
         let service = Arc::new(RegisteredMcpServer {
             name,
             url: format!("acp:{uuid}"),
-            spawn,
+            spawn: Arc::new(FnSpawner { new_fn }),
         });
         self.insert_registered_server(service);
         Ok(())
@@ -219,71 +173,59 @@ impl McpServiceRegistry {
         let (mcp_server_tx, mut mcp_server_rx) = mpsc::channel(128);
         self.insert_connection(&connection_id, mcp_server_tx);
 
-        // Generate streams
-        let (mcp_server_stream, mcp_client_stream) = tokio::io::duplex(8192);
-        let (mcp_server_read, mcp_server_write) = tokio::io::split(mcp_server_stream);
-        let (mcp_client_read, mcp_client_write) = tokio::io::split(mcp_client_stream);
+        // Create connected channel pair for client-server communication
+        let (client_channel, server_channel) = Channel::duplex();
 
-        // Create JrConnection for communicating with the server.
-        //
-        // Every request/notification that the server sends up, we will package up
-        // as an McpOverAcpRequest/McpOverAcpNotification and send to our agent.
-        //
-        // Every request/notification that is sent over `mcp_server_tx` we will
-        // send to the MCP server.
+        // Create client-side handler that wraps messages and forwards to successor
+        let client_component = {
+            let connection_id = connection_id.clone();
+            let outer_cx = request_cx.connection_cx();
+
+            JrHandlerChain::new()
+                .on_receive_message(async move |message: sacp::MessageAndCx| {
+                    // Wrap the message in McpOverAcp{Request,Notification} and forward to successor
+                    let wrapped = message.map(
+                        |request, request_cx| {
+                            (
+                                McpOverAcpRequest {
+                                    connection_id: connection_id.clone(),
+                                    request,
+                                },
+                                request_cx,
+                            )
+                        },
+                        |notification, cx| {
+                            (
+                                McpOverAcpNotification {
+                                    connection_id: connection_id.clone(),
+                                    notification,
+                                },
+                                cx,
+                            )
+                        },
+                    );
+                    outer_cx.send_proxied_message(wrapped)
+                })
+                .with_spawned(move |mcp_cx| async move {
+                    while let Some(msg) = mcp_server_rx.next().await {
+                        mcp_cx.send_proxied_message(msg)?;
+                    }
+                    Ok(())
+                })
+        };
+
+        // Get the MCP server component
+        let mcp_server = registered_server.spawn.spawn();
+
+        // Spawn both sides of the connection
         let spawn_results = request_cx
             .connection_cx()
-            .spawn({
-                let connection_id = connection_id.clone();
-                let outer_cx = request_cx.connection_cx();
-
-                let transport = sacp::ByteStreams::new(
-                    mcp_client_write.compat_write(),
-                    mcp_client_read.compat(),
-                );
-
-                JrHandlerChain::new()
-                    .on_receive_message(async move |message: sacp::MessageAndCx| {
-                        // Wrap the message in McpOverAcp{Request,Notification} and forward to successor
-                        let wrapped = message.map(
-                            |request, request_cx| {
-                                (
-                                    McpOverAcpRequest {
-                                        connection_id: connection_id.clone(),
-                                        request,
-                                    },
-                                    request_cx,
-                                )
-                            },
-                            |notification, cx| {
-                                (
-                                    McpOverAcpNotification {
-                                        connection_id: connection_id.clone(),
-                                        notification,
-                                    },
-                                    cx,
-                                )
-                            },
-                        );
-                        outer_cx.send_proxied_message(wrapped)
-                    })
-                    .with_spawned(move |mcp_cx| async move {
-                        while let Some(msg) = mcp_server_rx.next().await {
-                            mcp_cx.send_proxied_message(msg)?;
-                        }
-                        Ok(())
-                    })
-                    .connect_to(transport)?
-                    .serve()
-            })
+            .spawn(async move { client_component.serve(client_channel).await })
             .and_then(|()| {
-                // Spawn MCP server task
-                request_cx.connection_cx().spawn(async move {
-                    registered_server
-                        .spawn
-                        .spawn(Box::pin(mcp_server_write), Box::pin(mcp_server_read))
-                        .await
-                })
+                // Spawn the MCP server serving the server channel
+                request_cx
+                    .connection_cx()
+                    .spawn(async move { mcp_server.serve(server_channel).await })
             });
 
         match spawn_results {
@@ -492,7 +434,7 @@ impl JrMessageHandler for McpServiceRegistry {
 struct RegisteredMcpServer {
     name: String,
     url: String,
-    spawn: Arc<dyn DynSpawnMcpServer>,
+    spawn: Arc<dyn SpawnMcpServer>,
 }
 
 impl RegisteredMcpServer {
@@ -514,12 +456,14 @@ impl std::fmt::Debug for RegisteredMcpServer {
     }
 }
 
-trait DynSpawnMcpServer: 'static + Send + Sync {
-    fn spawn(
-        &self,
-        outgoing_bytes: Pin<Box<dyn tokio::io::AsyncWrite + Send>>,
-        incoming_bytes: Pin<Box<dyn tokio::io::AsyncRead + Send>>,
-    ) -> BoxFuture<'static, Result<(), sacp::Error>>;
+/// Trait for spawning MCP server components.
+///
+/// This trait allows creating MCP server instances that implement the `Component` trait.
+trait SpawnMcpServer: Send + Sync + 'static {
+    /// Create a new MCP server component.
+    ///
+    /// Returns a `DynComponent` that can be used with the Component API.
+    fn spawn(&self) -> sacp::DynComponent;
 }
 
 impl AsRef<McpServiceRegistry> for McpServiceRegistry {
