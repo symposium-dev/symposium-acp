@@ -13,7 +13,6 @@ agent-client-protocol-schema.workspace = true
 futures.workspace = true
 fxhash.workspace = true
 
-rmcp.workspace = true
 sacp = { version = "1.0.0-alpha.7", path = "../sacp" }
 serde.workspace = true
 serde_json.workspace = true
