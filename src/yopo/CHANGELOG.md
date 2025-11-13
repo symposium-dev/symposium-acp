@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.0-alpha.9](https://github.com/symposium-dev/symposium-acp/compare/yopo-v1.0.0-alpha.8...yopo-v1.0.0-alpha.9) - 2025-11-13
+
+### Other
+
+- updated the following local packages: sacp, sacp-tokio
+
 ## [1.0.0-alpha.8](https://github.com/symposium-dev/symposium-acp/compare/yopo-v1.0.0-alpha.7...yopo-v1.0.0-alpha.8) - 2025-11-12
 
 ### Other
