@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [1.0.0-alpha.9](https://github.com/symposium-dev/symposium-acp/compare/elizacp-v1.0.0-alpha.8...elizacp-v1.0.0-alpha.9) - 2025-11-13
+## [1.0.0](https://github.com/symposium-dev/symposium-acp/compare/elizacp-v1.0.0-alpha.8...elizacp-v1.0.0) - 2025-11-13
 
 ### Other
 
