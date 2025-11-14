@@ -9,8 +9,8 @@ keywords = ["acp", "agent", "proxy", "mcp", "rmcp"]
 categories = ["development-tools"]
 
 [dependencies]
-sacp = { version = "1.0.0-alpha.7", path = "../sacp" }
-sacp-proxy = { version = "1.0.0-alpha.7", path = "../sacp-proxy" }
+sacp = { version = "1.0.0-alpha.8", path = "../sacp" }
+sacp-proxy = { version = "1.0.0-alpha.8", path = "../sacp-proxy" }
 rmcp.workspace = true
 futures.workspace = true
 tokio.workspace = true
