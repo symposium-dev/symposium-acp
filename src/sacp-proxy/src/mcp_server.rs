@@ -2,10 +2,11 @@ use futures::channel::mpsc;
 use futures::{SinkExt, StreamExt};
 use fxhash::FxHashMap;
 
-use sacp::schema::NewSessionRequest;
+use sacp::schema::{NewSessionRequest, NewSessionResponse};
+use sacp::util::MatchMessage;
 use sacp::{
-    Channel, Component, DynComponent, Handled, JrConnectionCx, JrHandlerChain, JrMessage,
-    JrMessageHandler, JrRequestCx, MessageAndCx, UntypedMessage,
+    Channel, Component, DynComponent, Handled, JrConnectionCx, JrHandlerChain, JrMessageHandler,
+    JrRequestCx, MessageAndCx, UntypedMessage,
 };
 use std::sync::{Arc, Mutex};
 
@@ -149,24 +150,21 @@ impl McpServiceRegistry {
 
     async fn handle_connect_request(
         &self,
-        result: Result<SuccessorRequest<McpConnectRequest>, sacp::Error>,
-        request_cx: JrRequestCx<serde_json::Value>,
-    ) -> Result<Handled<JrRequestCx<serde_json::Value>>, sacp::Error> {
-        // Check if we parsed this message successfully.
-        let SuccessorRequest { request } = match result {
-            Ok(request) => request,
-            Err(err) => {
-                request_cx.respond_with_error(err)?;
-                return Ok(Handled::Yes);
-            }
-        };
+        successor_request: SuccessorRequest<McpConnectRequest>,
+        request_cx: JrRequestCx<McpConnectResponse>,
+    ) -> Result<
+        Handled<(
+            SuccessorRequest<McpConnectRequest>,
+            JrRequestCx<McpConnectResponse>,
+        )>,
+        sacp::Error,
+    > {
+        let SuccessorRequest { request } = &successor_request;
 
         // Check if we have a registered server with the given URL. If not, don't try to handle the request.
         let Some(registered_server) = self.get_registered_server_by_url(&request.acp_url) else {
-            return Ok(Handled::No(request_cx));
+            return Ok(Handled::No((successor_request, request_cx)));
         };
-
-        let request_cx = request_cx.cast::<McpConnectResponse>();
 
         // Create a unique connection ID and a channel for future communication
         let connection_id = format!("mcp-over-acp-connection:{}", uuid::Uuid::new_v4());
@@ -243,22 +241,22 @@ impl McpServiceRegistry {
 
     async fn handle_mcp_over_acp_request(
         &self,
-        result: Result<SuccessorRequest<McpOverAcpRequest<UntypedMessage>>, sacp::Error>,
+        successor_request: SuccessorRequest<McpOverAcpRequest<UntypedMessage>>,
         request_cx: JrRequestCx<serde_json::Value>,
-    ) -> Result<Handled<JrRequestCx<serde_json::Value>>, sacp::Error> {
-        // Check if we parsed this message successfully.
-        let SuccessorRequest { request } = match result {
-            Ok(request) => request,
-            Err(err) => {
-                request_cx.respond_with_error(err)?;
-                return Ok(Handled::Yes);
-            }
+    ) -> Result<
+        Handled<(
+            SuccessorRequest<McpOverAcpRequest<UntypedMessage>>,
+            JrRequestCx<serde_json::Value>,
+        )>,
+        sacp::Error,
+    > {
+        // Check if we have a registered server with the given URL. If not, don't try to handle the request.
+        let Some(mut mcp_server_tx) = self.get_connection(&successor_request.request.connection_id)
+        else {
+            return Ok(Handled::No((successor_request, request_cx)));
         };
 
-        // Check if we have a registered server with the given URL. If not, don't try to handle the request.
-        let Some(mut mcp_server_tx) = self.get_connection(&request.connection_id) else {
-            return Ok(Handled::No(request_cx));
-        };
+        let SuccessorRequest { request } = successor_request;
 
         mcp_server_tx
             .send(MessageAndCx::Request(request.request, request_cx))
@@ -270,22 +268,23 @@ impl McpServiceRegistry {
 
     async fn handle_mcp_over_acp_notification(
         &self,
-        result: Result<SuccessorNotification<McpOverAcpNotification<UntypedMessage>>, sacp::Error>,
+        successor_notification: SuccessorNotification<McpOverAcpNotification<UntypedMessage>>,
         notification_cx: JrConnectionCx,
-    ) -> Result<Handled<JrConnectionCx>, sacp::Error> {
-        // Check if we parsed this message successfully.
-        let SuccessorNotification { notification } = match result {
-            Ok(request) => request,
-            Err(err) => {
-                notification_cx.send_error_notification(err)?;
-                return Ok(Handled::Yes);
-            }
+    ) -> Result<
+        Handled<(
+            SuccessorNotification<McpOverAcpNotification<UntypedMessage>>,
+            JrConnectionCx,
+        )>,
+        sacp::Error,
+    > {
+        // Check if we have a registered server with the given URL. If not, don't try to handle the request.
+        let Some(mut mcp_server_tx) =
+            self.get_connection(&successor_notification.notification.connection_id)
+        else {
+            return Ok(Handled::No((successor_notification, notification_cx)));
         };
 
-        // Check if we have a registered server with the given URL. If not, don't try to handle the request.
-        let Some(mut mcp_server_tx) = self.get_connection(&notification.connection_id) else {
-            return Ok(Handled::No(notification_cx));
-        };
+        let SuccessorNotification { notification } = successor_notification;
 
         mcp_server_tx
             .send(MessageAndCx::Notification(
@@ -300,40 +299,30 @@ impl McpServiceRegistry {
 
     async fn handle_mcp_disconnect_notification(
         &self,
-        result: Result<SuccessorNotification<McpDisconnectNotification>, sacp::Error>,
+        successor_notification: SuccessorNotification<McpDisconnectNotification>,
         notification_cx: JrConnectionCx,
-    ) -> Result<Handled<JrConnectionCx>, sacp::Error> {
-        // Check if we parsed this message successfully.
-        let SuccessorNotification { notification } = match result {
-            Ok(request) => request,
-            Err(err) => {
-                notification_cx.send_error_notification(err)?;
-                return Ok(Handled::Yes);
-            }
-        };
+    ) -> Result<
+        Handled<(
+            SuccessorNotification<McpDisconnectNotification>,
+            JrConnectionCx,
+        )>,
+        sacp::Error,
+    > {
+        let SuccessorNotification { notification } = &successor_notification;
 
         // Remove connection if we have it. Otherwise, do not handle the notification.
         if self.remove_connection(&notification.connection_id) {
             Ok(Handled::Yes)
         } else {
-            Ok(Handled::No(notification_cx))
+            Ok(Handled::No((successor_notification, notification_cx)))
         }
     }
 
     async fn handle_new_session_request(
         &self,
-        result: Result<NewSessionRequest, sacp::Error>,
-        request_cx: JrRequestCx<serde_json::Value>,
-    ) -> Result<Handled<MessageAndCx>, sacp::Error> {
-        // Check if we parsed this message successfully.
-        let mut request = match result {
-            Ok(request) => request,
-            Err(err) => {
-                request_cx.connection_cx().send_error_notification(err)?;
-                return Ok(Handled::Yes);
-            }
-        };
-
+        mut request: NewSessionRequest,
+        request_cx: JrRequestCx<NewSessionResponse>,
+    ) -> Result<Handled<(NewSessionRequest, JrRequestCx<NewSessionResponse>)>, sacp::Error> {
         // Add the MCP servers into the session/new request.
         //
         // Q: Do we care if there are already servers with that name?
@@ -344,10 +333,8 @@ impl McpServiceRegistry {
             }
         }
 
-        // Convert modified request back to UntypedMessage and return it
-        // so subsequent handlers in the chain can see the MCP servers we added.
-        let modified_msg = request.into_untyped_message()?;
-        Ok(Handled::No(MessageAndCx::Request(modified_msg, request_cx)))
+        // Return the modified request so subsequent handlers can see the MCP servers we added.
+        Ok(Handled::No((request, request_cx)))
     }
 }
 
@@ -360,66 +347,22 @@ impl JrMessageHandler for McpServiceRegistry {
         &mut self,
         message: sacp::MessageAndCx,
     ) -> Result<sacp::Handled<sacp::MessageAndCx>, sacp::Error> {
-        match message {
-            sacp::MessageAndCx::Request(msg, cx) => {
-                let params = msg.params();
-
-                if let Some(result) =
-                    <SuccessorRequest<McpConnectRequest>>::parse_request(cx.method(), params)
-                {
-                    match self.handle_connect_request(result, cx).await? {
-                        Handled::Yes => Ok(Handled::Yes),
-                        Handled::No(cx) => Ok(Handled::No(sacp::MessageAndCx::Request(msg, cx))),
-                    }
-                } else if let Some(result) =
-                    <SuccessorRequest<McpOverAcpRequest<UntypedMessage>>>::parse_request(
-                        cx.method(),
-                        params,
-                    )
-                {
-                    match self.handle_mcp_over_acp_request(result, cx).await? {
-                        Handled::Yes => Ok(Handled::Yes),
-                        Handled::No(cx) => Ok(Handled::No(sacp::MessageAndCx::Request(msg, cx))),
-                    }
-                } else if let Some(result) = <NewSessionRequest>::parse_request(cx.method(), params)
-                {
-                    self.handle_new_session_request(result, cx).await
-                } else {
-                    Ok(Handled::No(sacp::MessageAndCx::Request(msg, cx)))
-                }
-            }
-            sacp::MessageAndCx::Notification(msg, cx) => {
-                let params = msg.params();
-
-                if let Some(result) =
-                    <SuccessorNotification<McpOverAcpNotification<UntypedMessage>>>::parse_notification(
-                        msg.method(),
-                        params,
-                    )
-                {
-                    match self.handle_mcp_over_acp_notification(result, cx).await? {
-                        Handled::Yes => Ok(Handled::Yes),
-                        Handled::No(cx) => {
-                            Ok(Handled::No(sacp::MessageAndCx::Notification(msg, cx)))
-                        }
-                    }
-                } else if let Some(result) =
-                    <SuccessorNotification<McpDisconnectNotification>>::parse_notification(
-                        msg.method(),
-                        params,
-                    )
-                {
-                    match self.handle_mcp_disconnect_notification(result, cx).await? {
-                        Handled::Yes => Ok(Handled::Yes),
-                        Handled::No(cx) => {
-                            Ok(Handled::No(sacp::MessageAndCx::Notification(msg, cx)))
-                        }
-                    }
-                } else {
-                    Ok(sacp::Handled::No(sacp::MessageAndCx::Notification(msg, cx)))
-                }
-            }
-        }
+        MatchMessage::new(message)
+            .if_request(|request, request_cx| self.handle_connect_request(request, request_cx))
+            .await
+            .if_request(|request, request_cx| self.handle_mcp_over_acp_request(request, request_cx))
+            .await
+            .if_request(|request, request_cx| self.handle_new_session_request(request, request_cx))
+            .await
+            .if_notification(|notification, notification_cx| {
+                self.handle_mcp_over_acp_notification(notification, notification_cx)
+            })
+            .await
+            .if_notification(|notification, notification_cx| {
+                self.handle_mcp_disconnect_notification(notification, notification_cx)
+            })
+            .await
+            .done()
     }
 }
 
