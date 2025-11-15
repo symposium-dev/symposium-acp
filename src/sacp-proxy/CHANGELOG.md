@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.1.0](https://github.com/symposium-dev/symposium-acp/compare/sacp-proxy-v1.0.0...sacp-proxy-v1.1.0) - 2025-11-15
+
+### Added
+
+- *(sacp-proxy)* add add_registered_mcp_servers_to public method
+
+### Fixed
+
+- *(sacp-proxy)* allow handlers after provide_mcp to see modified NewSessionRequest
+
+### Other
+
+- *(sacp-proxy)* use MatchMessage for cleaner message handling
+- *(sacp-proxy)* use else-if-let chains in McpServiceRegistry::handle_message
+
 ## [1.0.0](https://github.com/symposium-dev/symposium-acp/compare/sacp-proxy-v1.0.0-alpha.7...sacp-proxy-v1.0.0) - 2025-11-13
 
 ### Other
