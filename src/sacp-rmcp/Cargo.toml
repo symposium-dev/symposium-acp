@@ -1,6 +1,6 @@
 [package]
 name = "sacp-rmcp"
-version = "0.8.0"
+version = "0.8.1"
 edition = "2024"
 description = "rmcp integration for SACP proxy components"
 license = "MIT OR Apache-2.0"
@@ -10,7 +10,7 @@ categories = ["development-tools"]
 
 [dependencies]
 sacp = { version = "1.0.0", path = "../sacp" }
-sacp-proxy = { version = "1.0.0", path = "../sacp-proxy" }
+sacp-proxy = { version = "1.1.0", path = "../sacp-proxy" }
 rmcp.workspace = true
 futures.workspace = true
 tokio.workspace = true
