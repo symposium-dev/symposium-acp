@@ -148,6 +148,35 @@ impl McpServiceRegistry {
             .is_some()
     }
 
+    /// Adds all registered MCP servers to the given `NewSessionRequest`.
+    ///
+    /// This method appends the MCP server configurations for all servers registered
+    /// with this registry to the `mcp_servers` field of the request. This is useful
+    /// when you want to manually populate a request with MCP servers outside of the
+    /// automatic handler chain processing.
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// let registry = McpServiceRegistry::new();
+    /// registry.add_mcp_server("my-server", || MyMcpServer)?;
+    ///
+    /// let mut request = NewSessionRequest {
+    ///     mcp_servers: vec![],
+    ///     cwd: std::env::current_dir()?,
+    ///     meta: None,
+    /// };
+    ///
+    /// registry.add_registered_mcp_servers_to(&mut request);
+    /// // request.mcp_servers now contains "my-server"
+    /// ```
+    pub fn add_registered_mcp_servers_to(&self, request: &mut NewSessionRequest) {
+        let data = self.data.lock().expect("not poisoned");
+        for server in data.registered_by_url.values() {
+            request.mcp_servers.push(server.acp_mcp_server());
+        }
+    }
+
     async fn handle_connect_request(
         &self,
         successor_request: SuccessorRequest<McpConnectRequest>,
@@ -326,12 +355,7 @@ impl McpServiceRegistry {
         // Add the MCP servers into the session/new request.
         //
         // Q: Do we care if there are already servers with that name?
-        {
-            let data = self.data.lock().expect("not poisoned");
-            for server in data.registered_by_url.values() {
-                request.mcp_servers.push(server.acp_mcp_server());
-            }
-        }
+        self.add_registered_mcp_servers_to(&mut request);
 
         // Return the modified request so subsequent handlers can see the MCP servers we added.
         Ok(Handled::No((request, request_cx)))
