@@ -361,40 +361,34 @@ impl JrMessageHandler for McpServiceRegistry {
         message: sacp::MessageAndCx,
     ) -> Result<sacp::Handled<sacp::MessageAndCx>, sacp::Error> {
         match message {
-            sacp::MessageAndCx::Request(msg, mut cx) => {
+            sacp::MessageAndCx::Request(msg, cx) => {
                 let params = msg.params();
 
                 if let Some(result) =
                     <SuccessorRequest<McpConnectRequest>>::parse_request(cx.method(), params)
                 {
-                    cx = match self.handle_connect_request(result, cx).await? {
-                        Handled::Yes => return Ok(Handled::Yes),
-                        Handled::No(cx) => cx,
-                    };
-                }
-
-                if let Some(result) =
+                    match self.handle_connect_request(result, cx).await? {
+                        Handled::Yes => Ok(Handled::Yes),
+                        Handled::No(cx) => Ok(Handled::No(sacp::MessageAndCx::Request(msg, cx))),
+                    }
+                } else if let Some(result) =
                     <SuccessorRequest<McpOverAcpRequest<UntypedMessage>>>::parse_request(
                         cx.method(),
                         params,
                     )
                 {
-                    cx = match self.handle_mcp_over_acp_request(result, cx).await? {
-                        Handled::Yes => return Ok(Handled::Yes),
-                        Handled::No(cx) => cx,
-                    };
-                }
-
-                if let Some(result) = <NewSessionRequest>::parse_request(cx.method(), params) {
-                    return match self.handle_new_session_request(result, cx).await? {
+                    match self.handle_mcp_over_acp_request(result, cx).await? {
                         Handled::Yes => Ok(Handled::Yes),
-                        Handled::No(message_and_cx) => Ok(Handled::No(message_and_cx)),
-                    };
+                        Handled::No(cx) => Ok(Handled::No(sacp::MessageAndCx::Request(msg, cx))),
+                    }
+                } else if let Some(result) = <NewSessionRequest>::parse_request(cx.method(), params)
+                {
+                    self.handle_new_session_request(result, cx).await
+                } else {
+                    Ok(Handled::No(sacp::MessageAndCx::Request(msg, cx)))
                 }
-
-                Ok(Handled::No(sacp::MessageAndCx::Request(msg, cx)))
             }
-            sacp::MessageAndCx::Notification(msg, mut cx) => {
+            sacp::MessageAndCx::Notification(msg, cx) => {
                 let params = msg.params();
 
                 if let Some(result) =
@@ -403,25 +397,27 @@ impl JrMessageHandler for McpServiceRegistry {
                         params,
                     )
                 {
-                    cx = match self.handle_mcp_over_acp_notification(result, cx).await? {
-                        Handled::Yes => return Ok(Handled::Yes),
-                        Handled::No(cx) => cx,
-                    };
-                }
-
-                if let Some(result) =
+                    match self.handle_mcp_over_acp_notification(result, cx).await? {
+                        Handled::Yes => Ok(Handled::Yes),
+                        Handled::No(cx) => {
+                            Ok(Handled::No(sacp::MessageAndCx::Notification(msg, cx)))
+                        }
+                    }
+                } else if let Some(result) =
                     <SuccessorNotification<McpDisconnectNotification>>::parse_notification(
                         msg.method(),
                         params,
                     )
                 {
-                    cx = match self.handle_mcp_disconnect_notification(result, cx).await? {
-                        Handled::Yes => return Ok(Handled::Yes),
-                        Handled::No(cx) => cx,
-                    };
+                    match self.handle_mcp_disconnect_notification(result, cx).await? {
+                        Handled::Yes => Ok(Handled::Yes),
+                        Handled::No(cx) => {
+                            Ok(Handled::No(sacp::MessageAndCx::Notification(msg, cx)))
+                        }
+                    }
+                } else {
+                    Ok(sacp::Handled::No(sacp::MessageAndCx::Notification(msg, cx)))
                 }
-
-                Ok(sacp::Handled::No(sacp::MessageAndCx::Notification(msg, cx)))
             }
         }
     }
