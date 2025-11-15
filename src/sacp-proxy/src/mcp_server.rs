@@ -10,8 +10,8 @@ use sacp::{
 use std::sync::{Arc, Mutex};
 
 use crate::{
-    JrCxExt, McpConnectRequest, McpConnectResponse, McpDisconnectNotification,
-    McpOverAcpNotification, McpOverAcpRequest, SuccessorNotification, SuccessorRequest,
+    McpConnectRequest, McpConnectResponse, McpDisconnectNotification, McpOverAcpNotification,
+    McpOverAcpRequest, SuccessorNotification, SuccessorRequest,
 };
 
 /// Manages MCP services offered to successor proxies and agents.
@@ -324,7 +324,7 @@ impl McpServiceRegistry {
         &self,
         result: Result<NewSessionRequest, sacp::Error>,
         request_cx: JrRequestCx<serde_json::Value>,
-    ) -> Result<Handled<JrRequestCx<serde_json::Value>>, sacp::Error> {
+    ) -> Result<Handled<MessageAndCx>, sacp::Error> {
         // Check if we parsed this message successfully.
         let mut request = match result {
             Ok(request) => request,
@@ -344,13 +344,10 @@ impl McpServiceRegistry {
             }
         }
 
-        // Forward it to the successor.
-        request_cx
-            .connection_cx()
-            .send_request_to_successor(request)
-            .forward_to_request_cx(request_cx.cast())?;
-
-        Ok(Handled::Yes)
+        // Convert modified request back to UntypedMessage and return it
+        // so subsequent handlers in the chain can see the MCP servers we added.
+        let modified_msg = request.into_untyped_message()?;
+        Ok(Handled::No(MessageAndCx::Request(modified_msg, request_cx)))
     }
 }
 
@@ -389,9 +386,9 @@ impl JrMessageHandler for McpServiceRegistry {
                 }
 
                 if let Some(result) = <NewSessionRequest>::parse_request(cx.method(), params) {
-                    cx = match self.handle_new_session_request(result, cx).await? {
-                        Handled::Yes => return Ok(Handled::Yes),
-                        Handled::No(cx) => cx,
+                    return match self.handle_new_session_request(result, cx).await? {
+                        Handled::Yes => Ok(Handled::Yes),
+                        Handled::No(message_and_cx) => Ok(Handled::No(message_and_cx)),
                     };
                 }
 
