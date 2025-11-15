@@ -6,7 +6,7 @@ description = "A debugging proxy that logs all ACP traffic to a file"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/symposium-dev/symposium-acp"
 keywords = ["acp", "agent", "debugging", "proxy", "logging"]
-categories = ["development-tools", "debugging"]
+categories = ["development-tools", "development-tools::debugging"]
 
 [dependencies]
 anyhow.workspace = true
