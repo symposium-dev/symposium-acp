@@ -117,5 +117,5 @@ pub use mcp_over_acp::*;
 mod to_from_successor;
 pub use to_from_successor::*;
 
-mod mcp_server;
-pub use mcp_server::*;
+mod mcp_server_registry;
+pub use mcp_server_registry::*;
