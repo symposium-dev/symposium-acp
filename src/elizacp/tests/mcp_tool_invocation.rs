@@ -41,7 +41,7 @@ async fn test_elizacp_mcp_tool_call() -> Result<(), sacp::Error> {
             let mut notification_tx = notification_tx.clone();
             async move |notification: SessionNotification, _cx| {
                 notification_tx
-                    .send(format!("{:?}", notification))
+                    .send(notification)
                     .await
                     .map_err(|_| sacp::Error::internal_error())
             }
@@ -101,10 +101,9 @@ async fn test_elizacp_mcp_tool_call() -> Result<(), sacp::Error> {
     let mut notification_texts = Vec::new();
     while let Some(notification) = notification_rx.next().await {
         // Extract just the text content from notifications, ignoring session IDs
-        if let Some(start) = notification.find("text: \"") {
-            if let Some(end) = notification[start + 7..].find("\"") {
-                let text = &notification[start + 7..start + 7 + end];
-                notification_texts.push(text.to_string());
+        if let sacp::schema::SessionUpdate::AgentMessageChunk(chunk) = notification.update {
+            if let ContentBlock::Text(text) = chunk.content {
+                notification_texts.push(text.text);
             }
         }
     }
