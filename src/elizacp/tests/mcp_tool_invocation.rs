@@ -98,19 +98,25 @@ async fn test_elizacp_mcp_tool_call() -> Result<(), sacp::Error> {
 
     // Drop the sender and collect all notifications
     drop(notification_tx);
-    let mut notifications = Vec::new();
+    let mut notification_texts = Vec::new();
     while let Some(notification) = notification_rx.next().await {
-        notifications.push(notification);
+        // Extract just the text content from notifications, ignoring session IDs
+        if let Some(start) = notification.find("text: \"") {
+            if let Some(end) = notification[start + 7..].find("\"") {
+                let text = &notification[start + 7..start + 7 + end];
+                notification_texts.push(text.to_string());
+            }
+        }
     }
 
     // Verify the output with expect_test
     // Since 'echo' is not a valid MCP server, we expect an error about connection closed
     expect![[r#"
         [
-            "SessionNotification { session_id: SessionId(\"3d08f29e-668a-4c29-ac9b-677c38cde41e\"), update: AgentMessageChunk(ContentChunk { content: Text(TextContent { annotations: None, text: \"ERROR: connection closed: initialize response\", meta: None }), meta: None }), meta: None }",
+            "ERROR: connection closed: initialize response",
         ]
     "#]]
-    .assert_debug_eq(&notifications);
+    .assert_debug_eq(&notification_texts);
 
     Ok(())
 }
