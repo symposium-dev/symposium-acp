@@ -42,23 +42,25 @@ impl McpBridgeListeners {
     /// 1. Spawns a TCP listener on an ephemeral port
     /// 2. Stores the mapping for message routing
     /// 3. Transforms the server to use stdio transport pointing to `conductor mcp $PORT`
+    /// 4. Returns a oneshot sender for delivering the session_id to the listener
     ///
-    /// Returns the modified NewSessionRequest with transformed MCP servers.
+    /// Returns `Some(session_id_tx)` if a listener was spawned, `None` otherwise.
     pub async fn transform_mcp_servers(
         &mut self,
         cx: &JrConnectionCx,
         mcp_server: &mut McpServer,
         conductor_tx: &mpsc::Sender<ConductorMessage>,
         conductor_command: &[String],
-    ) -> Result<(), sacp::Error> {
+    ) -> Result<Option<futures::channel::oneshot::Sender<sacp::schema::SessionId>>, sacp::Error>
+    {
         use sacp::schema::McpServer;
 
         let McpServer::Http { name, url, headers } = mcp_server else {
-            return Ok(());
+            return Ok(None);
         };
 
         if !url.starts_with("acp:") {
-            return Ok(());
+            return Ok(None);
         }
 
         if !headers.is_empty() {
@@ -71,9 +73,12 @@ impl McpBridgeListeners {
             "Detected MCP server with ACP transport, spawning TCP bridge"
         );
 
+        // Create oneshot channel for session_id delivery
+        let (session_id_tx, session_id_rx) = futures::channel::oneshot::channel();
+
         // Spawn TCP listener on ephemeral port
         let tcp_port = self
-            .spawn_tcp_listener(cx, &url, conductor_tx.clone())
+            .spawn_tcp_listener(cx, &url, conductor_tx.clone(), session_id_rx)
             .await?;
 
         info!(
@@ -102,7 +107,7 @@ impl McpBridgeListeners {
         };
         *mcp_server = transformed;
 
-        Ok(())
+        Ok(Some(session_id_tx))
     }
 
     /// Spawns a TCP listener for an MCP bridge and stores the mapping.
@@ -110,12 +115,15 @@ impl McpBridgeListeners {
     /// Binds to `localhost:0` to get an ephemeral port, then stores the
     /// `acp_url → tcp_port` mapping in `self.mcp_bridges`.
     ///
+    /// The listener blocks on receiving the session_id before processing connections.
+    ///
     /// Returns the bound port number.
     async fn spawn_tcp_listener(
         &mut self,
         cx: &JrConnectionCx,
         acp_url: &String,
         conductor_tx: mpsc::Sender<ConductorMessage>,
+        session_id_rx: futures::channel::oneshot::Receiver<sacp::schema::SessionId>,
     ) -> anyhow::Result<McpPort> {
         use tokio::net::TcpListener;
 
@@ -146,7 +154,20 @@ impl McpBridgeListeners {
             async move {
                 info!(
                     acp_url = acp_url,
-                    tcp_port.tcp_port, "Waiting for bridge connection"
+                    tcp_port.tcp_port, "Waiting for session_id before accepting connections"
+                );
+
+                // Block waiting for session_id before accepting any connections
+                let session_id = session_id_rx.await.map_err(|_| {
+                    sacp::Error::internal_error()
+                        .with_data("session_id channel closed before receiving session_id")
+                })?;
+
+                info!(
+                    acp_url = acp_url,
+                    tcp_port.tcp_port,
+                    ?session_id,
+                    "Session ID received, now accepting bridge connections"
                 );
 
                 // Accept connections
@@ -161,6 +182,7 @@ impl McpBridgeListeners {
                     conductor_tx
                         .send(ConductorMessage::McpConnectionReceived {
                             acp_url: acp_url.clone(),
+                            session_id: session_id.clone(),
                             actor: McpBridgeConnectionActor {
                                 stream,
                                 addr,

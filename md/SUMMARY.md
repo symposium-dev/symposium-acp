@@ -14,4 +14,5 @@
 - [SACP RFD](./proxying-acp.md)
 - [Component Architecture](./pacp-components.md)
 - [Conductor Implementation](./conductor.md)
+- [MCP Bridge](./mcp-bridge.md)
 - [Transport Architecture](./transport-architecture.md)
