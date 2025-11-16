@@ -1,6 +1,7 @@
 //! Integration tests for elizacp MCP tool invocation
 
 use elizacp::run_elizacp;
+use expect_test::expect;
 use sacp::JrHandlerChain;
 use sacp::schema::{
     ContentBlock, InitializeRequest, McpServer, NewSessionRequest, PromptRequest,
@@ -40,7 +41,7 @@ async fn test_elizacp_mcp_tool_call() -> Result<(), sacp::Error> {
             let mut notification_tx = notification_tx.clone();
             async move |notification: SessionNotification, _cx| {
                 notification_tx
-                    .send(notification)
+                    .send(format!("{:?}", notification))
                     .await
                     .map_err(|_| sacp::Error::internal_error())
             }
@@ -102,31 +103,14 @@ async fn test_elizacp_mcp_tool_call() -> Result<(), sacp::Error> {
         notifications.push(notification);
     }
 
-    // Verify we got a response notification
-    assert!(
-        !notifications.is_empty(),
-        "Expected at least one notification"
-    );
-
-    // Check that the response contains our result
-    let response_text = notifications
-        .iter()
-        .filter_map(|n| match &n.update {
-            sacp::schema::SessionUpdate::AgentMessageChunk(chunk) => match &chunk.content {
-                ContentBlock::Text(text) => Some(text.text.clone()),
-                _ => None,
-            },
-            _ => None,
-        })
-        .collect::<Vec<_>>()
-        .join(" ");
-
-    // Should start with OK: or ERROR:
-    assert!(
-        response_text.starts_with("OK:") || response_text.starts_with("ERROR:"),
-        "Expected response to start with OK: or ERROR:, got: {}",
-        response_text
-    );
+    // Verify the output with expect_test
+    // Since 'echo' is not a valid MCP server, we expect an error about connection closed
+    expect![[r#"
+        [
+            "SessionNotification { session_id: SessionId(\"3d08f29e-668a-4c29-ac9b-677c38cde41e\"), update: AgentMessageChunk(ContentChunk { content: Text(TextContent { annotations: None, text: \"ERROR: connection closed: initialize response\", meta: None }), meta: None }), meta: None }",
+        ]
+    "#]]
+    .assert_debug_eq(&notifications);
 
     Ok(())
 }
