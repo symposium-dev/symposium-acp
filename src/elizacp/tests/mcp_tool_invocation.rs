@@ -64,14 +64,19 @@ async fn test_elizacp_mcp_tool_call() -> Result<(), sacp::Error> {
             .await?;
 
             // Create session with an MCP server
-            // For this test, we'll use a simple echo MCP server
-            // You can replace this with a real MCP server command
+            // Use the mcp-echo-server from sacp-test
             let session_response = recv(client_cx.send_request(NewSessionRequest {
                 cwd: PathBuf::from("/tmp"),
                 mcp_servers: vec![McpServer::Stdio {
                     name: "test".to_string(),
-                    command: PathBuf::from("echo"),
-                    args: vec!["hello".to_string()],
+                    command: PathBuf::from("cargo"),
+                    args: vec![
+                        "run".to_string(),
+                        "-p".to_string(),
+                        "sacp-test".to_string(),
+                        "--bin".to_string(),
+                        "mcp-echo-server".to_string(),
+                    ],
                     env: vec![],
                 }],
                 meta: None,
@@ -109,10 +114,10 @@ async fn test_elizacp_mcp_tool_call() -> Result<(), sacp::Error> {
     }
 
     // Verify the output with expect_test
-    // Since 'echo' is not a valid MCP server, we expect an error about connection closed
+    // Should get a successful response from the echo tool
     expect![[r#"
         [
-            "ERROR: connection closed: initialize response",
+            "OK: CallToolResult { content: [Annotated { raw: Text(RawTextContent { text: \"Echo: Hello from test!\", meta: None }), annotations: None }], structured_content: None, is_error: Some(false), meta: None }",
         ]
     "#]]
     .assert_debug_eq(&notification_texts);
