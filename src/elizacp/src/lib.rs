@@ -4,17 +4,25 @@ use anyhow::Result;
 use eliza::Eliza;
 use sacp::schema::{
     AgentCapabilities, ContentBlock, ContentChunk, InitializeRequest, InitializeResponse,
-    LoadSessionRequest, LoadSessionResponse, NewSessionRequest, NewSessionResponse, PromptRequest,
-    PromptResponse, SessionId, SessionNotification, SessionUpdate, StopReason, TextContent,
+    LoadSessionRequest, LoadSessionResponse, McpServer, NewSessionRequest, NewSessionResponse,
+    PromptRequest, PromptResponse, SessionId, SessionNotification, SessionUpdate, StopReason,
+    TextContent,
 };
 use sacp::{Component, JrHandlerChain};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
+/// Session data for each active session
+#[derive(Clone)]
+struct SessionData {
+    eliza: Eliza,
+    mcp_servers: Vec<McpServer>,
+}
+
 /// Shared state across all sessions
 #[derive(Clone)]
 struct ElizaAgent {
-    sessions: Arc<Mutex<HashMap<SessionId, Eliza>>>,
+    sessions: Arc<Mutex<HashMap<SessionId, SessionData>>>,
 }
 
 impl ElizaAgent {
@@ -24,17 +32,35 @@ impl ElizaAgent {
         }
     }
 
-    fn create_session(&self, session_id: &SessionId) {
+    fn create_session(&self, session_id: &SessionId, mcp_servers: Vec<McpServer>) {
+        let mcp_server_count = mcp_servers.len();
         let mut sessions = self.sessions.lock().unwrap();
-        sessions.insert(session_id.clone(), Eliza::new());
-        tracing::info!("Created session: {}", session_id);
+        sessions.insert(
+            session_id.clone(),
+            SessionData {
+                eliza: Eliza::new(),
+                mcp_servers,
+            },
+        );
+        tracing::info!(
+            "Created session: {} with {} MCP servers",
+            session_id,
+            mcp_server_count
+        );
     }
 
     fn get_response(&self, session_id: &SessionId, input: &str) -> Option<String> {
         let mut sessions = self.sessions.lock().unwrap();
         sessions
             .get_mut(session_id)
-            .map(|eliza| eliza.respond(input))
+            .map(|session| session.eliza.respond(input))
+    }
+
+    fn get_mcp_servers(&self, session_id: &SessionId) -> Option<Vec<McpServer>> {
+        let sessions = self.sessions.lock().unwrap();
+        sessions
+            .get(session_id)
+            .map(|session| session.mcp_servers.clone())
     }
 
     fn _end_session(&self, session_id: &SessionId) {
@@ -52,7 +78,7 @@ impl ElizaAgent {
 
         // Generate a new session ID
         let session_id = SessionId(Arc::from(uuid::Uuid::new_v4().to_string()));
-        self.create_session(&session_id);
+        self.create_session(&session_id, request.mcp_servers);
 
         let response = NewSessionResponse {
             session_id,
@@ -70,8 +96,8 @@ impl ElizaAgent {
     ) -> Result<(), sacp::Error> {
         tracing::debug!("Load session request: {:?}", request.session_id);
 
-        // For Eliza, we just create a fresh session
-        self.create_session(&request.session_id);
+        // For Eliza, we just create a fresh session with no MCP servers
+        self.create_session(&request.session_id, vec![]);
 
         let response = LoadSessionResponse {
             modes: None,
@@ -109,12 +135,38 @@ impl ElizaAgent {
 
         tracing::debug!("Eliza response: {}", response_text);
 
+        // Check if this is an MCP tool call
+        let final_response = if response_text == "MCP_TOOL_CALL" {
+            // Parse the tool call from the input
+            if let Some((server_name, tool_name, params_json)) = parse_tool_call(&input_text) {
+                tracing::debug!(
+                    "Executing MCP tool call: {}::{} with params: {}",
+                    server_name,
+                    tool_name,
+                    params_json
+                );
+
+                // Execute the tool call
+                match self
+                    .execute_tool_call(session_id, &server_name, &tool_name, &params_json)
+                    .await
+                {
+                    Ok(result) => format!("OK: {}", result),
+                    Err(e) => format!("ERROR: {}", e),
+                }
+            } else {
+                "ERROR: Failed to parse tool call command".to_string()
+            }
+        } else {
+            response_text
+        };
+
         request_cx
             .connection_cx()
             .send_notification(SessionNotification {
                 session_id: session_id.clone(),
                 update: SessionUpdate::AgentMessageChunk(ContentChunk {
-                    content: response_text.into(),
+                    content: final_response.into(),
                     meta: None,
                 }),
                 meta: None,
@@ -125,6 +177,87 @@ impl ElizaAgent {
             stop_reason: StopReason::EndTurn,
             meta: None,
         })
+    }
+
+    async fn execute_tool_call(
+        &self,
+        session_id: &SessionId,
+        server_name: &str,
+        tool_name: &str,
+        params_json: &str,
+    ) -> Result<String> {
+        use rmcp::{
+            ServiceExt,
+            model::CallToolRequestParam,
+            transport::{ConfigureCommandExt, TokioChildProcess},
+        };
+        use tokio::process::Command;
+
+        // Get MCP servers for this session
+        let mcp_servers = self
+            .get_mcp_servers(session_id)
+            .ok_or_else(|| anyhow::anyhow!("Session not found"))?;
+
+        // Find the requested server
+        let mcp_server = mcp_servers
+            .iter()
+            .find(|server| match server {
+                McpServer::Stdio { name, .. } => name == server_name,
+                McpServer::Http { name, .. } => name == server_name,
+                McpServer::Sse { name, .. } => name == server_name,
+            })
+            .ok_or_else(|| anyhow::anyhow!("MCP server '{}' not found", server_name))?;
+
+        // Parse params JSON
+        let params = serde_json::from_str::<serde_json::Value>(params_json)
+            .map_err(|e| anyhow::anyhow!("Invalid JSON params: {}", e))?;
+
+        let params_obj = params.as_object().cloned();
+
+        // Spawn MCP client based on server type
+        match mcp_server {
+            McpServer::Stdio {
+                command, args, env, ..
+            } => {
+                tracing::debug!(
+                    command = ?command,
+                    args = ?args,
+                    "Starting MCP client for tool call"
+                );
+
+                // Create MCP client by spawning the process
+                let mcp_client = ()
+                    .serve(TokioChildProcess::new(Command::new(command).configure(
+                        |cmd| {
+                            cmd.args(args);
+                            for env_var in env {
+                                cmd.env(&env_var.name, &env_var.value);
+                            }
+                        },
+                    ))?)
+                    .await?;
+
+                tracing::debug!("MCP client connected, calling tool: {}", tool_name);
+
+                // Call the tool
+                let tool_result = mcp_client
+                    .call_tool(CallToolRequestParam {
+                        name: tool_name.to_string().into(),
+                        arguments: params_obj,
+                    })
+                    .await?;
+
+                tracing::debug!("Tool call result: {:?}", tool_result);
+
+                // Clean up the client
+                mcp_client.cancel().await?;
+
+                // Format the result
+                Ok(format!("{:?}", tool_result))
+            }
+            McpServer::Http { .. } => Err(anyhow::anyhow!("HTTP MCP servers not yet supported")),
+            McpServer::Sse { .. } => Err(anyhow::anyhow!("SSE MCP servers not yet supported")),
+        }
     }
 }
 
@@ -138,6 +271,22 @@ fn extract_text_from_prompt(blocks: &[ContentBlock]) -> String {
         })
         .collect::<Vec<_>>()
         .join(" ")
+}
+
+/// Parse tool call command from text input
+/// Format: "Use tool <server>::<tool> with <json_params>"
+/// Returns: Some((server_name, tool_name, params_json))
+fn parse_tool_call(input: &str) -> Option<(String, String, String)> {
+    use regex::Regex;
+
+    let re = Regex::new(r"(?i)^use tool ([a-zA-Z_0-9]+)::([a-zA-Z_0-9]+) with (.+)$").ok()?;
+    let captures = re.captures(input.trim())?;
+
+    Some((
+        captures.get(1)?.as_str().to_string(),
+        captures.get(2)?.as_str().to_string(),
+        captures.get(3)?.as_str().to_string(),
+    ))
 }
 
 /// Run the Eliza ACP agent with the given input/output streams.
