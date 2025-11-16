@@ -117,6 +117,39 @@ async fn test_proxy_provides_mcp_tools() -> Result<(), sacp::Error> {
 }
 
 #[tokio::test]
+async fn test_mcp_bridge_with_session_id() -> Result<(), sacp::Error> {
+    use mcp_integration::test_helpers::TestBuilder;
+
+    // Create shared state to track what the proxy receives
+    let proxy_state = mcp_integration::acp_proxy::AcpProxyState::default();
+    let proxy_state_clone = proxy_state.clone();
+
+    let notifications = TestBuilder::new()
+        .with_component(mcp_integration::acp_proxy::create(proxy_state))
+        .with_component(mcp_integration::elizacp_agent::create())
+        .run(|session| async move {
+            // Send a prompt to invoke the MCP tool via elizacp
+            session.prompt(
+                r#"Use tool test-acp-server::echo with {"message": "Hello from MCP bridge test!"}"#
+            ).await?;
+            Ok(())
+        })
+        .await?;
+
+    // Verify the proxy received the session_id in _mcp/connect
+    let received_session_ids = proxy_state_clone.received_session_ids.lock().unwrap();
+    assert!(
+        !received_session_ids.is_empty(),
+        "Proxy should have received at least one _mcp/connect request"
+    );
+
+    tracing::info!("Proxy received session IDs: {:?}", *received_session_ids);
+    tracing::info!("Notifications: {:?}", notifications);
+
+    Ok(())
+}
+
+#[tokio::test]
 async fn test_agent_handles_prompt() -> Result<(), sacp::Error> {
     // Create channel to collect log events
     let (mut log_tx, mut log_rx) = mpsc::unbounded();
