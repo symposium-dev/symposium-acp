@@ -11,7 +11,7 @@ use sacp::{BoxFuture, ByteStreams, Component};
 
 mod tool;
 use schemars::JsonSchema;
-use serde::{Deserialize, Serialize, de::DeserializeOwned};
+use serde::{Serialize, de::DeserializeOwned};
 use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
 pub use tool::*;
 
@@ -51,7 +51,7 @@ impl McpServer {
     ///
     /// * `name`: The name of the tool.
     /// * `description`: The description of the tool.
-    /// * `func`: The function that implements the tool.
+    /// * `func`: The function that implements the tool. Use an async closure like `async |args, cx| { .. }`.
     /// * `to_future_hack`: A function that converts the tool function into a future.
     ///   You should always write `|t, args, cx| Box::pin(t(args, cx))`.
     ///   This is needed to sidestep current Rust language limitations.
@@ -71,7 +71,7 @@ impl McpServer {
         P: JsonSchema + DeserializeOwned + 'static + Send,
         R: JsonSchema + Serialize + 'static + Send,
         F: AsyncFn(P, McpContext) -> Result<R, sacp::Error> + Send + Sync + 'static,
-        H: Fn(&F, P, McpContext) -> BoxFuture<'_, Result<R, sacp::Error>> + Send + Sync,
+        H: Fn(&F, P, McpContext) -> BoxFuture<'_, Result<R, sacp::Error>> + Send + Sync + 'static,
     {
         struct ToolFnTool<P, R, F, H> {
             name: String,
@@ -86,7 +86,10 @@ impl McpServer {
             P: JsonSchema + DeserializeOwned + 'static + Send,
             R: JsonSchema + Serialize + 'static + Send,
             F: AsyncFn(P, McpContext) -> Result<R, sacp::Error> + Send + Sync + 'static,
-            H: Fn(&F, P, McpContext) -> BoxFuture<'_, Result<R, sacp::Error>> + Send + Sync,
+            H: Fn(&F, P, McpContext) -> BoxFuture<'_, Result<R, sacp::Error>>
+                + Send
+                + Sync
+                + 'static,
         {
             type Input = P;
             type Output = R;
