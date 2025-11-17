@@ -7,7 +7,7 @@ use sacp::{
 use serde::{Deserialize, Serialize};
 use std::marker::PhantomData;
 
-use crate::mcp_server::McpServiceRegistry;
+use crate::mcp_server_registry::McpServiceRegistry;
 
 // Requests and notifications send between us and the successor
 // ============================================================

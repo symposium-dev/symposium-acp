@@ -119,3 +119,5 @@ pub use to_from_successor::*;
 
 mod mcp_server_registry;
 pub use mcp_server_registry::*;
+
+mod mcp_server_builder;

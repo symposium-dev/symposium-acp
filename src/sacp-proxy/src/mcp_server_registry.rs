@@ -2,7 +2,7 @@ use futures::channel::mpsc;
 use futures::{SinkExt, StreamExt};
 use fxhash::FxHashMap;
 
-use sacp::schema::{NewSessionRequest, NewSessionResponse};
+use sacp::schema::{NewSessionRequest, NewSessionResponse, SessionId};
 use sacp::util::MatchMessage;
 use sacp::{
     Channel, Component, DynComponent, Handled, JrConnectionCx, JrHandlerChain, JrMessageHandler,
@@ -10,6 +10,7 @@ use sacp::{
 };
 use std::sync::{Arc, Mutex};
 
+use crate::mcp_server_builder::McpServer;
 use crate::{
     McpConnectRequest, McpConnectResponse, McpDisconnectNotification, McpOverAcpNotification,
     McpOverAcpRequest, SuccessorNotification, SuccessorRequest,
@@ -46,18 +47,32 @@ impl McpServiceRegistry {
         Self::default()
     }
 
-    /// Add an MCP server to the registry using a custom spawner.
+    /// Add an [`McpServer`] to the registry.
     ///
-    /// This is the base method for adding MCP servers. Use this if you have a custom
-    /// way to create Component instances for your MCP server.
+    /// This server will be added to all new sessions where this registry is in the handler chain.
     ///
-    /// For rmcp-based servers, use the `sacp-rmcp` crate which provides convenient
-    /// extension methods.
+    /// See the [`McpServer`] documentation for more information.
+    pub fn with_mcp_server(
+        self,
+        name: impl ToString,
+        server: McpServer,
+    ) -> Result<Self, sacp::Error> {
+        self.add_mcp_server_with_context(name, move |mcp_cx| server.new_connection(mcp_cx))?;
+        Ok(self)
+    }
+
+    /// Add an MCP server to the registry using a custom constructor function.
+    ///
+    /// This server will be added to all new sessions where this registry is in the handler chain.
+    ///
+    /// This method is for independent MCP servers that do not make use of ACP.
+    /// You may wish to use the `sacp-rmcp` crate which provides convenient
+    /// extension methods for working with MCP servers implemented using the `rmcp` crate.
     ///
     /// # Parameters
     ///
     /// - `name`: The name of the server.
-    /// - `spawner`: A trait object that can create Component instances.
+    /// - `new_fn`: Constructor function that creates the MCP server and returns a [`Component`] for connecting to it.
     pub fn add_mcp_server<C: Component>(
         &self,
         name: impl ToString,
@@ -72,12 +87,53 @@ impl McpServiceRegistry {
             F: Fn() -> C + Send + Sync + 'static,
             C: Component,
         {
-            fn spawn(&self) -> DynComponent {
+            fn spawn(&self, _cx: McpContext) -> DynComponent {
                 let component = (self.new_fn)();
                 DynComponent::new(component)
             }
         }
 
+        self.add_mcp_server_internal(name, FnSpawner { new_fn })
+    }
+
+    /// Add an MCP server to the registry that wishes to receive a [`McpContext`] when created.
+    ///
+    /// This server will be added to all new sessions where this registry is in the handler chain.
+    ///
+    /// This method is for MCP servers that require information about the ACP connection and/or
+    /// the ability to make ACP requests.
+    ///
+    /// # Parameters
+    ///
+    /// - `name`: The name of the server.
+    /// - `new_fn`: Constructor function that creates the MCP server and returns a [`Component`] for connecting to it.
+    pub fn add_mcp_server_with_context<C: Component>(
+        &self,
+        name: impl ToString,
+        new_fn: impl Fn(McpContext) -> C + Send + Sync + 'static,
+    ) -> Result<(), sacp::Error> {
+        struct FnSpawner<F> {
+            new_fn: F,
+        }
+
+        impl<C, F> SpawnMcpServer for FnSpawner<F>
+        where
+            F: Fn(McpContext) -> C + Send + Sync + 'static,
+            C: Component,
+        {
+            fn spawn(&self, cx: McpContext) -> DynComponent {
+                let component = (self.new_fn)(cx);
+                DynComponent::new(component)
+            }
+        }
+
+        self.add_mcp_server_internal(name, FnSpawner { new_fn })
+    }
+    fn add_mcp_server_internal(
+        &self,
+        name: impl ToString,
+        spawner: impl SpawnMcpServer,
+    ) -> Result<(), sacp::Error> {
         let name = name.to_string();
         if let Some(_) = self.get_registered_server_by_name(&name) {
             return Err(sacp::util::internal_error(format!(
@@ -90,7 +146,7 @@ impl McpServiceRegistry {
         let service = Arc::new(RegisteredMcpServer {
             name,
             url: format!("acp:{uuid}"),
-            spawn: Arc::new(FnSpawner { new_fn }),
+            spawn: Arc::new(spawner),
         });
         self.insert_registered_server(service);
         Ok(())
@@ -189,6 +245,7 @@ impl McpServiceRegistry {
         sacp::Error,
     > {
         let SuccessorRequest { request } = &successor_request;
+        let outer_cx = request_cx.connection_cx();
 
         // Check if we have a registered server with the given URL. If not, don't try to handle the request.
         let Some(registered_server) = self.get_registered_server_by_url(&request.acp_url) else {
@@ -206,7 +263,7 @@ impl McpServiceRegistry {
         // Create client-side handler that wraps messages and forwards to successor
         let client_component = {
             let connection_id = connection_id.clone();
-            let outer_cx = request_cx.connection_cx();
+            let outer_cx = outer_cx.clone();
 
             JrHandlerChain::new()
                 .on_receive_message(async move |message: sacp::MessageAndCx| {
@@ -242,11 +299,13 @@ impl McpServiceRegistry {
         };
 
         // Get the MCP server component
-        let mcp_server = registered_server.spawn.spawn();
+        let mcp_server = registered_server.spawn.spawn(McpContext {
+            session_id: request.session_id.clone(),
+            connection_cx: outer_cx.clone(),
+        });
 
         // Spawn both sides of the connection
-        let spawn_results = request_cx
-            .connection_cx()
+        let spawn_results = outer_cx
             .spawn(async move { client_component.serve(client_channel).await })
             .and_then(|()| {
                 // Spawn the MCP server serving the server channel
@@ -390,6 +449,7 @@ impl JrMessageHandler for McpServiceRegistry {
     }
 }
 
+/// A "registeed" MCP server can be launched when a connection is established.
 #[derive(Clone)]
 struct RegisteredMcpServer {
     name: String,
@@ -423,11 +483,31 @@ trait SpawnMcpServer: Send + Sync + 'static {
     /// Create a new MCP server component.
     ///
     /// Returns a `DynComponent` that can be used with the Component API.
-    fn spawn(&self) -> sacp::DynComponent;
+    fn spawn(&self, cx: McpContext) -> sacp::DynComponent;
 }
 
 impl AsRef<McpServiceRegistry> for McpServiceRegistry {
     fn as_ref(&self) -> &McpServiceRegistry {
         self
+    }
+}
+
+/// Context about the ACP and MCP connection available to an MCP server.
+#[derive(Clone)]
+pub struct McpContext {
+    session_id: SessionId,
+    connection_cx: JrConnectionCx,
+}
+
+impl McpContext {
+    /// The session-id of the session connected to this MCP server.
+    pub fn session_id(&self) -> &SessionId {
+        &self.session_id
+    }
+
+    /// The ACP connection context, which can be used to send ACP requests and notifications
+    /// to your successor.
+    pub fn connection_cx(&self) -> JrConnectionCx {
+        self.connection_cx.clone()
     }
 }
