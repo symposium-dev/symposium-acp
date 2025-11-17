@@ -66,9 +66,8 @@ impl Eliza {
     fn load_patterns(&mut self) {
         // Highest priority: MCP tool invocation command
         // Format: "Use tool <server>::<tool> with <json_params>"
-        // Match anything except colons and whitespace for server/tool names
         self.add_pattern(
-            r"(?i)^use tool ([^:\s]+)::([^:\s]+) with (.+)$",
+            r"(?i)^use tool ([a-zA-Z_0-9]+)::([a-zA-Z_0-9]+) with (.+)$",
             vec!["MCP_TOOL_CALL"],
             100,
         );
