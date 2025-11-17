@@ -15,6 +15,7 @@ use sacp_proxy::{AcpProxyExt, McpServer, McpServiceRegistry};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
+#[allow(dead_code)]
 mod mcp_integration;
 
 /// Input for the echo tool (null/empty)
@@ -95,7 +96,7 @@ async fn test_session_id_delivered_to_mcp_tools() -> Result<(), sacp::Error> {
     let session_id_clone = received_session_id.clone();
 
     // Collect notifications
-    let (mut notif_tx, mut notif_rx) = mpsc::unbounded();
+    let (notif_tx, mut notif_rx) = mpsc::unbounded();
 
     JrHandlerChain::new()
         .name("test-editor")
