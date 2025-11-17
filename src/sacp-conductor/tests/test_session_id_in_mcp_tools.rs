@@ -27,17 +27,6 @@ struct EchoOutput {
     session_id: String,
 }
 
-/// Helper to receive a JSON-RPC response
-async fn recv<R: sacp::JrResponsePayload + Send>(
-    response: sacp::JrResponse<R>,
-) -> Result<R, sacp::Error> {
-    let (tx, rx) = tokio::sync::oneshot::channel();
-    response.await_when_result_received(async move |result| {
-        tx.send(result).map_err(|_| sacp::Error::internal_error())
-    })?;
-    rx.await.map_err(|_| sacp::Error::internal_error())?
-}
-
 fn conductor_command() -> Vec<String> {
     vec![
         "cargo".to_string(),
@@ -136,21 +125,25 @@ async fn test_session_id_delivered_to_mcp_tools() -> Result<(), sacp::Error> {
         })
         .with_client(transport, async move |editor_cx| {
             // Initialize
-            recv(editor_cx.send_request(sacp::schema::InitializeRequest {
-                protocol_version: Default::default(),
-                client_capabilities: Default::default(),
-                meta: None,
-                client_info: None,
-            }))
-            .await?;
+            editor_cx
+                .send_request(sacp::schema::InitializeRequest {
+                    protocol_version: Default::default(),
+                    client_capabilities: Default::default(),
+                    meta: None,
+                    client_info: None,
+                })
+                .block_task()
+                .await?;
 
             // Create session
-            let session = recv(editor_cx.send_request(sacp::schema::NewSessionRequest {
-                cwd: Default::default(),
-                mcp_servers: vec![],
-                meta: None,
-            }))
-            .await?;
+            let session = editor_cx
+                .send_request(sacp::schema::NewSessionRequest {
+                    cwd: Default::default(),
+                    mcp_servers: vec![],
+                    meta: None,
+                })
+                .block_task()
+                .await?;
 
             // Store the session_id for later comparison
             *session_id_clone.lock().await = Some(session.session_id.clone());
@@ -158,16 +151,18 @@ async fn test_session_id_delivered_to_mcp_tools() -> Result<(), sacp::Error> {
             tracing::info!(session_id = %session.session_id.0, "Session created");
 
             // Send a prompt asking elizacp to invoke the echo tool
-            let _prompt_response = recv(editor_cx.send_request(sacp::schema::PromptRequest {
-                session_id: session.session_id.clone(),
-                prompt: vec![ContentBlock::Text(TextContent {
-                    annotations: None,
-                    text: r#"Use tool echo_server::echo with {}"#.to_string(),
+            editor_cx
+                .send_request(sacp::schema::PromptRequest {
+                    session_id: session.session_id.clone(),
+                    prompt: vec![ContentBlock::Text(TextContent {
+                        annotations: None,
+                        text: r#"Use tool echo_server::echo with {}"#.to_string(),
+                        meta: None,
+                    })],
                     meta: None,
-                })],
-                meta: None,
-            }))
-            .await?;
+                })
+                .block_task()
+                .await?;
 
             Ok(())
         })
