@@ -22,6 +22,10 @@ pub struct SuccessorRequest<Req: JrRequest> {
     /// The message to be sent to the successor component.
     #[serde(flatten)]
     pub request: Req,
+
+    /// Optional metadata
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub meta: Option<serde_json::Value>,
 }
 
 impl<Req: JrRequest> JrMessage for SuccessorRequest<Req> {
@@ -30,6 +34,7 @@ impl<Req: JrRequest> JrMessage for SuccessorRequest<Req> {
             SUCCESSOR_REQUEST_METHOD,
             SuccessorRequest {
                 request: self.request.into_untyped_message()?,
+                meta: self.meta,
             },
         )
     }
@@ -43,7 +48,10 @@ impl<Req: JrRequest> JrMessage for SuccessorRequest<Req> {
             match sacp::util::json_cast::<_, SuccessorRequest<sacp::UntypedMessage>>(params) {
                 Ok(outer) => match Req::parse_request(&outer.request.method, &outer.request.params)
                 {
-                    Some(Ok(request)) => Some(Ok(SuccessorRequest { request })),
+                    Some(Ok(request)) => Some(Ok(SuccessorRequest {
+                        request,
+                        meta: outer.meta,
+                    })),
                     Some(Err(err)) => Some(Err(err)),
                     None => None,
                 },
@@ -76,6 +84,10 @@ pub struct SuccessorNotification<Req: JrNotification> {
     /// The message to be sent to the successor component.
     #[serde(flatten)]
     pub notification: Req,
+
+    /// Optional metadata
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub meta: Option<serde_json::Value>,
 }
 
 impl<Req: JrNotification> JrMessage for SuccessorNotification<Req> {
@@ -84,6 +96,7 @@ impl<Req: JrNotification> JrMessage for SuccessorNotification<Req> {
             SUCCESSOR_NOTIFICATION_METHOD,
             SuccessorNotification {
                 notification: self.notification.into_untyped_message()?,
+                meta: self.meta,
             },
         )
     }
@@ -106,7 +119,10 @@ impl<Req: JrNotification> JrMessage for SuccessorNotification<Req> {
                     &outer.notification.method,
                     &outer.notification.params,
                 ) {
-                    Some(Ok(notification)) => Some(Ok(SuccessorNotification { notification })),
+                    Some(Ok(notification)) => Some(Ok(SuccessorNotification {
+                        notification,
+                        meta: outer.meta,
+                    })),
                     Some(Err(err)) => Some(Err(err)),
                     None => None,
                 },
@@ -674,7 +690,10 @@ impl JrCxExt for JrConnectionCx {
         &self,
         request: Req,
     ) -> sacp::JrResponse<Req::Response> {
-        let wrapper = SuccessorRequest { request };
+        let wrapper = SuccessorRequest {
+            request,
+            meta: None,
+        };
         self.send_request(wrapper)
     }
 
@@ -682,7 +701,10 @@ impl JrCxExt for JrConnectionCx {
         &self,
         notification: Req,
     ) -> Result<(), sacp::Error> {
-        let wrapper = SuccessorNotification { notification };
+        let wrapper = SuccessorNotification {
+            notification,
+            meta: None,
+        };
         self.send_notification(wrapper)
     }
 }

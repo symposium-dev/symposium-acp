@@ -263,7 +263,10 @@ impl McpBridgeConnectionActor {
 
         self.conductor_tx
             .send(ConductorMessage::McpConnectionDisconnected {
-                notification: McpDisconnectNotification { connection_id },
+                notification: McpDisconnectNotification {
+                    connection_id,
+                    meta: None,
+                },
             })
             .await
             .map_err(|_| sacp::Error::internal_error())?;
