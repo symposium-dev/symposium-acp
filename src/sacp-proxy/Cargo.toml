@@ -20,6 +20,8 @@ tokio.workspace = true
 tokio-util.workspace = true
 tracing.workspace = true
 uuid.workspace = true
+rmcp = { workspace = true, features = ["server"] }
+schemars.workspace = true
 
 [dev-dependencies]
 chrono.workspace = true

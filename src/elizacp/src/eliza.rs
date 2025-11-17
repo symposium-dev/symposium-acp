@@ -20,6 +20,7 @@ struct Pattern {
 }
 
 /// The Eliza chatbot engine.
+#[derive(Clone)]
 pub struct Eliza {
     patterns: Vec<Pattern>,
     reflections: HashMap<String, String>,
@@ -63,6 +64,15 @@ impl Eliza {
 
     /// Load the classic Eliza pattern database.
     fn load_patterns(&mut self) {
+        // Highest priority: MCP tool invocation command
+        // Format: "Use tool <server>::<tool> with <json_params>"
+        // Per MCP spec, tool names can contain: A-Z, a-z, 0-9, _, -, .
+        self.add_pattern(
+            r"(?i)^use tool ([a-zA-Z0-9_.\-]+)::([a-zA-Z0-9_.\-]+) with (.+)$",
+            vec!["MCP_TOOL_CALL"],
+            100,
+        );
+
         // High priority patterns for specific psychological keywords
         self.add_pattern(
             r"(?i).*\b(father|dad|mother|mom|parent|family)\b.*",

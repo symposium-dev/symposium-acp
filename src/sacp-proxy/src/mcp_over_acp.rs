@@ -12,6 +12,9 @@ pub const METHOD_MCP_CONNECT_REQUEST: &str = "_mcp/connect";
 pub struct McpConnectRequest {
     /// The ACP URL to connect to (e.g., "acp:uuid")
     pub acp_url: String,
+
+    /// The session ID this MCP connection belongs to
+    pub session_id: sacp::schema::SessionId,
 }
 
 impl JrMessage for McpConnectRequest {
