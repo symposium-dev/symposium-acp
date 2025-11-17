@@ -1,4 +1,4 @@
-use std::{pin::pin, sync::Arc};
+use std::{marker::PhantomData, pin::pin, sync::Arc};
 
 use futures::future::Either;
 use fxhash::FxHashMap;
@@ -10,6 +10,8 @@ use rmcp::{
 use sacp::{BoxFuture, ByteStreams, Component};
 
 mod tool;
+use schemars::JsonSchema;
+use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
 pub use tool::*;
 
@@ -41,6 +43,74 @@ impl McpServer {
         self.tool_models.push(tool_model);
         self.tools.insert(tool.name(), make_erased_mcp_tool(tool));
         self
+    }
+
+    /// Convenience wrapper for defining a tool without having to create a struct.
+    ///
+    /// # Parameters
+    ///
+    /// * `name`: The name of the tool.
+    /// * `description`: The description of the tool.
+    /// * `func`: The function that implements the tool.
+    /// * `to_future_hack`: A function that converts the tool function into a future.
+    ///   You should always write `|t, args, cx| Box::pin(t(args, cx))`.
+    ///   This is needed to sidestep current Rust language limitations.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// ```
+    pub fn tool_fn<P, R, F, H>(
+        self,
+        name: impl ToString,
+        description: impl ToString,
+        func: F,
+        to_future_hack: H,
+    ) -> Self
+    where
+        P: JsonSchema + DeserializeOwned + 'static + Send,
+        R: JsonSchema + Serialize + 'static + Send,
+        F: AsyncFn(P, McpContext) -> Result<R, sacp::Error> + Send + Sync + 'static,
+        H: Fn(&F, P, McpContext) -> BoxFuture<'_, Result<R, sacp::Error>> + Send + Sync,
+    {
+        struct ToolFnTool<P, R, F, H> {
+            name: String,
+            description: String,
+            func: F,
+            to_future_hack: H,
+            phantom: PhantomData<fn(P) -> R>,
+        }
+
+        impl<P, R, F, H> McpTool for ToolFnTool<P, R, F, H>
+        where
+            P: JsonSchema + DeserializeOwned + 'static + Send,
+            R: JsonSchema + Serialize + 'static + Send,
+            F: AsyncFn(P, McpContext) -> Result<R, sacp::Error> + Send + Sync + 'static,
+            H: Fn(&F, P, McpContext) -> BoxFuture<'_, Result<R, sacp::Error>> + Send + Sync,
+        {
+            type Input = P;
+            type Output = R;
+
+            fn name(&self) -> String {
+                self.name.clone()
+            }
+
+            fn description(&self) -> String {
+                self.description.clone()
+            }
+
+            async fn call_tool(&self, params: P, cx: McpContext) -> Result<R, sacp::Error> {
+                (self.to_future_hack)(&self.func, params, cx).await
+            }
+        }
+
+        self.tool(ToolFnTool {
+            name: name.to_string(),
+            description: description.to_string(),
+            func,
+            to_future_hack,
+            phantom: PhantomData::<fn(P) -> R>,
+        })
     }
 
     /// Create a connection to communicate with this server given the MCP context.

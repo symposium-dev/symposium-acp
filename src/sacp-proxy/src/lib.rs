@@ -121,3 +121,4 @@ mod mcp_server_registry;
 pub use mcp_server_registry::*;
 
 mod mcp_server_builder;
+pub use mcp_server_builder::*;
