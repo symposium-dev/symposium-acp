@@ -15,6 +15,10 @@ pub struct McpConnectRequest {
 
     /// The session ID this MCP connection belongs to
     pub session_id: sacp::schema::SessionId,
+
+    /// Optional metadata
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub meta: Option<serde_json::Value>,
 }
 
 impl JrMessage for McpConnectRequest {
@@ -51,6 +55,10 @@ impl JrRequest for McpConnectRequest {
 pub struct McpConnectResponse {
     /// Unique identifier for the established MCP connection
     pub connection_id: String,
+
+    /// Optional metadata
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub meta: Option<serde_json::Value>,
 }
 
 impl JrResponsePayload for McpConnectResponse {
@@ -71,6 +79,10 @@ pub const METHOD_MCP_DISCONNECT_NOTIFICATION: &str = "_mcp/disconnect";
 pub struct McpDisconnectNotification {
     /// The id of the connection to disconnect.
     pub connection_id: String,
+
+    /// Optional metadata
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub meta: Option<serde_json::Value>,
 }
 
 impl JrMessage for McpDisconnectNotification {
@@ -116,6 +128,10 @@ pub struct McpOverAcpRequest<R> {
     /// Request to be sent to the MCP server or client.
     #[serde(flatten)]
     pub request: R,
+
+    /// Optional metadata
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub meta: Option<serde_json::Value>,
 }
 
 impl<R: JrRequest> JrMessage for McpOverAcpRequest<R> {
@@ -126,6 +142,7 @@ impl<R: JrRequest> JrMessage for McpOverAcpRequest<R> {
             McpOverAcpRequest {
                 connection_id: self.connection_id,
                 request: message,
+                meta: self.meta,
             },
         )
     }
@@ -141,6 +158,7 @@ impl<R: JrRequest> JrMessage for McpOverAcpRequest<R> {
                     Some(Ok(request)) => Some(Ok(McpOverAcpRequest {
                         connection_id: outer.connection_id,
                         request,
+                        meta: outer.meta,
                     })),
                     Some(Err(err)) => Some(Err(err)),
                     None => None,
@@ -181,6 +199,10 @@ pub struct McpOverAcpNotification<R> {
     /// Notification to be sent to the MCP server or client.
     #[serde(flatten)]
     pub notification: R,
+
+    /// Optional metadata
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub meta: Option<serde_json::Value>,
 }
 
 impl<R: JrMessage> JrMessage for McpOverAcpNotification<R> {
@@ -191,6 +213,7 @@ impl<R: JrMessage> JrMessage for McpOverAcpNotification<R> {
             McpOverAcpNotification {
                 connection_id: self.connection_id,
                 notification: params,
+                meta: self.meta,
             },
         )
     }
@@ -216,6 +239,7 @@ impl<R: JrMessage> JrMessage for McpOverAcpNotification<R> {
                     Some(Ok(notification)) => Some(Ok(McpOverAcpNotification {
                         connection_id: outer.connection_id,
                         notification,
+                        meta: outer.meta,
                     })),
                     Some(Err(err)) => Some(Err(err)),
                     None => None,

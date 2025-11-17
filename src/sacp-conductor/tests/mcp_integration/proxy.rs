@@ -6,7 +6,7 @@ use sacp_rmcp::McpServiceRegistryRmcpExt;
 
 use crate::mcp_integration::mcp_server::TestMcpServer;
 
-pub struct ProxyComponent;
+struct ProxyComponent;
 
 impl Component for ProxyComponent {
     async fn serve(self, client: impl Component) -> Result<(), sacp::Error> {

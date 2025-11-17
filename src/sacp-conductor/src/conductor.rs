@@ -379,6 +379,7 @@ impl ConductorHandlerState {
                     McpConnectRequest {
                         acp_url,
                         session_id,
+                        meta: None,
                     },
                 )
                 .await_when_result_received({
@@ -404,7 +405,7 @@ impl ConductorHandlerState {
             // MCP connection successfully established. Spawn the actor
             // and insert the connection into our map fot future reference.
             ConductorMessage::McpConnectionEstablished {
-                response: McpConnectResponse { connection_id },
+                response: McpConnectResponse { connection_id, .. },
                 actor,
                 connection,
             } => {
@@ -424,6 +425,7 @@ impl ConductorHandlerState {
                             McpOverAcpRequest {
                                 connection_id: connection_id.clone(),
                                 request,
+                                meta: None,
                             },
                             request_cx,
                         )
@@ -433,6 +435,7 @@ impl ConductorHandlerState {
                             McpOverAcpNotification {
                                 connection_id: connection_id.clone(),
                                 notification,
+                                meta: None,
                             },
                             notification_cx,
                         )
@@ -497,9 +500,23 @@ impl ConductorHandlerState {
 
                 // Message from conductor's successor goes to the last component (the conductor's successor's predecessor)
                 let wrapped = message.map(
-                    |request, request_cx| (SuccessorRequest { request }, request_cx),
+                    |request, request_cx| {
+                        (
+                            SuccessorRequest {
+                                request,
+                                meta: None,
+                            },
+                            request_cx,
+                        )
+                    },
                     |notification, notification_cx| {
-                        (SuccessorNotification { notification }, notification_cx)
+                        (
+                            SuccessorNotification {
+                                notification,
+                                meta: None,
+                            },
+                            notification_cx,
+                        )
                     },
                 );
                 // components.len() - 1 is the last component index, which is the predecessor of the conductor's successor
@@ -509,9 +526,23 @@ impl ConductorHandlerState {
             SourceComponentIndex::Component(index) => {
                 // Message from component at `index` goes to component at `index - 1`
                 let wrapped = message.map(
-                    |request, request_cx| (SuccessorRequest { request }, request_cx),
+                    |request, request_cx| {
+                        (
+                            SuccessorRequest {
+                                request,
+                                meta: None,
+                            },
+                            request_cx,
+                        )
+                    },
                     |notification, notification_cx| {
-                        (SuccessorNotification { notification }, notification_cx)
+                        (
+                            SuccessorNotification {
+                                notification,
+                                meta: None,
+                            },
+                            notification_cx,
+                        )
                     },
                 );
                 self.components[index - 1]
@@ -529,7 +560,10 @@ impl ConductorHandlerState {
         if source_component_index == 0 {
             client.send_request(request)
         } else {
-            self.components[source_component_index - 1].send_request(SuccessorRequest { request })
+            self.components[source_component_index - 1].send_request(SuccessorRequest {
+                request,
+                meta: None,
+            })
         }
     }
 
@@ -552,8 +586,10 @@ impl ConductorHandlerState {
         if component_index == 0 {
             client.send_notification(notification)
         } else {
-            self.components[component_index - 1]
-                .send_notification(SuccessorNotification { notification })
+            self.components[component_index - 1].send_notification(SuccessorNotification {
+                notification,
+                meta: None,
+            })
         }
     }
 
@@ -580,9 +616,23 @@ impl ConductorHandlerState {
             );
             // Wrap the message as a successor message before sending
             let to_successor_message = message.map(
-                |request, request_cx| (SuccessorRequest { request }, request_cx),
+                |request, request_cx| {
+                    (
+                        SuccessorRequest {
+                            request,
+                            meta: None,
+                        },
+                        request_cx,
+                    )
+                },
                 |notification, notification_cx| {
-                    (SuccessorNotification { notification }, notification_cx)
+                    (
+                        SuccessorNotification {
+                            notification,
+                            meta: None,
+                        },
+                        notification_cx,
+                    )
                 },
             );
             return client.send_proxied_message(to_successor_message);
@@ -620,6 +670,7 @@ impl ConductorHandlerState {
                     let McpOverAcpRequest {
                         connection_id,
                         request: mcp_request,
+                        ..
                     } = request;
                     self.bridge_connections
                         .get_mut(&connection_id)
@@ -639,6 +690,7 @@ impl ConductorHandlerState {
                     let McpOverAcpNotification {
                         connection_id,
                         notification: mcp_notification,
+                        ..
                     } = notification;
                     self.bridge_connections
                         .get_mut(&connection_id)

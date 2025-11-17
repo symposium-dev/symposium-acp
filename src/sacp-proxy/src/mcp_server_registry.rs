@@ -218,11 +218,7 @@ impl McpServiceRegistry {
     /// registry.add_mcp_server("my-server", || MyMcpServer)?;
     ///
     /// let mut request = NewSessionRequest {
-    ///     mcp_servers: vec![],
-    ///     cwd: std::env::current_dir()?,
-    ///     meta: None,
-    /// };
-    ///
+
     /// registry.add_registered_mcp_servers_to(&mut request);
     /// // request.mcp_servers now contains "my-server"
     /// ```
@@ -244,7 +240,7 @@ impl McpServiceRegistry {
         )>,
         sacp::Error,
     > {
-        let SuccessorRequest { request } = &successor_request;
+        let SuccessorRequest { request, .. } = &successor_request;
         let outer_cx = request_cx.connection_cx();
 
         // Check if we have a registered server with the given URL. If not, don't try to handle the request.
@@ -274,6 +270,7 @@ impl McpServiceRegistry {
                                 McpOverAcpRequest {
                                     connection_id: connection_id.clone(),
                                     request,
+                                    meta: None,
                                 },
                                 request_cx,
                             )
@@ -283,6 +280,7 @@ impl McpServiceRegistry {
                                 McpOverAcpNotification {
                                     connection_id: connection_id.clone(),
                                     notification,
+                                    meta: None,
                                 },
                                 cx,
                             )
@@ -316,7 +314,10 @@ impl McpServiceRegistry {
 
         match spawn_results {
             Ok(()) => {
-                request_cx.respond(McpConnectResponse { connection_id })?;
+                request_cx.respond(McpConnectResponse {
+                    connection_id,
+                    meta: None,
+                })?;
                 Ok(Handled::Yes)
             }
 
@@ -344,7 +345,7 @@ impl McpServiceRegistry {
             return Ok(Handled::No((successor_request, request_cx)));
         };
 
-        let SuccessorRequest { request } = successor_request;
+        let SuccessorRequest { request, .. } = successor_request;
 
         mcp_server_tx
             .send(MessageAndCx::Request(request.request, request_cx))
@@ -372,7 +373,7 @@ impl McpServiceRegistry {
             return Ok(Handled::No((successor_notification, notification_cx)));
         };
 
-        let SuccessorNotification { notification } = successor_notification;
+        let SuccessorNotification { notification, .. } = successor_notification;
 
         mcp_server_tx
             .send(MessageAndCx::Notification(
@@ -396,7 +397,7 @@ impl McpServiceRegistry {
         )>,
         sacp::Error,
     > {
-        let SuccessorNotification { notification } = &successor_notification;
+        let SuccessorNotification { notification, .. } = &successor_notification;
 
         // Remove connection if we have it. Otherwise, do not handle the notification.
         if self.remove_connection(&notification.connection_id) {
