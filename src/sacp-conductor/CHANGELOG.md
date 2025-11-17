@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.1.0](https://github.com/symposium-dev/symposium-acp/compare/sacp-conductor-v1.0.1...sacp-conductor-v1.1.0) - 2025-11-17
+
+### Added
+
+- *(sacp-proxy)* add meta fields to all request/notification types
+- *(conductor)* add session-aware MCP bridge with connection correlation
+
+### Fixed
+
+- *(elizacp)* update tool name regex to match MCP spec
+- *(test)* suppress dead code warnings from mcp_integration module
+
+### Other
+
+- Merge pull request #47 from nikomatsakis/main
+- *(test)* remove broken test_mcp_bridge_with_session_id
+- *(test)* use block_task() instead of custom recv helper
+- *(sacp-conductor)* verify MCP tools receive correct session_id
+- add test helpers and elizacp component wrapper
+
 ## [1.0.1](https://github.com/symposium-dev/symposium-acp/compare/sacp-conductor-v1.0.0...sacp-conductor-v1.0.1) - 2025-11-15
 
 ### Other

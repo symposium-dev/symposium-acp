@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.1.0](https://github.com/symposium-dev/symposium-acp/compare/elizacp-v1.0.0...elizacp-v1.1.0) - 2025-11-17
+
+### Added
+
+- *(sacp-test)* add mcp-echo-server binary for testing
+- *(elizacp)* add MCP tool invocation support for testing
+
+### Fixed
+
+- *(elizacp)* update tool name regex to match MCP spec
+- *(elizacp)* allow hyphens in MCP server and tool names
+
+### Other
+
+- Revert "fix(elizacp): allow hyphens in MCP server and tool names"
+- *(test)* use structured SessionNotification instead of debug strings
+- *(elizacp)* extract text content only to avoid UUID flakiness
+- *(elizacp)* convert to expect_test for clearer output verification
+- *(elizacp)* add integration test for MCP tool invocation
+
 ## [1.0.0](https://github.com/symposium-dev/symposium-acp/compare/elizacp-v1.0.0-alpha.8...elizacp-v1.0.0) - 2025-11-13
 
 ### Other
