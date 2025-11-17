@@ -36,7 +36,7 @@ impl Component for AcpProxyComponent {
                     // Inject an MCP server with acp: transport
                     let mut modified_request = request;
                     modified_request.mcp_servers.push(McpServer::Http {
-                        name: "test-acp-server".to_string(),
+                        name: "test_acp_server".to_string(),
                         url: "acp:test-uuid-12345".to_string(),
                         headers: vec![],
                     });

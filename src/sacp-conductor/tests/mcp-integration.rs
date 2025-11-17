@@ -130,7 +130,7 @@ async fn test_mcp_bridge_with_session_id() -> Result<(), sacp::Error> {
         .run(|session| async move {
             // Send a prompt to invoke the MCP tool via elizacp
             session.prompt(
-                r#"Use tool test-acp-server::echo with {"message": "Hello from MCP bridge test!"}"#
+                r#"Use tool test_acp_server::echo with {"message": "Hello from MCP bridge test!"}"#
             ).await?;
             Ok(())
         })
