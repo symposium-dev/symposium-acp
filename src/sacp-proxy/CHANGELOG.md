@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.0.0](https://github.com/symposium-dev/symposium-acp/compare/sacp-proxy-v1.1.0...sacp-proxy-v2.0.0) - 2025-11-17
+
+### Added
+
+- *(sacp-proxy)* add meta fields to all request/notification types
+- [**breaking**] MCP server messages include session-ids
+- *(conductor)* add session-aware MCP bridge with connection correlation
+
+### Other
+
+- Merge pull request #47 from nikomatsakis/main
+- *(sacp-proxy)* add simple_mcp_server example using tool_fn API
+- added a convenience function
+- rename mcp_server to registry
+
 ## [1.1.0](https://github.com/symposium-dev/symposium-acp/compare/sacp-proxy-v1.0.0...sacp-proxy-v1.1.0) - 2025-11-15
 
 ### Added

@@ -1,6 +1,6 @@
 [package]
 name = "sacp-tee"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2024"
 description = "A debugging proxy that logs all ACP traffic to a file"
 license = "MIT OR Apache-2.0"
@@ -13,7 +13,7 @@ anyhow.workspace = true
 chrono.workspace = true
 clap = { workspace = true, features = ["derive"] }
 sacp = { version = "1.0", path = "../sacp" }
-sacp-proxy = { version = "1.0", path = "../sacp-proxy" }
+sacp-proxy = { version = "2.0", path = "../sacp-proxy" }
 sacp-tokio = { version = "1.0", path = "../sacp-tokio" }
 serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true
