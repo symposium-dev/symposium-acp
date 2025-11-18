@@ -83,7 +83,7 @@ pub async fn prompt_with_callback<C, F, Fut>(
     component: C,
     prompt_text: String,
     callback: F,
-) -> Result<(), Box<dyn std::error::Error>>
+) -> Result<(), sacp::Error>
 where
     C: Component,
     F: Fn(ContentBlock) -> Fut + Send + Sync + 'static,
@@ -191,10 +191,7 @@ where
 /// # Ok(())
 /// # }
 /// ```
-pub async fn prompt(
-    component: impl Component,
-    prompt_text: String,
-) -> Result<String, Box<dyn std::error::Error>> {
+pub async fn prompt(component: impl Component, prompt_text: String) -> Result<String, sacp::Error> {
     let accumulated_text = Arc::new(Mutex::new(String::new()));
     let accumulated_text_clone = accumulated_text.clone();
 

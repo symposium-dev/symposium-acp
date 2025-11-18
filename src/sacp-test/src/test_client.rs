@@ -34,5 +34,4 @@ where
         prompt.to_string(),
     )
     .await
-    .map_err(|e| sacp::util::internal_error(e.to_string()))
 }
