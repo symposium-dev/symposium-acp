@@ -8,9 +8,7 @@ use sacp::schema::{
     RequestPermissionResponse, SessionNotification, TextContent, VERSION as PROTOCOL_VERSION,
 };
 use sacp::{Component, JrHandlerChain};
-use std::future::Future;
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex};
 
 /// Converts a `ContentBlock` to its string representation.
 ///
@@ -79,21 +77,13 @@ pub fn content_block_to_string(block: &ContentBlock) -> String {
 /// # Ok(())
 /// # }
 /// ```
-pub async fn prompt_with_callback<C, F, Fut>(
-    component: C,
+pub async fn prompt_with_callback(
+    component: impl Component,
     prompt_text: impl ToString,
-    callback: F,
-) -> Result<(), sacp::Error>
-where
-    C: Component,
-    F: Fn(ContentBlock) -> Fut + Send + Sync + 'static,
-    Fut: Future<Output = ()> + Send,
-{
+    mut callback: impl AsyncFnMut(ContentBlock) + Send,
+) -> Result<(), sacp::Error> {
     // Convert prompt to String
     let prompt_text = prompt_text.to_string();
-
-    // Wrap callback in Arc so it can be cloned into the async block
-    let callback = Arc::new(callback);
 
     // Run the client
     JrHandlerChain::new()
@@ -198,22 +188,11 @@ pub async fn prompt(
     component: impl Component,
     prompt_text: impl ToString,
 ) -> Result<String, sacp::Error> {
-    let accumulated_text = Arc::new(Mutex::new(String::new()));
-    let accumulated_text_clone = accumulated_text.clone();
-
-    prompt_with_callback(component, prompt_text, move |block| {
-        let accumulated_text = accumulated_text_clone.clone();
-        async move {
-            let text = content_block_to_string(&block);
-            accumulated_text.lock().unwrap().push_str(&text);
-        }
+    let mut accumulated_text = String::new();
+    prompt_with_callback(component, prompt_text, async |block| {
+        let text = content_block_to_string(&block);
+        accumulated_text.push_str(&text);
     })
     .await?;
-
-    // Extract the accumulated text
-    let result = Arc::try_unwrap(accumulated_text)
-        .map(|mutex| mutex.into_inner().unwrap())
-        .unwrap_or_else(|arc| arc.lock().unwrap().clone());
-
-    Ok(result)
+    Ok(accumulated_text)
 }
