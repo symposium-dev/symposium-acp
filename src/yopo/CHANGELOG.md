@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.1.0](https://github.com/symposium-dev/symposium-acp/compare/yopo-v1.0.0...yopo-v1.1.0) - 2025-11-18
+
+### Added
+
+- *(yopo)* add library API with callback support for testing SACP agents
+
+### Fixed
+
+- *(yopo)* correct doctest examples to use valid AcpAgent API
+
+### Other
+
+- *(yopo)* simplify callback implementation using AsyncFnMut
+- *(yopo)* accept impl ToString for prompt parameter
+- *(yopo)* return sacp::Error instead of Box<dyn Error>
+
 ## [1.0.0](https://github.com/symposium-dev/symposium-acp/compare/yopo-v1.0.0-alpha.8...yopo-v1.0.0) - 2025-11-13
 
 ### Other

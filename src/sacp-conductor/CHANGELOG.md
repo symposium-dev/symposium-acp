@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.0.1](https://github.com/symposium-dev/symposium-acp/compare/sacp-conductor-v2.0.0...sacp-conductor-v2.0.1) - 2025-11-18
+
+### Other
+
+- *(yopo)* accept impl ToString for prompt parameter
+- replace yolo_prompt with direct yopo::prompt calls
+- upgrade to sacp-proxy 2.0.0 and migrate tests to McpServer API
+
 ## [2.0.0](https://github.com/symposium-dev/symposium-acp/compare/sacp-conductor-v1.0.1...sacp-conductor-v2.0.0) - 2025-11-17
 
 ### Added
