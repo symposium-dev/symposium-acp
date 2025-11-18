@@ -6,6 +6,13 @@ description = "YOPO (You Only Prompt Once) - A simple ACP client for one-shot pr
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/symposium-dev/symposium-acp"
 
+[lib]
+path = "src/lib.rs"
+
+[[bin]]
+name = "yopo"
+path = "src/main.rs"
+
 [dependencies]
 sacp = { version = "1.0.0", path = "../sacp" }
 sacp-tokio = { version = "1.0.0", path = "../sacp-tokio" }
