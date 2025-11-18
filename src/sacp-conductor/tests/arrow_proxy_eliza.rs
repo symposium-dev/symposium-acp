@@ -6,7 +6,6 @@
 //! 3. The full proxy chain works end-to-end
 
 use sacp_conductor::conductor::Conductor;
-use sacp_test::test_client::yolo_prompt;
 use sacp_tokio::AcpAgent;
 use std::str::FromStr;
 use tokio::io::duplex;
@@ -38,8 +37,11 @@ async fn test_conductor_with_arrow_proxy_and_eliza() -> Result<(), sacp::Error> 
 
     // Wait for editor to complete and get the result
     let result = tokio::time::timeout(std::time::Duration::from_secs(30), async move {
-        let result =
-            yolo_prompt(editor_write.compat_write(), editor_read.compat(), "Hello").await?;
+        let result = yopo::prompt(
+            sacp::ByteStreams::new(editor_write.compat_write(), editor_read.compat()),
+            "Hello".to_string(),
+        )
+        .await?;
 
         tracing::debug!(?result, "Received response from arrow proxy chain");
 

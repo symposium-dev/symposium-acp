@@ -13,7 +13,6 @@
 //! - arrow_proxy1 adds second '>' to that: ">>Hello..."
 
 use sacp_conductor::conductor::Conductor;
-use sacp_test::test_client::yolo_prompt;
 use sacp_tokio::AcpAgent;
 use std::str::FromStr;
 use tokio::io::duplex;
@@ -46,8 +45,11 @@ async fn test_conductor_with_two_external_arrow_proxies() -> Result<(), sacp::Er
 
     // Wait for editor to complete and get the result
     let result = tokio::time::timeout(std::time::Duration::from_secs(30), async move {
-        let result =
-            yolo_prompt(editor_write.compat_write(), editor_read.compat(), "Hello").await?;
+        let result = yopo::prompt(
+            sacp::ByteStreams::new(editor_write.compat_write(), editor_read.compat()),
+            "Hello".to_string(),
+        )
+        .await?;
 
         expect_test::expect![[r#"
             ">>Hello. How are you feeling today?"

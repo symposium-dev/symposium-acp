@@ -20,7 +20,6 @@
 use sacp::Component;
 use sacp_conductor::conductor::Conductor;
 use sacp_test::arrow_proxy::run_arrow_proxy;
-use sacp_test::test_client::yolo_prompt;
 use sacp_tokio::AcpAgent;
 use std::str::FromStr;
 use tokio::io::duplex;
@@ -100,8 +99,11 @@ async fn test_nested_conductor_with_arrow_proxies() -> Result<(), sacp::Error> {
 
     // Wait for editor to complete and get the result
     let result = tokio::time::timeout(std::time::Duration::from_secs(30), async move {
-        let result =
-            yolo_prompt(editor_write.compat_write(), editor_read.compat(), "Hello").await?;
+        let result = yopo::prompt(
+            sacp::ByteStreams::new(editor_write.compat_write(), editor_read.compat()),
+            "Hello".to_string(),
+        )
+        .await?;
 
         tracing::debug!(?result, "Received response from nested conductor chain");
 
@@ -156,8 +158,11 @@ async fn test_nested_conductor_with_external_arrow_proxies() -> Result<(), sacp:
 
     // Wait for editor to complete and get the result
     let result = tokio::time::timeout(std::time::Duration::from_secs(30), async move {
-        let result =
-            yolo_prompt(editor_write.compat_write(), editor_read.compat(), "Hello").await?;
+        let result = yopo::prompt(
+            sacp::ByteStreams::new(editor_write.compat_write(), editor_read.compat()),
+            "Hello".to_string(),
+        )
+        .await?;
 
         tracing::debug!(?result, "Received response from nested conductor chain");
 
