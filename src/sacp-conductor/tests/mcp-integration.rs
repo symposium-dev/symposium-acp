@@ -208,7 +208,7 @@ async fn test_agent_handles_prompt() -> Result<(), sacp::Error> {
     expect![[r#"
         [
             "SessionNotification { session_id: SessionId(\"test-session-123\"), update: AgentMessageChunk(ContentChunk { content: Text(TextContent { annotations: None, text: \"Hello. I will now use the MCP tool\", meta: None }), meta: None }), meta: None }",
-            "SessionNotification { session_id: SessionId(\"test-session-123\"), update: AgentMessageChunk(ContentChunk { content: Text(TextContent { annotations: None, text: \"MCP tool result: CallToolResult { content: [Annotated { raw: Text(RawTextContent { text: \\\"Echo: Hello from the agent!\\\", meta: None }), annotations: None }], structured_content: None, is_error: Some(false), meta: None }\", meta: None }), meta: None }), meta: None }",
+            "SessionNotification { session_id: SessionId(\"test-session-123\"), update: AgentMessageChunk(ContentChunk { content: Text(TextContent { annotations: None, text: \"MCP tool result: CallToolResult { content: [Annotated { raw: Text(RawTextContent { text: \\\"{\\\\\\\"result\\\\\\\":\\\\\\\"Echo: Hello from the agent!\\\\\\\"}\\\", meta: None }), annotations: None }], structured_content: Some(Object {\\\"result\\\": String(\\\"Echo: Hello from the agent!\\\")}), is_error: Some(false), meta: None }\", meta: None }), meta: None }), meta: None }",
             "PromptResponse { stop_reason: EndTurn, meta: None }",
         ]
     "#]]

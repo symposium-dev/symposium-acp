@@ -39,4 +39,3 @@ rmcp = { workspace = true, features = ["client", "server", "transport-io", "tran
 schemars.workspace = true
 sacp-test = { path = "../sacp-test" }
 sacp-tokio = { path = "../sacp-tokio" }
-sacp-rmcp = { path = "../sacp-rmcp" }
