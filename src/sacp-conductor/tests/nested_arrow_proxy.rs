@@ -47,7 +47,7 @@ async fn test_conductor_with_two_external_arrow_proxies() -> Result<(), sacp::Er
     let result = tokio::time::timeout(std::time::Duration::from_secs(30), async move {
         let result = yopo::prompt(
             sacp::ByteStreams::new(editor_write.compat_write(), editor_read.compat()),
-            "Hello".to_string(),
+            "Hello",
         )
         .await?;
 

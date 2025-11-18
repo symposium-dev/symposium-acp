@@ -81,7 +81,7 @@ pub fn content_block_to_string(block: &ContentBlock) -> String {
 /// ```
 pub async fn prompt_with_callback<C, F, Fut>(
     component: C,
-    prompt_text: String,
+    prompt_text: impl ToString,
     callback: F,
 ) -> Result<(), sacp::Error>
 where
@@ -89,6 +89,9 @@ where
     F: Fn(ContentBlock) -> Fut + Send + Sync + 'static,
     Fut: Future<Output = ()> + Send,
 {
+    // Convert prompt to String
+    let prompt_text = prompt_text.to_string();
+
     // Wrap callback in Arc so it can be cloned into the async block
     let callback = Arc::new(callback);
 
@@ -191,7 +194,10 @@ where
 /// # Ok(())
 /// # }
 /// ```
-pub async fn prompt(component: impl Component, prompt_text: String) -> Result<String, sacp::Error> {
+pub async fn prompt(
+    component: impl Component,
+    prompt_text: impl ToString,
+) -> Result<String, sacp::Error> {
     let accumulated_text = Arc::new(Mutex::new(String::new()));
     let accumulated_text_clone = accumulated_text.clone();
 

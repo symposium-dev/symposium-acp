@@ -39,7 +39,7 @@ async fn test_conductor_with_arrow_proxy_and_eliza() -> Result<(), sacp::Error> 
     let result = tokio::time::timeout(std::time::Duration::from_secs(30), async move {
         let result = yopo::prompt(
             sacp::ByteStreams::new(editor_write.compat_write(), editor_read.compat()),
-            "Hello".to_string(),
+            "Hello",
         )
         .await?;
 
