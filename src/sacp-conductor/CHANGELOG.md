@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [1.1.0](https://github.com/symposium-dev/symposium-acp/compare/sacp-conductor-v1.0.1...sacp-conductor-v1.1.0) - 2025-11-17
+## [2.0.0](https://github.com/symposium-dev/symposium-acp/compare/sacp-conductor-v1.0.1...sacp-conductor-v2.0.0) - 2025-11-17
 
 ### Added
 
