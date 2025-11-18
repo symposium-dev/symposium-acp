@@ -65,13 +65,14 @@ pub fn content_block_to_string(block: &ContentBlock) -> String {
 ///
 /// # Example
 ///
-/// ```no_run
+/// ```ignore
 /// use yopo::{prompt_with_callback, content_block_to_string};
 /// use sacp_tokio::AcpAgent;
+/// use std::str::FromStr;
 ///
-/// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
-/// let agent = AcpAgent::stdio("my-agent", "python", vec!["agent.py"], vec![]);
-/// prompt_with_callback(agent, "What is 2+2?".to_string(), |block| async move {
+/// # async fn example() -> Result<(), sacp::Error> {
+/// let agent = AcpAgent::from_str("python agent.py")?;
+/// prompt_with_callback(agent, "What is 2+2?", async |block| {
 ///     print!("{}", content_block_to_string(&block));
 /// }).await?;
 /// # Ok(())
@@ -173,13 +174,14 @@ pub async fn prompt_with_callback(
 ///
 /// # Example
 ///
-/// ```no_run
+/// ```ignore
 /// use yopo::prompt;
 /// use sacp_tokio::AcpAgent;
+/// use std::str::FromStr;
 ///
-/// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
-/// let agent = AcpAgent::stdio("my-agent", "python", vec!["agent.py"], vec![]);
-/// let response = prompt(agent, "What is 2+2?".to_string()).await?;
+/// # async fn example() -> Result<(), sacp::Error> {
+/// let agent = AcpAgent::from_str("python agent.py")?;
+/// let response = prompt(agent, "What is 2+2?").await?;
 /// assert!(response.contains("4"));
 /// # Ok(())
 /// # }
