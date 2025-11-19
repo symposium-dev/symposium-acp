@@ -20,30 +20,47 @@
 //! yopo "Hello!" '{"type":"stdio","name":"my-agent","command":"python","args":["agent.py"],"env":[]}'
 //! ```
 
+use clap::Parser;
 use sacp_tokio::AcpAgent;
 use std::str::FromStr;
+use tracing_subscriber::{EnvFilter, layer::SubscriberExt, util::SubscriberInitExt};
+
+#[derive(Parser, Debug)]
+#[command(author, version, about = "YOPO - You Only Prompt Once", long_about = None)]
+struct Args {
+    /// The prompt to send to the agent
+    prompt: String,
+
+    /// Agent configuration (command string or JSON)
+    agent_config: String,
+
+    /// Set logging level (trace, debug, info, warn, error)
+    #[arg(short, long)]
+    log: Option<String>,
+}
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    // Parse command line arguments
-    let args: Vec<String> = std::env::args().collect();
-    if args.len() != 3 {
-        eprintln!("Usage: {} <prompt> <agent-config>", args[0]);
-        eprintln!();
-        eprintln!("  <prompt>       - The prompt to send to the agent");
-        eprintln!("  <agent-config> - Either a command string or JSON (starting with '{{')");
-        eprintln!();
-        eprintln!("Examples:");
-        eprintln!("  {} \"What is 2+2?\" \"python my_agent.py\"", args[0]);
-        eprintln!(
-            "  {} \"Hello!\" '{{\"type\":\"stdio\",\"name\":\"agent\",\"command\":\"python\",\"args\":[\"agent.py\"],\"env\":[]}}'",
-            args[0]
-        );
-        std::process::exit(1);
-    }
+    let args = Args::parse();
 
-    let prompt = &args[1];
-    let agent_config = &args[2];
+    // Initialize tracing to stderr
+    let env_filter = if let Some(level) = args.log {
+        EnvFilter::new(format!("yopo={}", level))
+    } else {
+        EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("yopo=info"))
+    };
+
+    tracing_subscriber::registry()
+        .with(env_filter)
+        .with(
+            tracing_subscriber::fmt::layer()
+                .with_target(true)
+                .with_writer(std::io::stderr),
+        )
+        .init();
+
+    let prompt = &args.prompt;
+    let agent_config = &args.agent_config;
 
     // Parse the agent configuration
     let agent = AcpAgent::from_str(agent_config)?;
