@@ -207,6 +207,91 @@ impl Component for Tee {
     }
 }
 
+/// Run the tee in raw mode - just log lines without parsing
+pub async fn run_raw(log_file: PathBuf, downstream: sacp_tokio::AcpAgent) -> Result<()> {
+    use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+
+    // Initialize tracing
+    tracing_subscriber::fmt()
+        .with_env_filter(
+            tracing_subscriber::EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),
+        )
+        .init();
+
+    tracing::info!(
+        "Starting sacp-tee in raw mode, logging to: {}",
+        log_file.display()
+    );
+
+    // Open log file
+    let log_file = tokio::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&log_file)
+        .await?;
+    let mut log_writer = tokio::io::BufWriter::new(log_file);
+
+    // Spawn the downstream process
+    let (mut child_stdin, child_stdout, _child) = downstream.spawn_process()?;
+    let mut child_stdout = BufReader::new(child_stdout).lines();
+
+    // Get stdin/stdout
+    let stdin = tokio::io::stdin();
+    let mut stdin_lines = BufReader::new(stdin).lines();
+    let mut stdout = tokio::io::stdout();
+
+    loop {
+        tokio::select! {
+            // Read from stdin, write to child, log outgoing
+            line = stdin_lines.next_line() => {
+                match line? {
+                    Some(line) => {
+                        // Write to child
+                        child_stdin.write_all(line.as_bytes()).await?;
+                        child_stdin.write_all(b"\n").await?;
+                        child_stdin.flush().await?;
+
+                        // Log outgoing
+                        log_writer.write_all(b"\xE2\x86\x92 ").await?; // → arrow
+                        log_writer.write_all(line.as_bytes()).await?;
+                        log_writer.write_all(b"\n").await?;
+                        log_writer.flush().await?;
+                    }
+                    None => {
+                        // stdin closed
+                        break;
+                    }
+                }
+            }
+
+            // Read from child, write to stdout, log incoming
+            line = child_stdout.next_line() => {
+                match line? {
+                    Some(line) => {
+                        // Write to stdout
+                        stdout.write_all(line.as_bytes()).await?;
+                        stdout.write_all(b"\n").await?;
+                        stdout.flush().await?;
+
+                        // Log incoming
+                        log_writer.write_all(b"\xE2\x86\x90 ").await?; // ← arrow
+                        log_writer.write_all(line.as_bytes()).await?;
+                        log_writer.write_all(b"\n").await?;
+                        log_writer.flush().await?;
+                    }
+                    None => {
+                        // child stdout closed
+                        break;
+                    }
+                }
+            }
+        }
+    }
+
+    Ok(())
+}
+
 /// Run the tee proxy as a standalone binary connected to stdio
 pub async fn run(log_file: PathBuf) -> Result<()> {
     // Initialize tracing
