@@ -7,7 +7,7 @@ use sacp::schema::{
     NewSessionRequest, PromptRequest, RequestPermissionOutcome, RequestPermissionRequest,
     RequestPermissionResponse, SessionNotification, TextContent, VERSION as PROTOCOL_VERSION,
 };
-use sacp::{Component, JrHandlerChain};
+use sacp::{Component, Handled, JrHandlerChain};
 use std::path::PathBuf;
 
 /// Converts a `ContentBlock` to its string representation.
@@ -88,6 +88,10 @@ pub async fn prompt_with_callback(
 
     // Run the client
     JrHandlerChain::new()
+        .on_receive_message(async |message_and_cx| {
+            eprintln!("message: {:?}", message_and_cx.message());
+            Ok(Handled::No(message_and_cx))
+        })
         .on_receive_notification(async move |notification: SessionNotification, _cx| {
             // Call the callback for each agent message chunk
             if let sacp::schema::SessionUpdate::AgentMessageChunk(content_chunk) =

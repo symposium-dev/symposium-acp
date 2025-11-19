@@ -478,14 +478,15 @@ impl<H: JrMessageHandler> JrHandlerChain<H> {
     /// For most use cases, prefer [`on_receive_request`](Self::on_receive_request) or
     /// [`on_receive_notification`](Self::on_receive_notification) which provide cleaner APIs
     /// for handling requests or notifications separately.
-    pub fn on_receive_message<R, N, F>(
+    pub fn on_receive_message<R, N, F, T>(
         self,
         op: F,
     ) -> JrHandlerChain<ChainedHandler<H, MessageHandler<R, N, F>>>
     where
         R: JrRequest,
         N: JrNotification,
-        F: AsyncFnMut(MessageAndCx<R, N>) -> Result<(), crate::Error> + Send,
+        F: AsyncFnMut(MessageAndCx<R, N>) -> Result<T, crate::Error> + Send,
+        T: IntoHandled<MessageAndCx<R, N>>,
     {
         self.with_handler(MessageHandler::new(op))
     }
