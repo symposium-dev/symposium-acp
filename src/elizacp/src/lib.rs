@@ -123,41 +123,43 @@ impl ElizaAgent {
         // Extract text from the prompt
         let input_text = extract_text_from_prompt(&request.prompt);
 
-        // Get Eliza's response
-        let response_text = self
-            .get_response(session_id, &input_text)
-            .unwrap_or_else(|| {
-                format!(
-                    "Error: Session {} not found. Please start a new session.",
-                    session_id
-                )
-            });
+        // Check for MCP commands first before invoking Eliza
+        let final_response = if let Some(server_name) = parse_list_tools_command(&input_text) {
+            // List tools from a specific server
+            tracing::debug!("Listing tools from MCP server: {}", server_name);
 
-        tracing::debug!("Eliza response: {}", response_text);
+            match self.list_tools(session_id, &server_name).await {
+                Ok(tools) => format!("Available tools:\n{}", tools),
+                Err(e) => format!("ERROR: {}", e),
+            }
+        } else if let Some((server_name, tool_name, params_json)) = parse_tool_call(&input_text) {
+            // Execute the tool call
+            tracing::debug!(
+                "Executing MCP tool call: {}::{} with params: {}",
+                server_name,
+                tool_name,
+                params_json
+            );
 
-        // Check if this is an MCP tool call
-        let final_response = if response_text == "MCP_TOOL_CALL" {
-            // Parse the tool call from the input
-            if let Some((server_name, tool_name, params_json)) = parse_tool_call(&input_text) {
-                tracing::debug!(
-                    "Executing MCP tool call: {}::{} with params: {}",
-                    server_name,
-                    tool_name,
-                    params_json
-                );
-
-                // Execute the tool call
-                match self
-                    .execute_tool_call(session_id, &server_name, &tool_name, &params_json)
-                    .await
-                {
-                    Ok(result) => format!("OK: {}", result),
-                    Err(e) => format!("ERROR: {}", e),
-                }
-            } else {
-                "ERROR: Failed to parse tool call command".to_string()
+            match self
+                .execute_tool_call(session_id, &server_name, &tool_name, &params_json)
+                .await
+            {
+                Ok(result) => format!("OK: {}", result),
+                Err(e) => format!("ERROR: {}", e),
             }
         } else {
+            // Not an MCP command, use Eliza for response
+            let response_text = self
+                .get_response(session_id, &input_text)
+                .unwrap_or_else(|| {
+                    format!(
+                        "Error: Session {} not found. Please start a new session.",
+                        session_id
+                    )
+                });
+
+            tracing::debug!("Eliza response: {}", response_text);
             response_text
         };
 
@@ -179,16 +181,19 @@ impl ElizaAgent {
         })
     }
 
-    async fn execute_tool_call(
+    /// Helper function to execute an operation with an MCP client
+    async fn with_mcp_client<F, Fut, T>(
         &self,
         session_id: &SessionId,
         server_name: &str,
-        tool_name: &str,
-        params_json: &str,
-    ) -> Result<String> {
+        operation: F,
+    ) -> Result<T>
+    where
+        F: FnOnce(rmcp::service::RunningService<rmcp::RoleClient, ()>) -> Fut,
+        Fut: std::future::Future<Output = Result<T>>,
+    {
         use rmcp::{
             ServiceExt,
-            model::CallToolRequestParam,
             transport::{ConfigureCommandExt, TokioChildProcess},
         };
         use tokio::process::Command;
@@ -208,12 +213,6 @@ impl ElizaAgent {
             })
             .ok_or_else(|| anyhow::anyhow!("MCP server '{}' not found", server_name))?;
 
-        // Parse params JSON
-        let params = serde_json::from_str::<serde_json::Value>(params_json)
-            .map_err(|e| anyhow::anyhow!("Invalid JSON params: {}", e))?;
-
-        let params_obj = params.as_object().cloned();
-
         // Spawn MCP client based on server type
         match mcp_server {
             McpServer::Stdio {
@@ -222,7 +221,8 @@ impl ElizaAgent {
                 tracing::debug!(
                     command = ?command,
                     args = ?args,
-                    "Starting MCP client for tool call"
+                    server_name = %server_name,
+                    "Starting MCP client"
                 );
 
                 // Create MCP client by spawning the process
@@ -237,27 +237,83 @@ impl ElizaAgent {
                     ))?)
                     .await?;
 
-                tracing::debug!("MCP client connected, calling tool: {}", tool_name);
+                tracing::debug!("MCP client connected");
 
-                // Call the tool
-                let tool_result = mcp_client
-                    .call_tool(CallToolRequestParam {
-                        name: tool_name.to_string().into(),
-                        arguments: params_obj,
-                    })
-                    .await?;
+                // Execute the operation
+                let result = operation(mcp_client).await?;
 
-                tracing::debug!("Tool call result: {:?}", tool_result);
-
-                // Clean up the client
-                mcp_client.cancel().await?;
-
-                // Format the result
-                Ok(format!("{:?}", tool_result))
+                Ok(result)
             }
             McpServer::Http { .. } => Err(anyhow::anyhow!("HTTP MCP servers not yet supported")),
             McpServer::Sse { .. } => Err(anyhow::anyhow!("SSE MCP servers not yet supported")),
         }
+    }
+
+    async fn list_tools(&self, session_id: &SessionId, server_name: &str) -> Result<String> {
+        self.with_mcp_client(session_id, server_name, async move |mcp_client| {
+            // List the tools
+            let tools_result = mcp_client.list_tools(None).await?;
+
+            tracing::debug!("Tools result: {:?}", tools_result);
+
+            // Clean up the client
+            mcp_client.cancel().await?;
+
+            // Format the tools list
+            let tools_list = tools_result
+                .tools
+                .iter()
+                .map(|tool| {
+                    format!(
+                        "  - {}: {}",
+                        tool.name,
+                        tool.description.as_deref().unwrap_or("No description")
+                    )
+                })
+                .collect::<Vec<_>>()
+                .join("\n");
+
+            Ok(tools_list)
+        })
+        .await
+    }
+
+    async fn execute_tool_call(
+        &self,
+        session_id: &SessionId,
+        server_name: &str,
+        tool_name: &str,
+        params_json: &str,
+    ) -> Result<String> {
+        use rmcp::model::CallToolRequestParam;
+
+        // Parse params JSON
+        let params = serde_json::from_str::<serde_json::Value>(params_json)
+            .map_err(|e| anyhow::anyhow!("Invalid JSON params: {}", e))?;
+
+        let params_obj = params.as_object().cloned();
+        let tool_name = tool_name.to_string();
+
+        self.with_mcp_client(session_id, server_name, async move |mcp_client| {
+            tracing::debug!("Calling tool: {}", tool_name);
+
+            // Call the tool
+            let tool_result = mcp_client
+                .call_tool(CallToolRequestParam {
+                    name: tool_name.into(),
+                    arguments: params_obj,
+                })
+                .await?;
+
+            tracing::debug!("Tool call result: {:?}", tool_result);
+
+            // Clean up the client
+            mcp_client.cancel().await?;
+
+            // Format the result
+            Ok(format!("{:?}", tool_result))
+        })
+        .await
     }
 }
 
@@ -271,6 +327,18 @@ fn extract_text_from_prompt(blocks: &[ContentBlock]) -> String {
         })
         .collect::<Vec<_>>()
         .join(" ")
+}
+
+/// Parse list tools command from text input
+/// Format: "List tools from <server>"
+/// Returns: Some(server_name)
+fn parse_list_tools_command(input: &str) -> Option<String> {
+    use regex::Regex;
+
+    let re = Regex::new(r"(?i)^list tools from ([a-zA-Z_0-9]+)$").ok()?;
+    let captures = re.captures(input.trim())?;
+
+    Some(captures.get(1)?.as_str().to_string())
 }
 
 /// Parse tool call command from text input

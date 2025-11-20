@@ -103,6 +103,34 @@ impl Component for ElizacpAgentComponent {
 }
 
 #[tokio::test]
+async fn test_list_tools_from_mcp_server() -> Result<(), sacp::Error> {
+    use expect_test::expect;
+
+    // Create the component chain: proxy with echo server -> eliza
+    let proxy = create_echo_proxy()?;
+    let eliza = sacp::DynComponent::new(ElizacpAgentComponent);
+
+    // Use yopo to send the prompt and get the response
+    let result = yopo::prompt(
+        Conductor::new(
+            "test-conductor".to_string(),
+            vec![proxy, eliza],
+            Some(conductor_command()),
+        ),
+        "List tools from echo_server",
+    )
+    .await?;
+
+    // Check the response using expect_test
+    expect![[r#"
+        Available tools:
+          - echo: Returns the current session_id"#]]
+    .assert_eq(&result);
+
+    Ok(())
+}
+
+#[tokio::test]
 async fn test_session_id_delivered_to_mcp_tools() -> Result<(), sacp::Error> {
     // Set up editor <-> conductor communication
     use futures::{SinkExt, StreamExt, channel::mpsc};
