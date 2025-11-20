@@ -213,6 +213,7 @@ pub async fn run_raw(log_file: PathBuf, downstream: sacp_tokio::AcpAgent) -> Res
 
     // Initialize tracing
     tracing_subscriber::fmt()
+        .with_writer(std::io::stderr)
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env()
                 .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),
@@ -296,6 +297,7 @@ pub async fn run_raw(log_file: PathBuf, downstream: sacp_tokio::AcpAgent) -> Res
 pub async fn run(log_file: PathBuf) -> Result<()> {
     // Initialize tracing
     tracing_subscriber::fmt()
+        .with_writer(std::io::stderr)
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env()
                 .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),
