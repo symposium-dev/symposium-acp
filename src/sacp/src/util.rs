@@ -9,8 +9,19 @@ where
     N: serde::Serialize,
     M: serde::de::DeserializeOwned,
 {
-    let json = serde_json::to_value(params).map_err(|_| crate::Error::parse_error())?;
-    let m = serde_json::from_value(json).map_err(|_| crate::Error::parse_error())?;
+    let json = serde_json::to_value(params).map_err(|e| {
+        crate::Error::parse_error().with_data(serde_json::json!({
+            "error": e.to_string(),
+            "phase": "serialization"
+        }))
+    })?;
+    let m = serde_json::from_value(json.clone()).map_err(|e| {
+        crate::Error::parse_error().with_data(serde_json::json!({
+            "error": e.to_string(),
+            "json": json,
+            "phase": "deserialization"
+        }))
+    })?;
     Ok(m)
 }
 

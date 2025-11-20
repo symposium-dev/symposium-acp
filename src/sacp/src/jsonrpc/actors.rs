@@ -305,7 +305,13 @@ pub(super) async fn transport_incoming_actor(
             }
             Err(_) => {
                 transport_tx
-                    .unbounded_send(Err(crate::Error::parse_error()))
+                    .unbounded_send(Err(crate::Error::parse_error().with_data(
+                        serde_json::json!(
+                            {
+                                "line": &line
+                            }
+                        ),
+                    )))
                     .map_err(crate::Error::into_internal_error)?;
             }
         }
