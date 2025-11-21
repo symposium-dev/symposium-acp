@@ -234,7 +234,7 @@ pub async fn run_raw(log_file: PathBuf, downstream: sacp_tokio::AcpAgent) -> Res
     let mut log_writer = tokio::io::BufWriter::new(log_file);
 
     // Spawn the downstream process
-    let (mut child_stdin, child_stdout, _child) = downstream.spawn_process()?;
+    let (mut child_stdin, child_stdout, _child_stderr, _child) = downstream.spawn_process()?;
     let mut child_stdout = BufReader::new(child_stdout).lines();
 
     // Get stdin/stdout
@@ -306,7 +306,7 @@ pub async fn run(log_file: PathBuf) -> Result<()> {
 
     tracing::info!("Starting sacp-tee, logging to: {}", log_file.display());
 
-    Tee::new(log_file).serve(sacp_tokio::Stdio).await?;
+    Tee::new(log_file).serve(sacp_tokio::Stdio::new()).await?;
 
     Ok(())
 }

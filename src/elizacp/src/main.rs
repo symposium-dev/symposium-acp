@@ -70,7 +70,7 @@ async fn main() -> Result<()> {
     tracing::info!("Elizacp starting");
 
     // Run the Eliza agent
-    run_elizacp(sacp_tokio::Stdio).await?;
+    run_elizacp(sacp_tokio::Stdio::new()).await?;
 
     Ok(())
 }
