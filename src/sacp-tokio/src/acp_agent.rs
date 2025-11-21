@@ -7,9 +7,9 @@ use std::future::Future;
 use std::path::PathBuf;
 use std::pin::Pin;
 use std::str::FromStr;
+use std::sync::Arc;
 use std::task::{Context, Poll};
 
-use serde::{Deserialize, Serialize};
 use tokio::process::Child;
 use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
 
@@ -78,17 +78,18 @@ pub enum LineDirection {
 /// ```
 ///
 /// [`sacp_conductor::Conductor`]: https://docs.rs/sacp-conductor/latest/sacp_conductor/struct.Conductor.html
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(transparent)]
 pub struct AcpAgent {
-    #[serde(flatten)]
     server: sacp::schema::McpServer,
+    debug_callback: Option<Arc<dyn Fn(&str, LineDirection) + Send + Sync + 'static>>,
 }
 
 impl AcpAgent {
     /// Create a new `AcpAgent` from an [`sacp::schema::McpServer`] configuration.
     pub fn new(server: sacp::schema::McpServer) -> Self {
-        Self { server }
+        Self {
+            server,
+            debug_callback: None,
+        }
     }
 
     /// Get the underlying [`sacp::schema::McpServer`] configuration.
@@ -117,14 +118,12 @@ impl AcpAgent {
     ///         eprintln!("{:?}: {}", direction, line);
     ///     });
     /// ```
-    pub fn with_debug<F>(self, callback: F) -> DebuggedAcpAgent<F>
+    pub fn with_debug<F>(mut self, callback: F) -> Self
     where
         F: Fn(&str, LineDirection) + Send + Sync + 'static,
     {
-        DebuggedAcpAgent {
-            agent: self,
-            debug_callback: callback,
-        }
+        self.debug_callback = Some(Arc::new(callback));
+        self
     }
 
     /// Spawn the process and get stdio streams.
@@ -177,59 +176,6 @@ impl AcpAgent {
     }
 }
 
-/// An `AcpAgent` wrapper with debug callback support.
-///
-/// Created by calling [`AcpAgent::with_debug`]. The debug callback is invoked
-/// for each line sent to or received from the agent process.
-pub struct DebuggedAcpAgent<F> {
-    agent: AcpAgent,
-    debug_callback: F,
-}
-
-impl<F> sacp::Component for DebuggedAcpAgent<F>
-where
-    F: Fn(&str, LineDirection) + Send + Sync + Clone + 'static,
-{
-    async fn serve(self, client: impl sacp::Component) -> Result<(), sacp::Error> {
-        use futures::AsyncBufReadExt;
-        use futures::AsyncWriteExt;
-        use futures::StreamExt;
-        use futures::io::BufReader;
-
-        let (child_stdin, child_stdout, child) = self.agent.spawn_process()?;
-
-        // Hold the child process - it will be killed when this future completes
-        let _child_holder = ChildHolder { _child: child };
-
-        // Convert stdio to line streams with debug inspection
-        let incoming_lines = BufReader::new(child_stdout.compat()).lines().inspect({
-            let callback = self.debug_callback.clone();
-            move |result| {
-                if let Ok(line) = result {
-                    callback(line, LineDirection::Stdout);
-                }
-            }
-        });
-
-        // Create a sink that writes lines and logs them
-        let outgoing_sink = futures::sink::unfold(
-            (child_stdin.compat_write(), self.debug_callback),
-            async move |(mut writer, callback), line: String| {
-                callback(&line, LineDirection::Stdin);
-                let mut bytes = line.into_bytes();
-                bytes.push(b'\n');
-                writer.write_all(&bytes).await?;
-                Ok::<_, std::io::Error>((writer, callback))
-            },
-        );
-
-        // Create the Lines component and serve it
-        sacp::Lines::new(outgoing_sink, incoming_lines)
-            .serve(client)
-            .await
-    }
-}
-
 /// A future that holds a `Child` process and never resolves.
 /// When dropped, the child process is killed.
 struct ChildHolder {
@@ -255,6 +201,7 @@ impl sacp::Component for AcpAgent {
     async fn serve(self, client: impl sacp::Component) -> Result<(), sacp::Error> {
         use futures::AsyncBufReadExt;
         use futures::AsyncWriteExt;
+        use futures::StreamExt;
         use futures::io::BufReader;
 
         let (child_stdin, child_stdout, child) = self.spawn_process()?;
@@ -262,19 +209,46 @@ impl sacp::Component for AcpAgent {
         // Hold the child process - it will be killed when this future completes
         let _child_holder = ChildHolder { _child: child };
 
-        // Convert stdio to line streams
-        let incoming_lines = BufReader::new(child_stdout.compat()).lines();
+        // Convert stdio to line streams with optional debug inspection
+        let incoming_lines = if let Some(callback) = self.debug_callback.clone() {
+            Box::pin(
+                BufReader::new(child_stdout.compat())
+                    .lines()
+                    .inspect(move |result| {
+                        if let Ok(line) = result {
+                            callback(line, LineDirection::Stdout);
+                        }
+                    }),
+            )
+                as std::pin::Pin<Box<dyn futures::Stream<Item = std::io::Result<String>> + Send>>
+        } else {
+            Box::pin(BufReader::new(child_stdout.compat()).lines())
+        };
 
-        // Create a sink that writes lines (with newlines) to stdin
-        let outgoing_sink = futures::sink::unfold(
-            child_stdin.compat_write(),
-            async move |mut writer, line: String| {
-                let mut bytes = line.into_bytes();
-                bytes.push(b'\n');
-                writer.write_all(&bytes).await?;
-                Ok::<_, std::io::Error>(writer)
-            },
-        );
+        // Create a sink that writes lines (with newlines) to stdin with optional debug logging
+        let outgoing_sink = if let Some(callback) = self.debug_callback.clone() {
+            Box::pin(futures::sink::unfold(
+                (child_stdin.compat_write(), callback),
+                async move |(mut writer, callback), line: String| {
+                    callback(&line, LineDirection::Stdin);
+                    let mut bytes = line.into_bytes();
+                    bytes.push(b'\n');
+                    writer.write_all(&bytes).await?;
+                    Ok::<_, std::io::Error>((writer, callback))
+                },
+            ))
+                as std::pin::Pin<Box<dyn futures::Sink<String, Error = std::io::Error> + Send>>
+        } else {
+            Box::pin(futures::sink::unfold(
+                child_stdin.compat_write(),
+                async move |mut writer, line: String| {
+                    let mut bytes = line.into_bytes();
+                    bytes.push(b'\n');
+                    writer.write_all(&bytes).await?;
+                    Ok::<_, std::io::Error>(writer)
+                },
+            ))
+        };
 
         // Create the Lines component and serve it
         sacp::Lines::new(outgoing_sink, incoming_lines)
@@ -293,7 +267,10 @@ impl FromStr for AcpAgent {
         if trimmed.starts_with('{') {
             let server: sacp::schema::McpServer = serde_json::from_str(trimmed)
                 .map_err(|e| sacp::util::internal_error(format!("Failed to parse JSON: {}", e)))?;
-            return Ok(Self { server });
+            return Ok(Self {
+                server,
+                debug_callback: None,
+            });
         }
 
         // Otherwise, parse as a command string
@@ -327,6 +304,7 @@ fn parse_command_string(s: &str) -> Result<AcpAgent, sacp::Error> {
             args,
             env: vec![],
         },
+        debug_callback: None,
     })
 }
 

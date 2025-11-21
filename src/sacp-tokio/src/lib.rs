@@ -6,7 +6,7 @@
 
 mod acp_agent;
 
-pub use acp_agent::{AcpAgent, DebuggedAcpAgent, LineDirection};
+pub use acp_agent::{AcpAgent, LineDirection};
 use sacp::{ByteStreams, Component};
 use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
 
