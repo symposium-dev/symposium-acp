@@ -163,13 +163,31 @@ impl Drop for ChildHolder {
 
 impl sacp::Component for AcpAgent {
     async fn serve(self, client: impl sacp::Component) -> Result<(), sacp::Error> {
+        use futures::AsyncBufReadExt;
+        use futures::AsyncWriteExt;
+        use futures::io::BufReader;
+
         let (child_stdin, child_stdout, child) = self.spawn_process()?;
 
         // Hold the child process - it will be killed when this future completes
         let _child_holder = ChildHolder { _child: child };
 
-        // Create the ByteStreams component and serve it
-        sacp::ByteStreams::new(child_stdin.compat_write(), child_stdout.compat())
+        // Convert stdio to line streams
+        let incoming_lines = BufReader::new(child_stdout.compat()).lines();
+
+        // Create a sink that writes lines (with newlines) to stdin
+        let outgoing_sink = futures::sink::unfold(
+            child_stdin.compat_write(),
+            async move |mut writer, line: String| {
+                let mut bytes = line.into_bytes();
+                bytes.push(b'\n');
+                writer.write_all(&bytes).await?;
+                Ok::<_, std::io::Error>(writer)
+            },
+        );
+
+        // Create the Lines component and serve it
+        sacp::Lines::new(outgoing_sink, incoming_lines)
             .serve(client)
             .await
     }
