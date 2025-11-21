@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::pin::pin;
 
 // Types re-exported from crate root
 use futures::StreamExt;
@@ -162,9 +163,10 @@ pub(super) async fn outgoing_protocol_actor(
 /// This is the transport layer - it has no knowledge of protocol semantics (IDs, correlation, etc.).
 pub(super) async fn transport_outgoing_lines_actor(
     mut transport_rx: mpsc::UnboundedReceiver<Result<jsonrpcmsg::Message, crate::Error>>,
-    mut outgoing_lines: impl futures::Sink<String, Error = std::io::Error> + Unpin,
+    outgoing_lines: impl futures::Sink<String, Error = std::io::Error>,
 ) -> Result<(), crate::Error> {
     use futures::SinkExt;
+    let mut outgoing_lines = pin!(outgoing_lines);
 
     while let Some(message_result) = transport_rx.next().await {
         // Unwrap the Result - errors here would be from the channel itself
@@ -231,9 +233,10 @@ pub(super) async fn transport_outgoing_lines_actor(
 ///
 /// This is the transport layer - it has no knowledge of protocol semantics.
 pub(super) async fn transport_incoming_lines_actor(
-    mut incoming_lines: impl futures::Stream<Item = std::io::Result<String>> + Unpin,
+    incoming_lines: impl futures::Stream<Item = std::io::Result<String>>,
     transport_tx: mpsc::UnboundedSender<Result<jsonrpcmsg::Message, crate::Error>>,
 ) -> Result<(), crate::Error> {
+    let mut incoming_lines = pin!(incoming_lines);
     while let Some(line_result) = incoming_lines.next().await {
         let line = line_result.map_err(crate::Error::into_internal_error)?;
         tracing::trace!(message = %line, "Received JSON-RPC message");

@@ -7,6 +7,7 @@ pub use jsonrpcmsg;
 use serde::{Deserialize, Serialize};
 use std::fmt::Debug;
 use std::panic::Location;
+use std::pin::pin;
 
 use boxfnonce::SendBoxFnOnce;
 use futures::channel::{mpsc, oneshot};
@@ -2116,8 +2117,8 @@ pub struct Lines<OutgoingSink, IncomingStream> {
 
 impl<OutgoingSink, IncomingStream> Lines<OutgoingSink, IncomingStream>
 where
-    OutgoingSink: futures::Sink<String, Error = std::io::Error> + Send + Unpin + 'static,
-    IncomingStream: futures::Stream<Item = std::io::Result<String>> + Send + Unpin + 'static,
+    OutgoingSink: futures::Sink<String, Error = std::io::Error> + Send + 'static,
+    IncomingStream: futures::Stream<Item = std::io::Result<String>> + Send + 'static,
 {
     /// Create a new line stream transport.
     pub fn new(outgoing: OutgoingSink, incoming: IncomingStream) -> Self {
@@ -2127,8 +2128,8 @@ where
 
 impl<OutgoingSink, IncomingStream> Component for Lines<OutgoingSink, IncomingStream>
 where
-    OutgoingSink: futures::Sink<String, Error = std::io::Error> + Send + Unpin + 'static,
-    IncomingStream: futures::Stream<Item = std::io::Result<String>> + Send + Unpin + 'static,
+    OutgoingSink: futures::Sink<String, Error = std::io::Error> + Send + 'static,
+    IncomingStream: futures::Stream<Item = std::io::Result<String>> + Send + 'static,
 {
     async fn serve(self, client: impl Component) -> Result<(), crate::Error> {
         let (channel, serve_self) = self.into_server();
@@ -2224,7 +2225,7 @@ where
 {
     async fn serve(self, client: impl Component) -> Result<(), crate::Error> {
         let (channel, serve_self) = self.into_server();
-        match futures::future::select(Box::pin(client.serve(channel)), serve_self).await {
+        match futures::future::select(pin!(client.serve(channel)), serve_self).await {
             Either::Left((result, _)) => result,
             Either::Right((result, _)) => result,
         }
@@ -2243,13 +2244,11 @@ where
         // Create a sink that writes lines (with newlines) to the outgoing byte stream
         // We need to Box the writer since it may not be Unpin
         let outgoing_sink =
-            futures::sink::unfold(Box::pin(outgoing), |mut writer, line: String| {
-                Box::pin(async move {
-                    let mut bytes = line.into_bytes();
-                    bytes.push(b'\n');
-                    writer.write_all(&bytes).await?;
-                    Ok::<_, std::io::Error>(writer)
-                })
+            futures::sink::unfold(Box::pin(outgoing), async move |mut writer, line: String| {
+                let mut bytes = line.into_bytes();
+                bytes.push(b'\n');
+                writer.write_all(&bytes).await?;
+                Ok::<_, std::io::Error>(writer)
             });
 
         // Delegate to Lines component
