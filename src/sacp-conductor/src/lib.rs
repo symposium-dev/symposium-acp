@@ -88,6 +88,8 @@ mod mcp_bridge;
 
 use clap::{Parser, Subcommand};
 use sacp_tokio::{AcpAgent, Stdio};
+use tracing::Instrument;
+use tracing_subscriber::{EnvFilter, layer::SubscriberExt, util::SubscriberInitExt};
 
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
@@ -123,7 +125,70 @@ pub enum ConductorCommand {
 }
 
 impl ConductorArgs {
-    pub async fn run(self) -> Result<(), sacp::Error> {
+    /// Main entry point that sets up tracing and runs the conductor
+    pub async fn main(self) -> anyhow::Result<()> {
+        let pid = std::process::id();
+        let cwd = std::env::current_dir()
+            .map(|p| p.display().to_string())
+            .unwrap_or_else(|_| "<unknown>".to_string());
+
+        // Check for SYMPOSIUM_LOG environment variable
+        if let Ok(log_level) = std::env::var("SYMPOSIUM_LOG") {
+            // Set up file logging to ~/.symposium/logs.$DATE
+            let home = std::env::var("HOME")
+                .map(PathBuf::from)
+                .unwrap_or_else(|_| PathBuf::from("."));
+
+            let log_dir = home.join(".symposium");
+            std::fs::create_dir_all(&log_dir)?;
+
+            let file_appender = tracing_appender::rolling::daily(log_dir, "logs");
+
+            tracing_subscriber::registry()
+                .with(EnvFilter::new(&log_level))
+                .with(
+                    tracing_subscriber::fmt::layer()
+                        .with_target(true)
+                        .with_span_events(
+                            tracing_subscriber::fmt::format::FmtSpan::NEW
+                                | tracing_subscriber::fmt::format::FmtSpan::CLOSE,
+                        )
+                        .with_writer(file_appender),
+                )
+                .init();
+
+            tracing::info!(
+                pid = %pid,
+                cwd = %cwd,
+                level = %log_level,
+                "Conductor starting with file logging"
+            );
+        } else {
+            // Initialize tracing with env filter support (RUST_LOG=debug, etc.)
+            // Important: Always write to stderr to avoid interfering with stdio protocols
+            // Note: --debug flag logs protocol messages to a file, tracing logs stay on stderr
+            tracing_subscriber::registry()
+                .with(
+                    EnvFilter::try_from_default_env()
+                        .unwrap_or_else(|_| EnvFilter::new("conductor=info")),
+                )
+                .with(
+                    tracing_subscriber::fmt::layer()
+                        .with_target(true)
+                        .with_writer(std::io::stderr),
+                )
+                .init();
+
+            tracing::info!(pid = %pid, cwd = %cwd, "Conductor starting");
+        }
+
+        self.run()
+            .instrument(tracing::info_span!("conductor", pid = %pid, cwd = %cwd))
+            .await
+            .map_err(|err| anyhow::anyhow!("{err}"))
+    }
+
+    async fn run(self) -> Result<(), sacp::Error> {
         match self.command {
             ConductorCommand::Agent { name, proxies } => {
                 // Create debug logger if --debug is enabled
@@ -155,9 +220,16 @@ impl ConductorArgs {
                     })
                     .collect::<Result<Vec<_>, sacp::Error>>()?;
 
+                // Create Stdio component with optional debug logging
+                let stdio = if let Some(ref logger) = debug_logger {
+                    Stdio::new().with_debug(logger.create_callback("C".to_string()))
+                } else {
+                    Stdio::new()
+                };
+
                 Conductor::new(name, providers, None)
                     .into_handler_chain()
-                    .connect_to(Stdio)?
+                    .connect_to(stdio)?
                     .serve()
                     .await
             }
