@@ -13,6 +13,17 @@ use serde::{Deserialize, Serialize};
 use tokio::process::Child;
 use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
 
+/// Direction of a line being sent or received.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LineDirection {
+    /// Line being sent to the agent (stdin)
+    Stdin,
+    /// Line being received from the agent (stdout)
+    Stdout,
+    /// Line being received from the agent (stderr)
+    Stderr,
+}
+
 /// A component representing an external ACP agent running in a separate process.
 ///
 /// `AcpAgent` implements the [`sacp::Component`] trait for spawning and communicating with
@@ -90,6 +101,32 @@ impl AcpAgent {
         self.server
     }
 
+    /// Add a debug callback that will be invoked for each line sent/received.
+    ///
+    /// The callback receives the line content and the direction (stdin/stdout/stderr).
+    /// This is useful for logging, debugging, or monitoring agent communication.
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// # use sacp_tokio::{AcpAgent, LineDirection};
+    /// # use std::str::FromStr;
+    /// let agent = AcpAgent::from_str("python my_agent.py")
+    ///     .unwrap()
+    ///     .with_debug(|line, direction| {
+    ///         eprintln!("{:?}: {}", direction, line);
+    ///     });
+    /// ```
+    pub fn with_debug<F>(self, callback: F) -> DebuggedAcpAgent<F>
+    where
+        F: Fn(&str, LineDirection) + Send + Sync + 'static,
+    {
+        DebuggedAcpAgent {
+            agent: self,
+            debug_callback: callback,
+        }
+    }
+
     /// Spawn the process and get stdio streams.
     /// Used internally by the Component trait implementation.
     pub fn spawn_process(
@@ -137,6 +174,59 @@ impl AcpAgent {
                 "SSE transport not yet supported by AcpAgent",
             )),
         }
+    }
+}
+
+/// An `AcpAgent` wrapper with debug callback support.
+///
+/// Created by calling [`AcpAgent::with_debug`]. The debug callback is invoked
+/// for each line sent to or received from the agent process.
+pub struct DebuggedAcpAgent<F> {
+    agent: AcpAgent,
+    debug_callback: F,
+}
+
+impl<F> sacp::Component for DebuggedAcpAgent<F>
+where
+    F: Fn(&str, LineDirection) + Send + Sync + Clone + 'static,
+{
+    async fn serve(self, client: impl sacp::Component) -> Result<(), sacp::Error> {
+        use futures::AsyncBufReadExt;
+        use futures::AsyncWriteExt;
+        use futures::StreamExt;
+        use futures::io::BufReader;
+
+        let (child_stdin, child_stdout, child) = self.agent.spawn_process()?;
+
+        // Hold the child process - it will be killed when this future completes
+        let _child_holder = ChildHolder { _child: child };
+
+        // Convert stdio to line streams with debug inspection
+        let incoming_lines = BufReader::new(child_stdout.compat()).lines().inspect({
+            let callback = self.debug_callback.clone();
+            move |result| {
+                if let Ok(line) = result {
+                    callback(line, LineDirection::Stdout);
+                }
+            }
+        });
+
+        // Create a sink that writes lines and logs them
+        let outgoing_sink = futures::sink::unfold(
+            (child_stdin.compat_write(), self.debug_callback),
+            async move |(mut writer, callback), line: String| {
+                callback(&line, LineDirection::Stdin);
+                let mut bytes = line.into_bytes();
+                bytes.push(b'\n');
+                writer.write_all(&bytes).await?;
+                Ok::<_, std::io::Error>((writer, callback))
+            },
+        );
+
+        // Create the Lines component and serve it
+        sacp::Lines::new(outgoing_sink, incoming_lines)
+            .serve(client)
+            .await
     }
 }
 
