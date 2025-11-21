@@ -134,6 +134,7 @@ impl AcpAgent {
         (
             tokio::process::ChildStdin,
             tokio::process::ChildStdout,
+            tokio::process::ChildStderr,
             Child,
         ),
         sacp::Error,
@@ -151,7 +152,8 @@ impl AcpAgent {
                     cmd.env(&env_var.name, &env_var.value);
                 }
                 cmd.stdin(std::process::Stdio::piped())
-                    .stdout(std::process::Stdio::piped());
+                    .stdout(std::process::Stdio::piped())
+                    .stderr(std::process::Stdio::piped());
 
                 let mut child = cmd.spawn().map_err(sacp::Error::into_internal_error)?;
 
@@ -163,8 +165,12 @@ impl AcpAgent {
                     .stdout
                     .take()
                     .ok_or_else(|| sacp::util::internal_error("Failed to open stdout"))?;
+                let child_stderr = child
+                    .stderr
+                    .take()
+                    .ok_or_else(|| sacp::util::internal_error("Failed to open stderr"))?;
 
-                Ok((child_stdin, child_stdout, child))
+                Ok((child_stdin, child_stdout, child_stderr, child))
             }
             sacp::schema::McpServer::Http { .. } => Err(sacp::util::internal_error(
                 "HTTP transport not yet supported by AcpAgent",
@@ -204,10 +210,23 @@ impl sacp::Component for AcpAgent {
         use futures::StreamExt;
         use futures::io::BufReader;
 
-        let (child_stdin, child_stdout, child) = self.spawn_process()?;
+        let (child_stdin, child_stdout, child_stderr, child) = self.spawn_process()?;
 
         // Hold the child process - it will be killed when this future completes
         let _child_holder = ChildHolder { _child: child };
+
+        // Spawn a task to read stderr if we have a debug callback
+        if let Some(callback) = self.debug_callback.clone() {
+            tokio::spawn(async move {
+                let stderr_reader = BufReader::new(child_stderr.compat());
+                let mut stderr_lines = stderr_reader.lines();
+                while let Some(line_result) = stderr_lines.next().await {
+                    if let Ok(line) = line_result {
+                        callback(&line, LineDirection::Stderr);
+                    }
+                }
+            });
+        }
 
         // Convert stdio to line streams with optional debug inspection
         let incoming_lines = if let Some(callback) = self.debug_callback.clone() {
