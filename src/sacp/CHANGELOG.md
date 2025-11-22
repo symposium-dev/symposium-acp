@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.1.0](https://github.com/symposium-dev/symposium-acp/compare/sacp-v1.0.0...sacp-v1.1.0) - 2025-11-22
+
+### Added
+
+- *(sacp)* add IntoHandled support to on_receive_message
+
+### Fixed
+
+- *(sacp-tee)* ensure tracing outputs to stderr
+
+### Other
+
+- *(sacp-tokio)* rewrite AcpAgent to use Lines instead of ByteStreams
+- cleanup the unpin usage
+- *(sacp)* create Lines component and have ByteStreams delegate to it
+- report more info on parse failures
+
 ## [1.0.0](https://github.com/symposium-dev/symposium-acp/compare/sacp-v1.0.0-alpha.7...sacp-v1.0.0) - 2025-11-13
 
 ### Fixed

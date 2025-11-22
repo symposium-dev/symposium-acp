@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.2](https://github.com/symposium-dev/symposium-acp/compare/sacp-tee-v0.1.1...sacp-tee-v0.1.2) - 2025-11-22
+
+### Added
+
+- *(sacp-tee)* add raw mode as default with line-by-line logging
+
+### Fixed
+
+- update Stdio usage to Stdio::new() after API change
+- *(sacp-tee)* ensure tracing outputs to stderr
+
 ## [0.1.1](https://github.com/symposium-dev/symposium-acp/compare/sacp-tee-v0.1.0...sacp-tee-v0.1.1) - 2025-11-17
 
 ### Other
