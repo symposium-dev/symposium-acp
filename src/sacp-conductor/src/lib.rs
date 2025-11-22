@@ -102,6 +102,11 @@ pub struct ConductorArgs {
     #[arg(long)]
     pub debug_dir: Option<PathBuf>,
 
+    /// Set log level (e.g., "trace", "debug", "info", "warn", "error", or module-specific like "conductor=debug")
+    /// Overrides RUST_LOG and SYMPOSIUM_LOG environment variables
+    #[arg(long)]
+    pub log: Option<String>,
+
     #[command(subcommand)]
     pub command: ConductorCommand,
 }
@@ -132,8 +137,15 @@ impl ConductorArgs {
             .map(|p| p.display().to_string())
             .unwrap_or_else(|_| "<unknown>".to_string());
 
-        // Check for SYMPOSIUM_LOG environment variable
-        if let Ok(log_level) = std::env::var("SYMPOSIUM_LOG") {
+        // Determine log level: --log flag takes precedence over environment variables
+        let log_level = self
+            .log
+            .clone()
+            .or_else(|| std::env::var("SYMPOSIUM_LOG").ok())
+            .or_else(|| std::env::var("RUST_LOG").ok());
+
+        // Check for SYMPOSIUM_LOG environment variable (for file logging)
+        if let Ok(symposium_log) = std::env::var("SYMPOSIUM_LOG") {
             // Set up file logging to ~/.symposium/logs.$DATE
             let home = std::env::var("HOME")
                 .map(PathBuf::from)
@@ -144,8 +156,10 @@ impl ConductorArgs {
 
             let file_appender = tracing_appender::rolling::daily(log_dir, "logs");
 
+            let effective_log_level = log_level.as_deref().unwrap_or(&symposium_log);
+
             tracing_subscriber::registry()
-                .with(EnvFilter::new(&log_level))
+                .with(EnvFilter::new(effective_log_level))
                 .with(
                     tracing_subscriber::fmt::layer()
                         .with_target(true)
@@ -160,18 +174,22 @@ impl ConductorArgs {
             tracing::info!(
                 pid = %pid,
                 cwd = %cwd,
-                level = %log_level,
+                level = %effective_log_level,
                 "Conductor starting with file logging"
             );
         } else {
             // Initialize tracing with env filter support (RUST_LOG=debug, etc.)
             // Important: Always write to stderr to avoid interfering with stdio protocols
             // Note: --debug flag logs protocol messages to a file, tracing logs stay on stderr
+            let env_filter = if let Some(ref level) = log_level {
+                EnvFilter::new(level)
+            } else {
+                EnvFilter::try_from_default_env()
+                    .unwrap_or_else(|_| EnvFilter::new("conductor=info"))
+            };
+
             tracing_subscriber::registry()
-                .with(
-                    EnvFilter::try_from_default_env()
-                        .unwrap_or_else(|_| EnvFilter::new("conductor=info")),
-                )
+                .with(env_filter)
                 .with(
                     tracing_subscriber::fmt::layer()
                         .with_target(true)
@@ -179,7 +197,11 @@ impl ConductorArgs {
                 )
                 .init();
 
-            tracing::info!(pid = %pid, cwd = %cwd, "Conductor starting");
+            if let Some(ref level) = log_level {
+                tracing::info!(pid = %pid, cwd = %cwd, level = %level, "Conductor starting");
+            } else {
+                tracing::info!(pid = %pid, cwd = %cwd, "Conductor starting");
+            }
         }
 
         self.run()

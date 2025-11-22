@@ -123,7 +123,7 @@ use futures::{
 };
 use sacp::{
     JrConnectionCx, JrHandlerChain, JrNotification, JrRequest, JrRequestCx, JrResponse,
-    MessageAndCx, MetaCapability, MetaCapabilityExt, Proxy, UntypedMessage,
+    MessageAndCx, MetaCapabilityExt, Proxy, UntypedMessage,
 };
 use sacp::{
     JrMessageHandler, JrResponsePayload,
