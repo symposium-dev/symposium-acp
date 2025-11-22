@@ -7,6 +7,7 @@ pub use jsonrpcmsg;
 use serde::{Deserialize, Serialize};
 use std::fmt::Debug;
 use std::panic::Location;
+use std::pin::pin;
 
 use boxfnonce::SendBoxFnOnce;
 use futures::channel::{mpsc, oneshot};
@@ -478,14 +479,15 @@ impl<H: JrMessageHandler> JrHandlerChain<H> {
     /// For most use cases, prefer [`on_receive_request`](Self::on_receive_request) or
     /// [`on_receive_notification`](Self::on_receive_notification) which provide cleaner APIs
     /// for handling requests or notifications separately.
-    pub fn on_receive_message<R, N, F>(
+    pub fn on_receive_message<R, N, F, T>(
         self,
         op: F,
     ) -> JrHandlerChain<ChainedHandler<H, MessageHandler<R, N, F>>>
     where
         R: JrRequest,
         N: JrNotification,
-        F: AsyncFnMut(MessageAndCx<R, N>) -> Result<(), crate::Error> + Send,
+        F: AsyncFnMut(MessageAndCx<R, N>) -> Result<T, crate::Error> + Send,
+        T: IntoHandled<MessageAndCx<R, N>>,
     {
         self.with_handler(MessageHandler::new(op))
     }
@@ -2084,6 +2086,83 @@ fn communication_failure(err: impl ToString) -> crate::Error {
 // IntoJrConnectionTransport Implementations
 // ============================================================================
 
+/// A component that communicates over line streams.
+///
+/// `Lines` implements the [`Component`] trait for any pair of line-based streams
+/// (a `Stream<Item = io::Result<String>>` for incoming and a `Sink<String>` for outgoing),
+/// handling serialization of JSON-RPC messages to/from newline-delimited JSON.
+///
+/// This is a lower-level primitive than [`ByteStreams`] that enables interception and
+/// transformation of individual lines before they are parsed or after they are serialized.
+/// This is particularly useful for debugging, logging, or implementing custom line-based
+/// protocols.
+///
+/// # Use Cases
+///
+/// - **Line-by-line logging**: Intercept and log each line before parsing
+/// - **Custom protocols**: Transform lines before/after JSON-RPC processing
+/// - **Debugging**: Inspect raw message strings
+/// - **Line filtering**: Skip or modify specific messages
+///
+/// Most users should use [`ByteStreams`] instead, which provides a simpler interface
+/// for byte-based I/O.
+///
+/// [`Component`]: crate::Component
+pub struct Lines<OutgoingSink, IncomingStream> {
+    /// Outgoing line sink (where we write serialized JSON-RPC messages)
+    pub outgoing: OutgoingSink,
+    /// Incoming line stream (where we read and parse JSON-RPC messages)
+    pub incoming: IncomingStream,
+}
+
+impl<OutgoingSink, IncomingStream> Lines<OutgoingSink, IncomingStream>
+where
+    OutgoingSink: futures::Sink<String, Error = std::io::Error> + Send + 'static,
+    IncomingStream: futures::Stream<Item = std::io::Result<String>> + Send + 'static,
+{
+    /// Create a new line stream transport.
+    pub fn new(outgoing: OutgoingSink, incoming: IncomingStream) -> Self {
+        Self { outgoing, incoming }
+    }
+}
+
+impl<OutgoingSink, IncomingStream> Component for Lines<OutgoingSink, IncomingStream>
+where
+    OutgoingSink: futures::Sink<String, Error = std::io::Error> + Send + 'static,
+    IncomingStream: futures::Stream<Item = std::io::Result<String>> + Send + 'static,
+{
+    async fn serve(self, client: impl Component) -> Result<(), crate::Error> {
+        let (channel, serve_self) = self.into_server();
+        match futures::future::select(Box::pin(client.serve(channel)), serve_self).await {
+            Either::Left((result, _)) => result,
+            Either::Right((result, _)) => result,
+        }
+    }
+
+    fn into_server(self) -> (Channel, BoxFuture<'static, Result<(), crate::Error>>) {
+        let Self { outgoing, incoming } = self;
+
+        // Create a channel pair for the client to use
+        let (channel_for_caller, channel_for_lines) = Channel::duplex();
+
+        // Create the server future that runs the line stream actors
+        let server_future = Box::pin(async move {
+            let Channel { rx, tx } = channel_for_lines;
+
+            // Run both actors concurrently
+            let outgoing_future = actors::transport_outgoing_lines_actor(rx, outgoing);
+            let incoming_future = actors::transport_incoming_lines_actor(incoming, tx);
+
+            // Wait for both to complete
+            futures::try_join!(outgoing_future, incoming_future)?;
+
+            Ok(())
+        });
+
+        (channel_for_caller, server_future)
+    }
+}
+
 /// A component that communicates over byte streams (stdin/stdout, sockets, pipes, etc.).
 ///
 /// `ByteStreams` implements the [`Component`] trait for any pair of `AsyncRead` and `AsyncWrite`
@@ -2146,33 +2225,34 @@ where
 {
     async fn serve(self, client: impl Component) -> Result<(), crate::Error> {
         let (channel, serve_self) = self.into_server();
-        match futures::future::select(Box::pin(client.serve(channel)), serve_self).await {
+        match futures::future::select(pin!(client.serve(channel)), serve_self).await {
             Either::Left((result, _)) => result,
             Either::Right((result, _)) => result,
         }
     }
 
     fn into_server(self) -> (Channel, BoxFuture<'static, Result<(), crate::Error>>) {
+        use futures::AsyncBufReadExt;
+        use futures::AsyncWriteExt;
+        use futures::io::BufReader;
         let Self { outgoing, incoming } = self;
 
-        // Create a channel pair for the client to use
-        let (channel_for_caller, channel_for_bytestreams) = Channel::duplex();
+        // Convert byte streams to line streams
+        // Box both streams to satisfy Unpin requirements
+        let incoming_lines = Box::pin(BufReader::new(incoming).lines());
 
-        // Create the server future that runs the byte stream actors
-        let server_future = Box::pin(async move {
-            let Channel { rx, tx } = channel_for_bytestreams;
+        // Create a sink that writes lines (with newlines) to the outgoing byte stream
+        // We need to Box the writer since it may not be Unpin
+        let outgoing_sink =
+            futures::sink::unfold(Box::pin(outgoing), async move |mut writer, line: String| {
+                let mut bytes = line.into_bytes();
+                bytes.push(b'\n');
+                writer.write_all(&bytes).await?;
+                Ok::<_, std::io::Error>(writer)
+            });
 
-            // Run both actors concurrently
-            let outgoing_future = actors::transport_outgoing_actor(rx, outgoing);
-            let incoming_future = actors::transport_incoming_actor(incoming, tx);
-
-            // Wait for both to complete
-            futures::try_join!(outgoing_future, incoming_future)?;
-
-            Ok(())
-        });
-
-        (channel_for_caller, server_future)
+        // Delegate to Lines component
+        Lines::new(outgoing_sink, incoming_lines).into_server()
     }
 }
 

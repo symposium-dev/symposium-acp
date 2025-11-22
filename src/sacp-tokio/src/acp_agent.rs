@@ -7,11 +7,22 @@ use std::future::Future;
 use std::path::PathBuf;
 use std::pin::Pin;
 use std::str::FromStr;
+use std::sync::Arc;
 use std::task::{Context, Poll};
 
-use serde::{Deserialize, Serialize};
 use tokio::process::Child;
 use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
+
+/// Direction of a line being sent or received.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LineDirection {
+    /// Line being sent to the agent (stdin)
+    Stdin,
+    /// Line being received from the agent (stdout)
+    Stdout,
+    /// Line being received from the agent (stderr)
+    Stderr,
+}
 
 /// A component representing an external ACP agent running in a separate process.
 ///
@@ -67,17 +78,18 @@ use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
 /// ```
 ///
 /// [`sacp_conductor::Conductor`]: https://docs.rs/sacp-conductor/latest/sacp_conductor/struct.Conductor.html
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(transparent)]
 pub struct AcpAgent {
-    #[serde(flatten)]
     server: sacp::schema::McpServer,
+    debug_callback: Option<Arc<dyn Fn(&str, LineDirection) + Send + Sync + 'static>>,
 }
 
 impl AcpAgent {
     /// Create a new `AcpAgent` from an [`sacp::schema::McpServer`] configuration.
     pub fn new(server: sacp::schema::McpServer) -> Self {
-        Self { server }
+        Self {
+            server,
+            debug_callback: None,
+        }
     }
 
     /// Get the underlying [`sacp::schema::McpServer`] configuration.
@@ -90,6 +102,30 @@ impl AcpAgent {
         self.server
     }
 
+    /// Add a debug callback that will be invoked for each line sent/received.
+    ///
+    /// The callback receives the line content and the direction (stdin/stdout/stderr).
+    /// This is useful for logging, debugging, or monitoring agent communication.
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// # use sacp_tokio::{AcpAgent, LineDirection};
+    /// # use std::str::FromStr;
+    /// let agent = AcpAgent::from_str("python my_agent.py")
+    ///     .unwrap()
+    ///     .with_debug(|line, direction| {
+    ///         eprintln!("{:?}: {}", direction, line);
+    ///     });
+    /// ```
+    pub fn with_debug<F>(mut self, callback: F) -> Self
+    where
+        F: Fn(&str, LineDirection) + Send + Sync + 'static,
+    {
+        self.debug_callback = Some(Arc::new(callback));
+        self
+    }
+
     /// Spawn the process and get stdio streams.
     /// Used internally by the Component trait implementation.
     pub fn spawn_process(
@@ -98,6 +134,7 @@ impl AcpAgent {
         (
             tokio::process::ChildStdin,
             tokio::process::ChildStdout,
+            tokio::process::ChildStderr,
             Child,
         ),
         sacp::Error,
@@ -115,7 +152,8 @@ impl AcpAgent {
                     cmd.env(&env_var.name, &env_var.value);
                 }
                 cmd.stdin(std::process::Stdio::piped())
-                    .stdout(std::process::Stdio::piped());
+                    .stdout(std::process::Stdio::piped())
+                    .stderr(std::process::Stdio::piped());
 
                 let mut child = cmd.spawn().map_err(sacp::Error::into_internal_error)?;
 
@@ -127,8 +165,12 @@ impl AcpAgent {
                     .stdout
                     .take()
                     .ok_or_else(|| sacp::util::internal_error("Failed to open stdout"))?;
+                let child_stderr = child
+                    .stderr
+                    .take()
+                    .ok_or_else(|| sacp::util::internal_error("Failed to open stderr"))?;
 
-                Ok((child_stdin, child_stdout, child))
+                Ok((child_stdin, child_stdout, child_stderr, child))
             }
             sacp::schema::McpServer::Http { .. } => Err(sacp::util::internal_error(
                 "HTTP transport not yet supported by AcpAgent",
@@ -163,13 +205,72 @@ impl Drop for ChildHolder {
 
 impl sacp::Component for AcpAgent {
     async fn serve(self, client: impl sacp::Component) -> Result<(), sacp::Error> {
-        let (child_stdin, child_stdout, child) = self.spawn_process()?;
+        use futures::AsyncBufReadExt;
+        use futures::AsyncWriteExt;
+        use futures::StreamExt;
+        use futures::io::BufReader;
+
+        let (child_stdin, child_stdout, child_stderr, child) = self.spawn_process()?;
 
         // Hold the child process - it will be killed when this future completes
         let _child_holder = ChildHolder { _child: child };
 
-        // Create the ByteStreams component and serve it
-        sacp::ByteStreams::new(child_stdin.compat_write(), child_stdout.compat())
+        // Spawn a task to read stderr if we have a debug callback
+        if let Some(callback) = self.debug_callback.clone() {
+            tokio::spawn(async move {
+                let stderr_reader = BufReader::new(child_stderr.compat());
+                let mut stderr_lines = stderr_reader.lines();
+                while let Some(line_result) = stderr_lines.next().await {
+                    if let Ok(line) = line_result {
+                        callback(&line, LineDirection::Stderr);
+                    }
+                }
+            });
+        }
+
+        // Convert stdio to line streams with optional debug inspection
+        let incoming_lines = if let Some(callback) = self.debug_callback.clone() {
+            Box::pin(
+                BufReader::new(child_stdout.compat())
+                    .lines()
+                    .inspect(move |result| {
+                        if let Ok(line) = result {
+                            callback(line, LineDirection::Stdout);
+                        }
+                    }),
+            )
+                as std::pin::Pin<Box<dyn futures::Stream<Item = std::io::Result<String>> + Send>>
+        } else {
+            Box::pin(BufReader::new(child_stdout.compat()).lines())
+        };
+
+        // Create a sink that writes lines (with newlines) to stdin with optional debug logging
+        let outgoing_sink = if let Some(callback) = self.debug_callback.clone() {
+            Box::pin(futures::sink::unfold(
+                (child_stdin.compat_write(), callback),
+                async move |(mut writer, callback), line: String| {
+                    callback(&line, LineDirection::Stdin);
+                    let mut bytes = line.into_bytes();
+                    bytes.push(b'\n');
+                    writer.write_all(&bytes).await?;
+                    Ok::<_, std::io::Error>((writer, callback))
+                },
+            ))
+                as std::pin::Pin<Box<dyn futures::Sink<String, Error = std::io::Error> + Send>>
+        } else {
+            Box::pin(futures::sink::unfold(
+                child_stdin.compat_write(),
+                async move |mut writer, line: String| {
+                    let mut bytes = line.into_bytes();
+                    bytes.push(b'\n');
+                    writer.write_all(&bytes).await?;
+                    Ok::<_, std::io::Error>(writer)
+                },
+            ))
+        };
+
+        // Create the Lines component and serve it
+        sacp::Lines::new(outgoing_sink, incoming_lines)
             .serve(client)
             .await
     }
@@ -185,7 +286,10 @@ impl FromStr for AcpAgent {
         if trimmed.starts_with('{') {
             let server: sacp::schema::McpServer = serde_json::from_str(trimmed)
                 .map_err(|e| sacp::util::internal_error(format!("Failed to parse JSON: {}", e)))?;
-            return Ok(Self { server });
+            return Ok(Self {
+                server,
+                debug_callback: None,
+            });
         }
 
         // Otherwise, parse as a command string
@@ -219,6 +323,7 @@ fn parse_command_string(s: &str) -> Result<AcpAgent, sacp::Error> {
             args,
             env: vec![],
         },
+        debug_callback: None,
     })
 }
 

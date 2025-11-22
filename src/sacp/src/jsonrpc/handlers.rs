@@ -1,4 +1,4 @@
-use crate::jsonrpc::{Handled, JrMessageHandler};
+use crate::jsonrpc::{Handled, IntoHandled, JrMessageHandler};
 use crate::{JrConnectionCx, JrNotification, JrRequest, MessageAndCx};
 // Types re-exported from crate root
 use super::JrRequestCx;
@@ -184,17 +184,17 @@ pub struct MessageHandler<R, N, F>
 where
     R: JrRequest,
     N: JrNotification,
-    F: AsyncFnMut(MessageAndCx<R, N>) -> Result<(), crate::Error>,
 {
     handler: F,
     phantom: PhantomData<fn(R, N)>,
 }
 
-impl<R, N, F> MessageHandler<R, N, F>
+impl<R, N, F, T> MessageHandler<R, N, F>
 where
     R: JrRequest,
     N: JrNotification,
-    F: AsyncFnMut(MessageAndCx<R, N>) -> Result<(), crate::Error>,
+    F: AsyncFnMut(MessageAndCx<R, N>) -> Result<T, crate::Error>,
+    T: IntoHandled<MessageAndCx<R, N>>,
 {
     /// Creates a new message handler
     pub fn new(handler: F) -> Self {
@@ -205,11 +205,12 @@ where
     }
 }
 
-impl<R, N, F> JrMessageHandler for MessageHandler<R, N, F>
+impl<R, N, F, T> JrMessageHandler for MessageHandler<R, N, F>
 where
     R: JrRequest,
     N: JrNotification,
-    F: AsyncFnMut(MessageAndCx<R, N>) -> Result<(), crate::Error>,
+    F: AsyncFnMut(MessageAndCx<R, N>) -> Result<T, crate::Error>,
+    T: IntoHandled<MessageAndCx<R, N>>,
 {
     async fn handle_message(
         &mut self,
@@ -226,8 +227,20 @@ where
                     Some(Ok(req)) => {
                         tracing::trace!(?req, "MessageHandler::handle_request: parse completed");
                         let typed_message = MessageAndCx::Request(req, request_cx.cast());
-                        (self.handler)(typed_message).await?;
-                        Ok(Handled::Yes)
+                        let result = (self.handler)(typed_message).await?;
+                        match result.into_handled() {
+                            Handled::Yes => Ok(Handled::Yes),
+                            Handled::No(MessageAndCx::Request(request, request_cx)) => {
+                                let untyped = request.into_untyped_message()?;
+                                Ok(Handled::No(MessageAndCx::Request(
+                                    untyped,
+                                    request_cx.erase_to_json(),
+                                )))
+                            }
+                            Handled::No(MessageAndCx::Notification(..)) => {
+                                unreachable!("Request handler returned notification")
+                            }
+                        }
                     }
                     Some(Err(err)) => {
                         tracing::trace!(?err, "MessageHandler::handle_request: parse errored");
@@ -253,8 +266,17 @@ where
                             "MessageHandler::handle_notification: parse completed"
                         );
                         let typed_message = MessageAndCx::Notification(notif, cx);
-                        (self.handler)(typed_message).await?;
-                        Ok(Handled::Yes)
+                        let result = (self.handler)(typed_message).await?;
+                        match result.into_handled() {
+                            Handled::Yes => Ok(Handled::Yes),
+                            Handled::No(MessageAndCx::Notification(notification, cx)) => {
+                                let untyped = notification.into_untyped_message()?;
+                                Ok(Handled::No(MessageAndCx::Notification(untyped, cx)))
+                            }
+                            Handled::No(MessageAndCx::Request(..)) => {
+                                unreachable!("Notification handler returned request")
+                            }
+                        }
                     }
                     Some(Err(err)) => {
                         tracing::trace!(?err, "MessageHandler::handle_notification: parse errored");

@@ -145,6 +145,9 @@ async fn test_invalid_json() {
                 {
                   "error": {
                     "code": -32700,
+                    "data": {
+                      "line": "{\"method\": \"test\", \"id\": 1, INVALID}"
+                    },
                     "message": "Parse error"
                   },
                   "jsonrpc": "2.0"
