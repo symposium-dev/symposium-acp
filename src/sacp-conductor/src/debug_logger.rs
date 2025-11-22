@@ -1,6 +1,7 @@
 //! Debug logging for conductor
 
 use chrono::Local;
+use std::io::Write;
 use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::fs::OpenOptions;
@@ -85,6 +86,78 @@ impl DebugLogger {
                 let _ = writer.write_all(log_line.as_bytes()).await;
                 let _ = writer.flush().await;
             });
+        }
+    }
+
+    /// Write a tracing log line to the debug file
+    /// This is synchronous and blocks, suitable for use with tracing's MakeWriter
+    pub fn write_tracing_log(&self, line: &str) {
+        let writer = self.writer.clone();
+        let line = line.to_string();
+        tokio::spawn(async move {
+            // Strip ANSI escape codes to keep logs clean
+            let bytes = strip_ansi_escapes::strip(&line);
+            let cleaned_line = String::from_utf8_lossy(&bytes);
+
+            let log_line = format!("C ! {}\n", cleaned_line.trim_end());
+            let mut writer = writer.lock().await;
+            let _ = writer.write_all(log_line.as_bytes()).await;
+            let _ = writer.flush().await;
+        });
+    }
+
+    /// Create a writer for tracing logs
+    pub fn create_tracing_writer(&self) -> DebugLogWriter {
+        DebugLogWriter {
+            logger: self.clone(),
+            buffer: Vec::new(),
+        }
+    }
+}
+
+impl Clone for DebugLogger {
+    fn clone(&self) -> Self {
+        Self {
+            writer: self.writer.clone(),
+        }
+    }
+}
+
+/// A writer that sends tracing logs to the debug logger
+pub struct DebugLogWriter {
+    logger: DebugLogger,
+    buffer: Vec<u8>,
+}
+
+impl Write for DebugLogWriter {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        self.buffer.extend_from_slice(buf);
+
+        // Write complete lines
+        while let Some(newline_pos) = self.buffer.iter().position(|&b| b == b'\n') {
+            let line = self.buffer.drain(..=newline_pos).collect::<Vec<_>>();
+            let line_str = String::from_utf8_lossy(&line);
+            self.logger.write_tracing_log(&line_str);
+        }
+
+        Ok(buf.len())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        if !self.buffer.is_empty() {
+            let line = self.buffer.drain(..).collect::<Vec<_>>();
+            let line_str = String::from_utf8_lossy(&line);
+            self.logger.write_tracing_log(&line_str);
+        }
+        Ok(())
+    }
+}
+
+impl Clone for DebugLogWriter {
+    fn clone(&self) -> Self {
+        Self {
+            logger: self.logger.clone(),
+            buffer: Vec::new(),
         }
     }
 }
