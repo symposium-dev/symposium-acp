@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.1.0](https://github.com/symposium-dev/symposium-acp/compare/sacp-conductor-v2.0.1...sacp-conductor-v2.1.0) - 2025-11-22
+
+### Added
+
+- *(sacp-conductor)* write tracing logs to debug file when --debug is enabled
+- *(sacp-conductor)* add --log option for setting log level
+- *(sacp-conductor)* strip ANSI escape codes from stderr in debug logs
+- *(sacp-conductor)* add debug logging with --debug and --debug-dir flags
+- *(elizacp)* add MCP tools/list support and refactor client handling
+
+### Fixed
+
+- *(sacp-conductor)* empty conductor now responds with proxy capability
+- *(sacp-conductor)* handle empty components in proxy mode
+
+### Other
+
+- *(sacp-conductor)* avoid creating debug logger twice
+- *(sacp-conductor)* simplify logging to only use command-line args
+- *(sacp-conductor)* move main logic into library
+
 ## [2.0.1](https://github.com/symposium-dev/symposium-acp/compare/sacp-conductor-v2.0.0...sacp-conductor-v2.0.1) - 2025-11-18
 
 ### Other

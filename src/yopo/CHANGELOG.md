@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.2.0](https://github.com/symposium-dev/symposium-acp/compare/yopo-v1.1.0...yopo-v1.2.0) - 2025-11-22
+
+### Added
+
+- *(yopo)* add tracing support with configurable log levels
+- *(sacp)* add IntoHandled support to on_receive_message
+
 ## [1.1.0](https://github.com/symposium-dev/symposium-acp/compare/yopo-v1.0.0...yopo-v1.1.0) - 2025-11-18
 
 ### Added
