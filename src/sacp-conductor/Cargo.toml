@@ -14,7 +14,7 @@ test-support = []
 [dependencies]
 sacp = { version = "1.1.0", path = "../sacp" }
 sacp-proxy = { version = "2.0.1", path = "../sacp-proxy" }
-sacp-tokio = { version = "1.1.0", path = "../sacp-tokio" }
+sacp-tokio = { version = "2.0.0", path = "../sacp-tokio" }
 agent-client-protocol-schema.workspace = true
 anyhow.workspace = true
 chrono.workspace = true
