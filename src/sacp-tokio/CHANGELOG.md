@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.0.0](https://github.com/symposium-dev/symposium-acp/compare/sacp-tokio-v1.1.0...sacp-tokio-v2.0.0) - 2025-11-22
+
+### Added
+
+- *(sacp-tokio)* add debug callback support to Stdio component
+- *(sacp-tokio)* capture stderr in AcpAgent debug logging
+- *(sacp-tokio)* add debug callback support to AcpAgent
+
+### Changed
+
+- [**breaking**] `Stdio` is no longer a unit struct. Use `Stdio::new()` instead of `Stdio` to instantiate.
+
+### Other
+
+- *(sacp-tokio)* simplify debug callback using Option instead of wrapper type
+- *(sacp-tokio)* rewrite AcpAgent to use Lines instead of ByteStreams
+
 ## [1.1.0](https://github.com/symposium-dev/symposium-acp/compare/sacp-tokio-v1.0.0...sacp-tokio-v1.1.0) - 2025-11-22
 
 ### Added
