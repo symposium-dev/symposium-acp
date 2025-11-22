@@ -625,6 +625,12 @@ impl ConductorHandlerState {
         message: MessageAndCx,
         client: &JrConnectionCx,
     ) -> Result<(), sacp::Error> {
+        tracing::trace!(
+            target_component_index,
+            ?message,
+            "forward_client_to_agent_message"
+        );
+
         // In proxy mode, if the target is beyond our component chain,
         // forward to the conductor's own successor (via client connection)
         if self.proxy_mode.load(Ordering::Relaxed)
@@ -756,7 +762,11 @@ impl ConductorHandlerState {
         mut initialize_req: InitializeRequest,
         request_cx: JrRequestCx<InitializeResponse>,
     ) -> Result<(), sacp::Error> {
-        tracing::debug!(?initialize_req, "forward_initialize_request");
+        tracing::debug!(
+            target_component_index,
+            ?initialize_req,
+            "forward_initialize_request"
+        );
 
         // Lazy initialization: spawn components on first Initialize request
         if let Some(component_list) = self.component_list.take() {
@@ -880,11 +890,23 @@ impl ConductorHandlerState {
             }
 
             // Otherwise, we should forward the request to our successor.
-            // We do not add proxy capability as we are not capable of proxying for them.
+            // An empty conductor in proxy mode IS a proxy - it forwards messages through.
+            // We need to respond with the proxy capability to indicate this.
             cx.send_request_to_successor(initialize_req)
-                .await_when_result_received(async move |response| match response {
-                    Ok(response) => request_cx.respond_via(conductor_tx, response).await,
-                    Err(error) => request_cx.respond_with_error(error),
+                .await_when_result_received(async move |response| {
+                    tracing::trace!(
+                        ?response,
+                        "received response to initialize from empty conductor"
+                    );
+
+                    match response {
+                        Ok(mut response) => {
+                            // Add proxy capability to indicate we are a proxy
+                            response = response.add_meta_capability(Proxy);
+                            request_cx.respond_via(conductor_tx, response).await
+                        }
+                        Err(error) => request_cx.respond_with_error(error),
+                    }
                 })
         } else {
             // An initialize request sent to the successor of the final
