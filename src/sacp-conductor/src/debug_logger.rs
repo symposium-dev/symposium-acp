@@ -71,7 +71,16 @@ impl DebugLogger {
                     sacp_tokio::LineDirection::Stdout => "←",
                     sacp_tokio::LineDirection::Stderr => "!",
                 };
-                let log_line = format!("{} {} {}\n", component_label, arrow, line);
+
+                // Strip ANSI escape codes from stderr to keep logs clean
+                let cleaned_line = if matches!(direction, sacp_tokio::LineDirection::Stderr) {
+                    let bytes = strip_ansi_escapes::strip(&line);
+                    String::from_utf8_lossy(&bytes).to_string()
+                } else {
+                    line
+                };
+
+                let log_line = format!("{} {} {}\n", component_label, arrow, cleaned_line);
                 let mut writer = writer.lock().await;
                 let _ = writer.write_all(log_line.as_bytes()).await;
                 let _ = writer.flush().await;
