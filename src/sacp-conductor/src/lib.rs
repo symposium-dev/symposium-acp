@@ -138,7 +138,7 @@ impl ConductorArgs {
             .unwrap_or_else(|_| "<unknown>".to_string());
 
         // Only set up tracing if --debug is enabled
-        if self.debug {
+        let debug_logger = if self.debug {
             // Extract proxy list to create the debug logger
             let proxies = match &self.command {
                 ConductorCommand::Agent { proxies, .. } => proxies.clone(),
@@ -146,58 +146,52 @@ impl ConductorArgs {
             };
 
             // Create debug logger
-            let debug_logger = debug_logger::DebugLogger::new(self.debug_dir.clone(), &proxies)
-                .await
-                .map_err(|e| anyhow::anyhow!("Failed to create debug logger: {}", e))?;
+            Some(
+                debug_logger::DebugLogger::new(self.debug_dir.clone(), &proxies)
+                    .await
+                    .map_err(|e| anyhow::anyhow!("Failed to create debug logger: {}", e))?,
+            )
+        } else {
+            None
+        };
 
+        if let Some(debug_logger) = &debug_logger {
             // Set up log level from --log flag, defaulting to "info"
             let log_level = self.log.as_deref().unwrap_or("info");
 
             // Set up tracing to write to the debug file with "C !" prefix
+            let tracing_writer = debug_logger.create_tracing_writer();
             tracing_subscriber::registry()
                 .with(EnvFilter::new(log_level))
                 .with(
                     tracing_subscriber::fmt::layer()
                         .with_target(true)
-                        .with_writer(move || debug_logger.create_tracing_writer()),
+                        .with_writer(move || tracing_writer.clone()),
                 )
                 .init();
 
             tracing::info!(pid = %pid, cwd = %cwd, level = %log_level, "Conductor starting with debug logging");
-        }
+        };
 
-        self.run()
+        self.run(debug_logger.as_ref())
             .instrument(tracing::info_span!("conductor", pid = %pid, cwd = %cwd))
             .await
             .map_err(|err| anyhow::anyhow!("{err}"))
     }
 
-    async fn run(self) -> Result<(), sacp::Error> {
+    async fn run(
+        self,
+        debug_logger: Option<&debug_logger::DebugLogger>,
+    ) -> Result<(), sacp::Error> {
         match self.command {
             ConductorCommand::Agent { name, proxies } => {
-                // Create debug logger if --debug is enabled
-                let debug_logger = if self.debug {
-                    Some(
-                        debug_logger::DebugLogger::new(self.debug_dir.clone(), &proxies)
-                            .await
-                            .map_err(|e| {
-                                sacp::util::internal_error(format!(
-                                    "Failed to create debug logger: {}",
-                                    e
-                                ))
-                            })?,
-                    )
-                } else {
-                    None
-                };
-
                 // Parse agents and optionally wrap with debug callbacks
                 let providers: Vec<AcpAgent> = proxies
                     .into_iter()
                     .enumerate()
                     .map(|(i, s)| {
                         let mut agent = AcpAgent::from_str(&s)?;
-                        if let Some(ref logger) = debug_logger {
+                        if let Some(logger) = debug_logger {
                             agent = agent.with_debug(logger.create_callback(i.to_string()));
                         }
                         Ok(agent)
@@ -205,7 +199,7 @@ impl ConductorArgs {
                     .collect::<Result<Vec<_>, sacp::Error>>()?;
 
                 // Create Stdio component with optional debug logging
-                let stdio = if let Some(ref logger) = debug_logger {
+                let stdio = if let Some(logger) = debug_logger {
                     Stdio::new().with_debug(logger.create_callback("C".to_string()))
                 } else {
                     Stdio::new()
