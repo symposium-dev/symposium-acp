@@ -103,7 +103,7 @@ pub struct ConductorArgs {
     pub debug_dir: Option<PathBuf>,
 
     /// Set log level (e.g., "trace", "debug", "info", "warn", "error", or module-specific like "conductor=debug")
-    /// Overrides RUST_LOG and SYMPOSIUM_LOG environment variables
+    /// Only applies when --debug is enabled
     #[arg(long)]
     pub log: Option<String>,
 
@@ -132,139 +132,38 @@ pub enum ConductorCommand {
 impl ConductorArgs {
     /// Main entry point that sets up tracing and runs the conductor
     pub async fn main(self) -> anyhow::Result<()> {
-        // If --debug is enabled, we need to set up tracing differently
-        // We'll defer tracing setup until we can create the debug logger
-        if self.debug {
-            self.run_with_debug().await
-        } else {
-            self.run_without_debug().await
-        }
-    }
-
-    /// Run conductor without debug logging (tracing goes to stderr or file)
-    async fn run_without_debug(self) -> anyhow::Result<()> {
         let pid = std::process::id();
         let cwd = std::env::current_dir()
             .map(|p| p.display().to_string())
             .unwrap_or_else(|_| "<unknown>".to_string());
 
-        // Determine log level: --log flag takes precedence over environment variables
-        let log_level = self
-            .log
-            .clone()
-            .or_else(|| std::env::var("SYMPOSIUM_LOG").ok())
-            .or_else(|| std::env::var("RUST_LOG").ok());
-
-        // Check for SYMPOSIUM_LOG environment variable (for file logging)
-        if let Ok(symposium_log) = std::env::var("SYMPOSIUM_LOG") {
-            // Set up file logging to ~/.symposium/logs.$DATE
-            let home = std::env::var("HOME")
-                .map(PathBuf::from)
-                .unwrap_or_else(|_| PathBuf::from("."));
-
-            let log_dir = home.join(".symposium");
-            std::fs::create_dir_all(&log_dir)?;
-
-            let file_appender = tracing_appender::rolling::daily(log_dir, "logs");
-
-            let effective_log_level = log_level.as_deref().unwrap_or(&symposium_log);
-
-            tracing_subscriber::registry()
-                .with(EnvFilter::new(effective_log_level))
-                .with(
-                    tracing_subscriber::fmt::layer()
-                        .with_target(true)
-                        .with_span_events(
-                            tracing_subscriber::fmt::format::FmtSpan::NEW
-                                | tracing_subscriber::fmt::format::FmtSpan::CLOSE,
-                        )
-                        .with_writer(file_appender),
-                )
-                .init();
-
-            tracing::info!(
-                pid = %pid,
-                cwd = %cwd,
-                level = %effective_log_level,
-                "Conductor starting with file logging"
-            );
-        } else {
-            // Initialize tracing with env filter support (RUST_LOG=debug, etc.)
-            // Important: Always write to stderr to avoid interfering with stdio protocols
-            let env_filter = if let Some(ref level) = log_level {
-                EnvFilter::new(level)
-            } else {
-                EnvFilter::try_from_default_env()
-                    .unwrap_or_else(|_| EnvFilter::new("conductor=info"))
+        // Only set up tracing if --debug is enabled
+        if self.debug {
+            // Extract proxy list to create the debug logger
+            let proxies = match &self.command {
+                ConductorCommand::Agent { proxies, .. } => proxies.clone(),
+                ConductorCommand::Mcp { .. } => Vec::new(),
             };
 
+            // Create debug logger
+            let debug_logger = debug_logger::DebugLogger::new(self.debug_dir.clone(), &proxies)
+                .await
+                .map_err(|e| anyhow::anyhow!("Failed to create debug logger: {}", e))?;
+
+            // Set up log level from --log flag, defaulting to "info"
+            let log_level = self.log.as_deref().unwrap_or("info");
+
+            // Set up tracing to write to the debug file with "C !" prefix
             tracing_subscriber::registry()
-                .with(env_filter)
+                .with(EnvFilter::new(log_level))
                 .with(
                     tracing_subscriber::fmt::layer()
                         .with_target(true)
-                        .with_writer(std::io::stderr),
+                        .with_writer(move || debug_logger.create_tracing_writer()),
                 )
                 .init();
 
-            if let Some(ref level) = log_level {
-                tracing::info!(pid = %pid, cwd = %cwd, level = %level, "Conductor starting");
-            } else {
-                tracing::info!(pid = %pid, cwd = %cwd, "Conductor starting");
-            }
-        }
-
-        self.run()
-            .instrument(tracing::info_span!("conductor", pid = %pid, cwd = %cwd))
-            .await
-            .map_err(|err| anyhow::anyhow!("{err}"))
-    }
-
-    /// Run conductor with debug logging (tracing goes to debug file)
-    async fn run_with_debug(self) -> anyhow::Result<()> {
-        let pid = std::process::id();
-        let cwd = std::env::current_dir()
-            .map(|p| p.display().to_string())
-            .unwrap_or_else(|_| "<unknown>".to_string());
-
-        // We need to extract the proxy list first to create the debug logger
-        let proxies = match &self.command {
-            ConductorCommand::Agent { proxies, .. } => proxies.clone(),
-            ConductorCommand::Mcp { .. } => Vec::new(),
-        };
-
-        // Create debug logger
-        let debug_logger = debug_logger::DebugLogger::new(self.debug_dir.clone(), &proxies)
-            .await
-            .map_err(|e| anyhow::anyhow!("Failed to create debug logger: {}", e))?;
-
-        // Determine log level
-        let log_level = self
-            .log
-            .clone()
-            .or_else(|| std::env::var("SYMPOSIUM_LOG").ok())
-            .or_else(|| std::env::var("RUST_LOG").ok());
-
-        let env_filter = if let Some(ref level) = log_level {
-            EnvFilter::new(level)
-        } else {
-            EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("conductor=info"))
-        };
-
-        // Set up tracing to write to the debug file with "C !" prefix
-        tracing_subscriber::registry()
-            .with(env_filter)
-            .with(
-                tracing_subscriber::fmt::layer()
-                    .with_target(true)
-                    .with_writer(move || debug_logger.create_tracing_writer()),
-            )
-            .init();
-
-        if let Some(ref level) = log_level {
-            tracing::info!(pid = %pid, cwd = %cwd, level = %level, "Conductor starting with debug logging");
-        } else {
-            tracing::info!(pid = %pid, cwd = %cwd, "Conductor starting with debug logging");
+            tracing::info!(pid = %pid, cwd = %cwd, level = %log_level, "Conductor starting with debug logging");
         }
 
         self.run()
