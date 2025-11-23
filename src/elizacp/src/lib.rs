@@ -335,7 +335,7 @@ fn extract_text_from_prompt(blocks: &[ContentBlock]) -> String {
 fn parse_list_tools_command(input: &str) -> Option<String> {
     use regex::Regex;
 
-    let re = Regex::new(r"(?i)^list tools from ([a-zA-Z_0-9]+)$").ok()?;
+    let re = Regex::new(r"(?i)^list tools from ([a-zA-Z_0-9-]+)$").ok()?;
     let captures = re.captures(input.trim())?;
 
     Some(captures.get(1)?.as_str().to_string())
@@ -347,7 +347,7 @@ fn parse_list_tools_command(input: &str) -> Option<String> {
 fn parse_tool_call(input: &str) -> Option<(String, String, String)> {
     use regex::Regex;
 
-    let re = Regex::new(r"(?i)^use tool ([a-zA-Z_0-9]+)::([a-zA-Z_0-9]+) with (.+)$").ok()?;
+    let re = Regex::new(r"(?i)^use tool ([a-zA-Z_0-9-]+)::([a-zA-Z_0-9-]+) with (.+)$").ok()?;
     let captures = re.captures(input.trim())?;
 
     Some((
