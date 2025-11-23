@@ -21,12 +21,12 @@ struct SessionData {
 
 /// Shared state across all sessions
 #[derive(Clone)]
-struct ElizaAgent {
+pub struct ElizaAgent {
     sessions: Arc<Mutex<HashMap<SessionId, SessionData>>>,
 }
 
 impl ElizaAgent {
-    fn new() -> Self {
+    pub fn new() -> Self {
         Self {
             sessions: Arc::new(Mutex::new(HashMap::new())),
         }
@@ -357,54 +357,48 @@ fn parse_tool_call(input: &str) -> Option<(String, String, String)> {
     ))
 }
 
-/// Run the Eliza ACP agent with the given input/output streams.
-///
-/// This is the core agent implementation that can be used both from the binary
-/// and from tests as an in-process mock component.
-pub async fn run_elizacp(transport: impl Component + 'static) -> Result<(), sacp::Error> {
-    let agent = ElizaAgent::new();
+impl Component for ElizaAgent {
+    async fn serve(self, client: impl Component) -> Result<(), sacp::Error> {
+        JrHandlerChain::new()
+            .name("elizacp")
+            .on_receive_request({
+                async |initialize: InitializeRequest, request_cx| {
+                    tracing::debug!("Received initialize request");
 
-    JrHandlerChain::new()
-        .name("elizacp")
-        .on_receive_request({
-            async |initialize: InitializeRequest, request_cx| {
-                tracing::debug!("Received initialize request");
-
-                request_cx.respond(InitializeResponse {
-                    protocol_version: initialize.protocol_version,
-                    agent_capabilities: AgentCapabilities {
-                        load_session: Default::default(),
-                        prompt_capabilities: Default::default(),
-                        mcp_capabilities: Default::default(),
+                    request_cx.respond(InitializeResponse {
+                        protocol_version: initialize.protocol_version,
+                        agent_capabilities: AgentCapabilities {
+                            load_session: Default::default(),
+                            prompt_capabilities: Default::default(),
+                            mcp_capabilities: Default::default(),
+                            meta: Default::default(),
+                        },
+                        auth_methods: Default::default(),
+                        agent_info: Default::default(),
                         meta: Default::default(),
-                    },
-                    auth_methods: Default::default(),
-                    agent_info: Default::default(),
-                    meta: Default::default(),
-                })
-            }
-        })
-        .on_receive_request({
-            let agent = agent.clone();
-            async move |request: NewSessionRequest, request_cx| {
-                agent.handle_new_session(request, request_cx).await
-            }
-        })
-        .on_receive_request({
-            let agent = agent.clone();
-            async move |request: LoadSessionRequest, request_cx| {
-                agent.handle_load_session(request, request_cx).await
-            }
-        })
-        .on_receive_request({
-            let agent = agent.clone();
-            async move |request: PromptRequest, request_cx| {
-                agent.handle_prompt_request(request, request_cx).await
-            }
-        })
-        .connect_to(transport)?
-        .serve()
-        .await?;
-
-    Ok(())
+                    })
+                }
+            })
+            .on_receive_request({
+                let agent = self.clone();
+                async move |request: NewSessionRequest, request_cx| {
+                    agent.handle_new_session(request, request_cx).await
+                }
+            })
+            .on_receive_request({
+                let agent = self.clone();
+                async move |request: LoadSessionRequest, request_cx| {
+                    agent.handle_load_session(request, request_cx).await
+                }
+            })
+            .on_receive_request({
+                let agent = self.clone();
+                async move |request: PromptRequest, request_cx| {
+                    agent.handle_prompt_request(request, request_cx).await
+                }
+            })
+            .connect_to(client)?
+            .serve()
+            .await
+    }
 }

@@ -31,7 +31,7 @@ struct MockEliza;
 
 impl Component for MockEliza {
     async fn serve(self, client: impl Component) -> Result<(), sacp::Error> {
-        elizacp::run_elizacp(client).await
+        elizacp::ElizaAgent::new().serve(client).await
     }
 }
 
