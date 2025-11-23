@@ -36,7 +36,8 @@
 
 use anyhow::Result;
 use clap::Parser;
-use elizacp::run_elizacp;
+use elizacp::ElizaAgent;
+use sacp::Component;
 use tracing_subscriber::{EnvFilter, layer::SubscriberExt, util::SubscriberInitExt};
 
 #[derive(Parser, Debug)]
@@ -70,7 +71,7 @@ async fn main() -> Result<()> {
     tracing::info!("Elizacp starting");
 
     // Run the Eliza agent
-    run_elizacp(sacp_tokio::Stdio::new()).await?;
+    ElizaAgent::new().serve(sacp_tokio::Stdio::new()).await?;
 
     Ok(())
 }

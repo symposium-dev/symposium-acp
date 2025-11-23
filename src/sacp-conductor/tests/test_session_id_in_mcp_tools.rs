@@ -92,7 +92,7 @@ impl Component for ElizacpAgentComponent {
 
         // Spawn elizacp in a background task
         tokio::spawn(async move {
-            if let Err(e) = elizacp::run_elizacp(elizacp_transport).await {
+            if let Err(e) = elizacp::ElizaAgent::new().serve(elizacp_transport).await {
                 tracing::error!("Elizacp error: {}", e);
             }
         });

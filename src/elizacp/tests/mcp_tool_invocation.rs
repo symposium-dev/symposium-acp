@@ -1,12 +1,12 @@
 //! Integration tests for elizacp MCP tool invocation
 
-use elizacp::run_elizacp;
+use elizacp::ElizaAgent;
 use expect_test::expect;
-use sacp::JrHandlerChain;
 use sacp::schema::{
     ContentBlock, InitializeRequest, McpServer, NewSessionRequest, PromptRequest,
     SessionNotification, TextContent,
 };
+use sacp::{Component, JrHandlerChain};
 use std::path::PathBuf;
 
 /// Test helper to receive a JSON-RPC response
@@ -47,11 +47,12 @@ async fn test_elizacp_mcp_tool_call() -> Result<(), sacp::Error> {
             }
         })
         .with_spawned(|_cx| async move {
-            run_elizacp(sacp::ByteStreams::new(
-                elizacp_out.compat_write(),
-                elizacp_in.compat(),
-            ))
-            .await
+            ElizaAgent::new()
+                .serve(sacp::ByteStreams::new(
+                    elizacp_out.compat_write(),
+                    elizacp_in.compat(),
+                ))
+                .await
         })
         .with_client(transport, async |client_cx| {
             // Initialize
