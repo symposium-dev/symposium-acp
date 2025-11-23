@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.0.0](https://github.com/symposium-dev/symposium-acp/compare/elizacp-v1.2.0...elizacp-v2.0.0) - 2025-11-23
+
+### Other
+
+- *(elizacp)* export ElizaAgent as public Component
+
 ## [1.2.0](https://github.com/symposium-dev/symposium-acp/compare/elizacp-v1.1.0...elizacp-v1.2.0) - 2025-11-22
 
 ### Added

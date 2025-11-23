@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.1.1](https://github.com/symposium-dev/symposium-acp/compare/sacp-conductor-v2.1.0...sacp-conductor-v2.1.1) - 2025-11-23
+
+### Other
+
+- *(elizacp)* export ElizaAgent as public Component
+
 ## [2.1.0](https://github.com/symposium-dev/symposium-acp/compare/sacp-conductor-v2.0.1...sacp-conductor-v2.1.0) - 2025-11-22
 
 ### Added
