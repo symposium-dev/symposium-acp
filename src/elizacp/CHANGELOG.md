@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.2.0](https://github.com/symposium-dev/symposium-acp/compare/elizacp-v1.1.0...elizacp-v1.2.0) - 2025-11-22
+
+### Added
+
+- *(elizacp)* add MCP tools/list support and refactor client handling
+
+### Fixed
+
+- update Stdio usage to Stdio::new() after API change
+
 ## [1.1.0](https://github.com/symposium-dev/symposium-acp/compare/elizacp-v1.0.0...elizacp-v1.1.0) - 2025-11-17
 
 ### Added
