@@ -107,26 +107,26 @@ impl McpBridgeListeners {
         // Create oneshot channel for session_id delivery
         let (session_id_tx, session_id_rx) = futures::channel::oneshot::channel();
 
-        // Spawn TCP listener on ephemeral port
-        let tcp_port = stdio::spawn_tcp_listener(
-            &mut self.listeners,
-            cx,
-            url,
-            conductor_tx.clone(),
-            session_id_rx,
-        )
-        .await?;
-
-        info!(
-            server_name = name,
-            acp_url = url,
-            tcp_port.tcp_port,
-            "Spawned TCP listener for MCP bridge"
-        );
-
         // Transform to stdio transport pointing to conductor mcp process
         match mcp_bridge_mode {
             crate::McpBridgeMode::Stdio { conductor_command } => {
+                // Spawn TCP listener on ephemeral port
+                let tcp_port = stdio::spawn_tcp_listener(
+                    &mut self.listeners,
+                    cx,
+                    url,
+                    conductor_tx.clone(),
+                    session_id_rx,
+                )
+                .await?;
+
+                info!(
+                    server_name = name,
+                    acp_url = url,
+                    tcp_port.tcp_port,
+                    "Spawned TCP listener for MCP bridge"
+                );
+
                 tracing::debug!(
                     conductor_command = ?conductor_command,
                     "Transforming MCP server to stdio"
