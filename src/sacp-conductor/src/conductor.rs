@@ -1136,7 +1136,7 @@ pub enum ConductorMessage {
         session_id: sacp::schema::SessionId,
 
         /// The actor that should be spawned once the connection-id is available.
-        actor: McpBridgeConnectionActor,
+        actor: Box<dyn McpBridgeConnectionActor>,
 
         /// The connection to the bridge
         connection: McpBridgeConnection,
@@ -1149,7 +1149,7 @@ pub enum ConductorMessage {
         response: McpConnectResponse,
 
         /// The actor that should be spawned once the connection-id is available.
-        actor: McpBridgeConnectionActor,
+        actor: Box<dyn McpBridgeConnectionActor>,
 
         /// The connection to the bridge
         connection: McpBridgeConnection,
