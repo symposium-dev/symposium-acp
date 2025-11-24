@@ -9,12 +9,89 @@ use futures::{SinkExt, StreamExt as _, channel::mpsc, future::Either, stream::St
 use futures_concurrency::future::FutureExt as _;
 use futures_concurrency::stream::StreamExt as _;
 use fxhash::FxHashMap;
-use sacp::{BoxFuture, Channel, Component, jsonrpcmsg::Message};
-use std::{pin::pin, sync::Arc};
+use sacp::{BoxFuture, Channel, Component, JrConnectionCx, jsonrpcmsg::Message};
+use std::{collections::HashMap, pin::pin, sync::Arc};
 use tokio::net::TcpListener;
+use tracing::info;
+
+use crate::conductor::{
+    ConductorMessage,
+    mcp_bridge::{McpBridgeConnection, McpBridgeConnectionActor, McpBridgeListener, McpPort},
+};
+
+/// Spawn an HTTP listener
+pub async fn spawn_http_listener(
+    listeners: &mut HashMap<String, McpBridgeListener>,
+    cx: &JrConnectionCx,
+    acp_url: &str,
+    mut conductor_tx: mpsc::Sender<ConductorMessage>,
+    session_id_rx: futures::channel::oneshot::Receiver<sacp::schema::SessionId>,
+) -> anyhow::Result<McpPort> {
+    // If there is already a listener for the ACP URL, return its TCP port
+    if let Some(listener) = listeners.get(acp_url) {
+        return Ok(listener.tcp_port);
+    }
+
+    let http_mcp_bridge = HttpMcpBridge::new().await?;
+    let tcp_port = http_mcp_bridge.port();
+
+    info!(
+        acp_url = acp_url,
+        tcp_port.tcp_port, "Bound HTTP listener for MCP bridge"
+    );
+
+    listeners.insert(acp_url.to_string(), McpBridgeListener { tcp_port });
+
+    cx.spawn({
+        let acp_url = acp_url.to_string();
+        async move {
+            info!(
+                acp_url = acp_url,
+                tcp_port.tcp_port, "Waiting for session_id before accepting connections"
+            );
+
+            // Block waiting for session_id before accepting any connections
+            let session_id = session_id_rx.await.map_err(|_| {
+                sacp::Error::internal_error()
+                    .with_data("session_id channel closed before receiving session_id")
+            })?;
+
+            info!(
+                acp_url = acp_url,
+                tcp_port.tcp_port,
+                ?session_id,
+                "Session ID received, now accepting bridge connections"
+            );
+
+            let (to_mcp_client_tx, to_mcp_client_rx) = mpsc::channel(128);
+
+            // When we send this message to the conductor,
+            // it is going to go through a step or two and eventually
+            // spawn the McpBridgeConnectionActor, which will ferry MCP requests
+            // back and forth.
+            conductor_tx
+                .send(ConductorMessage::McpConnectionReceived {
+                    acp_url: acp_url.clone(),
+                    session_id: session_id.clone(),
+                    actor: McpBridgeConnectionActor::new(
+                        http_mcp_bridge,
+                        conductor_tx.clone(),
+                        to_mcp_client_rx,
+                    ),
+                    connection: McpBridgeConnection::new(to_mcp_client_tx),
+                })
+                .await
+                .map_err(|_| sacp::Error::internal_error())?;
+
+            Ok(())
+        }
+    })?;
+
+    Ok(tcp_port)
+}
 
 /// A component that receives HTTP requests/responses using the HTTP transport defined by the MCP protocol.
-pub struct HttpMcpBridge {
+struct HttpMcpBridge {
     listener: tokio::net::TcpListener,
 }
 
@@ -28,8 +105,10 @@ impl HttpMcpBridge {
     }
 
     /// Returns the port on which the HTTP server is listening.
-    pub fn port(&self) -> u16 {
-        self.listener.local_addr().unwrap().port()
+    pub fn port(&self) -> McpPort {
+        McpPort {
+            tcp_port: self.listener.local_addr().unwrap().port(),
+        }
     }
 }
 
@@ -51,6 +130,7 @@ impl sacp::Component for HttpMcpBridge {
     }
 }
 
+/// Error type that we use to respond to malformed HTTP requests.
 #[derive(Debug, thiserror::Error)]
 #[error(transparent)]
 struct HttpError(#[from] sacp::Error);
@@ -68,6 +148,8 @@ impl IntoResponse for HttpError {
     }
 }
 
+/// Run a webserver listening on `listener` for HTTP requests at `/`
+/// and communicating those requests over `channel` to the JSON-RPC server.
 async fn run(listener: TcpListener, channel: Channel) -> Result<(), sacp::Error> {
     let (registration_tx, registration_rx) = mpsc::unbounded();
 
@@ -99,6 +181,7 @@ async fn run(listener: TcpListener, channel: Channel) -> Result<(), sacp::Error>
     .await
 }
 
+/// The state we pass to our POST/GET handlers.
 struct BridgeState {
     /// Where to send registration messages.
     registration_tx: mpsc::UnboundedSender<RegistrationMessage>,
@@ -147,6 +230,14 @@ impl RunningServer {
         }
     }
 
+    /// The main loop: listen for incoming "registrations"
+    /// (POSTs, GETs from the HTTP client)
+    /// and for outgoing JSON-RPC messages to be dispatched.
+    ///
+    /// # Parameters
+    ///
+    /// * `channel`: The channel to use for sending/receiving JSON-RPC messages.
+    /// * `registration_rx`: The receiver for registration messages from HTTP clients.
     async fn run(
         mut self,
         mut channel: Channel,
@@ -187,6 +278,7 @@ impl RunningServer {
         }: RegistrationMessage,
         channel_tx: &mut mpsc::UnboundedSender<Result<sacp::jsonrpcmsg::Message, sacp::Error>>,
     ) -> Result<(), sacp::Error> {
+        // Extract the message-id if this is a request that needs a reply.
         let message_id = match &message {
             Some(Message::Request(request)) => match &request.id {
                 Some(v) => Some(v.clone().into()),
@@ -195,20 +287,22 @@ impl RunningServer {
             _ => None,
         };
 
+        // Send the message over the channel to be processed.
         if let Some(message) = message {
             channel_tx
                 .unbounded_send(Ok(message))
                 .map_err(sacp::util::internal_error)?;
         }
 
+        // Record the registered session to receive replies or other messages.
         let registered_session = RegisteredSession { outgoing_tx };
-
         if let Some(message_id) = message_id {
             self.waiting_sessions.insert(message_id, registered_session);
         } else {
             self.general_sessions.push(registered_session);
         }
 
+        // Just for good hygiene, purge closed sessions.
         self.purge_closed_sessions();
 
         Ok(())
@@ -284,7 +378,8 @@ impl RunningServer {
         Ok(())
     }
 
-    /// Purge closed sessions from the bridge state.
+    /// Purge sessions from the bridge state where the receiver is closed.
+    /// This happens when the HTTP client disconnects.
     fn purge_closed_sessions(&mut self) {
         self.general_sessions
             .retain(|session| !session.outgoing_tx.is_closed());
@@ -297,6 +392,8 @@ struct RegisteredSession {
     outgoing_tx: mpsc::UnboundedSender<sacp::jsonrpcmsg::Message>,
 }
 
+/// Accept a POST request carrying a JsonRpc message from an MCP client.
+/// The message is then send over the channel and we begin a streaming response.
 async fn handle_post(
     State(state): State<Arc<BridgeState>>,
     body: String,
@@ -308,6 +405,8 @@ async fn handle_post(
     handle_any(state, Some(message)).await
 }
 
+/// Accept a GET request from an MCP client.
+/// We begin a streaming response.
 async fn handle_get(
     State(state): State<Arc<BridgeState>>,
 ) -> Result<Sse<impl Stream<Item = Result<axum::response::sse::Event, HttpError>>>, HttpError> {
@@ -315,6 +414,7 @@ async fn handle_get(
     handle_any(state, None).await
 }
 
+/// Handle either a POST or GET request.
 async fn handle_any(
     state: Arc<BridgeState>,
     message: Option<sacp::jsonrpcmsg::Message>,
@@ -329,7 +429,13 @@ async fn handle_any(
         .await
         .map_err(sacp::util::internal_error)?;
 
-    // Stream responses from ACP side
+    // Stream responses from ACP side.
+    //
+    // In the case of a JSON-RPC request having been posted,
+    // the tx handle will be dropped once the response has arrived.
+    //
+    // In the case of notifications, replies, etc, we'll just keep sending
+    // messages back so long as the client is connected.
     let stream = async_stream::stream! {
         while let Some(message) = messages_rx.next().await {
             match axum::response::sse::Event::default().json_data(message) {

@@ -83,7 +83,6 @@ use crate::conductor::Conductor;
 pub mod conductor;
 /// Debug logging for conductor
 mod debug_logger;
-mod http_mcp_bridge;
 /// MCP bridge functionality for TCP-based MCP servers
 mod mcp_bridge;
 
@@ -101,6 +100,9 @@ pub enum McpBridgeMode {
         /// E.g., vec!["conductor"] or vec!["cargo", "run", "-p", "conductor", "--"]
         conductor_command: Vec<String>,
     },
+
+    /// Use HTTP-based MCP bridge
+    Http,
 }
 
 impl Default for McpBridgeMode {

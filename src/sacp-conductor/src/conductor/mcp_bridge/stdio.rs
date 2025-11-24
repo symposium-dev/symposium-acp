@@ -1,115 +1,14 @@
-use std::{collections::HashMap, net::SocketAddr};
+use std::collections::HashMap;
 
-use futures::{SinkExt, StreamExt as _, channel::mpsc};
-use sacp::{BoxFuture, JrConnectionCx, JrHandlerChain, MessageAndCx};
-use sacp_proxy::McpDisconnectNotification;
+use futures::{SinkExt, channel::mpsc};
+use sacp::{JrConnectionCx, MessageAndCx};
 use tokio::net::{TcpListener, TcpStream};
 use tokio_util::compat::{TokioAsyncReadCompatExt as _, TokioAsyncWriteCompatExt as _};
 use tracing::info;
 
 use crate::conductor::ConductorMessage;
 
-use super::{
-    McpBridgeConnection, McpBridgeConnectionActor as McpBridgeConnectionActorTrait,
-    McpBridgeListener, McpPort,
-};
-
-/// Actor that handles a stdio-based MCP bridge connection over TCP.
-///
-/// Bridges between MCP clients connecting via TCP (stdio transport)
-/// and the conductor's ACP message flow.
-#[derive(Debug)]
-pub struct StdioMcpBridgeConnectionActor {
-    /// TCP stream to the MCP client
-    stream: TcpStream,
-
-    /// Socket address we are connected on
-    #[expect(dead_code)]
-    addr: SocketAddr,
-
-    /// Sender for messages to the conductor
-    conductor_tx: mpsc::Sender<ConductorMessage>,
-
-    /// Receiver for messages from the conductor to the MCP client
-    to_mcp_client_rx: mpsc::Receiver<MessageAndCx>,
-}
-
-impl StdioMcpBridgeConnectionActor {
-    pub fn new(
-        stream: TcpStream,
-        addr: SocketAddr,
-        conductor_tx: mpsc::Sender<ConductorMessage>,
-        to_mcp_client_rx: mpsc::Receiver<MessageAndCx>,
-    ) -> Self {
-        Self {
-            stream,
-            addr,
-            conductor_tx,
-            to_mcp_client_rx,
-        }
-    }
-}
-
-impl McpBridgeConnectionActorTrait for StdioMcpBridgeConnectionActor {
-    fn run(self: Box<Self>, connection_id: String) -> BoxFuture<'static, Result<(), sacp::Error>> {
-        Box::pin(async move {
-            info!(connection_id, "Stdio bridge connected");
-
-            let StdioMcpBridgeConnectionActor {
-                stream,
-                addr: _,
-                mut conductor_tx,
-                to_mcp_client_rx,
-            } = *self;
-
-            let (read_half, write_half) = stream.into_split();
-
-            // Establish bidirectional JSON-RPC connection
-            // The bridge will send MCP requests (tools/call, etc.) to the conductor
-            // The conductor can also send responses back
-            let transport = sacp::ByteStreams::new(write_half.compat_write(), read_half.compat());
-
-            let result = JrHandlerChain::new()
-                .name(format!("mpc-client-to-conductor({connection_id})"))
-                // When we receive a message from the MCP client, forward it to the conductor
-                .on_receive_message({
-                    let mut conductor_tx = conductor_tx.clone();
-                    let connection_id = connection_id.clone();
-                    async move |message: sacp::MessageAndCx| {
-                        conductor_tx
-                            .send(ConductorMessage::McpClientToMcpServer {
-                                connection_id: connection_id.clone(),
-                                message,
-                            })
-                            .await
-                            .map_err(|_| sacp::Error::internal_error())
-                    }
-                })
-                // When we receive messages from the conductor, forward them to the MCP client
-                .connect_to(transport)?
-                .with_client(async move |mcp_client_cx| {
-                    let mut to_mcp_client_rx = to_mcp_client_rx;
-                    while let Some(message) = to_mcp_client_rx.next().await {
-                        mcp_client_cx.send_proxied_message(message)?;
-                    }
-                    Ok(())
-                })
-                .await;
-
-            conductor_tx
-                .send(ConductorMessage::McpConnectionDisconnected {
-                    notification: McpDisconnectNotification {
-                        connection_id,
-                        meta: None,
-                    },
-                })
-                .await
-                .map_err(|_| sacp::Error::internal_error())?;
-
-            result
-        })
-    }
-}
+use super::{McpBridgeConnection, McpBridgeConnectionActor, McpBridgeListener, McpPort};
 
 /// Spawns a TCP listener for an MCP bridge and stores the mapping.
 ///
@@ -170,7 +69,7 @@ pub async fn spawn_tcp_listener(
 
             // Accept connections
             loop {
-                let (stream, addr) = listener
+                let (stream, _addr) = listener
                     .accept()
                     .await
                     .map_err(sacp::Error::into_internal_error)?;
@@ -181,12 +80,7 @@ pub async fn spawn_tcp_listener(
                     .send(ConductorMessage::McpConnectionReceived {
                         acp_url: acp_url.clone(),
                         session_id: session_id.clone(),
-                        actor: Box::new(StdioMcpBridgeConnectionActor::new(
-                            stream,
-                            addr,
-                            conductor_tx.clone(),
-                            to_mcp_client_rx,
-                        )),
+                        actor: make_stdio_actor(stream, conductor_tx.clone(), to_mcp_client_rx),
                         connection: McpBridgeConnection::new(to_mcp_client_tx),
                     })
                     .await
@@ -196,4 +90,19 @@ pub async fn spawn_tcp_listener(
     })?;
 
     Ok(tcp_port)
+}
+
+fn make_stdio_actor(
+    stream: TcpStream,
+    conductor_tx: mpsc::Sender<ConductorMessage>,
+    to_mcp_client_rx: mpsc::Receiver<MessageAndCx>,
+) -> McpBridgeConnectionActor {
+    let (read_half, write_half) = stream.into_split();
+
+    // Establish bidirectional JSON-RPC connection
+    // The bridge will send MCP requests (tools/call, etc.) to the conductor
+    // The conductor can also send responses back
+    let transport = sacp::ByteStreams::new(write_half.compat_write(), read_half.compat());
+
+    McpBridgeConnectionActor::new(transport, conductor_tx, to_mcp_client_rx)
 }
