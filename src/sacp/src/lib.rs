@@ -186,7 +186,7 @@ pub use capabilities::*;
 /// Users of the `sacp` crate can use these types without adding a direct dependency
 /// on `jsonrpcmsg`.
 pub mod jsonrpcmsg {
-    pub use jsonrpcmsg::{Id, Message, Params, Request, Response};
+    pub use jsonrpcmsg::{Error, Id, Message, Params, Request, Response};
 }
 
 pub use jsonrpc::{

@@ -54,3 +54,12 @@ pub(crate) async fn instrument_with_connection_name<R>(
         task.await
     }
 }
+
+/// Convert a `crate::Error` into a `crate::jsonrpcmsg::Error`
+pub fn into_jsonrpc_error(err: crate::Error) -> crate::jsonrpcmsg::Error {
+    crate::jsonrpcmsg::Error {
+        code: err.code,
+        message: err.message,
+        data: err.data,
+    }
+}
