@@ -43,6 +43,11 @@ rmcp = { version = "0.8.3", features = ["server", "transport-io", "schemars"] }
 # CLI parsing
 clap = { version = "4.5", features = ["derive"] }
 
+# HTTP server
+axum = "0.7"
+tower = "0.5"
+hyper = "1.0"
+
 # Other dependencies
 boxfnonce = "0.1.1"
 chrono = "0.4"
