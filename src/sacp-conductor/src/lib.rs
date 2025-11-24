@@ -92,6 +92,29 @@ use sacp_tokio::{AcpAgent, Stdio};
 use tracing::Instrument;
 use tracing_subscriber::{EnvFilter, layer::SubscriberExt, util::SubscriberInitExt};
 
+/// Mode for the MCP bridge.
+#[derive(Debug, Clone)]
+pub enum McpBridgeMode {
+    /// Use stdio-based MCP bridge with a conductor subprocess.
+    Stdio {
+        /// Command and args to spawn conductor MCP bridge processes.
+        /// E.g., vec!["conductor"] or vec!["cargo", "run", "-p", "conductor", "--"]
+        conductor_command: Vec<String>,
+    },
+}
+
+impl Default for McpBridgeMode {
+    fn default() -> Self {
+        let argv0 = std::env::current_exe()
+            .expect("valid current executable path")
+            .display()
+            .to_string();
+        McpBridgeMode::Stdio {
+            conductor_command: vec![argv0],
+        }
+    }
+}
+
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
 pub struct ConductorArgs {
@@ -206,7 +229,7 @@ impl ConductorArgs {
                     Stdio::new()
                 };
 
-                Conductor::new(name, providers, None)
+                Conductor::new(name, providers, Default::default())
                     .into_handler_chain()
                     .connect_to(stdio)?
                     .serve()

@@ -151,39 +151,31 @@ mod mcp_bridge;
 pub struct Conductor {
     name: String,
     component_list: Box<dyn ComponentList>,
-    conductor_command: Option<Vec<String>>,
+    mcp_bridge_mode: crate::McpBridgeMode,
 }
 
 impl Conductor {
     pub fn new(
         name: String,
         component_list: impl ComponentList + 'static,
-        conductor_command: Option<Vec<String>>,
+        mcp_bridge_mode: crate::McpBridgeMode,
     ) -> Self {
         Conductor {
             name,
             component_list: Box::new(component_list),
-            conductor_command,
+            mcp_bridge_mode,
         }
     }
 
     pub fn into_handler_chain(self) -> JrHandlerChain<ConductorMessageHandler> {
         let (mut conductor_tx, mut conductor_rx) = mpsc::channel(128 /* chosen arbitrarily */);
 
-        let conductor_command = self.conductor_command.unwrap_or_else(|| {
-            let argv0 = std::env::current_exe()
-                .expect("valid current executable path")
-                .display()
-                .to_string();
-            vec![argv0]
-        });
-
         let mut state = ConductorHandlerState {
             components: Default::default(),
             component_list: Some(self.component_list),
             bridge_listeners: Default::default(),
             bridge_connections: Default::default(),
-            conductor_command,
+            mcp_bridge_mode: self.mcp_bridge_mode,
             proxy_mode: AtomicBool::new(false),
         };
 
@@ -253,9 +245,8 @@ struct ConductorHandlerState {
     /// Set to None after components are instantiated.
     component_list: Option<Box<dyn ComponentList>>,
 
-    /// Command and args to spawn conductor MCP bridge processes
-    /// E.g., vec!["conductor"] or vec!["cargo", "run", "-p", "conductor", "--"]
-    conductor_command: Vec<String>,
+    /// Mode for the MCP bridge (determines how to spawn bridge processes).
+    mcp_bridge_mode: crate::McpBridgeMode,
 
     /// Whether the conductor is operating in proxy mode.
     /// In proxy mode, the conductor itself acts as a proxy component in a larger chain,
@@ -961,7 +952,7 @@ impl ConductorHandlerState {
                         &request_cx.connection_cx(),
                         mcp_server,
                         conductor_tx,
-                        &self.conductor_command,
+                        &self.mcp_bridge_mode,
                     )
                     .await?
                 {

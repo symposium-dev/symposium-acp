@@ -81,7 +81,7 @@ impl McpBridgeListeners {
         cx: &JrConnectionCx,
         mcp_server: &mut McpServer,
         conductor_tx: &mpsc::Sender<ConductorMessage>,
-        conductor_command: &[String],
+        mcp_bridge_mode: &crate::McpBridgeMode,
     ) -> Result<Option<futures::channel::oneshot::Sender<sacp::schema::SessionId>>, sacp::Error>
     {
         use sacp::schema::McpServer;
@@ -125,23 +125,27 @@ impl McpBridgeListeners {
         );
 
         // Transform to stdio transport pointing to conductor mcp process
-        tracing::debug!(
-            conductor_command = ?conductor_command,
-            "Transforming MCP server to stdio"
-        );
-        let command = std::path::PathBuf::from(&conductor_command[0]);
-        let mut args: Vec<String> = conductor_command[1..].to_vec();
-        args.push("mcp".to_string());
-        args.push(tcp_port.tcp_port.to_string());
+        match mcp_bridge_mode {
+            crate::McpBridgeMode::Stdio { conductor_command } => {
+                tracing::debug!(
+                    conductor_command = ?conductor_command,
+                    "Transforming MCP server to stdio"
+                );
+                let command = std::path::PathBuf::from(&conductor_command[0]);
+                let mut args: Vec<String> = conductor_command[1..].to_vec();
+                args.push("mcp".to_string());
+                args.push(tcp_port.tcp_port.to_string());
 
-        let transformed = McpServer::Stdio {
-            name: name.clone(),
-            command,
-            args,
-            env: vec![],
-        };
-        *mcp_server = transformed;
+                let transformed = McpServer::Stdio {
+                    name: name.clone(),
+                    command,
+                    args,
+                    env: vec![],
+                };
+                *mcp_server = transformed;
 
-        Ok(Some(session_id_tx))
+                Ok(Some(session_id_tx))
+            }
+        }
     }
 }
