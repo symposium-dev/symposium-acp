@@ -66,7 +66,7 @@ impl Component for MockInnerConductor {
             components.push(sacp::DynComponent::new(MockArrowProxy));
         }
 
-        Conductor::new("inner-conductor".to_string(), components, None)
+        Conductor::new("inner-conductor".to_string(), components, Default::default())
             .run(client)
             .await
     }
@@ -88,7 +88,7 @@ async fn test_nested_conductor_with_arrow_proxies() -> Result<(), sacp::Error> {
         Conductor::new(
             "outer-conductor".to_string(),
             vec![inner_conductor, sacp::DynComponent::new(MockEliza)],
-            None,
+            Default::default(),
         )
         .run(sacp::ByteStreams::new(
             conductor_write.compat_write(),
@@ -147,7 +147,7 @@ async fn test_nested_conductor_with_external_arrow_proxies() -> Result<(), sacp:
         Conductor::new(
             "outer-conductor".to_string(),
             vec![inner_conductor, eliza],
-            None,
+            Default::default(),
         )
         .run(sacp::ByteStreams::new(
             conductor_write.compat_write(),

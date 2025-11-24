@@ -34,7 +34,7 @@ async fn test_conductor_with_two_external_arrow_proxies() -> Result<(), sacp::Er
         Conductor::new(
             "test-conductor".to_string(),
             vec![arrow_proxy1, arrow_proxy2, eliza],
-            None,
+            Default::default(),
         )
         .run(sacp::ByteStreams::new(
             conductor_write.compat_write(),
