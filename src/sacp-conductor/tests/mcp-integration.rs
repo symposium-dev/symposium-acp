@@ -172,16 +172,6 @@ async fn test_proxy_provides_mcp_tools_http() -> Result<(), sacp::Error> {
 
 #[tokio::test]
 async fn test_agent_handles_prompt() -> Result<(), sacp::Error> {
-    // Initialize tracing for debugging
-    let _ = tracing_subscriber::fmt()
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| {
-                tracing_subscriber::EnvFilter::new("sacp_conductor::conductor::mcp_bridge=trace")
-            }),
-        )
-        .with_test_writer()
-        .try_init();
-
     // Create channel to collect log events
     let (mut log_tx, mut log_rx) = mpsc::unbounded();
 
