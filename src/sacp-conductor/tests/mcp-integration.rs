@@ -56,7 +56,9 @@ async fn run_test_with_components(
             Conductor::new(
                 "conductor".to_string(),
                 components,
-                sacp_conductor::McpBridgeMode::Stdio { conductor_command: conductor_command() },
+                sacp_conductor::McpBridgeMode::Stdio {
+                    conductor_command: conductor_command(),
+                },
             )
             .run(sacp::ByteStreams::new(
                 conductor_out.compat_write(),
@@ -147,7 +149,7 @@ async fn test_agent_handles_prompt() -> Result<(), sacp::Error> {
                     mcp_integration::proxy::create(),
                     mcp_integration::agent::create(),
                 ],
-                sacp_conductor::McpBridgeMode::Stdio { conductor_command: conductor_command() },
+                Default::default(),
             )
             .run(sacp::ByteStreams::new(
                 conductor_out.compat_write(),

@@ -244,7 +244,27 @@ impl ElizaAgent {
 
                 Ok(result)
             }
-            McpServer::Http { .. } => Err(anyhow::anyhow!("HTTP MCP servers not yet supported")),
+            McpServer::Http { url, .. } => {
+                use rmcp::transport::StreamableHttpClientTransport;
+
+                tracing::debug!(
+                    url = %url,
+                    server_name = %server_name,
+                    "Starting HTTP MCP client"
+                );
+
+                // Create HTTP MCP client
+                let mcp_client =
+                    ().serve(StreamableHttpClientTransport::from_uri(url.as_str()))
+                        .await?;
+
+                tracing::debug!("HTTP MCP client connected");
+
+                // Execute the operation
+                let result = operation(mcp_client).await?;
+
+                Ok(result)
+            }
             McpServer::Sse { .. } => Err(anyhow::anyhow!("SSE MCP servers not yet supported")),
         }
     }

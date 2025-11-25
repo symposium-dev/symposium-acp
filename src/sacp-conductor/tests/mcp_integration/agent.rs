@@ -45,27 +45,37 @@ impl Component for AgentComponent {
                 async move |request: NewSessionRequest, request_cx| {
                     assert_eq!(request.mcp_servers.len(), 1);
 
-                    // Although the proxy injects an HTTP server, it will be rewritten to stdio by the conductor.
+                    // The proxy injects an HTTP server with acp: URL, which the conductor
+                    // rewrites to either stdio or HTTP depending on bridge mode.
                     let mcp_server = &request.mcp_servers[0];
-                    assert!(
-                        matches!(mcp_server, McpServer::Stdio { .. }),
-                        "expected a stdio MCP server: {:?}",
-                        request.mcp_servers
-                    );
 
-                    // Verify the stdio configuration is correct
-                    if let McpServer::Stdio {
-                        name,
-                        command,
-                        args,
-                        ..
-                    } = mcp_server
-                    {
-                        assert_eq!(name, "test");
-                        let conductor_command = conductor_command();
-                        assert_eq!(command.to_str().unwrap(), &conductor_command[0]);
-                        for (arg, expected) in args.iter().zip(&conductor_command[1..]) {
-                            assert_eq!(arg, expected);
+                    // Verify the server configuration based on its type
+                    match mcp_server {
+                        McpServer::Stdio {
+                            name,
+                            command,
+                            args,
+                            ..
+                        } => {
+                            // Stdio mode: verify command configuration
+                            assert_eq!(name, "test");
+                            let conductor_command = conductor_command();
+                            assert_eq!(command.to_str().unwrap(), &conductor_command[0]);
+                            for (arg, expected) in args.iter().zip(&conductor_command[1..]) {
+                                assert_eq!(arg, expected);
+                            }
+                        }
+                        McpServer::Http { name, url, .. } => {
+                            // HTTP mode: verify basic configuration
+                            assert_eq!(name, "test");
+                            assert!(
+                                url.starts_with("http://localhost:"),
+                                "expected localhost URL, got: {}",
+                                url
+                            );
+                        }
+                        McpServer::Sse { .. } => {
+                            panic!("SSE MCP servers are not expected in these tests");
                         }
                     }
 

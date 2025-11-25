@@ -22,7 +22,7 @@ clap.workspace = true
 futures.workspace = true
 rand = "0.9"
 regex = "1.12"
-rmcp = { workspace = true, features = ["client", "transport-child-process"] }
+rmcp = { workspace = true, features = ["client", "transport-child-process", "transport-streamable-http-client-reqwest"] }
 serde.workspace = true
 serde_json.workspace = true
 tokio.workspace = true
