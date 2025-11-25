@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.1.1](https://github.com/symposium-dev/symposium-acp/compare/sacp-v1.1.0...sacp-v1.1.1) - 2025-11-25
+
+### Other
+
+- move HTTP and implement shared code
+- implementing HTTP MCP bridge
+
 ## [1.1.0](https://github.com/symposium-dev/symposium-acp/compare/sacp-v1.0.0...sacp-v1.1.0) - 2025-11-22
 
 ### Added
