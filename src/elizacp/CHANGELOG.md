@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.0.1](https://github.com/symposium-dev/symposium-acp/compare/elizacp-v3.0.0...elizacp-v3.0.1) - 2025-11-25
+
+### Fixed
+
+- *(elizacp)* spawn prompt processing to avoid blocking event loop
+
+### Other
+
+- Merge pull request #60 from nikomatsakis/main
+
 ## [3.0.0](https://github.com/symposium-dev/symposium-acp/compare/elizacp-v2.0.1...elizacp-v3.0.0) - 2025-11-25
 
 ### Added
