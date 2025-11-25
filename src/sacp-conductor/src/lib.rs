@@ -107,13 +107,7 @@ pub enum McpBridgeMode {
 
 impl Default for McpBridgeMode {
     fn default() -> Self {
-        let argv0 = std::env::current_exe()
-            .expect("valid current executable path")
-            .display()
-            .to_string();
-        McpBridgeMode::Stdio {
-            conductor_command: vec![argv0],
-        }
+        McpBridgeMode::Http
     }
 }
 
