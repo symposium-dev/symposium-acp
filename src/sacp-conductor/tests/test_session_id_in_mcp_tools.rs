@@ -10,7 +10,7 @@
 
 use sacp::schema::{ContentBlock, SessionId, TextContent};
 use sacp::{Component, JrHandlerChain};
-use sacp_conductor::conductor::Conductor;
+use sacp_conductor::Conductor;
 use sacp_proxy::{AcpProxyExt, McpServer, McpServiceRegistry};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};

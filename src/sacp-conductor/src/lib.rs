@@ -77,14 +77,16 @@
 use std::path::PathBuf;
 use std::str::FromStr;
 
-use crate::conductor::Conductor;
-
 /// Core conductor logic for orchestrating proxy chains
-pub mod conductor;
+mod conductor;
 /// Debug logging for conductor
 mod debug_logger;
 /// MCP bridge functionality for TCP-based MCP servers
 mod mcp_bridge;
+/// Trace event types for sequence diagram viewer
+pub mod trace;
+
+pub use self::conductor::*;
 
 use clap::{Parser, Subcommand};
 use sacp_tokio::{AcpAgent, Stdio};
@@ -126,6 +128,12 @@ pub struct ConductorArgs {
     /// Only applies when --debug is enabled
     #[arg(long)]
     pub log: Option<String>,
+
+    /// Path to write trace events for sequence diagram visualization.
+    /// Events are written as newline-delimited JSON (.jsons format).
+    /// Use sacp-trace-viewer to view the trace.
+    #[arg(long)]
+    pub trace: Option<PathBuf>,
 
     #[command(subcommand)]
     pub command: ConductorCommand,
@@ -193,7 +201,17 @@ impl ConductorArgs {
             tracing::info!(pid = %pid, cwd = %cwd, level = %log_level, "Conductor starting with debug logging");
         };
 
-        self.run(debug_logger.as_ref())
+        // Create trace writer if --trace is specified
+        let trace_writer = if let Some(trace_path) = &self.trace {
+            Some(
+                trace::TraceWriter::new(trace_path)
+                    .map_err(|e| anyhow::anyhow!("Failed to create trace writer: {}", e))?,
+            )
+        } else {
+            None
+        };
+
+        self.run(debug_logger.as_ref(), trace_writer)
             .instrument(tracing::info_span!("conductor", pid = %pid, cwd = %cwd))
             .await
             .map_err(|err| anyhow::anyhow!("{err}"))
@@ -202,6 +220,7 @@ impl ConductorArgs {
     async fn run(
         self,
         debug_logger: Option<&debug_logger::DebugLogger>,
+        trace_writer: Option<trace::TraceWriter>,
     ) -> Result<(), sacp::Error> {
         match self.command {
             ConductorCommand::Agent { name, proxies } => {
@@ -225,7 +244,13 @@ impl ConductorArgs {
                     Stdio::new()
                 };
 
-                Conductor::new(name, providers, Default::default())
+                // Create conductor with optional trace writer
+                let mut conductor = Conductor::new(name, providers, Default::default());
+                if let Some(writer) = trace_writer {
+                    conductor = conductor.with_trace_writer(writer);
+                }
+
+                conductor
                     .into_handler_chain()
                     .connect_to(stdio)?
                     .serve()

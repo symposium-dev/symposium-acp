@@ -16,3 +16,7 @@
 - [Conductor Implementation](./conductor.md)
 - [MCP Bridge](./mcp-bridge.md)
 - [Transport Architecture](./transport-architecture.md)
+
+# Design
+
+- [Trace Viewer](./trace-viewer.md)

@@ -1405,6 +1405,15 @@ impl<T: JrResponsePayload> JrRequestCx<T> {
         &self.method
     }
 
+    /// ID of the incoming request as a JSON value
+    pub fn id(&self) -> serde_json::Value {
+        match &self.id {
+            jsonrpcmsg::Id::Number(n) => serde_json::Value::Number((*n).into()),
+            jsonrpcmsg::Id::String(s) => serde_json::Value::String(s.clone()),
+            jsonrpcmsg::Id::Null => serde_json::Value::Null,
+        }
+    }
+
     /// Convert to a `JrRequestCx` that expects a JSON value
     /// and which checks (dynamically) that the JSON value it receives
     /// can be converted to `T`.
@@ -1605,6 +1614,14 @@ impl MessageAndCx {
         match self {
             MessageAndCx::Request(msg, _) => &msg.method,
             MessageAndCx::Notification(msg, _) => &msg.method,
+        }
+    }
+
+    /// Returns the request ID if this is a request, None if notification.
+    pub fn id(&self) -> Option<serde_json::Value> {
+        match self {
+            MessageAndCx::Request(_, cx) => Some(cx.id()),
+            MessageAndCx::Notification(_, _) => None,
         }
     }
 

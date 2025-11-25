@@ -15,7 +15,7 @@ use sacp::schema::{
     TextContent,
 };
 use sacp_conductor::McpBridgeMode;
-use sacp_conductor::conductor::Conductor;
+use sacp_conductor::Conductor;
 
 use tokio::io::duplex;
 use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
