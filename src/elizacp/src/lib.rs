@@ -8,7 +8,7 @@ use sacp::schema::{
     PromptRequest, PromptResponse, SessionId, SessionNotification, SessionUpdate, StopReason,
     TextContent,
 };
-use sacp::{Component, JrHandlerChain};
+use sacp::{Component, JrHandlerChain, JrRequestCx};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
@@ -72,7 +72,7 @@ impl ElizaAgent {
     async fn handle_new_session(
         &self,
         request: NewSessionRequest,
-        request_cx: sacp::JrRequestCx<NewSessionResponse>,
+        request_cx: JrRequestCx<NewSessionResponse>,
     ) -> Result<(), sacp::Error> {
         tracing::debug!("New session request with cwd: {:?}", request.cwd);
 
@@ -92,7 +92,7 @@ impl ElizaAgent {
     async fn handle_load_session(
         &self,
         request: LoadSessionRequest,
-        request_cx: sacp::JrRequestCx<LoadSessionResponse>,
+        request_cx: JrRequestCx<LoadSessionResponse>,
     ) -> Result<(), sacp::Error> {
         tracing::debug!("Load session request: {:?}", request.session_id);
 
@@ -107,15 +107,16 @@ impl ElizaAgent {
         request_cx.respond(response)
     }
 
-    async fn handle_prompt_request(
+    /// Process the prompt and send response - this runs in a spawned task
+    async fn process_prompt(
         &self,
         request: PromptRequest,
-        request_cx: sacp::JrRequestCx<PromptResponse>,
+        request_cx: JrRequestCx<PromptResponse>,
     ) -> Result<(), sacp::Error> {
-        let session_id = &request.session_id;
+        let session_id = request.session_id.clone();
 
         tracing::debug!(
-            "Received prompt in session {}: {} content blocks",
+            "Processing prompt in session {}: {} content blocks",
             session_id,
             request.prompt.len()
         );
@@ -128,7 +129,7 @@ impl ElizaAgent {
             // List tools from a specific server
             tracing::debug!("Listing tools from MCP server: {}", server_name);
 
-            match self.list_tools(session_id, &server_name).await {
+            match self.list_tools(&session_id, &server_name).await {
                 Ok(tools) => format!("Available tools:\n{}", tools),
                 Err(e) => format!("ERROR: {}", e),
             }
@@ -142,7 +143,7 @@ impl ElizaAgent {
             );
 
             match self
-                .execute_tool_call(session_id, &server_name, &tool_name, &params_json)
+                .execute_tool_call(&session_id, &server_name, &tool_name, &params_json)
                 .await
             {
                 Ok(result) => format!("OK: {}", result),
@@ -151,7 +152,7 @@ impl ElizaAgent {
         } else {
             // Not an MCP command, use Eliza for response
             let response_text = self
-                .get_response(session_id, &input_text)
+                .get_response(&session_id, &input_text)
                 .unwrap_or_else(|| {
                     format!(
                         "Error: Session {} not found. Please start a new session.",
@@ -414,7 +415,15 @@ impl Component for ElizaAgent {
             .on_receive_request({
                 let agent = self.clone();
                 async move |request: PromptRequest, request_cx| {
-                    agent.handle_prompt_request(request, request_cx).await
+                    // Spawn prompt processing to avoid blocking the event loop.
+                    // This allows the agent to handle other requests (like session/new)
+                    // while processing a prompt.
+                    request_cx.connection_cx().spawn({
+                        let agent = agent.clone();
+                        async move {
+                            agent.process_prompt(request, request_cx).await
+                        }
+                    })
                 }
             })
             .connect_to(client)?
