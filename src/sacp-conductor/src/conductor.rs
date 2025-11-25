@@ -948,7 +948,7 @@ impl ConductorHandlerState {
             for mcp_server in &mut request.mcp_servers {
                 if let Some(session_id_tx) = self
                     .bridge_listeners
-                    .transform_mcp_servers(
+                    .transform_mcp_server(
                         &request_cx.connection_cx(),
                         mcp_server,
                         conductor_tx,

@@ -9,85 +9,43 @@ use futures::{SinkExt, StreamExt as _, channel::mpsc, future::Either, stream::St
 use futures_concurrency::future::FutureExt as _;
 use futures_concurrency::stream::StreamExt as _;
 use fxhash::FxHashMap;
-use sacp::{BoxFuture, Channel, Component, JrConnectionCx, jsonrpcmsg::Message};
-use std::{collections::HashMap, pin::pin, sync::Arc};
+use sacp::{BoxFuture, Channel, Component, jsonrpcmsg::Message};
+use std::{pin::pin, sync::Arc};
 use tokio::net::TcpListener;
-use tracing::info;
 
 use crate::conductor::{
     ConductorMessage,
-    mcp_bridge::{McpBridgeConnection, McpBridgeConnectionActor, McpBridgeListener, McpPort},
+    mcp_bridge::{McpBridgeConnection, McpBridgeConnectionActor},
 };
 
-/// Spawn an HTTP listener
-pub async fn spawn_http_listener(
-    listeners: &mut HashMap<String, McpBridgeListener>,
-    cx: &JrConnectionCx,
-    acp_url: &str,
+/// Runs an HTTP listener for MCP bridge connections
+pub async fn run_http_listener(
+    tcp_listener: TcpListener,
+    acp_url: String,
+    session_id: sacp::schema::SessionId,
     mut conductor_tx: mpsc::Sender<ConductorMessage>,
-    session_id_rx: futures::channel::oneshot::Receiver<sacp::schema::SessionId>,
-) -> anyhow::Result<McpPort> {
-    // If there is already a listener for the ACP URL, return its TCP port
-    if let Some(listener) = listeners.get(acp_url) {
-        return Ok(listener.tcp_port);
-    }
+) -> Result<(), sacp::Error> {
+    let (to_mcp_client_tx, to_mcp_client_rx) = mpsc::channel(128);
 
-    let http_mcp_bridge = HttpMcpBridge::new().await?;
-    let tcp_port = http_mcp_bridge.port();
+    // When we send this message to the conductor,
+    // it is going to go through a step or two and eventually
+    // spawn the McpBridgeConnectionActor, which will ferry MCP requests
+    // back and forth.
+    conductor_tx
+        .send(ConductorMessage::McpConnectionReceived {
+            acp_url: acp_url,
+            session_id: session_id.clone(),
+            actor: McpBridgeConnectionActor::new(
+                HttpMcpBridge::new(tcp_listener),
+                conductor_tx.clone(),
+                to_mcp_client_rx,
+            ),
+            connection: McpBridgeConnection::new(to_mcp_client_tx),
+        })
+        .await
+        .map_err(|_| sacp::Error::internal_error())?;
 
-    info!(
-        acp_url = acp_url,
-        tcp_port.tcp_port, "Bound HTTP listener for MCP bridge"
-    );
-
-    listeners.insert(acp_url.to_string(), McpBridgeListener { tcp_port });
-
-    cx.spawn({
-        let acp_url = acp_url.to_string();
-        async move {
-            info!(
-                acp_url = acp_url,
-                tcp_port.tcp_port, "Waiting for session_id before accepting connections"
-            );
-
-            // Block waiting for session_id before accepting any connections
-            let session_id = session_id_rx.await.map_err(|_| {
-                sacp::Error::internal_error()
-                    .with_data("session_id channel closed before receiving session_id")
-            })?;
-
-            info!(
-                acp_url = acp_url,
-                tcp_port.tcp_port,
-                ?session_id,
-                "Session ID received, now accepting bridge connections"
-            );
-
-            let (to_mcp_client_tx, to_mcp_client_rx) = mpsc::channel(128);
-
-            // When we send this message to the conductor,
-            // it is going to go through a step or two and eventually
-            // spawn the McpBridgeConnectionActor, which will ferry MCP requests
-            // back and forth.
-            conductor_tx
-                .send(ConductorMessage::McpConnectionReceived {
-                    acp_url: acp_url.clone(),
-                    session_id: session_id.clone(),
-                    actor: McpBridgeConnectionActor::new(
-                        http_mcp_bridge,
-                        conductor_tx.clone(),
-                        to_mcp_client_rx,
-                    ),
-                    connection: McpBridgeConnection::new(to_mcp_client_tx),
-                })
-                .await
-                .map_err(|_| sacp::Error::internal_error())?;
-
-            Ok(())
-        }
-    })?;
-
-    Ok(tcp_port)
+    Ok(())
 }
 
 /// A component that receives HTTP requests/responses using the HTTP transport defined by the MCP protocol.
@@ -96,19 +54,9 @@ struct HttpMcpBridge {
 }
 
 impl HttpMcpBridge {
-    /// Creates a new HTTP-MCP bridge running on localhost at a random port.
-    pub async fn new() -> Result<Self, sacp::Error> {
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
-            .await
-            .map_err(sacp::util::internal_error)?;
-        Ok(Self { listener })
-    }
-
-    /// Returns the port on which the HTTP server is listening.
-    pub fn port(&self) -> McpPort {
-        McpPort {
-            tcp_port: self.listener.local_addr().unwrap().port(),
-        }
+    /// Creates a new HTTP-MCP bridge from an existing TCP listener.
+    fn new(listener: tokio::net::TcpListener) -> Self {
+        Self { listener }
     }
 }
 

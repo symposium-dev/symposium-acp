@@ -3,11 +3,13 @@ pub mod http;
 pub mod stdio;
 
 use std::collections::HashMap;
+use std::path::PathBuf;
 
 use futures::{SinkExt, channel::mpsc};
 use sacp;
 use sacp::schema::McpServer;
 use sacp::{JrConnectionCx, MessageAndCx};
+use tokio::net::TcpListener;
 use tracing::info;
 
 pub use self::actor::McpBridgeConnectionActor;
@@ -20,17 +22,11 @@ pub struct McpBridgeListeners {
     listeners: HashMap<String, McpBridgeListener>,
 }
 
-/// TCP port on which an MCP bridge is listening.
-#[derive(Copy, Clone, Debug)]
-pub struct McpPort {
-    pub tcp_port: u16,
-}
-
 /// Information about an MCP bridge that is listening for connections from MCP clients.
 #[derive(Clone, Debug)]
 pub(super) struct McpBridgeListener {
-    /// The TCP port we bound for this bridge
-    pub tcp_port: McpPort,
+    /// The replacement MCP server
+    pub server: McpServer,
 }
 
 /// Connection handle for sending messages to an MCP client.
@@ -59,11 +55,11 @@ impl McpBridgeListeners {
     /// For each MCP server with an `acp:` URL:
     /// 1. Spawns a TCP listener on an ephemeral port
     /// 2. Stores the mapping for message routing
-    /// 3. Transforms the server to use stdio transport pointing to `conductor mcp $PORT`
+    /// 3. Transforms the server to use either stdio or HTTP transport depending on bridge mode
     /// 4. Returns a oneshot sender for delivering the session_id to the listener
     ///
     /// Returns `Some(session_id_tx)` if a listener was spawned, `None` otherwise.
-    pub async fn transform_mcp_servers(
+    pub async fn transform_mcp_server(
         &mut self,
         cx: &JrConnectionCx,
         mcp_server: &mut McpServer,
@@ -93,70 +89,99 @@ impl McpBridgeListeners {
 
         // Create oneshot channel for session_id delivery
         let (session_id_tx, session_id_rx) = futures::channel::oneshot::channel();
-
-        // Transform to stdio transport pointing to conductor mcp process
-        let transformed = match mcp_bridge_mode {
-            crate::McpBridgeMode::Stdio { conductor_command } => {
-                // Spawn TCP listener on ephemeral port
-                let tcp_port = stdio::spawn_tcp_listener(
-                    &mut self.listeners,
-                    cx,
-                    url,
-                    conductor_tx.clone(),
-                    session_id_rx,
-                )
-                .await?;
-
-                info!(
-                    server_name = name,
-                    acp_url = url,
-                    tcp_port.tcp_port,
-                    "Spawned TCP listener for MCP bridge"
-                );
-
-                tracing::debug!(
-                    conductor_command = ?conductor_command,
-                    "Transforming MCP server to stdio"
-                );
-                let command = std::path::PathBuf::from(&conductor_command[0]);
-                let mut args: Vec<String> = conductor_command[1..].to_vec();
-                args.push("mcp".to_string());
-                args.push(tcp_port.tcp_port.to_string());
-
-                McpServer::Stdio {
-                    name: name.clone(),
-                    command,
-                    args,
-                    env: vec![],
-                }
-            }
-
-            crate::McpBridgeMode::Http => {
-                let tcp_port = http::spawn_http_listener(
-                    &mut self.listeners,
-                    cx,
-                    url,
-                    conductor_tx.clone(),
-                    session_id_rx,
-                )
-                .await?;
-
-                info!(
-                    server_name = name,
-                    acp_url = url,
-                    port = tcp_port.tcp_port,
-                    "Spawned HTTP listener for MCP bridge"
-                );
-
-                McpServer::Http {
-                    name: name.clone(),
-                    url: format!("http://127.0.0.1:{}", tcp_port.tcp_port),
-                    headers: vec![],
-                }
-            }
-        };
-
+        let transformed = self
+            .spawn_bridge(cx, name, url, conductor_tx, mcp_bridge_mode, session_id_rx)
+            .await?;
         *mcp_server = transformed;
         Ok(Some(session_id_tx))
+    }
+
+    /// Spawn a bridge listener (HTTP or stdio) for an MCP server with ACP transport
+    async fn spawn_bridge(
+        &mut self,
+        cx: &JrConnectionCx,
+        server_name: &str,
+        acp_url: &str,
+        conductor_tx: &mpsc::Sender<ConductorMessage>,
+        mcp_bridge_mode: &crate::McpBridgeMode,
+        session_id_rx: futures::channel::oneshot::Receiver<sacp::schema::SessionId>,
+    ) -> anyhow::Result<McpServer> {
+        // If there is already a listener for the ACP URL, return its server
+        if let Some(listener) = self.listeners.get(acp_url) {
+            return Ok(listener.server.clone());
+        }
+
+        // Bind to ephemeral port
+        let tcp_listener = TcpListener::bind("127.0.0.1:0").await?;
+        let tcp_port = tcp_listener.local_addr()?.port();
+
+        info!(acp_url = acp_url, tcp_port, "Bound listener for MCP bridge");
+
+        let new_server = match mcp_bridge_mode {
+            crate::McpBridgeMode::Stdio { conductor_command } => McpServer::Stdio {
+                name: server_name.to_string(),
+                command: PathBuf::from(&conductor_command[0]),
+                args: conductor_command[1..]
+                    .iter()
+                    .cloned()
+                    .chain(vec!["mcp".to_string(), format!("{tcp_port}")])
+                    .collect(),
+                env: Default::default(),
+            },
+
+            crate::McpBridgeMode::Http => McpServer::Http {
+                name: server_name.to_string(),
+                url: format!("http://localhost:{tcp_port}"),
+                headers: vec![],
+            },
+        };
+
+        // remember for later
+        self.listeners.insert(
+            acp_url.to_string(),
+            McpBridgeListener {
+                server: new_server.clone(),
+            },
+        );
+
+        cx.spawn({
+            let acp_url = acp_url.to_string();
+            let conductor_tx = conductor_tx.clone();
+            let mcp_bridge_mode = mcp_bridge_mode.clone();
+            async move {
+                info!(
+                    acp_url = acp_url,
+                    tcp_port, "Waiting for session_id before accepting connections"
+                );
+
+                // Block waiting for session_id before accepting any connections
+                let session_id = session_id_rx.await.map_err(|_| {
+                    sacp::Error::internal_error()
+                        .with_data("session_id channel closed before receiving session_id")
+                })?;
+
+                info!(
+                    acp_url = acp_url,
+                    tcp_port,
+                    ?session_id,
+                    "Session ID received, now accepting bridge connections"
+                );
+
+                match mcp_bridge_mode {
+                    crate::McpBridgeMode::Stdio {
+                        conductor_command: _,
+                    } => {
+                        stdio::run_tcp_listener(tcp_listener, acp_url, session_id, conductor_tx)
+                            .await
+                    }
+                    crate::McpBridgeMode::Http => {
+                        http::run_http_listener(tcp_listener, acp_url, session_id, conductor_tx)
+                            .await
+                    }
+                }
+            }
+        })?;
+
+        Ok(new_server)
     }
 }
