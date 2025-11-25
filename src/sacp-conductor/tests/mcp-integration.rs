@@ -7,13 +7,14 @@
 
 mod mcp_integration;
 
-use expect_test::expect;
+use elizacp::ElizaAgent;
 use futures::{SinkExt, StreamExt, channel::mpsc};
 use sacp::JrHandlerChain;
 use sacp::schema::{
     ContentBlock, InitializeRequest, NewSessionRequest, PromptRequest, SessionNotification,
     TextContent,
 };
+use sacp_conductor::McpBridgeMode;
 use sacp_conductor::conductor::Conductor;
 
 use tokio::io::duplex;
@@ -40,7 +41,8 @@ fn conductor_command() -> Vec<String> {
     ]
 }
 
-async fn run_test_with_components(
+async fn run_test_with_mode(
+    mode: McpBridgeMode,
     components: Vec<sacp::DynComponent>,
     editor_task: impl AsyncFnOnce(sacp::JrConnectionCx) -> Result<(), sacp::Error>,
 ) -> Result<(), sacp::Error> {
@@ -53,29 +55,27 @@ async fn run_test_with_components(
     JrHandlerChain::new()
         .name("editor-to-connector")
         .with_spawned(|_cx| async move {
-            Conductor::new(
-                "conductor".to_string(),
-                components,
-                sacp_conductor::McpBridgeMode::Stdio {
-                    conductor_command: conductor_command(),
-                },
-            )
-            .run(sacp::ByteStreams::new(
-                conductor_out.compat_write(),
-                conductor_in.compat(),
-            ))
-            .await
+            Conductor::new("conductor".to_string(), components, mode)
+                .run(sacp::ByteStreams::new(
+                    conductor_out.compat_write(),
+                    conductor_in.compat(),
+                ))
+                .await
         })
         .with_client(transport, editor_task)
         .await
 }
 
+/// Test that proxy-provided MCP tools work with stdio bridge mode
 #[tokio::test]
-async fn test_proxy_provides_mcp_tools() -> Result<(), sacp::Error> {
-    run_test_with_components(
+async fn test_proxy_provides_mcp_tools_stdio() -> Result<(), sacp::Error> {
+    run_test_with_mode(
+        McpBridgeMode::Stdio {
+            conductor_command: conductor_command(),
+        },
         vec![
             mcp_integration::proxy::create(),
-            mcp_integration::agent::create(),
+            sacp::DynComponent::new(ElizaAgent::new()),
         ],
         async |editor_cx| {
             // Send initialization request
@@ -108,7 +108,59 @@ async fn test_proxy_provides_mcp_tools() -> Result<(), sacp::Error> {
             );
 
             let session = session_response.unwrap();
-            assert_eq!(&*session.session_id.0, "test-session-123");
+            // ElizACP generates UUID session IDs, just verify it's non-empty
+            assert!(!session.session_id.0.is_empty());
+
+            Ok(())
+        },
+    )
+    .await?;
+
+    Ok(())
+}
+
+/// Test that proxy-provided MCP tools work with HTTP bridge mode
+#[tokio::test]
+async fn test_proxy_provides_mcp_tools_http() -> Result<(), sacp::Error> {
+    run_test_with_mode(
+        McpBridgeMode::Http,
+        vec![
+            mcp_integration::proxy::create(),
+            sacp::DynComponent::new(ElizaAgent::new()),
+        ],
+        async |editor_cx| {
+            // Send initialization request
+            let init_response = recv(editor_cx.send_request(InitializeRequest {
+                protocol_version: Default::default(),
+                client_capabilities: Default::default(),
+                meta: None,
+                client_info: None,
+            }))
+            .await;
+
+            assert!(
+                init_response.is_ok(),
+                "Initialize should succeed: {:?}",
+                init_response
+            );
+
+            // Send session/new request
+            let session_response = recv(editor_cx.send_request(NewSessionRequest {
+                cwd: Default::default(),
+                mcp_servers: vec![],
+                meta: None,
+            }))
+            .await;
+
+            assert!(
+                session_response.is_ok(),
+                "Session/new should succeed: {:?}",
+                session_response
+            );
+
+            let session = session_response.unwrap();
+            // ElizACP generates UUID session IDs, just verify it's non-empty
+            assert!(!session.session_id.0.is_empty());
 
             Ok(())
         },
@@ -120,15 +172,18 @@ async fn test_proxy_provides_mcp_tools() -> Result<(), sacp::Error> {
 
 #[tokio::test]
 async fn test_agent_handles_prompt() -> Result<(), sacp::Error> {
+    // Initialize tracing for debugging
+    let _ = tracing_subscriber::fmt()
+        .with_env_filter(
+            tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| {
+                tracing_subscriber::EnvFilter::new("sacp_conductor::conductor::mcp_bridge=trace")
+            }),
+        )
+        .with_test_writer()
+        .try_init();
+
     // Create channel to collect log events
     let (mut log_tx, mut log_rx) = mpsc::unbounded();
-
-    // Set up editor <-> conductor communication with notification handling
-    let (editor, conductor) = duplex(1024);
-    let (editor_in, editor_out) = tokio::io::split(editor);
-    let (conductor_in, conductor_out) = tokio::io::split(conductor);
-
-    let transport = sacp::ByteStreams::new(editor_out.compat_write(), editor_in.compat());
 
     JrHandlerChain::new()
         .name("editor-to-connector")
@@ -142,22 +197,15 @@ async fn test_agent_handles_prompt() -> Result<(), sacp::Error> {
                     .map_err(|_| sacp::Error::internal_error())
             }
         })
-        .with_spawned(|_cx| async move {
-            Conductor::new(
-                "mcp-integration-conductor".to_string(),
-                vec![
-                    mcp_integration::proxy::create(),
-                    mcp_integration::agent::create(),
-                ],
-                Default::default(),
-            )
-            .run(sacp::ByteStreams::new(
-                conductor_out.compat_write(),
-                conductor_in.compat(),
-            ))
-            .await
-        })
-        .with_client(transport, async |editor_cx| {
+        .connect_to(Conductor::new(
+            "mcp-integration-conductor".to_string(),
+            vec![
+                mcp_integration::proxy::create(),
+                sacp::DynComponent::new(ElizaAgent::new()),
+            ],
+            Default::default(),
+        ))?
+        .with_client(async |editor_cx| {
             // Initialize
             recv(editor_cx.send_request(InitializeRequest {
                 protocol_version: Default::default(),
@@ -177,12 +225,13 @@ async fn test_agent_handles_prompt() -> Result<(), sacp::Error> {
 
             tracing::debug!(session_id = %session.session_id.0, "Session created");
 
-            // Send a prompt
+            // Send a prompt to call the echo tool via ElizACP's command syntax
             let prompt_response = recv(editor_cx.send_request(PromptRequest {
                 session_id: session.session_id.clone(),
                 prompt: vec![ContentBlock::Text(TextContent {
                     annotations: None,
-                    text: "Hello agent!".to_string(),
+                    text: r#"Use tool test::echo with {"message": "Hello from the test!"}"#
+                        .to_string(),
                     meta: None,
                 })],
                 meta: None,
@@ -206,15 +255,24 @@ async fn test_agent_handles_prompt() -> Result<(), sacp::Error> {
         log_entries.push(entry);
     }
 
-    // Verify the output
-    expect![[r#"
-        [
-            "SessionNotification { session_id: SessionId(\"test-session-123\"), update: AgentMessageChunk(ContentChunk { content: Text(TextContent { annotations: None, text: \"Hello. I will now use the MCP tool\", meta: None }), meta: None }), meta: None }",
-            "SessionNotification { session_id: SessionId(\"test-session-123\"), update: AgentMessageChunk(ContentChunk { content: Text(TextContent { annotations: None, text: \"MCP tool result: CallToolResult { content: [Annotated { raw: Text(RawTextContent { text: \\\"{\\\\\\\"result\\\\\\\":\\\\\\\"Echo: Hello from the agent!\\\\\\\"}\\\", meta: None }), annotations: None }], structured_content: Some(Object {\\\"result\\\": String(\\\"Echo: Hello from the agent!\\\")}), is_error: Some(false), meta: None }\", meta: None }), meta: None }), meta: None }",
-            "PromptResponse { stop_reason: EndTurn, meta: None }",
-        ]
-    "#]]
-    .assert_debug_eq(&log_entries);
+    // Verify we got a successful tool call response
+    // The session ID is a UUID generated by ElizACP, so we check for the tool result pattern
+    assert_eq!(log_entries.len(), 2, "Expected notification + response");
+    assert!(
+        log_entries[0].contains("OK: CallToolResult"),
+        "Expected successful tool call, got: {}",
+        log_entries[0]
+    );
+    assert!(
+        log_entries[0].contains("Echo: Hello from the test!"),
+        "Expected echo result, got: {}",
+        log_entries[0]
+    );
+    assert!(
+        log_entries[1].contains("PromptResponse"),
+        "Expected prompt response, got: {}",
+        log_entries[1]
+    );
 
     Ok(())
 }

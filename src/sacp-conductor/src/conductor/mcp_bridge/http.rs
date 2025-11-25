@@ -136,6 +136,7 @@ struct BridgeState {
 }
 
 /// This is sent when we receive a POST or GET.
+#[derive(Debug)]
 struct RegistrationMessage {
     /// The message received from the client (`None` for GET requests)
     message: Option<sacp::jsonrpcmsg::Message>,
@@ -191,6 +192,7 @@ impl RunningServer {
         mut channel: Channel,
         registration_rx: mpsc::UnboundedReceiver<RegistrationMessage>,
     ) -> Result<(), sacp::Error> {
+        #[derive(Debug)]
         enum MultiplexMessage {
             Registration(RegistrationMessage),
             JsonRpc(Result<sacp::jsonrpcmsg::Message, sacp::Error>),
@@ -201,6 +203,7 @@ impl RunningServer {
             .merge(channel.rx.map(MultiplexMessage::JsonRpc));
 
         while let Some(message) = merged_stream.next().await {
+            tracing::trace!(?message, "received message");
             match message {
                 MultiplexMessage::Registration(message) => {
                     self.register(message, &mut channel.tx).await?
@@ -211,6 +214,8 @@ impl RunningServer {
                 }
             }
         }
+
+        tracing::trace!("http connection terminating");
 
         Ok(())
     }
@@ -226,6 +231,8 @@ impl RunningServer {
         }: RegistrationMessage,
         channel_tx: &mut mpsc::UnboundedSender<Result<sacp::jsonrpcmsg::Message, sacp::Error>>,
     ) -> Result<(), sacp::Error> {
+        tracing::debug!(?message, "register");
+
         // Extract the message-id if this is a request that needs a reply.
         let message_id = match &message {
             Some(Message::Request(request)) => match &request.id {
@@ -234,6 +241,7 @@ impl RunningServer {
             },
             _ => None,
         };
+        tracing::debug!(?message_id);
 
         // Send the message over the channel to be processed.
         if let Some(message) = message {
@@ -341,37 +349,49 @@ struct RegisteredSession {
 }
 
 /// Accept a POST request carrying a JsonRpc message from an MCP client.
-/// The message is then send over the channel and we begin a streaming response.
+/// For requests (messages with id), we return an SSE stream.
+/// For notifications/responses (messages without id), we return 202 Accepted.
 async fn handle_post(
     State(state): State<Arc<BridgeState>>,
     body: String,
-) -> Result<Sse<impl Stream<Item = Result<axum::response::sse::Event, HttpError>>>, HttpError> {
+) -> Result<Response, HttpError> {
     // Parse incoming JSON-RPC message
     let message: sacp::jsonrpcmsg::Message =
         serde_json::from_str(&body).map_err(sacp::util::parse_error)?;
 
-    handle_any(state, Some(message)).await
+    // Check if this is a request (has an id) or a notification/response
+    let is_request = matches!(&message, Message::Request(req) if req.id.is_some());
+
+    if is_request {
+        // For requests, return an SSE stream
+        Ok(handle_request(state, message).await?.into_response())
+    } else {
+        // For notifications/responses, send to server and return 202 Accepted
+        handle_notification(state, message).await?;
+        Ok(StatusCode::ACCEPTED.into_response())
+    }
 }
 
 /// Accept a GET request from an MCP client.
-/// We begin a streaming response.
+/// We begin a streaming response for server-initiated messages.
 async fn handle_get(
     State(state): State<Arc<BridgeState>>,
 ) -> Result<Sse<impl Stream<Item = Result<axum::response::sse::Event, HttpError>>>, HttpError> {
     // GET requests don't include a message, just open an SSE stream
-    handle_any(state, None).await
+    handle_request(state, None).await
 }
 
-/// Handle either a POST or GET request.
-async fn handle_any(
+/// Handle a request that expects an SSE stream response.
+/// Used for POST requests with an id, and GET requests.
+async fn handle_request(
     state: Arc<BridgeState>,
-    message: Option<sacp::jsonrpcmsg::Message>,
+    message: impl Into<Option<sacp::jsonrpcmsg::Message>>,
 ) -> Result<Sse<impl Stream<Item = Result<axum::response::sse::Event, HttpError>>>, HttpError> {
     let mut registration_tx = state.registration_tx.clone();
     let (messages_tx, mut messages_rx) = mpsc::unbounded();
     registration_tx
         .send(RegistrationMessage {
-            message,
+            message: message.into(),
             outgoing_tx: messages_tx,
         })
         .await
@@ -382,7 +402,7 @@ async fn handle_any(
     // In the case of a JSON-RPC request having been posted,
     // the tx handle will be dropped once the response has arrived.
     //
-    // In the case of notifications, replies, etc, we'll just keep sending
+    // In the case of GET requests, we'll just keep sending
     // messages back so long as the client is connected.
     let stream = async_stream::stream! {
         while let Some(message) = messages_rx.next().await {
@@ -394,4 +414,22 @@ async fn handle_any(
     };
 
     Ok(Sse::new(stream))
+}
+
+/// Handle a notification or response - just send it to the server, no response expected.
+async fn handle_notification(
+    state: Arc<BridgeState>,
+    message: sacp::jsonrpcmsg::Message,
+) -> Result<(), HttpError> {
+    let mut registration_tx = state.registration_tx.clone();
+    // Create a dummy channel - we won't use it since notifications don't get responses
+    let (messages_tx, _messages_rx) = mpsc::unbounded();
+    registration_tx
+        .send(RegistrationMessage {
+            message: Some(message),
+            outgoing_tx: messages_tx,
+        })
+        .await
+        .map_err(sacp::util::internal_error)?;
+    Ok(())
 }
