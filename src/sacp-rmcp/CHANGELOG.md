@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.4](https://github.com/symposium-dev/symposium-acp/compare/sacp-rmcp-v0.8.3...sacp-rmcp-v0.8.4) - 2025-11-25
+
+### Other
+
+- updated the following local packages: sacp, sacp-proxy
+
 ## [0.8.3](https://github.com/symposium-dev/symposium-acp/compare/sacp-rmcp-v0.8.2...sacp-rmcp-v0.8.3) - 2025-11-22
 
 ### Other

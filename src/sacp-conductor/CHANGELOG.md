@@ -7,6 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.2.0](https://github.com/symposium-dev/symposium-acp/compare/sacp-conductor-v2.1.1...sacp-conductor-v2.2.0) - 2025-11-25
+
+### Added
+
+- *(elizacp)* add HTTP MCP server support and update tests to use HTTP bridge
+- *(conductor)* change default MCP bridge mode to HTTP
+
+### Fixed
+
+- *(conductor)* return 202 Accepted for MCP notifications per HTTP spec
+- *(conductor)* correct typo in actor parameter name
+- *(conductor)* update tests to use McpBridgeMode instead of Option<Vec<String>>
+
+### Other
+
+- *(conductor)* simplify HTTP MCP bridge with typed HttpMessage enum
+- *(conductor)* update outdated comments in MCP bridge modules
+- move HTTP and implement shared code
+- move stdio into the stdio arm
+- *(conductor)* introduce McpBridgeMode enum to support multiple bridge types
+- adopt newer convention
+- *(conductor)* extract MCP bridge actor into trait with stdio submodule
+- implementing HTTP MCP bridge
+- impenetrable error
+
 ## [2.1.1](https://github.com/symposium-dev/symposium-acp/compare/sacp-conductor-v2.1.0...sacp-conductor-v2.1.1) - 2025-11-23
 
 ### Other

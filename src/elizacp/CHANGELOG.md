@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.1.0](https://github.com/symposium-dev/symposium-acp/compare/elizacp-v2.0.1...elizacp-v2.1.0) - 2025-11-25
+
+### Added
+
+- *(elizacp)* add HTTP MCP server support and update tests to use HTTP bridge
+
 ## [2.0.1](https://github.com/symposium-dev/symposium-acp/compare/elizacp-v2.0.0...elizacp-v2.0.1) - 2025-11-23
 
 ### Fixed
