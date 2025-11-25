@@ -115,7 +115,7 @@ async fn test_list_tools_from_mcp_server() -> Result<(), sacp::Error> {
         Conductor::new(
             "test-conductor".to_string(),
             vec![proxy, eliza],
-            Some(conductor_command()),
+            Default::default(),
         ),
         "List tools from echo_server",
     )
@@ -170,7 +170,7 @@ async fn test_session_id_delivered_to_mcp_tools() -> Result<(), sacp::Error> {
                     create_echo_proxy()?,
                     sacp::DynComponent::new(ElizacpAgentComponent),
                 ],
-                Some(conductor_command()),
+                Default::default(),
             )
             .run(sacp::ByteStreams::new(
                 conductor_out.compat_write(),

@@ -125,7 +125,7 @@ async fn run_test_with_components(
     JrHandlerChain::new()
         .name("editor-to-connector")
         .with_spawned(|_cx| async move {
-            Conductor::new("conductor".to_string(), components, None)
+            Conductor::new("conductor".to_string(), components, Default::default())
                 .run(sacp::ByteStreams::new(
                     conductor_out.compat_write(),
                     conductor_in.compat(),

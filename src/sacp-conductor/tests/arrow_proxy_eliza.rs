@@ -26,7 +26,7 @@ async fn test_conductor_with_arrow_proxy_and_eliza() -> Result<(), sacp::Error> 
         Conductor::new(
             "conductor".to_string(),
             vec![arrow_proxy_agent, eliza_agent],
-            None,
+            Default::default(),
         )
         .run(sacp::ByteStreams::new(
             conductor_write.compat_write(),

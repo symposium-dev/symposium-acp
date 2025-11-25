@@ -142,6 +142,8 @@ pub trait Component: Send + 'static {
 /// [`Component`] instead, which is automatically converted to `ErasedComponent`
 /// via a blanket implementation.
 trait ErasedComponent: Send {
+    fn type_name(&self) -> String;
+
     fn serve_erased(
         self: Box<Self>,
         client: Box<dyn ErasedComponent>,
@@ -154,6 +156,10 @@ trait ErasedComponent: Send {
 
 /// Blanket implementation: any `Component` can be type-erased.
 impl<C: Component> ErasedComponent for C {
+    fn type_name(&self) -> String {
+        std::any::type_name::<C>().to_string()
+    }
+
     fn serve_erased(
         self: Box<Self>,
         client: Box<dyn ErasedComponent>,
@@ -206,5 +212,13 @@ impl Component for DynComponent {
 
     fn into_server(self) -> (Channel, BoxFuture<'static, Result<(), crate::Error>>) {
         self.inner.into_server_erased()
+    }
+}
+
+impl std::fmt::Debug for DynComponent {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("DynComponent")
+            .field("type_name", &self.type_name())
+            .finish()
     }
 }

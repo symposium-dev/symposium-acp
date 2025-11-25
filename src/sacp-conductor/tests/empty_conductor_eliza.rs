@@ -19,7 +19,7 @@ impl Component for MockEmptyConductor {
     async fn serve(self, client: impl Component) -> Result<(), sacp::Error> {
         // Create an empty conductor with no components - it should act as a passthrough
         let empty_components: Vec<sacp::DynComponent> = vec![];
-        Conductor::new("empty-conductor".to_string(), empty_components, None)
+        Conductor::new("empty-conductor".to_string(), empty_components, Default::default())
             .run(client)
             .await
     }
@@ -58,7 +58,7 @@ async fn test_conductor_with_empty_conductor_and_eliza() -> Result<(), sacp::Err
         Conductor::new(
             "outer-conductor".to_string(),
             vec![empty_conductor, eliza],
-            None,
+            Default::default(),
         )
         .run(sacp::ByteStreams::new(
             conductor_write.compat_write(),

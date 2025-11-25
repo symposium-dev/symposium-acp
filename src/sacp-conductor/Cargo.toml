@@ -17,9 +17,12 @@ sacp-proxy = { version = "2.0.1", path = "../sacp-proxy" }
 sacp-tokio = { version = "2.0.0", path = "../sacp-tokio" }
 agent-client-protocol-schema.workspace = true
 anyhow.workspace = true
+axum.workspace = true
 chrono.workspace = true
 clap.workspace = true
 futures.workspace = true
+hyper.workspace = true
+tower.workspace = true
 
 serde.workspace = true
 serde_json.workspace = true
@@ -32,6 +35,9 @@ tracing.workspace = true
 tracing-appender.workspace = true
 tracing-subscriber.workspace = true
 uuid.workspace = true
+async-stream = "0.3.6"
+fxhash.workspace = true
+futures-concurrency = "7.6.3"
 
 [dev-dependencies]
 elizacp = { path = "../elizacp" }

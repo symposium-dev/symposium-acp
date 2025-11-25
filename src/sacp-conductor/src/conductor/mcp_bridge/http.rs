@@ -1,0 +1,440 @@
+use axum::{
+    Router,
+    extract::State,
+    http::StatusCode,
+    response::{IntoResponse, Response, Sse},
+    routing::post,
+};
+use futures::{SinkExt, StreamExt as _, channel::mpsc, future::Either, stream::Stream};
+use futures_concurrency::future::FutureExt as _;
+use futures_concurrency::stream::StreamExt as _;
+use fxhash::FxHashMap;
+use sacp::{BoxFuture, Channel, Component, jsonrpcmsg::Message};
+use std::{pin::pin, sync::Arc};
+use tokio::net::TcpListener;
+
+use crate::conductor::{
+    ConductorMessage,
+    mcp_bridge::{McpBridgeConnection, McpBridgeConnectionActor},
+};
+
+/// Runs an HTTP listener for MCP bridge connections
+pub async fn run_http_listener(
+    tcp_listener: TcpListener,
+    acp_url: String,
+    session_id: sacp::schema::SessionId,
+    mut conductor_tx: mpsc::Sender<ConductorMessage>,
+) -> Result<(), sacp::Error> {
+    let (to_mcp_client_tx, to_mcp_client_rx) = mpsc::channel(128);
+
+    // When we send this message to the conductor,
+    // it is going to go through a step or two and eventually
+    // spawn the McpBridgeConnectionActor, which will ferry MCP requests
+    // back and forth.
+    conductor_tx
+        .send(ConductorMessage::McpConnectionReceived {
+            acp_url: acp_url,
+            session_id: session_id.clone(),
+            actor: McpBridgeConnectionActor::new(
+                HttpMcpBridge::new(tcp_listener),
+                conductor_tx.clone(),
+                to_mcp_client_rx,
+            ),
+            connection: McpBridgeConnection::new(to_mcp_client_tx),
+        })
+        .await
+        .map_err(|_| sacp::Error::internal_error())?;
+
+    Ok(())
+}
+
+/// A component that receives HTTP requests/responses using the HTTP transport defined by the MCP protocol.
+struct HttpMcpBridge {
+    listener: tokio::net::TcpListener,
+}
+
+impl HttpMcpBridge {
+    /// Creates a new HTTP-MCP bridge from an existing TCP listener.
+    fn new(listener: tokio::net::TcpListener) -> Self {
+        Self { listener }
+    }
+}
+
+impl sacp::Component for HttpMcpBridge {
+    async fn serve(self, client: impl Component) -> Result<(), sacp::Error> {
+        let (channel, serve_self) = self.into_server();
+        match futures::future::select(pin!(client.serve(channel)), serve_self).await {
+            Either::Left((result, _)) => result,
+            Either::Right((result, _)) => result,
+        }
+    }
+
+    fn into_server(self) -> (Channel, BoxFuture<'static, Result<(), sacp::Error>>)
+    where
+        Self: Sized,
+    {
+        let (channel_a, channel_b) = Channel::duplex();
+        (channel_a, Box::pin(run(self.listener, channel_b)))
+    }
+}
+
+/// Error type that we use to respond to malformed HTTP requests.
+#[derive(Debug, thiserror::Error)]
+#[error(transparent)]
+struct HttpError(#[from] sacp::Error);
+
+impl From<axum::Error> for HttpError {
+    fn from(error: axum::Error) -> Self {
+        HttpError(sacp::util::internal_error(error))
+    }
+}
+
+impl IntoResponse for HttpError {
+    fn into_response(self) -> Response {
+        let message = format!("Error: {}", self.0);
+        (StatusCode::INTERNAL_SERVER_ERROR, message).into_response()
+    }
+}
+
+/// Run a webserver listening on `listener` for HTTP requests at `/`
+/// and communicating those requests over `channel` to the JSON-RPC server.
+async fn run(listener: TcpListener, channel: Channel) -> Result<(), sacp::Error> {
+    let (registration_tx, registration_rx) = mpsc::unbounded();
+
+    let state = BridgeState { registration_tx };
+
+    // The way that the MCP protocol works is a bit "special".
+    //
+    // Clients *POST* messages to `/`. Those are submitted to the MCP server.
+    // If the message is a REQUEST, then the client waits until it gets a reply.
+    // It expects the server to close the connection after responding.
+    //
+    // Clients can also issue a *GET* request. This will result in a stream of messages.
+    //
+    // Non-reply messages can be send to any open stream (POST, GET, etc) but must be sent to
+    // exactly one.
+    //
+    // There are provisions for "resuming" from a blocked point by tagging each message in the SSE stream
+    // with an id, but we are not implementing that because I am lazy.
+    async {
+        let app = Router::new()
+            .route("/", post(handle_post).get(handle_get))
+            .with_state(Arc::new(state));
+
+        axum::serve(listener, app)
+            .await
+            .map_err(sacp::util::internal_error)
+    }
+    .race(RunningServer::new().run(channel, registration_rx))
+    .await
+}
+
+/// The state we pass to our POST/GET handlers.
+struct BridgeState {
+    /// Where to send registration messages.
+    registration_tx: mpsc::UnboundedSender<HttpMessage>,
+}
+
+/// Messages from HTTP handlers to the bridge server.
+#[derive(Debug)]
+enum HttpMessage {
+    /// A JSON-RPC request (has an id, expects a response via the channel)
+    Request(
+        sacp::jsonrpcmsg::Request,
+        mpsc::UnboundedSender<sacp::jsonrpcmsg::Message>,
+    ),
+    /// A JSON-RPC notification (no id, no response expected)
+    Notification(sacp::jsonrpcmsg::Request),
+    /// A JSON-RPC response from the client
+    Response(sacp::jsonrpcmsg::Response),
+    /// A GET request to open an SSE stream for server-initiated messages
+    Get(mpsc::UnboundedSender<sacp::jsonrpcmsg::Message>),
+}
+
+/// Clone of `sacp::jsonrpcmsg::Id` since for unfathomable reasons that does not impl Hash
+#[derive(Eq, PartialEq, PartialOrd, Ord, Hash, Debug, Clone)]
+enum JsonRpcId {
+    /// String identifier
+    String(String),
+    /// Numeric identifier
+    Number(u64),
+    /// Null identifier (for notifications)
+    Null,
+}
+
+impl From<sacp::jsonrpcmsg::Id> for JsonRpcId {
+    fn from(id: sacp::jsonrpcmsg::Id) -> Self {
+        match id {
+            sacp::jsonrpcmsg::Id::String(s) => JsonRpcId::String(s),
+            sacp::jsonrpcmsg::Id::Number(n) => JsonRpcId::Number(n),
+            sacp::jsonrpcmsg::Id::Null => JsonRpcId::Null,
+        }
+    }
+}
+
+struct RunningServer {
+    waiting_sessions: FxHashMap<JsonRpcId, RegisteredSession>,
+    general_sessions: Vec<RegisteredSession>,
+}
+
+impl RunningServer {
+    fn new() -> Self {
+        RunningServer {
+            waiting_sessions: Default::default(),
+            general_sessions: Default::default(),
+        }
+    }
+
+    /// The main loop: listen for incoming HTTP messages and outgoing JSON-RPC messages.
+    ///
+    /// # Parameters
+    ///
+    /// * `channel`: The channel to use for sending/receiving JSON-RPC messages.
+    /// * `http_rx`: The receiver for messages from HTTP handlers.
+    async fn run(
+        mut self,
+        mut channel: Channel,
+        http_rx: mpsc::UnboundedReceiver<HttpMessage>,
+    ) -> Result<(), sacp::Error> {
+        #[derive(Debug)]
+        enum MultiplexMessage {
+            FromHttpToChannel(HttpMessage),
+            FromChannelToHttp(Result<sacp::jsonrpcmsg::Message, sacp::Error>),
+        }
+
+        let mut merged_stream = http_rx
+            .map(MultiplexMessage::FromHttpToChannel)
+            .merge(channel.rx.map(MultiplexMessage::FromChannelToHttp));
+
+        while let Some(message) = merged_stream.next().await {
+            tracing::trace!(?message, "received message");
+            match message {
+                MultiplexMessage::FromHttpToChannel(http_message) => {
+                    self.handle_http_message(http_message, &mut channel.tx)
+                        .await?
+                }
+
+                MultiplexMessage::FromChannelToHttp(message) => {
+                    self.dispatch_jsonrpc_message(message).await?
+                }
+            }
+        }
+
+        tracing::trace!("http connection terminating");
+
+        Ok(())
+    }
+
+    /// Handle an incoming HTTP message (request, notification, response, or GET).
+    async fn handle_http_message(
+        &mut self,
+        message: HttpMessage,
+        channel_tx: &mut mpsc::UnboundedSender<Result<sacp::jsonrpcmsg::Message, sacp::Error>>,
+    ) -> Result<(), sacp::Error> {
+        match message {
+            HttpMessage::Request(request, outgoing_tx) => {
+                tracing::debug!(?request, "handling request");
+                let request_id = request.id.clone().map(JsonRpcId::from);
+
+                // Send to the JSON-RPC server
+                channel_tx
+                    .unbounded_send(Ok(Message::Request(request)))
+                    .map_err(sacp::util::internal_error)?;
+
+                // Register to receive the response
+                let session = RegisteredSession { outgoing_tx };
+                if let Some(id) = request_id {
+                    self.waiting_sessions.insert(id, session);
+                } else {
+                    // Request without id - treat like a general session
+                    self.general_sessions.push(session);
+                }
+            }
+
+            HttpMessage::Notification(notification) => {
+                tracing::debug!(?notification, "handling notification");
+                // Just forward to the server, no response tracking needed
+                channel_tx
+                    .unbounded_send(Ok(Message::Request(notification)))
+                    .map_err(sacp::util::internal_error)?;
+            }
+
+            HttpMessage::Response(response) => {
+                tracing::debug!(?response, "handling response");
+                // Forward to the server
+                channel_tx
+                    .unbounded_send(Ok(Message::Response(response)))
+                    .map_err(sacp::util::internal_error)?;
+            }
+
+            HttpMessage::Get(outgoing_tx) => {
+                tracing::debug!("handling GET (opening SSE stream)");
+                // Register as a general session to receive server-initiated messages
+                self.general_sessions
+                    .push(RegisteredSession { outgoing_tx });
+            }
+        }
+
+        // Purge closed sessions for good hygiene
+        self.purge_closed_sessions();
+
+        Ok(())
+    }
+
+    /// Invoked when there is an outgoing JSON-RPC message to send.
+    /// Finds a suitable place to send it or drops it on the floor.
+    ///
+    /// FIXME: We could buffer, replay, etc.
+    async fn dispatch_jsonrpc_message(
+        &mut self,
+        message: Result<sacp::jsonrpcmsg::Message, sacp::Error>,
+    ) -> Result<(), sacp::Error> {
+        let mut message = message.unwrap_or_else(|err| {
+            sacp::jsonrpcmsg::Message::Response(sacp::jsonrpcmsg::Response::error(
+                sacp::util::into_jsonrpc_error(err),
+                None,
+            ))
+        });
+
+        // Extract the id of the message we are replying to, if any
+        let message_id = match &message {
+            Message::Response(response) => match &response.id {
+                Some(v) => Some(v.clone().into()),
+                None => None,
+            },
+            Message::Request(_) => None,
+        };
+
+        // If there is a specific id, try to send the message to that sender.
+        // This also removes them from the list of waiting sessions.
+        if let Some(message_id) = message_id {
+            if let Some(RegisteredSession { outgoing_tx }) =
+                self.waiting_sessions.remove(&message_id)
+            {
+                match outgoing_tx.unbounded_send(message) {
+                    // Successfully sent the message, return
+                    Ok(()) => return Ok(()),
+
+                    // If the sender died, just recover the message and send it to anyone.
+                    Err(m) => {
+                        // If that sender is dead, remove them from the list
+                        // and recover the message.
+                        assert!(m.is_disconnected());
+                        message = m.into_inner();
+                    }
+                }
+            }
+        }
+
+        // Try to find *somewhere* to send the message
+        self.purge_closed_sessions();
+        let all_sessions = self
+            .general_sessions
+            .iter_mut()
+            .chain(self.waiting_sessions.values_mut());
+        for session in all_sessions {
+            match session.outgoing_tx.unbounded_send(message) {
+                Ok(()) => {
+                    // Successfully sent the message, restore the general session and return.
+                    return Ok(());
+                }
+
+                Err(m) => {
+                    // If that session is dead, try the next one.
+                    assert!(m.is_disconnected());
+                    message = m.into_inner();
+                }
+            }
+        }
+
+        // If we don't find anywhere to send the message, just discard it. :shrug:
+        Ok(())
+    }
+
+    /// Purge sessions from the bridge state where the receiver is closed.
+    /// This happens when the HTTP client disconnects.
+    fn purge_closed_sessions(&mut self) {
+        self.general_sessions
+            .retain(|session| !session.outgoing_tx.is_closed());
+        self.waiting_sessions
+            .retain(|_, session| !session.outgoing_tx.is_closed());
+    }
+}
+
+struct RegisteredSession {
+    outgoing_tx: mpsc::UnboundedSender<sacp::jsonrpcmsg::Message>,
+}
+
+/// Accept a POST request carrying a JSON-RPC message from an MCP client.
+/// For requests (messages with id), we return an SSE stream.
+/// For notifications/responses (messages without id), we return 202 Accepted.
+async fn handle_post(
+    State(state): State<Arc<BridgeState>>,
+    body: String,
+) -> Result<Response, HttpError> {
+    // Parse incoming JSON-RPC message
+    let message: sacp::jsonrpcmsg::Message =
+        serde_json::from_str(&body).map_err(sacp::util::parse_error)?;
+
+    match message {
+        Message::Request(request) if request.id.is_some() => {
+            // Request with id - return SSE stream for response
+            let (tx, mut rx) = mpsc::unbounded();
+            state
+                .registration_tx
+                .unbounded_send(HttpMessage::Request(request, tx))
+                .map_err(sacp::util::internal_error)?;
+
+            let stream = async_stream::stream! {
+                while let Some(message) = rx.next().await {
+                    match axum::response::sse::Event::default().json_data(message) {
+                        Ok(v) => yield Ok(v),
+                        Err(e) => yield Err(HttpError::from(e)),
+                    }
+                }
+            };
+            Ok(Sse::new(stream).into_response())
+        }
+
+        Message::Request(request) => {
+            // Request without id is a notification
+            state
+                .registration_tx
+                .unbounded_send(HttpMessage::Notification(request))
+                .map_err(sacp::util::internal_error)?;
+            Ok(StatusCode::ACCEPTED.into_response())
+        }
+
+        Message::Response(response) => {
+            // Response from client (rare, but possible in MCP)
+            state
+                .registration_tx
+                .unbounded_send(HttpMessage::Response(response))
+                .map_err(sacp::util::internal_error)?;
+            Ok(StatusCode::ACCEPTED.into_response())
+        }
+    }
+}
+
+/// Accept a GET request from an MCP client.
+/// Opens an SSE stream for server-initiated messages.
+async fn handle_get(
+    State(state): State<Arc<BridgeState>>,
+) -> Result<Sse<impl Stream<Item = Result<axum::response::sse::Event, HttpError>>>, HttpError> {
+    let (tx, mut rx) = mpsc::unbounded();
+    state
+        .registration_tx
+        .unbounded_send(HttpMessage::Get(tx))
+        .map_err(sacp::util::internal_error)?;
+
+    let stream = async_stream::stream! {
+        while let Some(message) = rx.next().await {
+            match axum::response::sse::Event::default().json_data(message) {
+                Ok(v) => yield Ok(v),
+                Err(e) => yield Err(HttpError::from(e)),
+            }
+        }
+    };
+
+    Ok(Sse::new(stream))
+}
