@@ -1,7 +1,7 @@
 //! YOPO (You Only Prompt Once) - A simple ACP client for one-shot prompts
 //!
 //! This client:
-//! - Takes a prompt and agent configuration as arguments
+//! - Takes a prompt and agent command as arguments
 //! - Spawns the agent
 //! - Sends the prompt
 //! - Auto-approves all permission requests
@@ -10,9 +10,10 @@
 //!
 //! # Usage
 //!
-//! With a command:
+//! With a command (arguments are concatenated):
 //! ```bash
-//! yopo "What is 2+2?" "python my_agent.py"
+//! yopo "What is 2+2?" python my_agent.py
+//! yopo "Hello!" cargo run --release
 //! ```
 //!
 //! With JSON config:
@@ -22,7 +23,6 @@
 
 use clap::Parser;
 use sacp_tokio::AcpAgent;
-use std::str::FromStr;
 use tracing_subscriber::{EnvFilter, layer::SubscriberExt, util::SubscriberInitExt};
 
 #[derive(Parser, Debug)]
@@ -31,8 +31,9 @@ struct Args {
     /// The prompt to send to the agent
     prompt: String,
 
-    /// Agent configuration (command string or JSON)
-    agent_config: String,
+    /// Agent command (multiple arguments are joined with spaces) or JSON config
+    #[arg(required = true, num_args = 1..)]
+    agent_args: Vec<String>,
 
     /// Set logging level (trace, debug, info, warn, error)
     #[arg(short, long)]
@@ -60,10 +61,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .init();
 
     let prompt = &args.prompt;
-    let agent_config = &args.agent_config;
 
-    // Parse the agent configuration
-    let agent = AcpAgent::from_str(agent_config)?;
+    // Parse the agent configuration from args
+    let agent = AcpAgent::from_args(args.agent_args)?;
 
     eprintln!("🚀 Spawning agent and running prompt...");
 

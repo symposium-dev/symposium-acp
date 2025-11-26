@@ -276,6 +276,106 @@ impl sacp::Component for AcpAgent {
     }
 }
 
+impl AcpAgent {
+    /// Create an `AcpAgent` from an iterator of command-line arguments.
+    ///
+    /// Leading arguments of the form `NAME=value` are parsed as environment variables.
+    /// The first non-env argument is the command, and the rest are arguments.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// # use sacp_tokio::AcpAgent;
+    /// let agent = AcpAgent::from_args([
+    ///     "RUST_LOG=debug",
+    ///     "cargo",
+    ///     "run",
+    ///     "-p",
+    ///     "my-crate",
+    /// ]).unwrap();
+    /// ```
+    pub fn from_args<I, T>(args: I) -> Result<Self, sacp::Error>
+    where
+        I: IntoIterator<Item = T>,
+        T: ToString,
+    {
+        let args: Vec<String> = args.into_iter().map(|s| s.to_string()).collect();
+
+        if args.is_empty() {
+            return Err(sacp::util::internal_error("Arguments cannot be empty"));
+        }
+
+        let mut env = vec![];
+        let mut command_idx = 0;
+
+        // Parse leading FOO=bar arguments as environment variables
+        for (i, arg) in args.iter().enumerate() {
+            if let Some((name, value)) = parse_env_var(arg) {
+                env.push(sacp::schema::EnvVariable {
+                    name,
+                    value,
+                    meta: None,
+                });
+                command_idx = i + 1;
+            } else {
+                break;
+            }
+        }
+
+        if command_idx >= args.len() {
+            return Err(sacp::util::internal_error(
+                "No command found (only environment variables provided)",
+            ));
+        }
+
+        let command = PathBuf::from(&args[command_idx]);
+        let cmd_args = args[command_idx + 1..].to_vec();
+
+        // Generate a name from the command
+        let name = command
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("agent")
+            .to_string();
+
+        Ok(AcpAgent {
+            server: sacp::schema::McpServer::Stdio {
+                name,
+                command,
+                args: cmd_args,
+                env,
+            },
+            debug_callback: None,
+        })
+    }
+}
+
+/// Parse a string as an environment variable assignment (NAME=value).
+/// Returns None if it doesn't match the pattern.
+fn parse_env_var(s: &str) -> Option<(String, String)> {
+    // Must contain '=' and the part before must be a valid env var name
+    let eq_pos = s.find('=')?;
+    if eq_pos == 0 {
+        return None;
+    }
+
+    let name = &s[..eq_pos];
+    let value = &s[eq_pos + 1..];
+
+    // Env var names must start with a letter or underscore, and contain only
+    // alphanumeric characters and underscores
+    let mut chars = name.chars();
+    let first = chars.next()?;
+    if !first.is_ascii_alphabetic() && first != '_' {
+        return None;
+    }
+    if !chars.all(|c| c.is_ascii_alphanumeric() || c == '_') {
+        return None;
+    }
+
+    Some((name.to_string(), value.to_string()))
+}
+
 impl FromStr for AcpAgent {
     type Err = sacp::Error;
 
@@ -293,38 +393,11 @@ impl FromStr for AcpAgent {
         }
 
         // Otherwise, parse as a command string
-        parse_command_string(trimmed)
+        let parts = shell_words::split(trimmed)
+            .map_err(|e| sacp::util::internal_error(format!("Failed to parse command: {}", e)))?;
+
+        Self::from_args(parts)
     }
-}
-
-fn parse_command_string(s: &str) -> Result<AcpAgent, sacp::Error> {
-    // Split the command string into words, respecting quotes
-    let parts = shell_words::split(s)
-        .map_err(|e| sacp::util::internal_error(format!("Failed to parse command: {}", e)))?;
-
-    if parts.is_empty() {
-        return Err(sacp::util::internal_error("Command string cannot be empty"));
-    }
-
-    let command = PathBuf::from(&parts[0]);
-    let args = parts[1..].to_vec();
-
-    // Generate a name from the command
-    let name = command
-        .file_name()
-        .and_then(|n| n.to_str())
-        .unwrap_or("agent")
-        .to_string();
-
-    Ok(AcpAgent {
-        server: sacp::schema::McpServer::Stdio {
-            name,
-            command,
-            args,
-            env: vec![],
-        },
-        debug_callback: None,
-    })
 }
 
 #[cfg(test)]
