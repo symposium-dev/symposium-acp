@@ -523,15 +523,13 @@
                         const label = event.method || event.type;
                         svg += `<text x="${labelX}" y="${y - 8}" text-anchor="middle" class="message-label" style="fill: ${pairColor}">${truncate(label, 20)}</text>`;
 
-                        // Content preview for session/update notifications
-                        if (
-                            event.method === "session/update" &&
-                            event.params?.content
-                        ) {
+                        // Content preview for various message types
+                        const contentPreview = getContentPreview(event);
+                        if (contentPreview) {
                             const contentWidth = Math.abs(toX - fromX);
                             const contentX = Math.min(fromX, toX);
                             svg += `<foreignObject x="${contentX}" y="${y + 4}" width="${contentWidth}" height="18">
-                                <div xmlns="http://www.w3.org/1999/xhtml" class="content-preview">${escapeHtml(event.params.content)}</div>
+                                <div xmlns="http://www.w3.org/1999/xhtml" class="content-preview">${escapeHtml(contentPreview)}</div>
                             </foreignObject>`;
                         }
 
@@ -586,6 +584,43 @@
                     .replace(/</g, "&lt;")
                     .replace(/>/g, "&gt;")
                     .replace(/"/g, "&quot;");
+            }
+
+            function getContentPreview(event) {
+                // session/prompt - show the prompt text
+                if (event.method === "session/prompt") {
+                    const promptText = event.params?.prompt?.[0]?.text;
+                    if (promptText) return promptText;
+                }
+
+                // session/update - varies by update type
+                if (event.method === "session/update") {
+                    const update = event.params?.update;
+                    if (!update) return null;
+
+                    switch (update.sessionUpdate) {
+                        case "agent_message_chunk":
+                            return update.content?.text;
+
+                        case "tool_call":
+                            const toolName =
+                                update._meta?.claudeCode?.toolName ||
+                                update.title;
+                            return toolName ? `📦 ${toolName}` : null;
+
+                        case "tool_call_update":
+                            const tool = update._meta?.claudeCode?.toolName;
+                            const status = update.status;
+                            if (tool && status) return `${status}: ${tool}`;
+                            return status;
+
+                        case "available_commands_update":
+                            const count = update.availableCommands?.length;
+                            return count ? `${count} commands` : null;
+                    }
+                }
+
+                return null;
             }
 
             function selectEvent(index) {
