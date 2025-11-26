@@ -1041,17 +1041,16 @@ impl ConductorHandlerState {
         tracing::debug!(?is_agent, "forward_initialize_request");
 
         let conductor_tx = conductor_tx.clone();
+
         if is_agent {
             // Agent component - no proxy capability
             self.components[target_component_index]
                 .send_request(initialize_req)
                 .await_when_result_received(async move |response| {
                     tracing::debug!(?response, "got initialize response");
-
-                    match response {
-                        Ok(response) => request_cx.respond(response),
-                        Err(error) => request_cx.respond_with_error(error),
-                    }
+                    request_cx
+                        .respond_with_result_via(conductor_tx, response)
+                        .await
                 })
         } else if target_component_index == self.components.len() {
             // This is a subtle case. Ordinarily, messages targeting the
@@ -1081,14 +1080,14 @@ impl ConductorHandlerState {
                         "received response to initialize from empty conductor"
                     );
 
-                    match response {
-                        Ok(mut response) => {
-                            // Add proxy capability to indicate we are a proxy
-                            response = response.add_meta_capability(Proxy);
-                            request_cx.respond_via(conductor_tx, response).await
-                        }
-                        Err(error) => request_cx.respond_with_error(error),
-                    }
+                    let response = response.map(|response| {
+                        // Add proxy capability to indicate we are a proxy
+                        response.add_meta_capability(Proxy)
+                    });
+
+                    request_cx
+                        .respond_with_result_via(conductor_tx, response)
+                        .await
                 })
         } else {
             // An initialize request sent to the successor of the final
@@ -1099,27 +1098,30 @@ impl ConductorHandlerState {
             initialize_req = initialize_req.add_meta_capability(Proxy);
             self.components[target_component_index]
                 .send_request(initialize_req)
-                .await_when_result_received(async move |response| match response {
-                    Ok(mut response) => {
-                        // Verify proxy capability handshake
-                        // Each proxy component must respond with Proxy capability or we
-                        // abort the conductor.
-                        if !response.has_meta_capability(Proxy) {
-                            return Err(sacp::util::internal_error(format!(
-                                "component {} is not a proxy",
-                                target_component_index
-                            )));
-                        }
+                .await_when_result_received(async move |response| {
+                    // Note: response tracing is handled by respond_via -> ForwardResponse -> trace_response
+                    match response {
+                        Ok(mut response) => {
+                            // Verify proxy capability handshake
+                            // Each proxy component must respond with Proxy capability or we
+                            // abort the conductor.
+                            if !response.has_meta_capability(Proxy) {
+                                return Err(sacp::util::internal_error(format!(
+                                    "component {} is not a proxy",
+                                    target_component_index
+                                )));
+                            }
 
-                        // We don't want to respond with that proxy capability to the predecessor.
-                        // Proxy communication is just between the conductor and others.
-                        if !initialize_had_proxy {
-                            response = response.remove_meta_capability(Proxy);
-                        }
+                            // We don't want to respond with that proxy capability to the predecessor.
+                            // Proxy communication is just between the conductor and others.
+                            if !initialize_had_proxy {
+                                response = response.remove_meta_capability(Proxy);
+                            }
 
-                        request_cx.respond_via(conductor_tx, response).await
+                            request_cx.respond_via(conductor_tx, response).await
+                        }
+                        Err(error) => request_cx.respond_with_error(error),
                     }
-                    Err(error) => request_cx.respond_with_error(error),
                 })
         }
     }
