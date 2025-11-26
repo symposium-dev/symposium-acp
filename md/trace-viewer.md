@@ -7,10 +7,12 @@
 When debugging ACP proxy chains, understanding the flow of messages between components is critical. The trace viewer provides:
 
 - **Visual sequence diagrams** showing messages flowing between Client, Proxies, and Agent
-- **Request/response correlation** with arrows linking requests to their responses
-- **Tracing log integration** showing component logs inline on their timeline
-- **Session color-coding** to distinguish multiple ACP sessions
-- **Zoom and filter** to navigate large traces
+- **Request/response correlation** with rainbow colors linking each request to its response
+- **Timeline spans** showing when components are actively processing requests
+- **Delta times** on each component's timeline showing elapsed time between events
+- **Content preview** for `session/update` notifications showing message text inline
+- **Filter controls** to show/hide ACP, MCP, and response messages
+- **Adjustable layout** with a slider to control swimlane width
 
 ## Architecture
 
@@ -162,50 +164,42 @@ The viewer displays these as swimlane columns in the sequence diagram.
 The main view is a vertical timeline with component columns (swimlanes):
 
 ```
-  Client         Proxy:0        Proxy:1         Agent
-    │               │              │               │
-    │──initialize──>│              │               │
-    │               │──initialize──>│              │
-    │               │              │──initialize──>│
-    │               │              │<╌╌╌╌╌╌╌╌╌╌╌╌╌╌│
-    │               │<╌╌╌╌╌╌╌╌╌╌╌╌╌│              │
-    │<╌╌╌╌╌╌╌╌╌╌╌╌╌╌│              │               │
-    │               │              │               │
-    │──session/new─>│              │               │
-    │               │──session/new─>│              │
-    │               │              │──session/new─>│
-    │               │              │<╌╌╌╌╌╌╌╌╌╌╌╌╌╌│
-    │               │<╌╌╌╌╌╌╌╌╌╌╌╌╌│              │
-    │<╌╌╌╌╌╌╌╌╌╌╌╌╌╌│              │               │
-    │               │              │               │
-    │               │<─tools/call──│              │  (mcp)
-    │               │╌╌╌╌╌╌╌╌╌╌╌╌╌>│              │
-    │               │              │               │
+       client     proxy:0         agent
+         │           │               │
+         │──init────>│    14ms       │
+         │   97ms    │──init────────>│
+         │           │      74ms     │<── orange (request/response pair)
+         │           │<╌╌╌╌╌╌╌╌╌╌╌╌╌╌│
+         │<╌╌╌╌╌╌╌╌╌╌│               │
+         │           │               │
+         │──prompt──>│               │
+         │           ║    15ms       │<── thickened timeline = processing
+         │           │──prompt──────>│
+         │           │      235ms    │
+         │           │<──tools/list──●    (MCP: circular arrowhead)
+         │           │╌╌╌╌╌╌╌╌╌╌╌╌╌╌>│
+         │           │               │
 ```
 
-- **Requests/notifications** - solid arrows with method name as inline label
-- **Responses** - dashed arrows pointing back, linked to their originating request
-  - No label (click to see payload)
-  - Visual indicator for error responses (e.g., red color)
-- **MCP messages** - distinguished visually (different color or line style), flow from agent back to proxies
-- **Trace logs** - inline markers on a component's column
-- **Click any arrow** - expands full JSON payload in a detail panel
+### Visual Design
+
+- **Requests/notifications** - solid arrows with method name label, colored by request/response pair
+- **Responses** - dashed arrows in the same color as their originating request
+- **MCP vs ACP** - MCP messages use circular arrowheads; ACP uses triangular
+- **Timeline spans** - when a component receives a request, its timeline thickens (in the pair's color) until the response is sent
+- **Delta times** - elapsed time shown on each component's timeline between its events
+- **Content preview** - `session/update` notifications show truncated message content below the arrow
+- **Error responses** - highlighted in red
 
 ### Interactions
 
-- **Zoom** - mouse wheel or pinch to zoom in/out on the timeline
-- **Pan** - drag to navigate
-- **Click message** - expands full JSON payload in sidebar panel
-- **Filter by session** - checkbox to show/hide sessions by color
-- **Filter by type** - show/hide requests, notifications, traces
-- **Search** - find messages by method name or content
+- **Click message** - expands full JSON payload in resizable bottom panel
+- **Filter checkboxes** - show/hide ACP messages, MCP messages, responses
+- **Width slider** - adjust swimlane column width (80-300px)
 
 ### Color Coding
 
-- Each ACP session gets a distinct color
-- Requests and their responses share the same color
-- Error responses highlighted in red
-- Trace log levels have distinct colors (debug=gray, info=blue, warn=yellow, error=red)
+Each request/response pair gets a unique color from a rainbow palette. This makes it easy to visually trace a request through the proxy chain to its response, even when many messages are interleaved.
 
 ## Implementation Notes
 
@@ -244,11 +238,9 @@ Conductor::new(name, components, mcp_bridge_mode)
 
 ### sacp-trace-viewer crate
 
-- Single binary with embedded static assets (HTML/JS/CSS)
-- Uses a lightweight HTTP server (e.g., `axum` or `tiny_http`)
-- Endpoints:
-  - `GET /` - serves the viewer HTML
-  - `GET /events` - streams the `.jsons` file content
-  - `GET /events?after=<offset>` - for tailing (returns events after byte offset)
-- Viewer JS fetches events, renders SVG sequence diagram
-- No build step for JS - vanilla JS is sufficient for this use case
+- Single binary with embedded static assets (HTML/JS/CSS via `include_str!`)
+- Axum HTTP server with two endpoints:
+  - `GET /` - serves the viewer HTML (single-page app)
+  - `GET /events` - returns trace events as JSON array
+- Vanilla JS renders SVG sequence diagram (no build step, no npm)
+- Auto-opens browser on launch (disable with `--no-open`)
