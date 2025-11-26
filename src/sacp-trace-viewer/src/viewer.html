@@ -436,38 +436,52 @@
                     }
                 });
 
+                // Track last event index for each component to show delta times
+                const lastEventIndex = new Map(); // component -> { index, ts }
+
+                // First pass: record which components are involved in each event
+                const eventComponents = filteredEvents.map((event) => {
+                    const involved = new Set();
+                    if (event.from) involved.add(event.from);
+                    if (event.to) involved.add(event.to);
+                    return involved;
+                });
+
                 // Draw delta times on component timelines
-                for (let i = 0; i < filteredEvents.length - 1; i++) {
-                    const currEvent = filteredEvents[i];
-                    const nextEvent = filteredEvents[i + 1];
-                    const delta = (nextEvent.ts || 0) - (currEvent.ts || 0);
+                filteredEvents.forEach((event, i) => {
+                    const involved = eventComponents[i];
+                    const ts = event.ts || 0;
 
-                    if (delta > 0) {
-                        // Show time on the receiving component's timeline
-                        const component = currEvent.to || currEvent.from;
+                    involved.forEach((component) => {
                         const compIndex = components.indexOf(component);
+                        if (compIndex < 0) return;
 
-                        if (compIndex >= 0) {
+                        const last = lastEventIndex.get(component);
+                        if (last && ts > last.ts) {
+                            const delta = ts - last.ts;
                             const x =
                                 PADDING +
                                 compIndex * SWIMLANE_WIDTH +
                                 SWIMLANE_WIDTH / 2;
                             const y1 =
                                 HEADER_HEIGHT +
-                                i * ROW_HEIGHT +
+                                last.index * ROW_HEIGHT +
                                 ROW_HEIGHT / 2 +
                                 8;
                             const y2 =
                                 HEADER_HEIGHT +
-                                (i + 1) * ROW_HEIGHT +
+                                i * ROW_HEIGHT +
                                 ROW_HEIGHT / 2 -
                                 8;
                             const yMid = (y1 + y2) / 2;
 
                             svg += `<text x="${x + 8}" y="${yMid + 3}" text-anchor="start" class="delta-time">${formatDelta(delta)}</text>`;
                         }
-                    }
-                }
+
+                        // Update last event for this component
+                        lastEventIndex.set(component, { index: i, ts });
+                    });
+                });
 
                 // Draw messages
                 filteredEvents.forEach((event, i) => {
