@@ -193,9 +193,19 @@
                 fill: #ffffff;
             }
 
-            .timestamp {
-                font-size: 10px;
+            .delta-time {
+                font-size: 9px;
                 fill: #6d6d6d;
+            }
+
+            .content-preview {
+                font-size: 10px;
+                color: #9d9d9d;
+                font-style: italic;
+                overflow: hidden;
+                text-overflow: ellipsis;
+                white-space: nowrap;
+                text-align: center;
             }
 
             .selected .message-arrow {
@@ -238,6 +248,16 @@
                     <input type="checkbox" id="show-responses" checked />
                     Responses
                 </label>
+                <label>
+                    Width
+                    <input
+                        type="range"
+                        id="swimlane-width"
+                        min="80"
+                        max="300"
+                        value="150"
+                    />
+                </label>
             </div>
         </header>
 
@@ -262,7 +282,7 @@
 
         <script>
             // Configuration
-            const SWIMLANE_WIDTH = 150;
+            let SWIMLANE_WIDTH = 150;
             const ROW_HEIGHT = 40;
             const HEADER_HEIGHT = 40;
             const PADDING = 20;
@@ -416,6 +436,39 @@
                     }
                 });
 
+                // Draw delta times on component timelines
+                for (let i = 0; i < filteredEvents.length - 1; i++) {
+                    const currEvent = filteredEvents[i];
+                    const nextEvent = filteredEvents[i + 1];
+                    const delta = (nextEvent.ts || 0) - (currEvent.ts || 0);
+
+                    if (delta > 0) {
+                        // Show time on the receiving component's timeline
+                        const component = currEvent.to || currEvent.from;
+                        const compIndex = components.indexOf(component);
+
+                        if (compIndex >= 0) {
+                            const x =
+                                PADDING +
+                                compIndex * SWIMLANE_WIDTH +
+                                SWIMLANE_WIDTH / 2;
+                            const y1 =
+                                HEADER_HEIGHT +
+                                i * ROW_HEIGHT +
+                                ROW_HEIGHT / 2 +
+                                8;
+                            const y2 =
+                                HEADER_HEIGHT +
+                                (i + 1) * ROW_HEIGHT +
+                                ROW_HEIGHT / 2 -
+                                8;
+                            const yMid = (y1 + y2) / 2;
+
+                            svg += `<text x="${x + 8}" y="${yMid + 3}" text-anchor="start" class="delta-time">${formatDelta(delta)}</text>`;
+                        }
+                    }
+                }
+
                 // Draw messages
                 filteredEvents.forEach((event, i) => {
                     const y = HEADER_HEIGHT + i * ROW_HEIGHT + ROW_HEIGHT / 2;
@@ -456,8 +509,17 @@
                         const label = event.method || event.type;
                         svg += `<text x="${labelX}" y="${y - 8}" text-anchor="middle" class="message-label" style="fill: ${pairColor}">${truncate(label, 20)}</text>`;
 
-                        // Timestamp
-                        svg += `<text x="${PADDING - 5}" y="${y + 4}" text-anchor="end" class="timestamp">${event.ts?.toFixed(3) || ""}</text>`;
+                        // Content preview for session/update notifications
+                        if (
+                            event.method === "session/update" &&
+                            event.params?.content
+                        ) {
+                            const contentWidth = Math.abs(toX - fromX);
+                            const contentX = Math.min(fromX, toX);
+                            svg += `<foreignObject x="${contentX}" y="${y + 4}" width="${contentWidth}" height="18">
+                                <div xmlns="http://www.w3.org/1999/xhtml" class="content-preview">${escapeHtml(event.params.content)}</div>
+                            </foreignObject>`;
+                        }
 
                         svg += `</g>`;
                     } else if (event.type === "response") {
@@ -485,9 +547,6 @@
                         // Arrow head
                         svg += `<polygon points="${toX},${y} ${arrowX},${y - 5} ${arrowX},${y + 5}" class="arrow-head" style="fill: ${color}"/>`;
 
-                        // Timestamp
-                        svg += `<text x="${PADDING - 5}" y="${y + 4}" text-anchor="end" class="timestamp">${event.ts?.toFixed(3) || ""}</text>`;
-
                         svg += `</g>`;
                     }
                 });
@@ -499,6 +558,20 @@
             function truncate(str, maxLen) {
                 if (str.length <= maxLen) return str;
                 return str.substring(0, maxLen - 1) + "\u2026";
+            }
+
+            function formatDelta(seconds) {
+                if (seconds < 0.001) return "<1ms";
+                if (seconds < 1) return Math.round(seconds * 1000) + "ms";
+                return seconds.toFixed(2) + "s";
+            }
+
+            function escapeHtml(str) {
+                return str
+                    .replace(/&/g, "&amp;")
+                    .replace(/</g, "&lt;")
+                    .replace(/>/g, "&gt;")
+                    .replace(/"/g, "&quot;");
             }
 
             function selectEvent(index) {
@@ -552,6 +625,12 @@
             document
                 .getElementById("show-responses")
                 .addEventListener("change", render);
+            document
+                .getElementById("swimlane-width")
+                .addEventListener("input", (e) => {
+                    SWIMLANE_WIDTH = parseInt(e.target.value, 10);
+                    render();
+                });
 
             // Resize handle for detail panel
             const resizeHandle = document.getElementById("resize-handle");
