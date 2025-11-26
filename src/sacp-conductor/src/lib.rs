@@ -93,6 +93,18 @@ use sacp_tokio::{AcpAgent, Stdio};
 use tracing::Instrument;
 use tracing_subscriber::{EnvFilter, layer::SubscriberExt, util::SubscriberInitExt};
 
+/// Wrapper to implement WriteEvent for TraceHandle.
+struct TraceHandleWriter(sacp_trace_viewer::TraceHandle);
+
+impl trace::WriteEvent for TraceHandleWriter {
+    fn write_event(&mut self, event: &trace::TraceEvent) -> std::io::Result<()> {
+        let value = serde_json::to_value(event)
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+        self.0.push(value);
+        Ok(())
+    }
+}
+
 /// Mode for the MCP bridge.
 #[derive(Debug, Clone)]
 pub enum McpBridgeMode {
@@ -131,9 +143,13 @@ pub struct ConductorArgs {
 
     /// Path to write trace events for sequence diagram visualization.
     /// Events are written as newline-delimited JSON (.jsons format).
-    /// Use sacp-trace-viewer to view the trace.
     #[arg(long)]
     pub trace: Option<PathBuf>,
+
+    /// Serve trace viewer in browser with live updates.
+    /// Can be used alone (in-memory) or with --trace (file-backed).
+    #[arg(long)]
+    pub serve: bool,
 
     #[command(subcommand)]
     pub command: ConductorCommand,
@@ -201,14 +217,35 @@ impl ConductorArgs {
             tracing::info!(pid = %pid, cwd = %cwd, level = %log_level, "Conductor starting with debug logging");
         };
 
-        // Create trace writer if --trace is specified
-        let trace_writer = if let Some(trace_path) = &self.trace {
-            Some(
-                trace::TraceWriter::from_path(trace_path)
-                    .map_err(|e| anyhow::anyhow!("Failed to create trace writer: {}", e))?,
-            )
-        } else {
-            None
+        // Set up tracing based on --trace and --serve flags
+        let (trace_writer, _viewer_server) = match (&self.trace, self.serve) {
+            // --trace only: write to file
+            (Some(trace_path), false) => {
+                let writer = trace::TraceWriter::from_path(trace_path)
+                    .map_err(|e| anyhow::anyhow!("Failed to create trace writer: {}", e))?;
+                (Some(writer), None)
+            }
+            // --serve only: in-memory with viewer
+            (None, true) => {
+                let (handle, server) = sacp_trace_viewer::serve_memory(
+                    sacp_trace_viewer::TraceViewerConfig::default(),
+                )
+                .await?;
+                let writer = trace::TraceWriter::new(TraceHandleWriter(handle));
+                (Some(writer), Some(tokio::spawn(server)))
+            }
+            // --trace --serve: write to file and serve it
+            (Some(trace_path), true) => {
+                let writer = trace::TraceWriter::from_path(trace_path)
+                    .map_err(|e| anyhow::anyhow!("Failed to create trace writer: {}", e))?;
+                let server = sacp_trace_viewer::serve_file(
+                    trace_path.clone(),
+                    sacp_trace_viewer::TraceViewerConfig::default(),
+                );
+                (Some(writer), Some(tokio::spawn(server)))
+            }
+            // Neither: no tracing
+            (None, false) => (None, None),
         };
 
         self.run(debug_logger.as_ref(), trace_writer)

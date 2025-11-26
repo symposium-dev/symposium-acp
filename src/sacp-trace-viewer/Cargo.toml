@@ -8,6 +8,10 @@ repository = "https://github.com/symposium-dev/symposium-acp"
 keywords = ["acp", "trace", "debugging", "visualization"]
 categories = ["development-tools::debugging"]
 
+[lib]
+name = "sacp_trace_viewer"
+path = "src/lib.rs"
+
 [[bin]]
 name = "sacp-trace-viewer"
 path = "src/main.rs"

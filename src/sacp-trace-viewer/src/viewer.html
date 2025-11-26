@@ -716,6 +716,52 @@
 
             // Initial load
             loadEvents();
+
+            // Live polling - check for updates every 500ms
+            let livePolling = true;
+            async function pollForUpdates() {
+                if (!livePolling) return;
+
+                try {
+                    const response = await fetch("/events");
+                    if (response.ok) {
+                        const newEvents = await response.json();
+                        // Only re-render if event count changed
+                        if (newEvents.length !== events.length) {
+                            events = newEvents;
+
+                            // Re-extract components
+                            const componentSet = new Set();
+                            for (const event of events) {
+                                if (event.from) componentSet.add(event.from);
+                                if (event.to) componentSet.add(event.to);
+                            }
+                            components = Array.from(componentSet);
+                            components.sort((a, b) => {
+                                if (a === "client") return -1;
+                                if (b === "client") return 1;
+                                if (a === "agent") return 1;
+                                if (b === "agent") return -1;
+                                return a.localeCompare(b);
+                            });
+
+                            render();
+
+                            // Auto-scroll to bottom to show new events
+                            const container =
+                                document.getElementById("diagram-container");
+                            container.scrollTop = container.scrollHeight;
+                        }
+                    }
+                } catch (e) {
+                    // Ignore polling errors
+                }
+
+                setTimeout(pollForUpdates, 500);
+            }
+
+            // Start polling after initial load
+            setTimeout(pollForUpdates, 500);
         </script>
     </body>
 </html>
