@@ -169,18 +169,24 @@ impl Conductor {
         }
     }
 
-    /// Enable trace logging to the given file path.
+    /// Enable trace logging to a custom destination.
     ///
-    /// Events will be appended as newline-delimited JSON (`.jsons` format).
     /// Use `sacp-trace-viewer` to view the trace as an interactive sequence diagram.
-    pub fn trace_to(mut self, path: impl AsRef<std::path::Path>) -> std::io::Result<Self> {
-        self.trace_writer = Some(crate::trace::TraceWriter::new(path)?);
+    pub fn trace_to(mut self, dest: impl crate::trace::WriteEvent) -> Self {
+        self.trace_writer = Some(crate::trace::TraceWriter::new(dest));
+        self
+    }
+
+    /// Enable trace logging to a file path.
+    ///
+    /// Events will be written as newline-delimited JSON (`.jsons` format).
+    /// Use `sacp-trace-viewer` to view the trace as an interactive sequence diagram.
+    pub fn trace_to_path(mut self, path: impl AsRef<std::path::Path>) -> std::io::Result<Self> {
+        self.trace_writer = Some(crate::trace::TraceWriter::from_path(path)?);
         Ok(self)
     }
 
     /// Enable trace logging with an existing TraceWriter.
-    ///
-    /// This allows sharing a TraceWriter across multiple components.
     pub fn with_trace_writer(mut self, writer: crate::trace::TraceWriter) -> Self {
         self.trace_writer = Some(writer);
         self
@@ -398,7 +404,7 @@ impl ConductorHandlerState {
 
         let (protocol, method, params) = Self::extract_trace_info(message);
 
-        let writer = self.trace_writer.as_ref().unwrap();
+        let writer = self.trace_writer.as_mut().unwrap();
         match message.id() {
             Some(id) => {
                 // Track pending request for response correlation
@@ -438,7 +444,7 @@ impl ConductorHandlerState {
 
         let (protocol, method, params) = Self::extract_trace_info(message);
 
-        let writer = self.trace_writer.as_ref().unwrap();
+        let writer = self.trace_writer.as_mut().unwrap();
         match message.id() {
             Some(id) => {
                 // Track pending request for response correlation
@@ -459,7 +465,7 @@ impl ConductorHandlerState {
         request_cx: &sacp::JrRequestCx<serde_json::Value>,
         result: &Result<serde_json::Value, sacp::Error>,
     ) {
-        let Some(writer) = &self.trace_writer else {
+        let Some(writer) = &mut self.trace_writer else {
             return;
         };
 

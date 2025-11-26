@@ -204,7 +204,7 @@ impl ConductorArgs {
         // Create trace writer if --trace is specified
         let trace_writer = if let Some(trace_path) = &self.trace {
             Some(
-                trace::TraceWriter::new(trace_path)
+                trace::TraceWriter::from_path(trace_path)
                     .map_err(|e| anyhow::anyhow!("Failed to create trace writer: {}", e))?,
             )
         } else {

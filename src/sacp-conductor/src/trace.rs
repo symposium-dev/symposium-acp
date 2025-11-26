@@ -3,10 +3,9 @@
 //! Events are serialized as newline-delimited JSON (`.jsons` files).
 //! The viewer loads these files to render interactive sequence diagrams.
 
-use std::fs::{File, OpenOptions};
+use std::fs::OpenOptions;
 use std::io::{BufWriter, Write};
 use std::path::Path;
-use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
 use serde::{Deserialize, Serialize};
@@ -146,53 +145,79 @@ pub enum TraceLevel {
     Error,
 }
 
-/// Writer for trace events, appending JSON lines to a file.
-///
-/// This is designed to be cloned and shared across async tasks.
-/// All writes are serialized through an internal mutex.
-#[derive(Clone)]
-pub struct TraceWriter {
-    inner: Arc<TraceWriterInner>,
+/// Trait for destinations that can receive trace events.
+pub trait WriteEvent: Send + 'static {
+    /// Write a trace event to the destination.
+    fn write_event(&mut self, event: &TraceEvent) -> std::io::Result<()>;
 }
 
-struct TraceWriterInner {
-    writer: Mutex<BufWriter<File>>,
+/// Writes trace events as newline-delimited JSON to a `Write` impl.
+pub struct EventWriter<W> {
+    writer: W,
+}
+
+impl<W: Write> EventWriter<W> {
+    pub fn new(writer: W) -> Self {
+        Self { writer }
+    }
+}
+
+impl<W: Write + Send + 'static> WriteEvent for EventWriter<W> {
+    fn write_event(&mut self, event: &TraceEvent) -> std::io::Result<()> {
+        serde_json::to_writer(&mut self.writer, event)
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+        self.writer.write_all(b"\n")?;
+        self.writer.flush()
+    }
+}
+
+/// Impl for UnboundedSender - sends events to a channel (useful for testing).
+impl WriteEvent for futures::channel::mpsc::UnboundedSender<TraceEvent> {
+    fn write_event(&mut self, event: &TraceEvent) -> std::io::Result<()> {
+        self.unbounded_send(event.clone())
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::BrokenPipe, e))
+    }
+}
+
+/// Writer for trace events.
+pub struct TraceWriter {
+    dest: Box<dyn WriteEvent>,
     start_time: Instant,
 }
 
 impl TraceWriter {
-    /// Create a new trace writer that appends to the given file path.
-    pub fn new(path: impl AsRef<Path>) -> std::io::Result<Self> {
+    /// Create a new trace writer from any WriteEvent destination.
+    pub fn new<D: WriteEvent>(dest: D) -> Self {
+        Self {
+            dest: Box::new(dest),
+            start_time: Instant::now(),
+        }
+    }
+
+    /// Create a new trace writer that writes to a file path.
+    pub fn from_path(path: impl AsRef<Path>) -> std::io::Result<Self> {
         let file = OpenOptions::new()
             .create(true)
-            .append(true)
+            .write(true)
+            .truncate(true)
             .open(path.as_ref())?;
-
-        Ok(Self {
-            inner: Arc::new(TraceWriterInner {
-                writer: Mutex::new(BufWriter::new(file)),
-                start_time: Instant::now(),
-            }),
-        })
+        Ok(Self::new(EventWriter::new(BufWriter::new(file))))
     }
 
     /// Get the elapsed time since trace start, in seconds.
     pub fn elapsed(&self) -> f64 {
-        self.inner.start_time.elapsed().as_secs_f64()
+        self.start_time.elapsed().as_secs_f64()
     }
 
-    /// Write a trace event to the file.
-    pub fn write_event(&self, event: &TraceEvent) {
-        let mut writer = self.inner.writer.lock().unwrap();
-        // Ignore write errors - tracing should not break the conductor
-        let _ = serde_json::to_writer(&mut *writer, event);
-        let _ = writer.write_all(b"\n");
-        let _ = writer.flush();
+    /// Write a trace event.
+    pub fn write_event(&mut self, event: &TraceEvent) {
+        // Ignore errors - tracing should not break the conductor
+        let _ = self.dest.write_event(event);
     }
 
     /// Write a request event.
     pub fn request(
-        &self,
+        &mut self,
         protocol: Protocol,
         from: impl Into<String>,
         to: impl Into<String>,
@@ -215,7 +240,7 @@ impl TraceWriter {
 
     /// Write a response event.
     pub fn response(
-        &self,
+        &mut self,
         from: impl Into<String>,
         to: impl Into<String>,
         id: serde_json::Value,
@@ -234,7 +259,7 @@ impl TraceWriter {
 
     /// Write a notification event.
     pub fn notification(
-        &self,
+        &mut self,
         protocol: Protocol,
         from: impl Into<String>,
         to: impl Into<String>,
@@ -255,7 +280,7 @@ impl TraceWriter {
 
     /// Write a trace log event.
     pub fn trace_log(
-        &self,
+        &mut self,
         component: impl Into<String>,
         level: TraceLevel,
         message: impl Into<String>,
