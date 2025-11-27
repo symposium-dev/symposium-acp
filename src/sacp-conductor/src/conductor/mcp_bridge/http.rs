@@ -139,16 +139,26 @@ struct BridgeState {
 #[derive(Debug)]
 enum HttpMessage {
     /// A JSON-RPC request (has an id, expects a response via the channel)
-    Request(
-        sacp::jsonrpcmsg::Request,
-        mpsc::UnboundedSender<sacp::jsonrpcmsg::Message>,
-    ),
+    Request {
+        http_request_id: uuid::Uuid,
+        request: sacp::jsonrpcmsg::Request,
+        response_tx: mpsc::UnboundedSender<sacp::jsonrpcmsg::Message>,
+    },
     /// A JSON-RPC notification (no id, no response expected)
-    Notification(sacp::jsonrpcmsg::Request),
+    Notification {
+        http_request_id: uuid::Uuid,
+        request: sacp::jsonrpcmsg::Request,
+    },
     /// A JSON-RPC response from the client
-    Response(sacp::jsonrpcmsg::Response),
+    Response {
+        http_request_id: uuid::Uuid,
+        response: sacp::jsonrpcmsg::Response,
+    },
     /// A GET request to open an SSE stream for server-initiated messages
-    Get(mpsc::UnboundedSender<sacp::jsonrpcmsg::Message>),
+    Get {
+        http_request_id: uuid::Uuid,
+        response_tx: mpsc::UnboundedSender<sacp::jsonrpcmsg::Message>,
+    },
 }
 
 /// Clone of `sacp::jsonrpcmsg::Id` since for unfathomable reasons that does not impl Hash
@@ -248,8 +258,12 @@ impl RunningServer {
         channel_tx: &mut mpsc::UnboundedSender<Result<sacp::jsonrpcmsg::Message, sacp::Error>>,
     ) -> Result<(), sacp::Error> {
         match message {
-            HttpMessage::Request(request, outgoing_tx) => {
-                tracing::debug!(?request, "handling request");
+            HttpMessage::Request {
+                http_request_id,
+                request,
+                response_tx,
+            } => {
+                tracing::debug!(%http_request_id, ?request, "handling request");
                 let request_id = request.id.clone().map(JsonRpcId::from);
 
                 // Send to the JSON-RPC server
@@ -258,36 +272,46 @@ impl RunningServer {
                     .map_err(sacp::util::internal_error)?;
 
                 // Register to receive the response
-                let session = RegisteredSession::new(outgoing_tx);
+                let session = RegisteredSession::new(response_tx);
                 if let Some(id) = request_id {
-                    tracing::debug!(session_id = %session.id, ?id, "registering waiting session");
+                    tracing::debug!(%http_request_id, session_id = %session.id, ?id, "registering waiting session");
                     self.waiting_sessions.insert(id, session);
                 } else {
                     // Request without id - treat like a general session
-                    tracing::debug!(session_id = %session.id, "registering general session (request without id)");
+                    tracing::debug!(%http_request_id, session_id = %session.id, "registering general session (request without id)");
                     self.general_sessions.push(session);
                 }
             }
 
-            HttpMessage::Notification(notification) => {
-                tracing::debug!(?notification, "handling notification");
+            HttpMessage::Notification {
+                http_request_id,
+                request,
+            } => {
+                tracing::debug!(%http_request_id, ?request, "handling notification");
                 // Just forward to the server, no response tracking needed
                 channel_tx
-                    .unbounded_send(Ok(Message::Request(notification)))
+                    .unbounded_send(Ok(Message::Request(request)))
                     .map_err(sacp::util::internal_error)?;
             }
 
-            HttpMessage::Response(response) => {
-                tracing::debug!(?response, "handling response");
+            HttpMessage::Response {
+                http_request_id,
+                response,
+            } => {
+                tracing::debug!(%http_request_id, ?response, "handling response");
                 // Forward to the server
                 channel_tx
                     .unbounded_send(Ok(Message::Response(response)))
                     .map_err(sacp::util::internal_error)?;
             }
 
-            HttpMessage::Get(outgoing_tx) => {
-                let session = RegisteredSession::new(outgoing_tx);
+            HttpMessage::Get {
+                http_request_id,
+                response_tx,
+            } => {
+                let session = RegisteredSession::new(response_tx);
                 tracing::debug!(
+                    %http_request_id,
                     session_id = %session.id,
                     queued_messages = self.message_deque.len(),
                     "handling GET (opening SSE stream)"
@@ -444,44 +468,61 @@ async fn handle_post(
     State(state): State<Arc<BridgeState>>,
     body: String,
 ) -> Result<Response, HttpError> {
+    let http_request_id = uuid::Uuid::new_v4();
+
     // Parse incoming JSON-RPC message
     let message: sacp::jsonrpcmsg::Message =
         serde_json::from_str(&body).map_err(sacp::util::parse_error)?;
 
     match message {
         Message::Request(request) if request.id.is_some() => {
+            tracing::debug!(%http_request_id, method = %request.method, "POST request received");
             // Request with id - return SSE stream for response
             let (tx, mut rx) = mpsc::unbounded();
             state
                 .registration_tx
-                .unbounded_send(HttpMessage::Request(request, tx))
+                .unbounded_send(HttpMessage::Request {
+                    http_request_id,
+                    request,
+                    response_tx: tx,
+                })
                 .map_err(sacp::util::internal_error)?;
 
             let stream = async_stream::stream! {
                 while let Some(message) = rx.next().await {
+                    tracing::debug!(%http_request_id, "sending SSE event");
                     match axum::response::sse::Event::default().json_data(message) {
                         Ok(v) => yield Ok(v),
                         Err(e) => yield Err(HttpError::from(e)),
                     }
                 }
+                tracing::debug!(%http_request_id, "SSE stream completed");
             };
             Ok(Sse::new(stream).into_response())
         }
 
         Message::Request(request) => {
+            tracing::debug!(%http_request_id, method = %request.method, "POST notification received");
             // Request without id is a notification
             state
                 .registration_tx
-                .unbounded_send(HttpMessage::Notification(request))
+                .unbounded_send(HttpMessage::Notification {
+                    http_request_id,
+                    request,
+                })
                 .map_err(sacp::util::internal_error)?;
             Ok(StatusCode::ACCEPTED.into_response())
         }
 
         Message::Response(response) => {
+            tracing::debug!(%http_request_id, "POST response received");
             // Response from client (rare, but possible in MCP)
             state
                 .registration_tx
-                .unbounded_send(HttpMessage::Response(response))
+                .unbounded_send(HttpMessage::Response {
+                    http_request_id,
+                    response,
+                })
                 .map_err(sacp::util::internal_error)?;
             Ok(StatusCode::ACCEPTED.into_response())
         }
@@ -493,19 +534,27 @@ async fn handle_post(
 async fn handle_get(
     State(state): State<Arc<BridgeState>>,
 ) -> Result<Sse<impl Stream<Item = Result<axum::response::sse::Event, HttpError>>>, HttpError> {
+    let http_request_id = uuid::Uuid::new_v4();
+    tracing::debug!(%http_request_id, "GET request received");
+
     let (tx, mut rx) = mpsc::unbounded();
     state
         .registration_tx
-        .unbounded_send(HttpMessage::Get(tx))
+        .unbounded_send(HttpMessage::Get {
+            http_request_id,
+            response_tx: tx,
+        })
         .map_err(sacp::util::internal_error)?;
 
     let stream = async_stream::stream! {
         while let Some(message) = rx.next().await {
+            tracing::debug!(%http_request_id, "sending SSE event");
             match axum::response::sse::Event::default().json_data(message) {
                 Ok(v) => yield Ok(v),
                 Err(e) => yield Err(HttpError::from(e)),
             }
         }
+        tracing::debug!(%http_request_id, "SSE stream completed");
     };
 
     Ok(Sse::new(stream))
