@@ -4,6 +4,7 @@ use chrono::Local;
 use std::io::Write;
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::time::Instant;
 use tokio::fs::OpenOptions;
 use tokio::io::AsyncWriteExt;
 use tokio::sync::Mutex;
@@ -11,6 +12,7 @@ use tokio::sync::Mutex;
 /// A debug logger that writes lines to a timestamped log file
 pub struct DebugLogger {
     writer: Arc<Mutex<tokio::io::BufWriter<tokio::fs::File>>>,
+    start_time: Instant,
 }
 
 impl DebugLogger {
@@ -53,7 +55,13 @@ impl DebugLogger {
 
         Ok(Self {
             writer: Arc::new(Mutex::new(writer)),
+            start_time: Instant::now(),
         })
+    }
+
+    /// Get the elapsed time since the logger started, in milliseconds
+    fn elapsed_ms(&self) -> u128 {
+        self.start_time.elapsed().as_millis()
     }
 
     /// Create a callback for a specific component
@@ -62,10 +70,12 @@ impl DebugLogger {
         component_label: String,
     ) -> impl Fn(&str, sacp_tokio::LineDirection) + Send + Sync + 'static {
         let writer = self.writer.clone();
+        let start_time = self.start_time;
         move |line: &str, direction: sacp_tokio::LineDirection| {
             let writer = writer.clone();
             let component_label = component_label.clone();
             let line = line.to_string();
+            let elapsed_ms = start_time.elapsed().as_millis();
             tokio::spawn(async move {
                 let arrow = match direction {
                     sacp_tokio::LineDirection::Stdin => "→",
@@ -81,7 +91,10 @@ impl DebugLogger {
                     line
                 };
 
-                let log_line = format!("{} {} {}\n", component_label, arrow, cleaned_line);
+                let log_line = format!(
+                    "{} {} +{}ms {}\n",
+                    component_label, arrow, elapsed_ms, cleaned_line
+                );
                 let mut writer = writer.lock().await;
                 let _ = writer.write_all(log_line.as_bytes()).await;
                 let _ = writer.flush().await;
@@ -94,12 +107,13 @@ impl DebugLogger {
     pub fn write_tracing_log(&self, line: &str) {
         let writer = self.writer.clone();
         let line = line.to_string();
+        let elapsed_ms = self.elapsed_ms();
         tokio::spawn(async move {
             // Strip ANSI escape codes to keep logs clean
             let bytes = strip_ansi_escapes::strip(&line);
             let cleaned_line = String::from_utf8_lossy(&bytes);
 
-            let log_line = format!("C ! {}\n", cleaned_line.trim_end());
+            let log_line = format!("C ! +{}ms {}\n", elapsed_ms, cleaned_line.trim_end());
             let mut writer = writer.lock().await;
             let _ = writer.write_all(log_line.as_bytes()).await;
             let _ = writer.flush().await;
@@ -119,6 +133,7 @@ impl Clone for DebugLogger {
     fn clone(&self) -> Self {
         Self {
             writer: self.writer.clone(),
+            start_time: self.start_time,
         }
     }
 }
