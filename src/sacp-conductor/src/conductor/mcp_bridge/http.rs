@@ -224,6 +224,11 @@ impl RunningServer {
                             None,
                         ))
                     });
+                    tracing::debug!(
+                        queue_len = self.message_deque.len() + 1,
+                        ?message,
+                        "enqueuing outgoing message"
+                    );
                     self.message_deque.push_back(message);
                 }
             }
@@ -253,11 +258,13 @@ impl RunningServer {
                     .map_err(sacp::util::internal_error)?;
 
                 // Register to receive the response
-                let session = RegisteredSession { outgoing_tx };
+                let session = RegisteredSession::new(outgoing_tx);
                 if let Some(id) = request_id {
+                    tracing::debug!(session_id = %session.id, ?id, "registering waiting session");
                     self.waiting_sessions.insert(id, session);
                 } else {
                     // Request without id - treat like a general session
+                    tracing::debug!(session_id = %session.id, "registering general session (request without id)");
                     self.general_sessions.push(session);
                 }
             }
@@ -279,10 +286,14 @@ impl RunningServer {
             }
 
             HttpMessage::Get(outgoing_tx) => {
-                tracing::debug!("handling GET (opening SSE stream)");
+                let session = RegisteredSession::new(outgoing_tx);
+                tracing::debug!(
+                    session_id = %session.id,
+                    queued_messages = self.message_deque.len(),
+                    "handling GET (opening SSE stream)"
+                );
                 // Register as a general session to receive server-initiated messages
-                self.general_sessions
-                    .push(RegisteredSession { outgoing_tx });
+                self.general_sessions.push(session);
             }
         }
 
@@ -295,14 +306,29 @@ impl RunningServer {
     /// Remove messages from the queue and send them.
     /// Stop if we cannot find places to send them.
     async fn drain_jsonrpc_messages(&mut self) -> Result<(), sacp::Error> {
+        if !self.message_deque.is_empty() {
+            tracing::debug!(
+                queue_len = self.message_deque.len(),
+                general_sessions = self.general_sessions.len(),
+                waiting_sessions = self.waiting_sessions.len(),
+                "draining message queue"
+            );
+        }
+
         while let Some(message) = self.message_deque.pop_front() {
             match self.try_dispatch_jsonrpc_message(message).await? {
                 None => {
-                    // Message successfully dispatched. See if there are more messages to send.
+                    tracing::debug!(
+                        remaining = self.message_deque.len(),
+                        "message dispatched successfully"
+                    );
                 }
 
                 Some(message) => {
-                    // Failed to send message, push it back to the deque and stop.
+                    tracing::debug!(
+                        remaining = self.message_deque.len() + 1,
+                        "no available session, re-enqueuing message"
+                    );
                     self.message_deque.push_front(message);
                     break;
                 }
@@ -329,18 +355,24 @@ impl RunningServer {
             Message::Request(_) => None,
         };
 
+        tracing::debug!(?message_id, "attempting to dispatch JSON-RPC message");
+
         // If there is a specific id, try to send the message to that sender.
         // This also removes them from the list of waiting sessions.
-        if let Some(message_id) = message_id {
-            if let Some(RegisteredSession { outgoing_tx }) =
-                self.waiting_sessions.remove(&message_id)
-            {
-                match outgoing_tx.unbounded_send(message) {
+        if let Some(ref message_id) = message_id {
+            if let Some(session) = self.waiting_sessions.remove(message_id) {
+                tracing::debug!(session_id = %session.id, "found waiting session, attempting send");
+
+                match session.outgoing_tx.unbounded_send(message) {
                     // Successfully sent the message, return
-                    Ok(()) => return Ok(None),
+                    Ok(()) => {
+                        tracing::debug!(session_id = %session.id, "sent to waiting session");
+                        return Ok(None);
+                    }
 
                     // If the sender died, just recover the message and send it to anyone.
                     Err(m) => {
+                        tracing::debug!(session_id = %session.id, "waiting session disconnected");
                         // If that sender is dead, remove them from the list
                         // and recover the message.
                         assert!(m.is_disconnected());
@@ -352,19 +384,25 @@ impl RunningServer {
 
         // Try to find *somewhere* to send the message
         self.purge_closed_sessions();
+        tracing::debug!(
+            general_sessions = self.general_sessions.len(),
+            waiting_sessions = self.waiting_sessions.len(),
+            "trying to find any active session"
+        );
         let all_sessions = self
             .general_sessions
             .iter_mut()
             .chain(self.waiting_sessions.values_mut());
         for session in all_sessions {
+            tracing::trace!(session_id = %session.id, "trying session");
             match session.outgoing_tx.unbounded_send(message) {
                 Ok(()) => {
-                    // Successfully sent the message, restore the general session and return.
+                    tracing::debug!(session_id = %session.id, "sent to session");
                     return Ok(None);
                 }
 
                 Err(m) => {
-                    // If that session is dead, try the next one.
+                    tracing::debug!(session_id = %session.id, "session disconnected, trying next");
                     assert!(m.is_disconnected());
                     message = m.into_inner();
                 }
@@ -386,7 +424,17 @@ impl RunningServer {
 }
 
 struct RegisteredSession {
+    id: uuid::Uuid,
     outgoing_tx: mpsc::UnboundedSender<sacp::jsonrpcmsg::Message>,
+}
+
+impl RegisteredSession {
+    fn new(outgoing_tx: mpsc::UnboundedSender<sacp::jsonrpcmsg::Message>) -> Self {
+        Self {
+            id: uuid::Uuid::new_v4(),
+            outgoing_tx,
+        }
+    }
 }
 
 /// Accept a POST request carrying a JSON-RPC message from an MCP client.
