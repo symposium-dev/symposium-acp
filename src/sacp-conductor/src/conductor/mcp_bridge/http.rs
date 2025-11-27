@@ -10,7 +10,7 @@ use futures_concurrency::future::FutureExt as _;
 use futures_concurrency::stream::StreamExt as _;
 use fxhash::FxHashMap;
 use sacp::{BoxFuture, Channel, Component, jsonrpcmsg::Message};
-use std::{pin::pin, sync::Arc};
+use std::{collections::VecDeque, pin::pin, sync::Arc};
 use tokio::net::TcpListener;
 
 use crate::conductor::{
@@ -175,6 +175,7 @@ impl From<sacp::jsonrpcmsg::Id> for JsonRpcId {
 struct RunningServer {
     waiting_sessions: FxHashMap<JsonRpcId, RegisteredSession>,
     general_sessions: Vec<RegisteredSession>,
+    message_deque: VecDeque<sacp::jsonrpcmsg::Message>,
 }
 
 impl RunningServer {
@@ -182,6 +183,7 @@ impl RunningServer {
         RunningServer {
             waiting_sessions: Default::default(),
             general_sessions: Default::default(),
+            message_deque: VecDeque::with_capacity(32),
         }
     }
 
@@ -208,6 +210,7 @@ impl RunningServer {
 
         while let Some(message) = merged_stream.next().await {
             tracing::trace!(?message, "received message");
+
             match message {
                 MultiplexMessage::FromHttpToChannel(http_message) => {
                     self.handle_http_message(http_message, &mut channel.tx)
@@ -215,9 +218,17 @@ impl RunningServer {
                 }
 
                 MultiplexMessage::FromChannelToHttp(message) => {
-                    self.dispatch_jsonrpc_message(message).await?
+                    let message = message.unwrap_or_else(|err| {
+                        sacp::jsonrpcmsg::Message::Response(sacp::jsonrpcmsg::Response::error(
+                            sacp::util::into_jsonrpc_error(err),
+                            None,
+                        ))
+                    });
+                    self.message_deque.push_back(message);
                 }
             }
+
+            self.drain_jsonrpc_messages().await?;
         }
 
         tracing::trace!("http connection terminating");
@@ -281,21 +292,34 @@ impl RunningServer {
         Ok(())
     }
 
-    /// Invoked when there is an outgoing JSON-RPC message to send.
-    /// Finds a suitable place to send it or drops it on the floor.
-    ///
-    /// FIXME: We could buffer, replay, etc.
-    async fn dispatch_jsonrpc_message(
-        &mut self,
-        message: Result<sacp::jsonrpcmsg::Message, sacp::Error>,
-    ) -> Result<(), sacp::Error> {
-        let mut message = message.unwrap_or_else(|err| {
-            sacp::jsonrpcmsg::Message::Response(sacp::jsonrpcmsg::Response::error(
-                sacp::util::into_jsonrpc_error(err),
-                None,
-            ))
-        });
+    /// Remove messages from the queue and send them.
+    /// Stop if we cannot find places to send them.
+    async fn drain_jsonrpc_messages(&mut self) -> Result<(), sacp::Error> {
+        while let Some(message) = self.message_deque.pop_front() {
+            match self.try_dispatch_jsonrpc_message(message).await? {
+                None => {
+                    // Message successfully dispatched. See if there are more messages to send.
+                }
 
+                Some(message) => {
+                    // Failed to send message, push it back to the deque and stop.
+                    self.message_deque.push_front(message);
+                    break;
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Invoked when there is an outgoing JSON-RPC message to send.
+    /// Tries to find a suitable place to send it.
+    /// If it succeeds, returns `Ok(None)`.
+    /// If there is no place to send it, returns `Ok(Some(message))`.
+    async fn try_dispatch_jsonrpc_message(
+        &mut self,
+        mut message: sacp::jsonrpcmsg::Message,
+    ) -> Result<Option<sacp::jsonrpcmsg::Message>, sacp::Error> {
         // Extract the id of the message we are replying to, if any
         let message_id = match &message {
             Message::Response(response) => match &response.id {
@@ -313,7 +337,7 @@ impl RunningServer {
             {
                 match outgoing_tx.unbounded_send(message) {
                     // Successfully sent the message, return
-                    Ok(()) => return Ok(()),
+                    Ok(()) => return Ok(None),
 
                     // If the sender died, just recover the message and send it to anyone.
                     Err(m) => {
@@ -336,7 +360,7 @@ impl RunningServer {
             match session.outgoing_tx.unbounded_send(message) {
                 Ok(()) => {
                     // Successfully sent the message, restore the general session and return.
-                    return Ok(());
+                    return Ok(None);
                 }
 
                 Err(m) => {
@@ -347,8 +371,8 @@ impl RunningServer {
             }
         }
 
-        // If we don't find anywhere to send the message, just discard it. :shrug:
-        Ok(())
+        // If we don't find anywhere to send the message, return it.
+        Ok(Some(message))
     }
 
     /// Purge sessions from the bridge state where the receiver is closed.
