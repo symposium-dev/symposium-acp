@@ -48,3 +48,4 @@ schemars.workspace = true
 sacp-test = { path = "../sacp-test" }
 sacp-tokio = { path = "../sacp-tokio" }
 yopo = { path = "../yopo" }
+regex = "1.12.2"

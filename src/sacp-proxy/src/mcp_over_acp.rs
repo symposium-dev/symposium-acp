@@ -13,9 +13,6 @@ pub struct McpConnectRequest {
     /// The ACP URL to connect to (e.g., "acp:uuid")
     pub acp_url: String,
 
-    /// The session ID this MCP connection belongs to
-    pub session_id: sacp::schema::SessionId,
-
     /// Optional metadata
     #[serde(skip_serializing_if = "Option::is_none")]
     pub meta: Option<serde_json::Value>,

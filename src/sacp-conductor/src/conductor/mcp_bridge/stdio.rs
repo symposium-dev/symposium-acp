@@ -15,7 +15,6 @@ use super::{McpBridgeConnection, McpBridgeConnectionActor};
 pub async fn run_tcp_listener(
     tcp_listener: TcpListener,
     acp_url: String,
-    session_id: sacp::schema::SessionId,
     mut conductor_tx: mpsc::Sender<ConductorMessage>,
 ) -> Result<(), sacp::Error> {
     // Accept connections
@@ -30,7 +29,6 @@ pub async fn run_tcp_listener(
         conductor_tx
             .send(ConductorMessage::McpConnectionReceived {
                 acp_url: acp_url.clone(),
-                session_id: session_id.clone(),
                 actor: make_stdio_actor(stream, conductor_tx.clone(), to_mcp_client_rx),
                 connection: McpBridgeConnection::new(to_mcp_client_tx),
             })

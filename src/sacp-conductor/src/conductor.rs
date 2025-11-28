@@ -551,7 +551,6 @@ impl ConductorHandlerState {
             // the connection id and the (as yet unspawned) actor.
             ConductorMessage::McpConnectionReceived {
                 acp_url,
-                session_id,
                 connection,
                 actor,
             } => {
@@ -565,7 +564,6 @@ impl ConductorHandlerState {
                     self.components.len() - 1,
                     McpConnectRequest {
                         acp_url,
-                        session_id,
                         meta: None,
                     },
                 )
@@ -1136,21 +1134,16 @@ impl ConductorHandlerState {
     ) -> Result<(), sacp::Error> {
         // Before forwarding the ACP request to the agent, replace ACP servers with stdio-based servers.
         // Collect oneshot senders for delivering session_id to listeners.
-        let mut session_id_senders = Vec::new();
         if self.is_agent_component(target_component_index) {
             for mcp_server in &mut request.mcp_servers {
-                if let Some(session_id_tx) = self
-                    .bridge_listeners
+                self.bridge_listeners
                     .transform_mcp_server(
                         &request_cx.connection_cx(),
                         mcp_server,
                         conductor_tx,
                         &self.mcp_bridge_mode,
                     )
-                    .await?
-                {
-                    session_id_senders.push(session_id_tx);
-                }
+                    .await?;
             }
         }
 
@@ -1162,10 +1155,6 @@ impl ConductorHandlerState {
         self.components[target_component_index]
             .send_request(request)
             .await_when_ok_response_received(request_cx, async move |response, request_cx| {
-                // Send session_id to all bridge listeners before forwarding response
-                for session_id_tx in session_id_senders {
-                    let _ = session_id_tx.send(response.session_id.clone());
-                }
                 request_cx.respond_via(conductor_tx, response).await
             })
     }
@@ -1315,9 +1304,6 @@ pub enum ConductorMessage {
     McpConnectionReceived {
         /// The acp:$UUID URL identifying this bridge
         acp_url: String,
-
-        /// The session ID this MCP connection belongs to
-        session_id: sacp::schema::SessionId,
 
         /// The actor that should be spawned once the connection-id is available.
         actor: McpBridgeConnectionActor,

@@ -22,7 +22,6 @@ use crate::conductor::{
 pub async fn run_http_listener(
     tcp_listener: TcpListener,
     acp_url: String,
-    session_id: sacp::schema::SessionId,
     mut conductor_tx: mpsc::Sender<ConductorMessage>,
 ) -> Result<(), sacp::Error> {
     let (to_mcp_client_tx, to_mcp_client_rx) = mpsc::channel(128);
@@ -34,7 +33,6 @@ pub async fn run_http_listener(
     conductor_tx
         .send(ConductorMessage::McpConnectionReceived {
             acp_url: acp_url,
-            session_id: session_id.clone(),
             actor: McpBridgeConnectionActor::new(
                 HttpMcpBridge::new(tcp_listener),
                 conductor_tx.clone(),

@@ -29,7 +29,7 @@ struct EmptyInput {}
 /// Output containing session information
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
 struct SessionInfoOutput {
-    session_id: String,
+    acp_url: String,
 }
 
 fn main() {
@@ -41,11 +41,7 @@ fn main() {
             "Echoes back the input message with session information",
             async |input: EchoInput, context| {
                 Ok(EchoOutput {
-                    result: format!(
-                        "Session {}: Echo: {}",
-                        context.session_id().0,
-                        input.message
-                    ),
+                    result: format!("ACP {}: Echo: {}", context.acp_url(), input.message),
                 })
             },
             |f, args, cx| Box::pin(f(args, cx)),
@@ -55,7 +51,7 @@ fn main() {
             "Returns information about the current session",
             async |_input: EmptyInput, context| {
                 Ok(SessionInfoOutput {
-                    session_id: context.session_id().0.to_string(),
+                    acp_url: context.acp_url(),
                 })
             },
             |f, args, cx| Box::pin(f(args, cx)),
