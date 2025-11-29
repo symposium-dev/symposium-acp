@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [4.0.0](https://github.com/symposium-dev/symposium-acp/compare/sacp-conductor-v3.0.0...sacp-conductor-v4.0.0) - 2025-11-29
+
+### Added
+
+- *(sacp)* make trace functions generic over MessageAndCx<R, N>
+- *(conductor)* add relative timestamps to debug log output
+- *(conductor)* add HTTP request UUIDs for tracing
+- *(mcp-bridge)* add detailed logging for HTTP message buffering
+- *(trace-viewer)* add live trace viewing with --serve flag
+- *(conductor)* add trace snapshot test and fix initialize response tracing
+- *(conductor)* add trace event system with WriteEvent trait
+- *(conductor)* add trace event logging for sequence diagram visualization
+
+### Fixed
+
+- *(conductor)* restore test_session_id_in_mcp_tools to use yopo and acp_url
+- *(conductor)* relax session_id test assertion for early MCP calls
+- *(conductor)* relax session_id test assertion for early MCP calls
+- buffer outgoing messages until HTTP connection is established
+
+### Other
+
+- *(conductor)* improve MCP-over-ACP message tracing
+
 ## [3.0.0](https://github.com/symposium-dev/symposium-acp/compare/sacp-conductor-v2.1.1...sacp-conductor-v3.0.0) - 2025-11-25
 
 ### Added
