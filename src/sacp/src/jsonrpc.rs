@@ -1606,14 +1606,12 @@ impl<R: JrRequest, N: JrMessage> MessageAndCx<R, N> {
             )),
         }
     }
-}
 
-impl MessageAndCx {
-    /// Returns the method of the message (only available for UntypedMessage).
-    pub fn method(&self) -> &str {
+    /// Convert the message to an untyped message.
+    pub fn to_untyped_message(&self) -> Result<UntypedMessage, crate::Error> {
         match self {
-            MessageAndCx::Request(msg, _) => &msg.method,
-            MessageAndCx::Notification(msg, _) => &msg.method,
+            MessageAndCx::Request(request, _) => request.to_untyped_message(),
+            MessageAndCx::Notification(notification, _) => notification.to_untyped_message(),
         }
     }
 
@@ -1622,6 +1620,16 @@ impl MessageAndCx {
         match self {
             MessageAndCx::Request(_, cx) => Some(cx.id()),
             MessageAndCx::Notification(_, _) => None,
+        }
+    }
+}
+
+impl MessageAndCx {
+    /// Returns the method of the message (only available for UntypedMessage).
+    pub fn method(&self) -> &str {
+        match self {
+            MessageAndCx::Request(msg, _) => &msg.method,
+            MessageAndCx::Notification(msg, _) => &msg.method,
         }
     }
 

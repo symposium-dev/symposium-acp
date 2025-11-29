@@ -351,12 +351,18 @@ impl ConductorHandlerState {
     ///
     /// For MCP-over-ACP messages, this extracts the inner MCP message.
     /// For regular ACP messages, returns the message as-is.
-    fn extract_trace_info(
-        message: &sacp::MessageAndCx,
+    fn extract_trace_info<R: sacp::JrRequest, N: sacp::JrNotification>(
+        message: &sacp::MessageAndCx<R, N>,
     ) -> (crate::trace::Protocol, String, serde_json::Value) {
         use sacp::JrMessage;
 
-        let untyped = message.message();
+        let Ok(untyped) = message.to_untyped_message() else {
+            return (
+                crate::trace::Protocol::Acp,
+                "unknown".to_string(),
+                serde_json::Value::Null,
+            );
+        };
 
         // Try to parse as MCP-over-ACP request
         if let Some(Ok(mcp_req)) =
@@ -390,7 +396,11 @@ impl ConductorHandlerState {
     }
 
     /// Trace a client-to-agent message (request or notification).
-    fn trace_client_to_agent(&mut self, target_index: usize, message: &sacp::MessageAndCx) {
+    fn trace_client_to_agent<R: sacp::JrRequest, N: sacp::JrNotification>(
+        &mut self,
+        target_index: usize,
+        message: &sacp::MessageAndCx<R, N>,
+    ) {
         if self.trace_writer.is_none() {
             return;
         }
@@ -420,10 +430,10 @@ impl ConductorHandlerState {
     }
 
     /// Trace an agent-to-client message (request or notification).
-    fn trace_agent_to_client(
+    fn trace_agent_to_client<R: sacp::JrRequest, N: sacp::JrNotification>(
         &mut self,
         source_index: SourceComponentIndex,
-        message: &sacp::MessageAndCx,
+        message: &sacp::MessageAndCx<R, N>,
     ) {
         if self.trace_writer.is_none() {
             return;
