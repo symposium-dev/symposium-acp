@@ -13,7 +13,7 @@ use crate::util::json_cast;
 // ============================================================================
 
 impl JrMessage for InitializeRequest {
-    fn into_untyped_message(self) -> Result<crate::UntypedMessage, crate::Error> {
+    fn to_untyped_message(&self) -> Result<crate::UntypedMessage, crate::Error> {
         let method = self.method().to_string();
         crate::UntypedMessage::new(&method, self)
     }
@@ -58,7 +58,7 @@ impl JrResponsePayload for InitializeResponse {
 // ============================================================================
 
 impl JrMessage for AuthenticateRequest {
-    fn into_untyped_message(self) -> Result<crate::UntypedMessage, crate::Error> {
+    fn to_untyped_message(&self) -> Result<crate::UntypedMessage, crate::Error> {
         let method = self.method().to_string();
         crate::UntypedMessage::new(&method, self)
     }
@@ -102,7 +102,7 @@ impl JrResponsePayload for AuthenticateResponse {
 // ============================================================================
 
 impl JrMessage for LoadSessionRequest {
-    fn into_untyped_message(self) -> Result<crate::UntypedMessage, crate::Error> {
+    fn to_untyped_message(&self) -> Result<crate::UntypedMessage, crate::Error> {
         let method = self.method().to_string();
         crate::UntypedMessage::new(&method, self)
     }
@@ -146,7 +146,7 @@ impl JrResponsePayload for LoadSessionResponse {
 // ============================================================================
 
 impl JrMessage for NewSessionRequest {
-    fn into_untyped_message(self) -> Result<crate::UntypedMessage, crate::Error> {
+    fn to_untyped_message(&self) -> Result<crate::UntypedMessage, crate::Error> {
         let method = self.method().to_string();
         crate::UntypedMessage::new(&method, self)
     }
@@ -190,7 +190,7 @@ impl JrResponsePayload for NewSessionResponse {
 // ============================================================================
 
 impl JrMessage for PromptRequest {
-    fn into_untyped_message(self) -> Result<crate::UntypedMessage, crate::Error> {
+    fn to_untyped_message(&self) -> Result<crate::UntypedMessage, crate::Error> {
         let method = self.method().to_string();
         crate::UntypedMessage::new(&method, self)
     }
@@ -234,7 +234,7 @@ impl JrResponsePayload for PromptResponse {
 // ============================================================================
 
 impl JrMessage for SetSessionModeRequest {
-    fn into_untyped_message(self) -> Result<crate::UntypedMessage, crate::Error> {
+    fn to_untyped_message(&self) -> Result<crate::UntypedMessage, crate::Error> {
         let method = self.method().to_string();
         crate::UntypedMessage::new(&method, self)
     }

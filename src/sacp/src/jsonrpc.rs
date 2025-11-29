@@ -111,7 +111,7 @@ pub trait JrMessageHandler {
 /// # async fn example() -> Result<(), sacp::Error> {
 /// # let connection = mock_connection();
 /// // Define an enum for multiple request types
-/// #[derive(Debug)]
+/// #[derive(Debug, Clone)]
 /// enum MyRequests {
 ///     Initialize(InitializeRequest),
 ///     Prompt(PromptRequest),
@@ -120,7 +120,7 @@ pub trait JrMessageHandler {
 /// // Implement JrRequest for your enum
 /// # impl JrMessage for MyRequests {
 /// #     fn method(&self) -> &str { "myRequests" }
-/// #     fn into_untyped_message(self) -> Result<UntypedMessage, sacp::Error> { todo!() }
+/// #     fn to_untyped_message(&self) -> Result<UntypedMessage, sacp::Error> { todo!() }
 /// #     fn parse_request(_method: &str, _params: &impl serde::Serialize) -> Option<Result<Self, sacp::Error>> { None }
 /// #     fn parse_notification(_method: &str, _params: &impl serde::Serialize) -> Option<Result<Self, sacp::Error>> { None }
 /// # }
@@ -1218,7 +1218,7 @@ impl JrConnectionCx {
     pub fn send_request<Req: JrRequest>(&self, request: Req) -> JrResponse<Req::Response> {
         let method = request.method().to_string();
         let (response_tx, response_rx) = oneshot::channel();
-        match request.into_untyped_message() {
+        match request.to_untyped_message() {
             Ok(untyped) => {
                 let params = crate::util::json_cast(untyped.params).ok();
                 let message = OutgoingMessage::Request {
@@ -1279,7 +1279,7 @@ impl JrConnectionCx {
         &self,
         notification: N,
     ) -> Result<(), crate::Error> {
-        let untyped = notification.into_untyped_message()?;
+        let untyped = notification.to_untyped_message()?;
         let params = crate::util::json_cast(untyped.params).ok();
         self.send_raw_message(OutgoingMessage::Notification {
             method: untyped.method,
@@ -1485,9 +1485,9 @@ impl<T: JrResponsePayload> JrRequestCx<T> {
 }
 
 /// Common bounds for any JSON-RPC message.
-pub trait JrMessage: 'static + Debug + Sized + Send {
+pub trait JrMessage: 'static + Debug + Sized + Send + Clone {
     /// The parameters for the request.
-    fn into_untyped_message(self) -> Result<UntypedMessage, crate::Error>;
+    fn to_untyped_message(&self) -> Result<UntypedMessage, crate::Error>;
 
     /// The method name for the request.
     fn method(&self) -> &str;
@@ -1597,11 +1597,11 @@ impl<R: JrRequest, N: JrMessage> MessageAndCx<R, N> {
     pub fn erase_to_json(self) -> Result<MessageAndCx, crate::Error> {
         match self {
             MessageAndCx::Request(response, request_cx) => Ok(MessageAndCx::Request(
-                response.into_untyped_message()?,
+                response.to_untyped_message()?,
                 request_cx.erase_to_json(),
             )),
             MessageAndCx::Notification(notification, cx) => Ok(MessageAndCx::Notification(
-                notification.into_untyped_message()?,
+                notification.to_untyped_message()?,
                 cx,
             )),
         }
@@ -1674,8 +1674,8 @@ impl JrMessage for UntypedMessage {
         &self.method
     }
 
-    fn into_untyped_message(self) -> Result<UntypedMessage, crate::Error> {
-        Ok(self)
+    fn to_untyped_message(&self) -> Result<UntypedMessage, crate::Error> {
+        Ok(self.clone())
     }
 
     fn parse_request(method: &str, params: &impl Serialize) -> Option<Result<Self, crate::Error>> {

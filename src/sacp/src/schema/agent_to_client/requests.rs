@@ -18,7 +18,7 @@ use crate::util::json_cast;
 // ============================================================================
 
 impl JrMessage for RequestPermissionRequest {
-    fn into_untyped_message(self) -> Result<crate::UntypedMessage, crate::Error> {
+    fn to_untyped_message(&self) -> Result<crate::UntypedMessage, crate::Error> {
         let method = self.method().to_string();
         crate::UntypedMessage::new(&method, self)
     }
@@ -62,7 +62,7 @@ impl JrResponsePayload for RequestPermissionResponse {
 // ============================================================================
 
 impl JrMessage for WriteTextFileRequest {
-    fn into_untyped_message(self) -> Result<crate::UntypedMessage, crate::Error> {
+    fn to_untyped_message(&self) -> Result<crate::UntypedMessage, crate::Error> {
         let method = self.method().to_string();
         crate::UntypedMessage::new(&method, self)
     }
@@ -106,7 +106,7 @@ impl JrResponsePayload for WriteTextFileResponse {
 // ============================================================================
 
 impl JrMessage for ReadTextFileRequest {
-    fn into_untyped_message(self) -> Result<crate::UntypedMessage, crate::Error> {
+    fn to_untyped_message(&self) -> Result<crate::UntypedMessage, crate::Error> {
         let method = self.method().to_string();
         crate::UntypedMessage::new(&method, self)
     }
@@ -150,7 +150,7 @@ impl JrResponsePayload for ReadTextFileResponse {
 // ============================================================================
 
 impl JrMessage for CreateTerminalRequest {
-    fn into_untyped_message(self) -> Result<crate::UntypedMessage, crate::Error> {
+    fn to_untyped_message(&self) -> Result<crate::UntypedMessage, crate::Error> {
         let method = self.method().to_string();
         crate::UntypedMessage::new(&method, self)
     }
@@ -194,7 +194,7 @@ impl JrResponsePayload for CreateTerminalResponse {
 // ============================================================================
 
 impl JrMessage for TerminalOutputRequest {
-    fn into_untyped_message(self) -> Result<crate::UntypedMessage, crate::Error> {
+    fn to_untyped_message(&self) -> Result<crate::UntypedMessage, crate::Error> {
         let method = self.method().to_string();
         crate::UntypedMessage::new(&method, self)
     }
@@ -238,7 +238,7 @@ impl JrResponsePayload for TerminalOutputResponse {
 // ============================================================================
 
 impl JrMessage for ReleaseTerminalRequest {
-    fn into_untyped_message(self) -> Result<crate::UntypedMessage, crate::Error> {
+    fn to_untyped_message(&self) -> Result<crate::UntypedMessage, crate::Error> {
         let method = self.method().to_string();
         crate::UntypedMessage::new(&method, self)
     }
@@ -282,7 +282,7 @@ impl JrResponsePayload for ReleaseTerminalResponse {
 // ============================================================================
 
 impl JrMessage for WaitForTerminalExitRequest {
-    fn into_untyped_message(self) -> Result<crate::UntypedMessage, crate::Error> {
+    fn to_untyped_message(&self) -> Result<crate::UntypedMessage, crate::Error> {
         let method = self.method().to_string();
         crate::UntypedMessage::new(&method, self)
     }
@@ -326,7 +326,7 @@ impl JrResponsePayload for WaitForTerminalExitResponse {
 // ============================================================================
 
 impl JrMessage for KillTerminalCommandRequest {
-    fn into_untyped_message(self) -> Result<crate::UntypedMessage, crate::Error> {
+    fn to_untyped_message(&self) -> Result<crate::UntypedMessage, crate::Error> {
         let method = self.method().to_string();
         crate::UntypedMessage::new(&method, self)
     }

@@ -72,7 +72,7 @@ where
                             Handled::Yes => Ok(Handled::Yes),
                             Handled::No((request, request_cx)) => {
                                 // Handler returned the request back, convert to untyped
-                                let untyped = request.into_untyped_message()?;
+                                let untyped = request.to_untyped_message()?;
                                 Ok(Handled::No(MessageAndCx::Request(
                                     untyped,
                                     request_cx.erase_to_json(),
@@ -150,7 +150,7 @@ where
                             Handled::Yes => Ok(Handled::Yes),
                             Handled::No((notification, cx)) => {
                                 // Handler returned the notification back, convert to untyped
-                                let untyped = notification.into_untyped_message()?;
+                                let untyped = notification.to_untyped_message()?;
                                 Ok(Handled::No(MessageAndCx::Notification(untyped, cx)))
                             }
                         }
@@ -231,7 +231,7 @@ where
                         match result.into_handled() {
                             Handled::Yes => Ok(Handled::Yes),
                             Handled::No(MessageAndCx::Request(request, request_cx)) => {
-                                let untyped = request.into_untyped_message()?;
+                                let untyped = request.to_untyped_message()?;
                                 Ok(Handled::No(MessageAndCx::Request(
                                     untyped,
                                     request_cx.erase_to_json(),
@@ -270,7 +270,7 @@ where
                         match result.into_handled() {
                             Handled::Yes => Ok(Handled::Yes),
                             Handled::No(MessageAndCx::Notification(notification, cx)) => {
-                                let untyped = notification.into_untyped_message()?;
+                                let untyped = notification.to_untyped_message()?;
                                 Ok(Handled::No(MessageAndCx::Notification(untyped, cx)))
                             }
                             Handled::No(MessageAndCx::Request(..)) => {

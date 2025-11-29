@@ -15,7 +15,7 @@ impl Component for MockTransport {
 }
 
 // Mock request/response types
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MyRequest {}
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -23,7 +23,7 @@ pub struct MyResponse {
     pub status: String,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProcessRequest {
     pub data: String,
 }
@@ -33,10 +33,10 @@ pub struct ProcessResponse {
     pub result: String,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProcessStarted {}
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AnalyzeRequest {
     pub data: String,
 }
@@ -46,7 +46,7 @@ pub struct AnalysisStarted {
     pub job_id: u32,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct QueryRequest {
     pub id: u64,
 }
@@ -56,7 +56,7 @@ pub struct QueryResponse {
     pub data: String,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ValidateRequest {
     pub data: String,
 }
@@ -67,7 +67,7 @@ pub struct ValidateResponse {
     pub error: Option<String>,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ExecuteRequest {}
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -75,7 +75,7 @@ pub struct ExecuteResponse {
     pub result: String,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OtherRequest {}
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -83,31 +83,31 @@ pub struct OtherResponse {
     pub value: String,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProxyRequest {
     pub inner_request: UntypedMessage,
 }
 
 // Mock notification types
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SessionUpdate {}
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StatusUpdate {
     pub message: String,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProcessComplete {
     pub result: String,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AnalysisComplete {
     pub result: String,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct QueryComplete {}
 
 // Implement JrMessage for all types
@@ -117,7 +117,7 @@ macro_rules! impl_jr_message {
             fn method(&self) -> &str {
                 $method
             }
-            fn into_untyped_message(self) -> Result<UntypedMessage, crate::Error> {
+            fn to_untyped_message(&self) -> Result<UntypedMessage, crate::Error> {
                 UntypedMessage::new($method, self)
             }
             fn parse_request(
