@@ -13,16 +13,13 @@ pub struct McpConnectRequest {
     /// The ACP URL to connect to (e.g., "acp:uuid")
     pub acp_url: String,
 
-    /// The session ID this MCP connection belongs to
-    pub session_id: sacp::schema::SessionId,
-
     /// Optional metadata
     #[serde(skip_serializing_if = "Option::is_none")]
     pub meta: Option<serde_json::Value>,
 }
 
 impl JrMessage for McpConnectRequest {
-    fn into_untyped_message(self) -> Result<UntypedMessage, sacp::Error> {
+    fn to_untyped_message(&self) -> Result<UntypedMessage, sacp::Error> {
         UntypedMessage::new(METHOD_MCP_CONNECT_REQUEST, self)
     }
 
@@ -86,7 +83,7 @@ pub struct McpDisconnectNotification {
 }
 
 impl JrMessage for McpDisconnectNotification {
-    fn into_untyped_message(self) -> Result<UntypedMessage, sacp::Error> {
+    fn to_untyped_message(&self) -> Result<UntypedMessage, sacp::Error> {
         UntypedMessage::new(METHOD_MCP_DISCONNECT_NOTIFICATION, self)
     }
 
@@ -135,14 +132,14 @@ pub struct McpOverAcpRequest<R> {
 }
 
 impl<R: JrRequest> JrMessage for McpOverAcpRequest<R> {
-    fn into_untyped_message(self) -> Result<UntypedMessage, sacp::Error> {
-        let message = self.request.into_untyped_message()?;
+    fn to_untyped_message(&self) -> Result<UntypedMessage, sacp::Error> {
+        let message = self.request.to_untyped_message()?;
         UntypedMessage::new(
             METHOD_MCP_REQUEST,
             McpOverAcpRequest {
-                connection_id: self.connection_id,
+                connection_id: self.connection_id.clone(),
                 request: message,
-                meta: self.meta,
+                meta: self.meta.clone(),
             },
         )
     }
@@ -206,14 +203,14 @@ pub struct McpOverAcpNotification<R> {
 }
 
 impl<R: JrMessage> JrMessage for McpOverAcpNotification<R> {
-    fn into_untyped_message(self) -> Result<UntypedMessage, sacp::Error> {
-        let params = self.notification.into_untyped_message()?;
+    fn to_untyped_message(&self) -> Result<UntypedMessage, sacp::Error> {
+        let params = self.notification.to_untyped_message()?;
         UntypedMessage::new(
             METHOD_MCP_NOTIFICATION,
             McpOverAcpNotification {
-                connection_id: self.connection_id,
+                connection_id: self.connection_id.clone(),
                 notification: params,
-                meta: self.meta,
+                meta: self.meta.clone(),
             },
         )
     }

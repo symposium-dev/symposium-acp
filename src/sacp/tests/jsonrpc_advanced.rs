@@ -47,7 +47,7 @@ struct PingRequest {
 }
 
 impl JrMessage for PingRequest {
-    fn into_untyped_message(self) -> Result<sacp::UntypedMessage, sacp::Error> {
+    fn to_untyped_message(&self) -> Result<sacp::UntypedMessage, sacp::Error> {
         let method = self.method().to_string();
         sacp::UntypedMessage::new(&method, self)
     }
@@ -79,7 +79,7 @@ impl JrRequest for PingRequest {
     type Response = PongResponse;
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 struct PongResponse {
     value: u32,
 }
@@ -94,14 +94,14 @@ impl JrResponsePayload for PongResponse {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 struct SlowRequest {
     delay_ms: u64,
     id: u32,
 }
 
 impl JrMessage for SlowRequest {
-    fn into_untyped_message(self) -> Result<sacp::UntypedMessage, sacp::Error> {
+    fn to_untyped_message(&self) -> Result<sacp::UntypedMessage, sacp::Error> {
         let method = self.method().to_string();
         sacp::UntypedMessage::new(&method, self)
     }
@@ -133,7 +133,7 @@ impl JrRequest for SlowRequest {
     type Response = SlowResponse;
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 struct SlowResponse {
     id: u32,
 }

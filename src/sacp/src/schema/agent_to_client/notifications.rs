@@ -7,7 +7,7 @@ use crate::jsonrpc::{JrMessage, JrNotification};
 // These are one-way messages that agents send to clients/editors
 
 impl JrMessage for SessionNotification {
-    fn into_untyped_message(self) -> Result<crate::UntypedMessage, crate::Error> {
+    fn to_untyped_message(&self) -> Result<crate::UntypedMessage, crate::Error> {
         let method = self.method().to_string();
         crate::UntypedMessage::new(&method, self)
     }

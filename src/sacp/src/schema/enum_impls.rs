@@ -18,7 +18,7 @@ use crate::util::json_cast;
 // ============================================================================
 
 impl JrMessage for ClientRequest {
-    fn into_untyped_message(self) -> Result<crate::UntypedMessage, crate::Error> {
+    fn to_untyped_message(&self) -> Result<crate::UntypedMessage, crate::Error> {
         let method = self.method().to_string();
         crate::UntypedMessage::new(&method, self)
     }
@@ -75,7 +75,7 @@ impl JrRequest for ClientRequest {
 }
 
 impl JrMessage for ClientNotification {
-    fn into_untyped_message(self) -> Result<crate::UntypedMessage, crate::Error> {
+    fn to_untyped_message(&self) -> Result<crate::UntypedMessage, crate::Error> {
         let method = self.method().to_string();
         crate::UntypedMessage::new(&method, self)
     }
@@ -127,7 +127,7 @@ impl JrNotification for ClientNotification {}
 // ============================================================================
 
 impl JrMessage for AgentRequest {
-    fn into_untyped_message(self) -> Result<crate::UntypedMessage, crate::Error> {
+    fn to_untyped_message(&self) -> Result<crate::UntypedMessage, crate::Error> {
         let method = self.method().to_string();
         crate::UntypedMessage::new(&method, self)
     }
@@ -192,7 +192,7 @@ impl JrRequest for AgentRequest {
 }
 
 impl JrMessage for AgentNotification {
-    fn into_untyped_message(self) -> Result<crate::UntypedMessage, crate::Error> {
+    fn to_untyped_message(&self) -> Result<crate::UntypedMessage, crate::Error> {
         let method = self.method().to_string();
         crate::UntypedMessage::new(&method, self)
     }

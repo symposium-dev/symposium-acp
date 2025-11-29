@@ -8,7 +8,7 @@
 
 use sacp::schema::{AgentCapabilities, InitializeRequest, InitializeResponse};
 use sacp::{Component, JrHandlerChain, MetaCapabilityExt, Proxy};
-use sacp_conductor::conductor::Conductor;
+use sacp_conductor::Conductor;
 use sacp_proxy::JrCxExt;
 use std::sync::Arc;
 use std::sync::Mutex;

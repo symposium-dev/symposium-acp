@@ -18,7 +18,7 @@
 //! - Outer conductor receives the ">>" prefixed response
 
 use sacp::Component;
-use sacp_conductor::conductor::Conductor;
+use sacp_conductor::Conductor;
 use sacp_test::arrow_proxy::run_arrow_proxy;
 use sacp_tokio::AcpAgent;
 use std::str::FromStr;

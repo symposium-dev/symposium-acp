@@ -29,12 +29,12 @@ pub struct SuccessorRequest<Req: JrRequest> {
 }
 
 impl<Req: JrRequest> JrMessage for SuccessorRequest<Req> {
-    fn into_untyped_message(self) -> Result<sacp::UntypedMessage, sacp::Error> {
+    fn to_untyped_message(&self) -> Result<sacp::UntypedMessage, sacp::Error> {
         sacp::UntypedMessage::new(
             SUCCESSOR_REQUEST_METHOD,
             SuccessorRequest {
-                request: self.request.into_untyped_message()?,
-                meta: self.meta,
+                request: self.request.to_untyped_message()?,
+                meta: self.meta.clone(),
             },
         )
     }
@@ -91,12 +91,12 @@ pub struct SuccessorNotification<Req: JrNotification> {
 }
 
 impl<Req: JrNotification> JrMessage for SuccessorNotification<Req> {
-    fn into_untyped_message(self) -> Result<sacp::UntypedMessage, sacp::Error> {
+    fn to_untyped_message(&self) -> Result<sacp::UntypedMessage, sacp::Error> {
         sacp::UntypedMessage::new(
             SUCCESSOR_NOTIFICATION_METHOD,
             SuccessorNotification {
-                notification: self.notification.into_untyped_message()?,
-                meta: self.meta,
+                notification: self.notification.to_untyped_message()?,
+                meta: self.meta.clone(),
             },
         )
     }

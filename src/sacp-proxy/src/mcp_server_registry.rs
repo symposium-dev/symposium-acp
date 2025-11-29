@@ -2,7 +2,7 @@ use futures::channel::mpsc;
 use futures::{SinkExt, StreamExt};
 use fxhash::FxHashMap;
 
-use sacp::schema::{NewSessionRequest, NewSessionResponse, SessionId};
+use sacp::schema::{NewSessionRequest, NewSessionResponse};
 use sacp::util::MatchMessage;
 use sacp::{
     Channel, Component, DynComponent, Handled, JrConnectionCx, JrHandlerChain, JrMessageHandler,
@@ -298,7 +298,7 @@ impl McpServiceRegistry {
 
         // Get the MCP server component
         let mcp_server = registered_server.spawn.spawn(McpContext {
-            session_id: request.session_id.clone(),
+            acp_url: request.acp_url.clone(),
             connection_cx: outer_cx.clone(),
         });
 
@@ -496,14 +496,14 @@ impl AsRef<McpServiceRegistry> for McpServiceRegistry {
 /// Context about the ACP and MCP connection available to an MCP server.
 #[derive(Clone)]
 pub struct McpContext {
-    session_id: SessionId,
+    acp_url: String,
     connection_cx: JrConnectionCx,
 }
 
 impl McpContext {
-    /// The session-id of the session connected to this MCP server.
-    pub fn session_id(&self) -> &SessionId {
-        &self.session_id
+    /// The `acp:UUID` that was given.
+    pub fn acp_url(&self) -> String {
+        self.acp_url.clone()
     }
 
     /// The ACP connection context, which can be used to send ACP requests and notifications

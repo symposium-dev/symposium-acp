@@ -5,7 +5,7 @@
 //! 2. Session updates from eliza get the '>' prefix from arrow proxy
 //! 3. The full proxy chain works end-to-end
 
-use sacp_conductor::conductor::Conductor;
+use sacp_conductor::Conductor;
 use sacp_tokio::AcpAgent;
 use std::str::FromStr;
 use tokio::io::duplex;

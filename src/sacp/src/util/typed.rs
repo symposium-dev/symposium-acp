@@ -104,7 +104,7 @@ impl MatchMessage {
                             Handled::Yes => self.state = Ok(Handled::Yes),
                             Handled::No((request, request_cx)) => {
                                 // Handler returned the request back, convert to untyped
-                                match request.into_untyped_message() {
+                                match request.to_untyped_message() {
                                     Ok(untyped) => {
                                         self.state = Ok(Handled::No(MessageAndCx::Request(
                                             untyped,
@@ -160,7 +160,7 @@ impl MatchMessage {
                             Handled::Yes => self.state = Ok(Handled::Yes),
                             Handled::No((notification, cx)) => {
                                 // Handler returned the notification back, convert to untyped
-                                match notification.into_untyped_message() {
+                                match notification.to_untyped_message() {
                                     Ok(untyped) => {
                                         self.state = Ok(Handled::No(MessageAndCx::Notification(
                                             untyped, cx,

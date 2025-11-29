@@ -42,11 +42,11 @@ fn setup_test_streams() -> (
 // Test types
 // ============================================================================
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 struct EmptyRequest;
 
 impl JrMessage for EmptyRequest {
-    fn into_untyped_message(self) -> Result<sacp::UntypedMessage, sacp::Error> {
+    fn to_untyped_message(&self) -> Result<sacp::UntypedMessage, sacp::Error> {
         let method = self.method().to_string();
         sacp::UntypedMessage::new(&method, self)
     }
@@ -78,14 +78,14 @@ impl JrRequest for EmptyRequest {
     type Response = SimpleResponse;
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 struct OptionalParamsRequest {
     #[serde(skip_serializing_if = "Option::is_none")]
     value: Option<String>,
 }
 
 impl JrMessage for OptionalParamsRequest {
-    fn into_untyped_message(self) -> Result<sacp::UntypedMessage, sacp::Error> {
+    fn to_untyped_message(&self) -> Result<sacp::UntypedMessage, sacp::Error> {
         let method = self.method().to_string();
         sacp::UntypedMessage::new(&method, self)
     }
@@ -117,7 +117,7 @@ impl JrRequest for OptionalParamsRequest {
     type Response = SimpleResponse;
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 struct SimpleResponse {
     result: String,
 }

@@ -26,13 +26,13 @@ async fn recv<R: JrResponsePayload + Send>(response: JrResponse<R>) -> Result<R,
 // Test 1: Multiple handlers with different methods
 // ============================================================================
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 struct FooRequest {
     value: String,
 }
 
 impl JrMessage for FooRequest {
-    fn into_untyped_message(self) -> Result<sacp::UntypedMessage, sacp::Error> {
+    fn to_untyped_message(&self) -> Result<sacp::UntypedMessage, sacp::Error> {
         let method = self.method().to_string();
         sacp::UntypedMessage::new(&method, self)
     }
@@ -64,7 +64,7 @@ impl JrRequest for FooRequest {
     type Response = FooResponse;
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 struct FooResponse {
     result: String,
 }
@@ -79,13 +79,13 @@ impl JrResponsePayload for FooResponse {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 struct BarRequest {
     value: String,
 }
 
 impl JrMessage for BarRequest {
-    fn into_untyped_message(self) -> Result<sacp::UntypedMessage, sacp::Error> {
+    fn to_untyped_message(&self) -> Result<sacp::UntypedMessage, sacp::Error> {
         let method = self.method().to_string();
         sacp::UntypedMessage::new(&method, self)
     }
@@ -117,7 +117,7 @@ impl JrRequest for BarRequest {
     type Response = BarResponse;
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 struct BarResponse {
     result: String,
 }
@@ -212,13 +212,13 @@ async fn test_multiple_handlers_different_methods() {
 // Test 2: Handler priority/ordering (first handler gets first chance)
 // ============================================================================
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 struct TrackRequest {
     value: String,
 }
 
 impl JrMessage for TrackRequest {
-    fn into_untyped_message(self) -> Result<sacp::UntypedMessage, sacp::Error> {
+    fn to_untyped_message(&self) -> Result<sacp::UntypedMessage, sacp::Error> {
         let method = self.method().to_string();
         sacp::UntypedMessage::new(&method, self)
     }
@@ -332,13 +332,13 @@ async fn test_handler_priority_ordering() {
 // Test 3: Fallthrough behavior (handler passes to next)
 // ============================================================================
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 struct Method1Request {
     value: String,
 }
 
 impl JrMessage for Method1Request {
-    fn into_untyped_message(self) -> Result<sacp::UntypedMessage, sacp::Error> {
+    fn to_untyped_message(&self) -> Result<sacp::UntypedMessage, sacp::Error> {
         let method = self.method().to_string();
         sacp::UntypedMessage::new(&method, self)
     }
@@ -370,13 +370,13 @@ impl JrRequest for Method1Request {
     type Response = FooResponse;
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 struct Method2Request {
     value: String,
 }
 
 impl JrMessage for Method2Request {
-    fn into_untyped_message(self) -> Result<sacp::UntypedMessage, sacp::Error> {
+    fn to_untyped_message(&self) -> Result<sacp::UntypedMessage, sacp::Error> {
         let method = self.method().to_string();
         sacp::UntypedMessage::new(&method, self)
     }
@@ -551,13 +551,13 @@ async fn test_no_handler_claims() {
 // Test 5: Handler can claim notifications
 // ============================================================================
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 struct EventNotification {
     event: String,
 }
 
 impl JrMessage for EventNotification {
-    fn into_untyped_message(self) -> Result<sacp::UntypedMessage, sacp::Error> {
+    fn to_untyped_message(&self) -> Result<sacp::UntypedMessage, sacp::Error> {
         let method = self.method().to_string();
         sacp::UntypedMessage::new(&method, self)
     }

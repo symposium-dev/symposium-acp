@@ -4,13 +4,13 @@ use sacp::{
 };
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 struct EchoRequestResponse {
     text: Vec<String>,
 }
 
 impl JrMessage for EchoRequestResponse {
-    fn into_untyped_message(self) -> Result<sacp::UntypedMessage, sacp::Error> {
+    fn to_untyped_message(&self) -> Result<sacp::UntypedMessage, sacp::Error> {
         Ok(sacp::UntypedMessage {
             method: self.method().to_string(),
             params: sacp::util::json_cast(self)?,

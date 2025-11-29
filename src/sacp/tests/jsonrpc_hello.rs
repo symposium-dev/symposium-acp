@@ -42,13 +42,13 @@ fn setup_test_streams() -> (
 }
 
 /// A simple "ping" request.
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 struct PingRequest {
     message: String,
 }
 
 impl JrMessage for PingRequest {
-    fn into_untyped_message(self) -> Result<sacp::UntypedMessage, sacp::Error> {
+    fn to_untyped_message(&self) -> Result<sacp::UntypedMessage, sacp::Error> {
         let method = self.method().to_string();
         sacp::UntypedMessage::new(&method, self)
     }
@@ -81,7 +81,7 @@ impl JrRequest for PingRequest {
 }
 
 /// A simple "pong" response.
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 struct PongResponse {
     echo: String,
 }
@@ -151,13 +151,13 @@ async fn test_hello_world() {
 }
 
 /// A simple notification message
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 struct LogNotification {
     message: String,
 }
 
 impl JrMessage for LogNotification {
-    fn into_untyped_message(self) -> Result<sacp::UntypedMessage, sacp::Error> {
+    fn to_untyped_message(&self) -> Result<sacp::UntypedMessage, sacp::Error> {
         let method = self.method().to_string();
         sacp::UntypedMessage::new(&method, self)
     }

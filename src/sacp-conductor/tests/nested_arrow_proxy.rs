@@ -12,7 +12,7 @@
 //! - arrow_proxy2 adds first '>' to eliza's response: ">Hello..."
 //! - arrow_proxy1 adds second '>' to that: ">>Hello..."
 
-use sacp_conductor::conductor::Conductor;
+use sacp_conductor::Conductor;
 use sacp_tokio::AcpAgent;
 use std::str::FromStr;
 use tokio::io::duplex;

@@ -44,13 +44,13 @@ fn setup_test_streams() -> (
 // Test types
 // ============================================================================
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 struct SimpleRequest {
     message: String,
 }
 
 impl JrMessage for SimpleRequest {
-    fn into_untyped_message(self) -> Result<sacp::UntypedMessage, sacp::Error> {
+    fn to_untyped_message(&self) -> Result<sacp::UntypedMessage, sacp::Error> {
         let method = self.method().to_string();
         sacp::UntypedMessage::new(&method, self)
     }
@@ -82,7 +82,7 @@ impl JrRequest for SimpleRequest {
     type Response = SimpleResponse;
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 struct SimpleResponse {
     result: String,
 }
@@ -234,13 +234,13 @@ async fn test_unknown_method() {
 // Test 3: Handler returns error
 // ============================================================================
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 struct ErrorRequest {
     value: String,
 }
 
 impl JrMessage for ErrorRequest {
-    fn into_untyped_message(self) -> Result<sacp::UntypedMessage, sacp::Error> {
+    fn to_untyped_message(&self) -> Result<sacp::UntypedMessage, sacp::Error> {
         let method = self.method().to_string();
         sacp::UntypedMessage::new(&method, self)
     }
@@ -327,11 +327,11 @@ async fn test_handler_returns_error() {
 // Test 4: Request without required params
 // ============================================================================
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 struct EmptyRequest;
 
 impl JrMessage for EmptyRequest {
-    fn into_untyped_message(self) -> Result<sacp::UntypedMessage, sacp::Error> {
+    fn to_untyped_message(&self) -> Result<sacp::UntypedMessage, sacp::Error> {
         let method = self.method().to_string();
         sacp::UntypedMessage::new(&method, self)
     }

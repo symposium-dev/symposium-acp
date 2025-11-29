@@ -15,6 +15,7 @@ test-support = []
 sacp = { version = "1.1.1", path = "../sacp" }
 sacp-proxy = { version = "2.0.2", path = "../sacp-proxy" }
 sacp-tokio = { version = "2.0.1", path = "../sacp-tokio" }
+sacp-trace-viewer = { version = "0.1.0", path = "../sacp-trace-viewer" }
 agent-client-protocol-schema.workspace = true
 anyhow.workspace = true
 axum.workspace = true
@@ -47,3 +48,4 @@ schemars.workspace = true
 sacp-test = { path = "../sacp-test" }
 sacp-tokio = { path = "../sacp-tokio" }
 yopo = { path = "../yopo" }
+regex = "1.12.2"

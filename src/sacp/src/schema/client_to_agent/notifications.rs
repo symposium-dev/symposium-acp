@@ -5,7 +5,7 @@ use crate::jsonrpc::{JrMessage, JrNotification};
 use crate::util::json_cast;
 
 impl JrMessage for CancelNotification {
-    fn into_untyped_message(self) -> Result<crate::UntypedMessage, crate::Error> {
+    fn to_untyped_message(&self) -> Result<crate::UntypedMessage, crate::Error> {
         let method = self.method().to_string();
         crate::UntypedMessage::new(&method, self)
     }

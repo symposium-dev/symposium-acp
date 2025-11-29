@@ -152,6 +152,7 @@ pub struct Conductor {
     name: String,
     component_list: Box<dyn ComponentList>,
     mcp_bridge_mode: crate::McpBridgeMode,
+    trace_writer: Option<crate::trace::TraceWriter>,
 }
 
 impl Conductor {
@@ -164,7 +165,31 @@ impl Conductor {
             name,
             component_list: Box::new(component_list),
             mcp_bridge_mode,
+            trace_writer: None,
         }
+    }
+
+    /// Enable trace logging to a custom destination.
+    ///
+    /// Use `sacp-trace-viewer` to view the trace as an interactive sequence diagram.
+    pub fn trace_to(mut self, dest: impl crate::trace::WriteEvent) -> Self {
+        self.trace_writer = Some(crate::trace::TraceWriter::new(dest));
+        self
+    }
+
+    /// Enable trace logging to a file path.
+    ///
+    /// Events will be written as newline-delimited JSON (`.jsons` format).
+    /// Use `sacp-trace-viewer` to view the trace as an interactive sequence diagram.
+    pub fn trace_to_path(mut self, path: impl AsRef<std::path::Path>) -> std::io::Result<Self> {
+        self.trace_writer = Some(crate::trace::TraceWriter::from_path(path)?);
+        Ok(self)
+    }
+
+    /// Enable trace logging with an existing TraceWriter.
+    pub fn with_trace_writer(mut self, writer: crate::trace::TraceWriter) -> Self {
+        self.trace_writer = Some(writer);
+        self
     }
 
     pub fn into_handler_chain(self) -> JrHandlerChain<ConductorMessageHandler> {
@@ -177,6 +202,8 @@ impl Conductor {
             bridge_connections: Default::default(),
             mcp_bridge_mode: self.mcp_bridge_mode,
             proxy_mode: AtomicBool::new(false),
+            trace_writer: self.trace_writer,
+            pending_requests: Default::default(),
         };
 
         JrHandlerChain::new_with(ConductorMessageHandler {
@@ -253,6 +280,12 @@ struct ConductorHandlerState {
     /// and ALL components (including the last) receive the proxy capability.
     /// Uses AtomicBool for thread-safe interior mutability since we detect this during initialization.
     proxy_mode: AtomicBool,
+
+    /// Optional trace writer for sequence diagram visualization.
+    trace_writer: Option<crate::trace::TraceWriter>,
+
+    /// Tracks pending requests for response tracing: id -> (from, to)
+    pending_requests: HashMap<String, (String, String)>,
 }
 
 impl JrMessageHandler for ConductorMessageHandler {
@@ -297,6 +330,174 @@ impl JrMessageHandler for ConductorMessageHandler {
 }
 
 impl ConductorHandlerState {
+    /// Convert a component index to a trace-friendly name.
+    fn component_name(&self, index: usize) -> String {
+        if self.is_agent_component(index) {
+            "agent".to_string()
+        } else {
+            format!("proxy:{}", index)
+        }
+    }
+
+    /// Convert a source component index to a trace-friendly name.
+    fn source_component_name(&self, index: SourceComponentIndex) -> String {
+        match index {
+            SourceComponentIndex::ConductorSuccessor => "agent".to_string(), // In proxy mode, successor is effectively the agent
+            SourceComponentIndex::Component(i) => self.component_name(i),
+        }
+    }
+
+    /// Extract the protocol and idealized method/params from a message.
+    ///
+    /// For MCP-over-ACP messages, this extracts the inner MCP message.
+    /// For regular ACP messages, returns the message as-is.
+    fn extract_trace_info<R: sacp::JrRequest, N: sacp::JrNotification>(
+        message: &sacp::MessageAndCx<R, N>,
+    ) -> Result<(crate::trace::Protocol, String, serde_json::Value), sacp::Error> {
+        use sacp::JrMessage;
+
+        match message {
+            sacp::MessageAndCx::Request(request, _) => {
+                let untyped = request.to_untyped_message()?;
+
+                // Try to parse as MCP-over-ACP request
+                if let Some(Ok(mcp_req)) = <McpOverAcpRequest<UntypedMessage>>::parse_request(
+                    &untyped.method,
+                    &untyped.params,
+                ) {
+                    return Ok((
+                        crate::trace::Protocol::Mcp,
+                        mcp_req.request.method,
+                        mcp_req.request.params,
+                    ));
+                }
+
+                // Regular ACP request
+                Ok((crate::trace::Protocol::Acp, untyped.method, untyped.params))
+            }
+            sacp::MessageAndCx::Notification(notification, _) => {
+                let untyped = notification.to_untyped_message()?;
+
+                // Try to parse as MCP-over-ACP notification
+                if let Some(Ok(mcp_notif)) =
+                    <McpOverAcpNotification<UntypedMessage>>::parse_notification(
+                        &untyped.method,
+                        &untyped.params,
+                    )
+                {
+                    return Ok((
+                        crate::trace::Protocol::Mcp,
+                        mcp_notif.notification.method,
+                        mcp_notif.notification.params,
+                    ));
+                }
+
+                // Regular ACP notification
+                Ok((crate::trace::Protocol::Acp, untyped.method, untyped.params))
+            }
+        }
+    }
+
+    /// Trace a client-to-agent message (request or notification).
+    fn trace_client_to_agent<R: sacp::JrRequest, N: sacp::JrNotification>(
+        &mut self,
+        target_index: usize,
+        message: &sacp::MessageAndCx<R, N>,
+    ) -> Result<(), sacp::Error> {
+        if self.trace_writer.is_none() {
+            return Ok(());
+        }
+
+        let from = if target_index == 0 {
+            "client".to_string()
+        } else {
+            self.component_name(target_index - 1)
+        };
+        let to = self.component_name(target_index);
+
+        let (protocol, method, params) = Self::extract_trace_info(message)?;
+
+        let writer = self.trace_writer.as_mut().unwrap();
+        match message.id() {
+            Some(id) => {
+                // Track pending request for response correlation
+                let id_key = id.to_string();
+                self.pending_requests
+                    .insert(id_key, (from.clone(), to.clone()));
+                writer.request(protocol, from, to, id, &method, None, params);
+            }
+            None => {
+                writer.notification(protocol, from, to, &method, None, params);
+            }
+        }
+        Ok(())
+    }
+
+    /// Trace an agent-to-client message (request or notification).
+    fn trace_agent_to_client<R: sacp::JrRequest, N: sacp::JrNotification>(
+        &mut self,
+        source_index: SourceComponentIndex,
+        message: &sacp::MessageAndCx<R, N>,
+    ) -> Result<(), sacp::Error> {
+        if self.trace_writer.is_none() {
+            return Ok(());
+        }
+
+        let from = self.source_component_name(source_index);
+        let to = match source_index {
+            SourceComponentIndex::ConductorSuccessor => {
+                if self.components.is_empty() {
+                    "client".to_string()
+                } else {
+                    self.component_name(self.components.len() - 1)
+                }
+            }
+            SourceComponentIndex::Component(0) => "client".to_string(),
+            SourceComponentIndex::Component(i) => self.component_name(i - 1),
+        };
+
+        let (protocol, method, params) = Self::extract_trace_info(message)?;
+
+        let writer = self.trace_writer.as_mut().unwrap();
+        match message.id() {
+            Some(id) => {
+                // Track pending request for response correlation
+                let id_key = id.to_string();
+                self.pending_requests
+                    .insert(id_key, (from.clone(), to.clone()));
+                writer.request(protocol, from, to, id, &method, None, params);
+            }
+            None => {
+                writer.notification(protocol, from, to, &method, None, params);
+            }
+        }
+        Ok(())
+    }
+
+    /// Trace a response to a previous request.
+    fn trace_response(
+        &mut self,
+        request_cx: &sacp::JrRequestCx<serde_json::Value>,
+        result: &Result<serde_json::Value, sacp::Error>,
+    ) {
+        let Some(writer) = &mut self.trace_writer else {
+            return;
+        };
+
+        let id = request_cx.id();
+        let id_key = id.to_string();
+
+        // Look up the original request's from/to (response goes in reverse)
+        if let Some((original_from, original_to)) = self.pending_requests.remove(&id_key) {
+            let (is_error, payload) = match result {
+                Ok(v) => (false, v.clone()),
+                Err(e) => (true, serde_json::json!({ "error": e.to_string() })),
+            };
+            // Response goes from original_to back to original_from
+            writer.response(&original_to, &original_from, id, is_error, payload);
+        }
+    }
+
     /// Recursively spawns components and builds the proxy chain.
     ///
     /// This function implements the recursive chain building pattern:
@@ -337,6 +538,9 @@ impl ConductorHandlerState {
                 target_component_index,
                 message,
             } => {
+                if let Err(e) = self.trace_client_to_agent(target_component_index, &message) {
+                    tracing::warn!("Failed to trace client-to-agent message: {e}");
+                }
                 self.forward_client_to_agent_message(
                     conductor_tx,
                     target_component_index,
@@ -349,19 +553,23 @@ impl ConductorHandlerState {
             ConductorMessage::AgentToClient {
                 source_component_index,
                 message,
-            } => self.send_message_to_predecessor_of(
-                conductor_tx,
-                client,
-                source_component_index,
-                message,
-            ),
+            } => {
+                if let Err(e) = self.trace_agent_to_client(source_component_index, &message) {
+                    tracing::warn!("Failed to trace agent-to-client message: {e}");
+                }
+                self.send_message_to_predecessor_of(
+                    conductor_tx,
+                    client,
+                    source_component_index,
+                    message,
+                )
+            }
 
             // New MCP connection request. Send it back along the chain to get a connection id.
             // When the connection id arrives, send a message back into this conductor loop with
             // the connection id and the (as yet unspawned) actor.
             ConductorMessage::McpConnectionReceived {
                 acp_url,
-                session_id,
                 connection,
                 actor,
             } => {
@@ -375,7 +583,6 @@ impl ConductorHandlerState {
                     self.components.len() - 1,
                     McpConnectRequest {
                         acp_url,
-                        session_id,
                         meta: None,
                     },
                 )
@@ -444,12 +651,9 @@ impl ConductorHandlerState {
                     },
                 );
 
-                self.send_message_to_predecessor_of(
-                    conductor_tx,
-                    client,
-                    SourceComponentIndex::Component(self.components.len() - 1),
-                    wrapped,
-                )
+                let source_component = SourceComponentIndex::Component(self.components.len() - 1);
+                self.trace_agent_to_client(source_component, &wrapped)?;
+                self.send_message_to_predecessor_of(conductor_tx, client, source_component, wrapped)
             }
 
             // MCP client disconnected. Remove it from our map and send the
@@ -471,6 +675,7 @@ impl ConductorHandlerState {
             // This ensures responses are processed in order with notifications by
             // going through the central conductor queue.
             ConductorMessage::ForwardResponse { request_cx, result } => {
+                self.trace_response(&request_cx, &result);
                 request_cx.respond_with_result(result)
             }
         }
@@ -850,17 +1055,16 @@ impl ConductorHandlerState {
         tracing::debug!(?is_agent, "forward_initialize_request");
 
         let conductor_tx = conductor_tx.clone();
+
         if is_agent {
             // Agent component - no proxy capability
             self.components[target_component_index]
                 .send_request(initialize_req)
                 .await_when_result_received(async move |response| {
                     tracing::debug!(?response, "got initialize response");
-
-                    match response {
-                        Ok(response) => request_cx.respond(response),
-                        Err(error) => request_cx.respond_with_error(error),
-                    }
+                    request_cx
+                        .respond_with_result_via(conductor_tx, response)
+                        .await
                 })
         } else if target_component_index == self.components.len() {
             // This is a subtle case. Ordinarily, messages targeting the
@@ -890,14 +1094,14 @@ impl ConductorHandlerState {
                         "received response to initialize from empty conductor"
                     );
 
-                    match response {
-                        Ok(mut response) => {
-                            // Add proxy capability to indicate we are a proxy
-                            response = response.add_meta_capability(Proxy);
-                            request_cx.respond_via(conductor_tx, response).await
-                        }
-                        Err(error) => request_cx.respond_with_error(error),
-                    }
+                    let response = response.map(|response| {
+                        // Add proxy capability to indicate we are a proxy
+                        response.add_meta_capability(Proxy)
+                    });
+
+                    request_cx
+                        .respond_with_result_via(conductor_tx, response)
+                        .await
                 })
         } else {
             // An initialize request sent to the successor of the final
@@ -908,27 +1112,30 @@ impl ConductorHandlerState {
             initialize_req = initialize_req.add_meta_capability(Proxy);
             self.components[target_component_index]
                 .send_request(initialize_req)
-                .await_when_result_received(async move |response| match response {
-                    Ok(mut response) => {
-                        // Verify proxy capability handshake
-                        // Each proxy component must respond with Proxy capability or we
-                        // abort the conductor.
-                        if !response.has_meta_capability(Proxy) {
-                            return Err(sacp::util::internal_error(format!(
-                                "component {} is not a proxy",
-                                target_component_index
-                            )));
-                        }
+                .await_when_result_received(async move |response| {
+                    // Note: response tracing is handled by respond_via -> ForwardResponse -> trace_response
+                    match response {
+                        Ok(mut response) => {
+                            // Verify proxy capability handshake
+                            // Each proxy component must respond with Proxy capability or we
+                            // abort the conductor.
+                            if !response.has_meta_capability(Proxy) {
+                                return Err(sacp::util::internal_error(format!(
+                                    "component {} is not a proxy",
+                                    target_component_index
+                                )));
+                            }
 
-                        // We don't want to respond with that proxy capability to the predecessor.
-                        // Proxy communication is just between the conductor and others.
-                        if !initialize_had_proxy {
-                            response = response.remove_meta_capability(Proxy);
-                        }
+                            // We don't want to respond with that proxy capability to the predecessor.
+                            // Proxy communication is just between the conductor and others.
+                            if !initialize_had_proxy {
+                                response = response.remove_meta_capability(Proxy);
+                            }
 
-                        request_cx.respond_via(conductor_tx, response).await
+                            request_cx.respond_via(conductor_tx, response).await
+                        }
+                        Err(error) => request_cx.respond_with_error(error),
                     }
-                    Err(error) => request_cx.respond_with_error(error),
                 })
         }
     }
@@ -943,21 +1150,16 @@ impl ConductorHandlerState {
     ) -> Result<(), sacp::Error> {
         // Before forwarding the ACP request to the agent, replace ACP servers with stdio-based servers.
         // Collect oneshot senders for delivering session_id to listeners.
-        let mut session_id_senders = Vec::new();
         if self.is_agent_component(target_component_index) {
             for mcp_server in &mut request.mcp_servers {
-                if let Some(session_id_tx) = self
-                    .bridge_listeners
+                self.bridge_listeners
                     .transform_mcp_server(
                         &request_cx.connection_cx(),
                         mcp_server,
                         conductor_tx,
                         &self.mcp_bridge_mode,
                     )
-                    .await?
-                {
-                    session_id_senders.push(session_id_tx);
-                }
+                    .await?;
             }
         }
 
@@ -969,10 +1171,6 @@ impl ConductorHandlerState {
         self.components[target_component_index]
             .send_request(request)
             .await_when_ok_response_received(request_cx, async move |response, request_cx| {
-                // Send session_id to all bridge listeners before forwarding response
-                for session_id_tx in session_id_senders {
-                    let _ = session_id_tx.send(response.session_id.clone());
-                }
                 request_cx.respond_via(conductor_tx, response).await
             })
     }
@@ -1122,9 +1320,6 @@ pub enum ConductorMessage {
     McpConnectionReceived {
         /// The acp:$UUID URL identifying this bridge
         acp_url: String,
-
-        /// The session ID this MCP connection belongs to
-        session_id: sacp::schema::SessionId,
 
         /// The actor that should be spawned once the connection-id is available.
         actor: McpBridgeConnectionActor,
