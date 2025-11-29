@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.0.0](https://github.com/symposium-dev/symposium-acp/compare/sacp-proxy-v2.0.2...sacp-proxy-v3.0.0) - 2025-11-29
+
+### Added
+
+- [**breaking**] change JrMessage trait to take &self and require Clone
+
+### Fixed
+
+- *(conductor)* relax session_id test assertion for early MCP calls
+
 ## [2.0.2](https://github.com/symposium-dev/symposium-acp/compare/sacp-proxy-v2.0.1...sacp-proxy-v2.0.2) - 2025-11-25
 
 ### Other

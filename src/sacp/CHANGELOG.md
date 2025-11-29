@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.0.0](https://github.com/symposium-dev/symposium-acp/compare/sacp-v1.1.1...sacp-v2.0.0) - 2025-11-29
+
+### Added
+
+- *(sacp)* make trace functions generic over MessageAndCx<R, N>
+- [**breaking**] change JrMessage trait to take &self and require Clone
+- *(conductor)* add trace event logging for sequence diagram visualization
+
 ## [1.1.1](https://github.com/symposium-dev/symposium-acp/compare/sacp-v1.1.0...sacp-v1.1.1) - 2025-11-25
 
 ### Other
