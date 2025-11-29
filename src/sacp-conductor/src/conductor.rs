@@ -353,46 +353,49 @@ impl ConductorHandlerState {
     /// For regular ACP messages, returns the message as-is.
     fn extract_trace_info<R: sacp::JrRequest, N: sacp::JrNotification>(
         message: &sacp::MessageAndCx<R, N>,
-    ) -> (crate::trace::Protocol, String, serde_json::Value) {
+    ) -> Result<(crate::trace::Protocol, String, serde_json::Value), sacp::Error> {
         use sacp::JrMessage;
 
-        let Ok(untyped) = message.to_untyped_message() else {
-            return (
-                crate::trace::Protocol::Acp,
-                "unknown".to_string(),
-                serde_json::Value::Null,
-            );
-        };
+        match message {
+            sacp::MessageAndCx::Request(request, _) => {
+                let untyped = request.to_untyped_message()?;
 
-        // Try to parse as MCP-over-ACP request
-        if let Some(Ok(mcp_req)) =
-            <McpOverAcpRequest<UntypedMessage>>::parse_request(&untyped.method, &untyped.params)
-        {
-            return (
-                crate::trace::Protocol::Mcp,
-                mcp_req.request.method,
-                mcp_req.request.params,
-            );
+                // Try to parse as MCP-over-ACP request
+                if let Some(Ok(mcp_req)) = <McpOverAcpRequest<UntypedMessage>>::parse_request(
+                    &untyped.method,
+                    &untyped.params,
+                ) {
+                    return Ok((
+                        crate::trace::Protocol::Mcp,
+                        mcp_req.request.method,
+                        mcp_req.request.params,
+                    ));
+                }
+
+                // Regular ACP request
+                Ok((crate::trace::Protocol::Acp, untyped.method, untyped.params))
+            }
+            sacp::MessageAndCx::Notification(notification, _) => {
+                let untyped = notification.to_untyped_message()?;
+
+                // Try to parse as MCP-over-ACP notification
+                if let Some(Ok(mcp_notif)) =
+                    <McpOverAcpNotification<UntypedMessage>>::parse_notification(
+                        &untyped.method,
+                        &untyped.params,
+                    )
+                {
+                    return Ok((
+                        crate::trace::Protocol::Mcp,
+                        mcp_notif.notification.method,
+                        mcp_notif.notification.params,
+                    ));
+                }
+
+                // Regular ACP notification
+                Ok((crate::trace::Protocol::Acp, untyped.method, untyped.params))
+            }
         }
-
-        // Try to parse as MCP-over-ACP notification
-        if let Some(Ok(mcp_notif)) = <McpOverAcpNotification<UntypedMessage>>::parse_notification(
-            &untyped.method,
-            &untyped.params,
-        ) {
-            return (
-                crate::trace::Protocol::Mcp,
-                mcp_notif.notification.method,
-                mcp_notif.notification.params,
-            );
-        }
-
-        // Regular ACP message
-        (
-            crate::trace::Protocol::Acp,
-            untyped.method.clone(),
-            untyped.params.clone(),
-        )
     }
 
     /// Trace a client-to-agent message (request or notification).
@@ -400,9 +403,9 @@ impl ConductorHandlerState {
         &mut self,
         target_index: usize,
         message: &sacp::MessageAndCx<R, N>,
-    ) {
+    ) -> Result<(), sacp::Error> {
         if self.trace_writer.is_none() {
-            return;
+            return Ok(());
         }
 
         let from = if target_index == 0 {
@@ -412,7 +415,7 @@ impl ConductorHandlerState {
         };
         let to = self.component_name(target_index);
 
-        let (protocol, method, params) = Self::extract_trace_info(message);
+        let (protocol, method, params) = Self::extract_trace_info(message)?;
 
         let writer = self.trace_writer.as_mut().unwrap();
         match message.id() {
@@ -427,6 +430,7 @@ impl ConductorHandlerState {
                 writer.notification(protocol, from, to, &method, None, params);
             }
         }
+        Ok(())
     }
 
     /// Trace an agent-to-client message (request or notification).
@@ -434,9 +438,9 @@ impl ConductorHandlerState {
         &mut self,
         source_index: SourceComponentIndex,
         message: &sacp::MessageAndCx<R, N>,
-    ) {
+    ) -> Result<(), sacp::Error> {
         if self.trace_writer.is_none() {
-            return;
+            return Ok(());
         }
 
         let from = self.source_component_name(source_index);
@@ -452,7 +456,7 @@ impl ConductorHandlerState {
             SourceComponentIndex::Component(i) => self.component_name(i - 1),
         };
 
-        let (protocol, method, params) = Self::extract_trace_info(message);
+        let (protocol, method, params) = Self::extract_trace_info(message)?;
 
         let writer = self.trace_writer.as_mut().unwrap();
         match message.id() {
@@ -467,6 +471,7 @@ impl ConductorHandlerState {
                 writer.notification(protocol, from, to, &method, None, params);
             }
         }
+        Ok(())
     }
 
     /// Trace a response to a previous request.
@@ -533,7 +538,9 @@ impl ConductorHandlerState {
                 target_component_index,
                 message,
             } => {
-                self.trace_client_to_agent(target_component_index, &message);
+                if let Err(e) = self.trace_client_to_agent(target_component_index, &message) {
+                    tracing::warn!("Failed to trace client-to-agent message: {e}");
+                }
                 self.forward_client_to_agent_message(
                     conductor_tx,
                     target_component_index,
@@ -547,7 +554,9 @@ impl ConductorHandlerState {
                 source_component_index,
                 message,
             } => {
-                self.trace_agent_to_client(source_component_index, &message);
+                if let Err(e) = self.trace_agent_to_client(source_component_index, &message) {
+                    tracing::warn!("Failed to trace agent-to-client message: {e}");
+                }
                 self.send_message_to_predecessor_of(
                     conductor_tx,
                     client,
@@ -642,12 +651,9 @@ impl ConductorHandlerState {
                     },
                 );
 
-                self.send_message_to_predecessor_of(
-                    conductor_tx,
-                    client,
-                    SourceComponentIndex::Component(self.components.len() - 1),
-                    wrapped,
-                )
+                let source_component = SourceComponentIndex::Component(self.components.len() - 1);
+                self.trace_agent_to_client(source_component, &wrapped)?;
+                self.send_message_to_predecessor_of(conductor_tx, client, source_component, wrapped)
             }
 
             // MCP client disconnected. Remove it from our map and send the
