@@ -1,6 +1,6 @@
 [package]
 name = "sacp-derive"
-version = "2.0.0"
+version = "2.0.1"
 edition = "2021"
 description = "Derive macros for SACP JSON-RPC traits"
 license = "MIT OR Apache-2.0"
