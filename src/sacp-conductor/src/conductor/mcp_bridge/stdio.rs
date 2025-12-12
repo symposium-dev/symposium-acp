@@ -1,5 +1,5 @@
 use futures::{SinkExt, channel::mpsc};
-use sacp::MessageAndCx;
+use sacp::MessageCx;
 use tokio::net::{TcpListener, TcpStream};
 use tokio_util::compat::{TokioAsyncReadCompatExt as _, TokioAsyncWriteCompatExt as _};
 
@@ -40,7 +40,7 @@ pub async fn run_tcp_listener(
 fn make_stdio_actor(
     stream: TcpStream,
     conductor_tx: mpsc::Sender<ConductorMessage>,
-    to_mcp_client_rx: mpsc::Receiver<MessageAndCx>,
+    to_mcp_client_rx: mpsc::Receiver<MessageCx>,
 ) -> McpBridgeConnectionActor {
     let (read_half, write_half) = stream.into_split();
 

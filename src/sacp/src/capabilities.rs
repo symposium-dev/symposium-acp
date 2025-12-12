@@ -6,13 +6,13 @@
 //! # Example
 //!
 //! ```rust,no_run
-//! use sacp::{MetaCapabilityExt, Proxy};
-//! # use sacp::schema::InitializeRequest;
-//! # let init_request: InitializeRequest = unimplemented!();
+//! use sacp::{MetaCapabilityExt, McpAcpTransport};
+//! # use sacp::schema::InitializeResponse;
+//! # let init_response: InitializeResponse = unimplemented!();
 //!
-//! let request = init_request.add_meta_capability(Proxy);
-//! if request.has_meta_capability(Proxy) {
-//!     // Component has a successor in the chain
+//! let response = init_response.add_meta_capability(McpAcpTransport);
+//! if response.has_meta_capability(McpAcpTransport) {
+//!     // Agent supports MCP-over-ACP bridging
 //! }
 //! ```
 
@@ -30,18 +30,6 @@ pub trait MetaCapability {
     /// The value to set when adding this capability (defaults to `true`)
     fn value(&self) -> serde_json::Value {
         serde_json::Value::Bool(true)
-    }
-}
-
-/// The proxy capability - indicates a component has a successor in the proxy chain.
-///
-/// When present in `_meta.symposium.proxy`, signals that the component should use
-/// the `_proxy/successor/*` protocol to communicate with its successor.
-pub struct Proxy;
-
-impl MetaCapability for Proxy {
-    fn key(&self) -> &'static str {
-        "proxy"
     }
 }
 
@@ -156,7 +144,7 @@ mod tests {
     use serde_json::json;
 
     #[test]
-    fn test_add_proxy_capability() {
+    fn test_add_capability_to_request() {
         let request = InitializeRequest {
             protocol_version: VERSION,
             client_capabilities: ClientCapabilities::default(),
@@ -164,22 +152,22 @@ mod tests {
             client_info: None,
         };
 
-        let request = request.add_meta_capability(Proxy);
+        let request = request.add_meta_capability(McpAcpTransport);
 
-        assert!(request.has_meta_capability(Proxy));
+        assert!(request.has_meta_capability(McpAcpTransport));
         assert_eq!(
-            request.client_capabilities.meta.as_ref().unwrap()["symposium"]["proxy"],
+            request.client_capabilities.meta.as_ref().unwrap()["symposium"]["mcp_acp_transport"],
             json!(true)
         );
     }
 
     #[test]
-    fn test_remove_proxy_capability() {
+    fn test_remove_capability_from_request() {
         let mut client_capabilities = ClientCapabilities::default();
         client_capabilities.meta = Some(json!({
             "symposium": {
                 "version": "1.0",
-                "proxy": true
+                "mcp_acp_transport": true
             }
         }));
 
@@ -190,33 +178,13 @@ mod tests {
             client_info: None,
         };
 
-        let request = request.remove_meta_capability(Proxy);
+        let request = request.remove_meta_capability(McpAcpTransport);
 
-        assert!(!request.has_meta_capability(Proxy));
-    }
-
-    #[test]
-    fn test_has_proxy_capability() {
-        let mut client_capabilities = ClientCapabilities::default();
-        client_capabilities.meta = Some(json!({
-            "symposium": {
-                "proxy": true
-            }
-        }));
-
-        let request = InitializeRequest {
-            protocol_version: VERSION,
-            client_capabilities,
-            meta: None,
-            client_info: None,
-        };
-
-        assert!(request.has_meta_capability(Proxy));
         assert!(!request.has_meta_capability(McpAcpTransport));
     }
 
     #[test]
-    fn test_response_capabilities() {
+    fn test_add_capability_to_response() {
         let response = InitializeResponse {
             protocol_version: VERSION,
             agent_capabilities: AgentCapabilities::default(),

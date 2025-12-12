@@ -13,29 +13,19 @@ use crate::util::json_cast;
 // ============================================================================
 
 impl JrMessage for InitializeRequest {
-    fn to_untyped_message(&self) -> Result<crate::UntypedMessage, crate::Error> {
-        let method = self.method().to_string();
-        crate::UntypedMessage::new(&method, self)
-    }
-
     fn method(&self) -> &str {
         "initialize"
     }
 
-    fn parse_request(method: &str, params: &impl Serialize) -> Option<Result<Self, crate::Error>> {
+    fn to_untyped_message(&self) -> Result<crate::UntypedMessage, crate::Error> {
+        crate::UntypedMessage::new(self.method(), self)
+    }
+
+    fn parse_message(method: &str, params: &impl Serialize) -> Option<Result<Self, crate::Error>> {
         if method != "initialize" {
             return None;
         }
-
         Some(json_cast(params))
-    }
-
-    fn parse_notification(
-        _method: &str,
-        _params: &impl Serialize,
-    ) -> Option<Result<Self, crate::Error>> {
-        // This is a request, not a notification
-        None
     }
 }
 
@@ -58,28 +48,19 @@ impl JrResponsePayload for InitializeResponse {
 // ============================================================================
 
 impl JrMessage for AuthenticateRequest {
-    fn to_untyped_message(&self) -> Result<crate::UntypedMessage, crate::Error> {
-        let method = self.method().to_string();
-        crate::UntypedMessage::new(&method, self)
-    }
-
     fn method(&self) -> &str {
         "authenticate"
     }
 
-    fn parse_request(method: &str, params: &impl Serialize) -> Option<Result<Self, crate::Error>> {
+    fn to_untyped_message(&self) -> Result<crate::UntypedMessage, crate::Error> {
+        crate::UntypedMessage::new(self.method(), self)
+    }
+
+    fn parse_message(method: &str, params: &impl Serialize) -> Option<Result<Self, crate::Error>> {
         if method != "authenticate" {
             return None;
         }
         Some(json_cast(params))
-    }
-
-    fn parse_notification(
-        _method: &str,
-        _params: &impl Serialize,
-    ) -> Option<Result<Self, crate::Error>> {
-        // This is a request, not a notification
-        None
     }
 }
 
@@ -102,28 +83,19 @@ impl JrResponsePayload for AuthenticateResponse {
 // ============================================================================
 
 impl JrMessage for LoadSessionRequest {
-    fn to_untyped_message(&self) -> Result<crate::UntypedMessage, crate::Error> {
-        let method = self.method().to_string();
-        crate::UntypedMessage::new(&method, self)
-    }
-
     fn method(&self) -> &str {
         "session/load"
     }
 
-    fn parse_request(method: &str, params: &impl Serialize) -> Option<Result<Self, crate::Error>> {
+    fn to_untyped_message(&self) -> Result<crate::UntypedMessage, crate::Error> {
+        crate::UntypedMessage::new(self.method(), self)
+    }
+
+    fn parse_message(method: &str, params: &impl Serialize) -> Option<Result<Self, crate::Error>> {
         if method != "session/load" {
             return None;
         }
         Some(json_cast(params))
-    }
-
-    fn parse_notification(
-        _method: &str,
-        _params: &impl Serialize,
-    ) -> Option<Result<Self, crate::Error>> {
-        // This is a request, not a notification
-        None
     }
 }
 
@@ -146,28 +118,19 @@ impl JrResponsePayload for LoadSessionResponse {
 // ============================================================================
 
 impl JrMessage for NewSessionRequest {
-    fn to_untyped_message(&self) -> Result<crate::UntypedMessage, crate::Error> {
-        let method = self.method().to_string();
-        crate::UntypedMessage::new(&method, self)
-    }
-
     fn method(&self) -> &str {
         "session/new"
     }
 
-    fn parse_request(method: &str, params: &impl Serialize) -> Option<Result<Self, crate::Error>> {
+    fn to_untyped_message(&self) -> Result<crate::UntypedMessage, crate::Error> {
+        crate::UntypedMessage::new(self.method(), self)
+    }
+
+    fn parse_message(method: &str, params: &impl Serialize) -> Option<Result<Self, crate::Error>> {
         if method != "session/new" {
             return None;
         }
         Some(json_cast(params))
-    }
-
-    fn parse_notification(
-        _method: &str,
-        _params: &impl Serialize,
-    ) -> Option<Result<Self, crate::Error>> {
-        // This is a request, not a notification
-        None
     }
 }
 
@@ -190,28 +153,19 @@ impl JrResponsePayload for NewSessionResponse {
 // ============================================================================
 
 impl JrMessage for PromptRequest {
-    fn to_untyped_message(&self) -> Result<crate::UntypedMessage, crate::Error> {
-        let method = self.method().to_string();
-        crate::UntypedMessage::new(&method, self)
-    }
-
     fn method(&self) -> &str {
         "session/prompt"
     }
 
-    fn parse_request(method: &str, params: &impl Serialize) -> Option<Result<Self, crate::Error>> {
+    fn to_untyped_message(&self) -> Result<crate::UntypedMessage, crate::Error> {
+        crate::UntypedMessage::new(self.method(), self)
+    }
+
+    fn parse_message(method: &str, params: &impl Serialize) -> Option<Result<Self, crate::Error>> {
         if method != "session/prompt" {
             return None;
         }
         Some(json_cast(params))
-    }
-
-    fn parse_notification(
-        _method: &str,
-        _params: &impl Serialize,
-    ) -> Option<Result<Self, crate::Error>> {
-        // This is a request, not a notification
-        None
     }
 }
 
@@ -234,28 +188,19 @@ impl JrResponsePayload for PromptResponse {
 // ============================================================================
 
 impl JrMessage for SetSessionModeRequest {
-    fn to_untyped_message(&self) -> Result<crate::UntypedMessage, crate::Error> {
-        let method = self.method().to_string();
-        crate::UntypedMessage::new(&method, self)
-    }
-
     fn method(&self) -> &str {
         "session/set_mode"
     }
 
-    fn parse_request(method: &str, params: &impl Serialize) -> Option<Result<Self, crate::Error>> {
+    fn to_untyped_message(&self) -> Result<crate::UntypedMessage, crate::Error> {
+        crate::UntypedMessage::new(self.method(), self)
+    }
+
+    fn parse_message(method: &str, params: &impl Serialize) -> Option<Result<Self, crate::Error>> {
         if method != "session/set_mode" {
             return None;
         }
         Some(json_cast(params))
-    }
-
-    fn parse_notification(
-        _method: &str,
-        _params: &impl Serialize,
-    ) -> Option<Result<Self, crate::Error>> {
-        // This is a request, not a notification
-        None
     }
 }
 

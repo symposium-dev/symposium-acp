@@ -1,15 +1,15 @@
-//! Integration tests for the initialization sequence and proxy capability handshake.
+//! Integration tests for the initialization sequence.
 //!
 //! These tests verify that:
-//! 1. Single-component chains do NOT receive the proxy capability offer
-//! 2. Multi-component chains: first component(s) receive proxy capability offer
-//! 3. Proxy components must accept the capability or initialization fails
-//! 4. Last component (agent) never receives proxy capability offer
+//! 1. Single-component chains receive `InitializeRequest` (agent mode)
+//! 2. Multi-component chains: proxies receive `InitializeProxyRequest`
+//! 3. Last component (agent) receives `InitializeRequest`
 
-use sacp::schema::{AgentCapabilities, InitializeRequest, InitializeResponse};
-use sacp::{Component, JrHandlerChain, MetaCapabilityExt, Proxy};
+use sacp::schema::{
+    AgentCapabilities, InitializeProxyRequest, InitializeRequest, InitializeResponse,
+};
+use sacp::{Client, Component, ProxyToConductor};
 use sacp_conductor::Conductor;
-use sacp_proxy::JrCxExt;
 use std::sync::Arc;
 use std::sync::Mutex;
 
@@ -17,9 +17,9 @@ use tokio::io::duplex;
 use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
 
 /// Test helper to receive a JSON-RPC response
-async fn recv<R: sacp::JrResponsePayload + Send>(
-    response: sacp::JrResponse<R>,
-) -> Result<R, sacp::Error> {
+async fn recv<T: sacp::JrResponsePayload + Send>(
+    response: sacp::JrResponse<T>,
+) -> Result<T, sacp::Error> {
     let (tx, rx) = tokio::sync::oneshot::channel();
     response.await_when_result_received(async move |result| {
         tx.send(result).map_err(|_| sacp::Error::internal_error())
@@ -27,32 +27,30 @@ async fn recv<R: sacp::JrResponsePayload + Send>(
     rx.await.map_err(|_| sacp::Error::internal_error())?
 }
 
+/// Tracks what type of initialization request was received
+#[derive(Debug, Clone, PartialEq)]
+enum InitRequestType {
+    Initialize,
+    InitializeProxy,
+}
+
 struct InitConfig {
-    respond_with_proxy: bool,
-    /// If true, forward the request WITH the proxy capability still attached (error case)
-    forward_with_proxy: bool,
-    offered_proxy: Mutex<Option<bool>>,
+    /// What type of init request was received
+    received_init_type: Mutex<Option<InitRequestType>>,
 }
 
 impl InitConfig {
-    fn new(respond_with_proxy: bool) -> Arc<Self> {
+    fn new() -> Arc<Self> {
         Arc::new(Self {
-            respond_with_proxy,
-            forward_with_proxy: false,
-            offered_proxy: Mutex::new(None),
+            received_init_type: Mutex::new(None),
         })
     }
 
-    fn new_with_forward_behavior(respond_with_proxy: bool, forward_with_proxy: bool) -> Arc<Self> {
-        Arc::new(Self {
-            respond_with_proxy,
-            forward_with_proxy,
-            offered_proxy: Mutex::new(None),
-        })
-    }
-
-    fn read_offered_proxy(&self) -> Option<bool> {
-        *self.offered_proxy.lock().expect("not poisoned")
+    fn read_init_type(&self) -> Option<InitRequestType> {
+        self.received_init_type
+            .lock()
+            .expect("not poisoned")
+            .clone()
     }
 }
 
@@ -71,30 +69,34 @@ impl InitComponent {
 impl Component for InitComponent {
     async fn serve(self, client: impl Component) -> Result<(), sacp::Error> {
         let config = Arc::clone(&self.config);
+        let config2 = Arc::clone(&self.config);
 
         {
-            JrHandlerChain::new()
+            ProxyToConductor::builder()
                 .name("init-component")
-                .on_receive_request(async move |mut request: InitializeRequest, request_cx| {
-                    let has_proxy_capability = request.has_meta_capability(Proxy);
-                    *config.offered_proxy.lock().expect("unpoisoned") = Some(has_proxy_capability);
+                // Handle InitializeProxyRequest (we're a proxy)
+                .on_receive_request_from(
+                    Client,
+                    async move |request: InitializeProxyRequest, request_cx, cx| {
+                        *config.received_init_type.lock().expect("unpoisoned") =
+                            Some(InitRequestType::InitializeProxy);
 
-                    // Conditionally remove proxy capability based on config
-                    if !config.forward_with_proxy {
-                        request = request.remove_meta_capability(Proxy);
-                    }
-
-                    if config.respond_with_proxy {
-                        request_cx
-                            .connection_cx()
-                            .send_request_to_successor(request)
+                        // Forward to successor and respond
+                        cx.send_request_to(sacp::Agent, request)
                             .await_when_result_received(async move |response| {
-                                let mut response = response?;
-                                assert!(!response.has_meta_capability(Proxy));
-                                response = response.add_meta_capability(Proxy);
+                                let response: InitializeResponse = response?;
                                 request_cx.respond(response)
                             })
-                    } else {
+                    },
+                )
+                // Handle InitializeRequest (we're the agent)
+                .on_receive_request_from(
+                    Client,
+                    async move |request: InitializeRequest, request_cx, _cx| {
+                        *config2.received_init_type.lock().expect("unpoisoned") =
+                            Some(InitRequestType::Initialize);
+
+                        // We're the final component, just respond
                         let response = InitializeResponse {
                             protocol_version: request.protocol_version,
                             agent_capabilities: AgentCapabilities::default(),
@@ -104,8 +106,8 @@ impl Component for InitComponent {
                         };
 
                         request_cx.respond(response)
-                    }
-                })
+                    },
+                )
                 .serve(client)
                 .await
         }
@@ -114,7 +116,7 @@ impl Component for InitComponent {
 
 async fn run_test_with_components(
     components: Vec<sacp::DynComponent>,
-    editor_task: impl AsyncFnOnce(sacp::JrConnectionCx) -> Result<(), sacp::Error>,
+    editor_task: impl AsyncFnOnce(sacp::JrConnectionCx<sacp::ClientToAgent>) -> Result<(), sacp::Error>,
 ) -> Result<(), sacp::Error> {
     // Set up editor <-> conductor communication
     let (editor_out, conductor_in) = duplex(1024);
@@ -122,7 +124,7 @@ async fn run_test_with_components(
 
     let transport = sacp::ByteStreams::new(editor_out.compat_write(), editor_in.compat());
 
-    JrHandlerChain::new()
+    sacp::ClientToAgent::builder()
         .name("editor-to-connector")
         .with_spawned(|_cx| async move {
             Conductor::new("conductor".to_string(), components, Default::default())
@@ -137,9 +139,9 @@ async fn run_test_with_components(
 }
 
 #[tokio::test]
-async fn test_single_component_no_proxy_offer() -> Result<(), sacp::Error> {
-    // Create a single mock component
-    let component1 = InitConfig::new(false);
+async fn test_single_component_gets_initialize_request() -> Result<(), sacp::Error> {
+    // Single component should receive InitializeRequest (it's the agent)
+    let component1 = InitConfig::new();
 
     run_test_with_components(vec![InitComponent::new(&component1)], async |editor_cx| {
         let init_response = recv(editor_cx.send_request(InitializeRequest {
@@ -160,16 +162,22 @@ async fn test_single_component_no_proxy_offer() -> Result<(), sacp::Error> {
     })
     .await?;
 
-    assert_eq!(component1.read_offered_proxy(), Some(false));
+    // Single component should receive InitializeRequest (not InitializeProxyRequest)
+    assert_eq!(
+        component1.read_init_type(),
+        Some(InitRequestType::Initialize),
+        "Single component should receive InitializeRequest"
+    );
 
     Ok(())
 }
 
 #[tokio::test]
-async fn test_two_components() -> Result<(), sacp::Error> {
-    // Create a single mock component
-    let component1 = InitConfig::new(true);
-    let component2 = InitConfig::new(false);
+async fn test_two_components_proxy_gets_initialize_proxy() -> Result<(), sacp::Error> {
+    // First component (proxy) gets InitializeProxyRequest
+    // Second component (agent) gets InitializeRequest
+    let component1 = InitConfig::new();
+    let component2 = InitConfig::new();
 
     run_test_with_components(
         vec![
@@ -196,22 +204,36 @@ async fn test_two_components() -> Result<(), sacp::Error> {
     )
     .await?;
 
-    assert_eq!(component1.read_offered_proxy(), Some(true));
-    assert_eq!(component2.read_offered_proxy(), Some(false));
+    // First component (proxy) should receive InitializeProxyRequest
+    assert_eq!(
+        component1.read_init_type(),
+        Some(InitRequestType::InitializeProxy),
+        "Proxy component should receive InitializeProxyRequest"
+    );
+
+    // Second component (agent) should receive InitializeRequest
+    assert_eq!(
+        component2.read_init_type(),
+        Some(InitRequestType::Initialize),
+        "Agent component should receive InitializeRequest"
+    );
 
     Ok(())
 }
 
 #[tokio::test]
-async fn test_proxy_component_must_respond_with_proxy() -> Result<(), sacp::Error> {
-    // Component is offered proxy but does NOT respond with it (respond_with_proxy: false)
-    let component1 = InitConfig::new(false);
-    let component2 = InitConfig::new(false);
+async fn test_three_components_all_proxies_get_initialize_proxy() -> Result<(), sacp::Error> {
+    // First two components (proxies) get InitializeProxyRequest
+    // Third component (agent) gets InitializeRequest
+    let component1 = InitConfig::new();
+    let component2 = InitConfig::new();
+    let component3 = InitConfig::new();
 
-    let result = run_test_with_components(
+    run_test_with_components(
         vec![
             InitComponent::new(&component1),
             InitComponent::new(&component2),
+            InitComponent::new(&component3),
         ],
         async |editor_cx| {
             let init_response = recv(editor_cx.send_request(InitializeRequest {
@@ -222,76 +244,35 @@ async fn test_proxy_component_must_respond_with_proxy() -> Result<(), sacp::Erro
             }))
             .await;
 
-            // Should fail because component1 was offered proxy but didn't respond with it
             assert!(
-                init_response.is_err(),
-                "Initialize should fail when proxy component doesn't respond with proxy capability"
+                init_response.is_ok(),
+                "Initialize should succeed: {:?}",
+                init_response
             );
 
             Ok::<(), sacp::Error>(())
         },
     )
-    .await;
+    .await?;
 
-    // Verify the error occurred
-    assert!(result.is_err(), "Expected conductor to return an error");
-    let error = result.unwrap_err();
-    assert!(
-        error.to_string().contains("component 0 is not a proxy"),
-        "Expected 'component 0 is not a proxy' error, got: {:?}",
-        error
+    // First two components (proxies) should receive InitializeProxyRequest
+    assert_eq!(
+        component1.read_init_type(),
+        Some(InitRequestType::InitializeProxy),
+        "First proxy should receive InitializeProxyRequest"
+    );
+    assert_eq!(
+        component2.read_init_type(),
+        Some(InitRequestType::InitializeProxy),
+        "Second proxy should receive InitializeProxyRequest"
     );
 
-    // Verify component1 was offered proxy
-    assert_eq!(component1.read_offered_proxy(), Some(true));
-
-    Ok(())
-}
-
-#[tokio::test]
-async fn test_proxy_component_must_strip_proxy_when_forwarding() -> Result<(), sacp::Error> {
-    // Component responds with proxy BUT incorrectly forwards the request with proxy still attached
-    let component1 = InitConfig::new_with_forward_behavior(true, true);
-    let component2 = InitConfig::new(false);
-
-    let result = run_test_with_components(
-        vec![
-            InitComponent::new(&component1),
-            InitComponent::new(&component2),
-        ],
-        async |editor_cx| {
-            let init_response = recv(editor_cx.send_request(InitializeRequest {
-                protocol_version: Default::default(),
-                client_capabilities: Default::default(),
-                meta: None,
-                client_info: None,
-            }))
-            .await;
-
-            // Should fail because component1 forwarded request with proxy capability still attached
-            assert!(
-                init_response.is_err(),
-                "Initialize should fail when proxy component forwards request with proxy capability"
-            );
-
-            Ok::<(), sacp::Error>(())
-        },
-    )
-    .await;
-
-    // Verify the error occurred
-    assert!(result.is_err(), "Expected conductor to return an error");
-    let error = result.unwrap_err();
-    assert!(
-        error
-            .to_string()
-            .contains("conductor received unexpected initialization request with proxy capability"),
-        "Expected 'conductor received unexpected initialization request with proxy capability' error, got: {:?}",
-        error
+    // Third component (agent) should receive InitializeRequest
+    assert_eq!(
+        component3.read_init_type(),
+        Some(InitRequestType::Initialize),
+        "Agent component should receive InitializeRequest"
     );
-
-    // Verify component1 was offered proxy
-    assert_eq!(component1.read_offered_proxy(), Some(true));
 
     Ok(())
 }

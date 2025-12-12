@@ -4,9 +4,9 @@
 //! while logging them to a file for debugging purposes.
 
 use anyhow::Result;
+use sacp::ProxyToConductor;
 use sacp::component::Component;
-use sacp::{Handled, JrMessageHandler, MessageAndCx};
-use sacp_proxy::AcpProxyExt;
+use sacp::{Handled, JrMessageHandler, MessageCx};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use tokio::sync::mpsc;
@@ -112,16 +112,19 @@ impl TeeHandler {
 }
 
 impl JrMessageHandler for TeeHandler {
+    type Role = ProxyToConductor;
+
     fn describe_chain(&self) -> impl std::fmt::Debug {
         "tee"
     }
 
     async fn handle_message(
         &mut self,
-        message: MessageAndCx,
-    ) -> Result<Handled<MessageAndCx>, sacp::Error> {
+        message: MessageCx,
+        _cx: sacp::JrConnectionCx<ProxyToConductor>,
+    ) -> Result<Handled<MessageCx>, sacp::Error> {
         match message {
-            MessageAndCx::Request(request, request_cx) => {
+            MessageCx::Request(request, request_cx) => {
                 // Allocate a synthetic ID for tracking this request/response pair
                 let synthetic_id = self.allocate_id();
 
@@ -155,9 +158,9 @@ impl JrMessageHandler for TeeHandler {
                 });
 
                 // Return unhandled with the wrapped context
-                Ok(Handled::No(MessageAndCx::Request(request, wrapped_cx)))
+                Ok(Handled::No(MessageCx::Request(request, wrapped_cx)))
             }
-            MessageAndCx::Notification(notification, cx) => {
+            MessageCx::Notification(notification) => {
                 // Log the notification
                 let json_msg = JsonRpcMessage::Notification {
                     message: notification.clone(),
@@ -166,7 +169,7 @@ impl JrMessageHandler for TeeHandler {
                 self.log_entry(entry);
 
                 // Return unhandled so it continues down the chain
-                Ok(Handled::No(MessageAndCx::Notification(notification, cx)))
+                Ok(Handled::No(MessageCx::Notification(notification)))
             }
         }
     }
@@ -197,10 +200,9 @@ impl Component for Tee {
         });
 
         // Create the handler chain
-        sacp::JrHandlerChain::new()
+        ProxyToConductor::builder()
             .name("sacp-tee")
             .with_handler(TeeHandler::new(log_tx))
-            .proxy()
             .connect_to(client)?
             .serve()
             .await

@@ -8,7 +8,7 @@
 //! Add rmcp-based MCP servers to your proxy using the extension trait:
 //!
 //! ```ignore
-//! use sacp_proxy::McpServiceRegistry;
+//! use sacp::mcp_server::McpServiceRegistry;
 //! use sacp_rmcp::McpServiceRegistryRmcpExt;
 //!
 //! let registry = McpServiceRegistry::new();
@@ -16,8 +16,9 @@
 //! ```
 
 use rmcp::ServiceExt;
-use sacp::{ByteStreams, Component};
-use sacp_proxy::McpServiceRegistry;
+use sacp::Agent;
+use sacp::mcp_server::McpServiceRegistry;
+use sacp::{ByteStreams, Component, HasEndpoint, JrRole};
 use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
 
 /// Extension trait for adding rmcp-based MCP servers to a registry.
@@ -54,7 +55,10 @@ pub trait McpServiceRegistryRmcpExt {
         Self: Sized;
 }
 
-impl McpServiceRegistryRmcpExt for McpServiceRegistry {
+impl<Role: JrRole> McpServiceRegistryRmcpExt for McpServiceRegistry<Role>
+where
+    Role: HasEndpoint<Agent>,
+{
     fn add_rmcp_server<S>(
         &self,
         name: impl ToString,

@@ -6,12 +6,13 @@
 //! - Out-of-order response handling
 
 use futures::{AsyncRead, AsyncWrite};
-use sacp::{JrHandlerChain, JrMessage, JrRequest, JrRequestCx, JrResponse, JrResponsePayload};
+use sacp::role::UntypedRole;
+use sacp::{JrConnectionCx, JrMessage, JrRequest, JrRequestCx, JrResponse, JrResponsePayload};
 use serde::{Deserialize, Serialize};
 use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
 
 /// Test helper to block and wait for a JSON-RPC response.
-async fn recv<R: JrResponsePayload + Send>(response: JrResponse<R>) -> Result<R, sacp::Error> {
+async fn recv<T: JrResponsePayload + Send>(response: JrResponse<T>) -> Result<T, sacp::Error> {
     let (tx, rx) = tokio::sync::oneshot::channel();
     response.await_when_result_received(async move |result| {
         tx.send(result).map_err(|_| sacp::Error::internal_error())
@@ -47,16 +48,15 @@ struct PingRequest {
 }
 
 impl JrMessage for PingRequest {
-    fn to_untyped_message(&self) -> Result<sacp::UntypedMessage, sacp::Error> {
-        let method = self.method().to_string();
-        sacp::UntypedMessage::new(&method, self)
-    }
-
     fn method(&self) -> &str {
         "ping"
     }
 
-    fn parse_request(
+    fn to_untyped_message(&self) -> Result<sacp::UntypedMessage, sacp::Error> {
+        sacp::UntypedMessage::new(self.method(), self)
+    }
+
+    fn parse_message(
         method: &str,
         params: &impl serde::Serialize,
     ) -> Option<Result<Self, sacp::Error>> {
@@ -64,14 +64,6 @@ impl JrMessage for PingRequest {
             return None;
         }
         Some(sacp::util::json_cast(params))
-    }
-
-    fn parse_notification(
-        _method: &str,
-        _params: &impl serde::Serialize,
-    ) -> Option<Result<Self, sacp::Error>> {
-        // This is a request, not a notification
-        None
     }
 }
 
@@ -101,16 +93,15 @@ struct SlowRequest {
 }
 
 impl JrMessage for SlowRequest {
-    fn to_untyped_message(&self) -> Result<sacp::UntypedMessage, sacp::Error> {
-        let method = self.method().to_string();
-        sacp::UntypedMessage::new(&method, self)
-    }
-
     fn method(&self) -> &str {
         "slow"
     }
 
-    fn parse_request(
+    fn to_untyped_message(&self) -> Result<sacp::UntypedMessage, sacp::Error> {
+        sacp::UntypedMessage::new(self.method(), self)
+    }
+
+    fn parse_message(
         method: &str,
         params: &impl serde::Serialize,
     ) -> Option<Result<Self, sacp::Error>> {
@@ -118,14 +109,6 @@ impl JrMessage for SlowRequest {
             return None;
         }
         Some(sacp::util::json_cast(params))
-    }
-
-    fn parse_notification(
-        _method: &str,
-        _params: &impl serde::Serialize,
-    ) -> Option<Result<Self, sacp::Error>> {
-        // This is a request, not a notification
-        None
     }
 }
 
@@ -164,8 +147,10 @@ async fn test_bidirectional_communication() {
             let (server_reader, server_writer, client_reader, client_writer) = setup_test_streams();
 
             let side_a_transport = sacp::ByteStreams::new(server_writer, server_reader);
-            let side_a = JrHandlerChain::new().on_receive_request(
-                async |request: PingRequest, request_cx: JrRequestCx<PongResponse>| {
+            let side_a = UntypedRole::builder().on_receive_request(
+                async |request: PingRequest,
+                       request_cx: JrRequestCx<PongResponse>,
+                       _connection_cx: JrConnectionCx<UntypedRole>| {
                     request_cx.respond(PongResponse {
                         value: request.value + 1,
                     })
@@ -173,7 +158,7 @@ async fn test_bidirectional_communication() {
             );
 
             let side_b_transport = sacp::ByteStreams::new(client_writer, client_reader);
-            let side_b = JrHandlerChain::new();
+            let side_b = UntypedRole::builder();
 
             // Spawn side_a as server
             tokio::task::spawn_local(async move {
@@ -215,8 +200,10 @@ async fn test_request_ids() {
             let (server_reader, server_writer, client_reader, client_writer) = setup_test_streams();
 
             let server_transport = sacp::ByteStreams::new(server_writer, server_reader);
-            let server = JrHandlerChain::new().on_receive_request(
-                async |request: PingRequest, request_cx: JrRequestCx<PongResponse>| {
+            let server = UntypedRole::builder().on_receive_request(
+                async |request: PingRequest,
+                       request_cx: JrRequestCx<PongResponse>,
+                       _connection_cx: JrConnectionCx<UntypedRole>| {
                     request_cx.respond(PongResponse {
                         value: request.value + 1,
                     })
@@ -224,7 +211,7 @@ async fn test_request_ids() {
             );
 
             let client_transport = sacp::ByteStreams::new(client_writer, client_reader);
-            let client = JrHandlerChain::new();
+            let client = UntypedRole::builder();
 
             tokio::task::spawn_local(async move {
                 server.serve(server_transport).await.ok();
@@ -274,8 +261,10 @@ async fn test_out_of_order_responses() {
             let (server_reader, server_writer, client_reader, client_writer) = setup_test_streams();
 
             let server_transport = sacp::ByteStreams::new(server_writer, server_reader);
-            let server = JrHandlerChain::new().on_receive_request(
-                async |request: SlowRequest, request_cx: JrRequestCx<SlowResponse>| {
+            let server = UntypedRole::builder().on_receive_request(
+                async |request: SlowRequest,
+                       request_cx: JrRequestCx<SlowResponse>,
+                       _connection_cx: JrConnectionCx<UntypedRole>| {
                     // Simulate delay
                     tokio::time::sleep(tokio::time::Duration::from_millis(request.delay_ms)).await;
                     request_cx.respond(SlowResponse { id: request.id })
@@ -283,7 +272,7 @@ async fn test_out_of_order_responses() {
             );
 
             let client_transport = sacp::ByteStreams::new(client_writer, client_reader);
-            let client = JrHandlerChain::new();
+            let client = UntypedRole::builder();
 
             tokio::task::spawn_local(async move {
                 server.serve(server_transport).await.ok();

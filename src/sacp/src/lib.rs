@@ -10,16 +10,17 @@
 //! Building an ACP agent is straightforward with sacp's type-safe API:
 //!
 //! ```no_run
-//! use sacp::{JrHandlerChain, MessageAndCx, UntypedMessage};
+//! use sacp::role::UntypedRole;
+//! use sacp::{MessageCx, UntypedMessage};
 //! use sacp::schema::{InitializeRequest, InitializeResponse, AgentCapabilities};
 //! use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
 //!
 //! # #[tokio::main]
 //! # async fn main() -> Result<(), sacp::Error> {
 //! // Start by creating an agent connection
-//! JrHandlerChain::new()
+//! UntypedRole::builder()
 //! .name("my-agent") // Give it a name for logging purposes
-//! .on_receive_request(async move |initialize: InitializeRequest, request_cx| {
+//! .on_receive_request(async move |initialize: InitializeRequest, request_cx, _cx| {
 //!     // Create one or more request handlers -- these are attempted in order.
 //!     // You can do anything you want in here, but you should eventually
 //!     // respond to the request with `request_cx.respond(...)`:
@@ -31,9 +32,9 @@
 //!         meta: Default::default(),
 //!     })
 //! })
-//! .on_receive_message(async move |message: MessageAndCx<UntypedMessage, UntypedMessage>| {
+//! .on_receive_message(async move |message: MessageCx, cx| {
 //!     // You can also handle any kind of message:
-//!     message.respond_with_error(sacp::util::internal_error("TODO"))
+//!     message.respond_with_error(sacp::util::internal_error("TODO"), cx)
 //! })
 //! .serve(sacp::ByteStreams::new(
 //!     tokio::io::stdout().compat_write(),
@@ -47,10 +48,10 @@
 //!
 //! ### Pattern 1: Defining Reusable Components
 //!
-//! When building agents or proxies, define a struct that implements [`Component`]. Internally, use [`JrHandlerChain`] to set up handlers:
+//! When building agents or proxies, define a struct that implements [`Component`]. Internally, use the role's `builder()` method to set up handlers:
 //!
 //! ```rust,ignore
-//! use sacp::{Component, JrHandlerChain};
+//! use sacp::Component;
 //!
 //! struct MyAgent {
 //!     config: AgentConfig,
@@ -58,7 +59,7 @@
 //!
 //! impl Component for MyAgent {
 //!     async fn serve(self, client: impl Component) -> Result<(), sacp::Error> {
-//!         JrHandlerChain::new()
+//!         UntypedRole::builder()
 //!             .name("my-agent")
 //!             .on_receive_request(async move |req: PromptRequest, cx| {
 //!                 // Don't block the message loop! Use await_when_* for async work
@@ -113,7 +114,7 @@
 //! to share access to local variables:
 //!
 //! ```rust,ignore
-//! JrHandlerChain::new()
+//! UntypedRole::builder()
 //!     .on_receive_notification(async |notif: SessionUpdate, cx| {
 //!         // Handle notifications from the server
 //!         Ok(())
@@ -171,6 +172,13 @@ pub mod component;
 pub mod handler;
 /// JSON-RPC connection and handler infrastructure
 mod jsonrpc;
+/// MCP declarations (minimal)
+pub mod mcp;
+/// MCP server support for providing MCP tools over ACP
+pub mod mcp_server;
+/// Proxy support for building ACP proxy components
+/// Role types for JSON-RPC connections
+pub mod role;
 /// ACP protocol schema types - all message types, requests, responses, and supporting types
 pub mod schema;
 /// Utility functions and types
@@ -190,9 +198,14 @@ pub mod jsonrpcmsg {
 }
 
 pub use jsonrpc::{
-    ByteStreams, Channel, Handled, IntoHandled, JrConnection, JrConnectionCx, JrHandlerChain,
-    JrMessage, JrMessageHandler, JrNotification, JrRequest, JrRequestCx, JrResponse,
-    JrResponsePayload, Lines, MessageAndCx, UntypedMessage,
+    ByteStreams, Channel, Handled, IntoHandled, JrConnection, JrConnectionBuilder, JrConnectionCx,
+    JrMessage, JrMessageHandler, JrMessageHandlerSend, JrNotification, JrRequest, JrRequestCx,
+    JrResponse, JrResponsePayload, Lines, MessageCx, NullHandler, UntypedMessage,
+};
+
+pub use role::{
+    Agent, AgentToClient, Client, ClientToAgent, Conductor, HasDefaultEndpoint, HasEndpoint,
+    JrEndpoint, JrRole, ProxyToConductor,
 };
 
 pub use component::{Component, DynComponent};

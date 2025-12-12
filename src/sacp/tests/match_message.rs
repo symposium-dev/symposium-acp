@@ -1,6 +1,7 @@
+use sacp::role::UntypedRole;
 use sacp::{
-    Component, Handled, JrHandlerChain, JrMessage, JrMessageHandler, JrRequest, JrResponsePayload,
-    util::MatchMessage,
+    Component, Handled, JrConnectionCx, JrMessage, JrMessageHandler, JrRequest, JrRequestCx,
+    JrResponsePayload, MessageCx, util::MatchMessage,
 };
 use serde::{Deserialize, Serialize};
 
@@ -10,6 +11,10 @@ struct EchoRequestResponse {
 }
 
 impl JrMessage for EchoRequestResponse {
+    fn method(&self) -> &str {
+        "echo"
+    }
+
     fn to_untyped_message(&self) -> Result<sacp::UntypedMessage, sacp::Error> {
         Ok(sacp::UntypedMessage {
             method: self.method().to_string(),
@@ -17,11 +22,7 @@ impl JrMessage for EchoRequestResponse {
         })
     }
 
-    fn method(&self) -> &str {
-        "echo"
-    }
-
-    fn parse_request(
+    fn parse_message(
         method: &str,
         params: &impl serde::Serialize,
     ) -> Option<Result<Self, sacp::Error>> {
@@ -30,13 +31,6 @@ impl JrMessage for EchoRequestResponse {
         } else {
             None
         }
-    }
-
-    fn parse_notification(
-        _method: &str,
-        _params: &impl serde::Serialize,
-    ) -> Option<Result<Self, sacp::Error>> {
-        None
     }
 }
 
@@ -57,10 +51,13 @@ impl JrRequest for EchoRequestResponse {
 struct EchoHandler;
 
 impl JrMessageHandler for EchoHandler {
+    type Role = UntypedRole;
+
     async fn handle_message(
         &mut self,
-        message: sacp::MessageAndCx,
-    ) -> Result<sacp::Handled<sacp::MessageAndCx>, sacp::Error> {
+        message: MessageCx,
+        _cx: JrConnectionCx<Self::Role>,
+    ) -> Result<Handled<MessageCx>, sacp::Error> {
         MatchMessage::new(message)
             .if_request(async move |request: EchoRequestResponse, request_cx| {
                 request_cx.respond(request)
@@ -83,7 +80,7 @@ async fn modify_message_en_route() -> Result<(), sacp::Error> {
 
     impl Component for TestComponent {
         async fn serve(self, client: impl Component) -> Result<(), sacp::Error> {
-            JrHandlerChain::new()
+            UntypedRole::builder()
                 .with_handler(PushHandler {
                     message: "b".to_string(),
                 })
@@ -98,10 +95,13 @@ async fn modify_message_en_route() -> Result<(), sacp::Error> {
     }
 
     impl JrMessageHandler for PushHandler {
+        type Role = UntypedRole;
+
         async fn handle_message(
             &mut self,
-            message: sacp::MessageAndCx,
-        ) -> Result<sacp::Handled<sacp::MessageAndCx>, sacp::Error> {
+            message: MessageCx,
+            _cx: JrConnectionCx<Self::Role>,
+        ) -> Result<Handled<MessageCx>, sacp::Error> {
             MatchMessage::new(message)
                 .if_request(async move |mut request: EchoRequestResponse, request_cx| {
                     request.text.push(self.message.clone());
@@ -116,7 +116,7 @@ async fn modify_message_en_route() -> Result<(), sacp::Error> {
         }
     }
 
-    JrHandlerChain::new()
+    UntypedRole::builder()
         .connect_to(TestComponent)?
         .with_client(async |cx| {
             let result = cx
@@ -148,18 +148,22 @@ async fn modify_message_en_route_inline() -> Result<(), sacp::Error> {
 
     impl Component for TestComponent {
         async fn serve(self, client: impl Component) -> Result<(), sacp::Error> {
-            JrHandlerChain::new()
-                .on_receive_request(async move |mut request: EchoRequestResponse, request_cx| {
-                    request.text.push("b".to_string());
-                    Ok(Handled::No((request, request_cx)))
-                })
+            UntypedRole::builder()
+                .on_receive_request(
+                    async move |mut request: EchoRequestResponse,
+                                request_cx: JrRequestCx<EchoRequestResponse>,
+                                _connection_cx: JrConnectionCx<UntypedRole>| {
+                        request.text.push("b".to_string());
+                        Ok(Handled::No((request, request_cx)))
+                    },
+                )
                 .with_handler(EchoHandler)
                 .serve(client)
                 .await
         }
     }
 
-    JrHandlerChain::new()
+    UntypedRole::builder()
         .connect_to(TestComponent)?
         .with_client(async |cx| {
             let result = cx
@@ -192,21 +196,29 @@ async fn modify_message_and_stop() -> Result<(), sacp::Error> {
 
     impl Component for TestComponent {
         async fn serve(self, client: impl Component) -> Result<(), sacp::Error> {
-            JrHandlerChain::new()
-                .on_receive_request(async move |request: EchoRequestResponse, request_cx| {
-                    request_cx.respond(request)
-                })
-                .on_receive_request(async move |mut request: EchoRequestResponse, request_cx| {
-                    request.text.push("b".to_string());
-                    Ok(Handled::No((request, request_cx)))
-                })
+            UntypedRole::builder()
+                .on_receive_request(
+                    async move |request: EchoRequestResponse,
+                                request_cx: JrRequestCx<EchoRequestResponse>,
+                                _connection_cx: JrConnectionCx<UntypedRole>| {
+                        request_cx.respond(request)
+                    },
+                )
+                .on_receive_request(
+                    async move |mut request: EchoRequestResponse,
+                                request_cx: JrRequestCx<EchoRequestResponse>,
+                                _connection_cx: JrConnectionCx<UntypedRole>| {
+                        request.text.push("b".to_string());
+                        Ok(Handled::No((request, request_cx)))
+                    },
+                )
                 .with_handler(EchoHandler)
                 .serve(client)
                 .await
         }
     }
 
-    JrHandlerChain::new()
+    UntypedRole::builder()
         .connect_to(TestComponent)?
         .with_client(async |cx| {
             let result = cx

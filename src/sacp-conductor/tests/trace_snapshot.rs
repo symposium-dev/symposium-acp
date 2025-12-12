@@ -208,11 +208,6 @@ async fn test_trace_snapshot() -> Result<(), sacp::Error> {
                     session: None,
                     params: Object {
                         "clientCapabilities": Object {
-                            "_meta": Object {
-                                "symposium": Object {
-                                    "version": String("1.0"),
-                                },
-                            },
                             "fs": Object {
                                 "readTextFile": Bool(false),
                                 "writeTextFile": Bool(false),
@@ -257,11 +252,6 @@ async fn test_trace_snapshot() -> Result<(), sacp::Error> {
                     is_error: false,
                     payload: Object {
                         "agentCapabilities": Object {
-                            "_meta": Object {
-                                "symposium": Object {
-                                    "version": String("1.0"),
-                                },
-                            },
                             "loadSession": Bool(false),
                             "mcpCapabilities": Object {
                                 "http": Bool(false),

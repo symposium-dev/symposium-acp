@@ -31,7 +31,7 @@ impl TypeRequest {
     ) -> Self {
         self.state = Some(match self.state.take().expect("valid state") {
             TypeMessageState::Unhandled(method, params, request_cx) => {
-                match R::parse_request(&method, &params) {
+                match R::parse_message(&method, &params) {
                     Some(Ok(request)) => {
                         TypeMessageState::Handled(op(request, request_cx.cast()).await)
                     }
@@ -91,7 +91,7 @@ impl TypeNotification {
     ) -> Self {
         self.state = Some(match self.state.take().expect("valid state") {
             TypeNotificationState::Unhandled(method, params) => {
-                match N::parse_notification(&method, &params) {
+                match N::parse_message(&method, &params) {
                     Some(Ok(request)) => TypeNotificationState::Handled(op(request).await),
 
                     Some(Err(err)) => {

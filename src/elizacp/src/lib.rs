@@ -2,13 +2,14 @@ pub mod eliza;
 
 use anyhow::Result;
 use eliza::Eliza;
+use sacp::AgentToClient;
 use sacp::schema::{
     AgentCapabilities, ContentBlock, ContentChunk, InitializeRequest, InitializeResponse,
     LoadSessionRequest, LoadSessionResponse, McpServer, NewSessionRequest, NewSessionResponse,
     PromptRequest, PromptResponse, SessionId, SessionNotification, SessionUpdate, StopReason,
     TextContent,
 };
-use sacp::{Component, JrHandlerChain, JrRequestCx};
+use sacp::{Component, JrConnectionCx, JrRequestCx};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
@@ -112,6 +113,7 @@ impl ElizaAgent {
         &self,
         request: PromptRequest,
         request_cx: JrRequestCx<PromptResponse>,
+        cx: JrConnectionCx<AgentToClient>,
     ) -> Result<(), sacp::Error> {
         let session_id = request.session_id.clone();
 
@@ -164,16 +166,19 @@ impl ElizaAgent {
             response_text
         };
 
-        request_cx
-            .connection_cx()
-            .send_notification(SessionNotification {
-                session_id: session_id.clone(),
-                update: SessionUpdate::AgentMessageChunk(ContentChunk {
-                    content: final_response.into(),
-                    meta: None,
-                }),
+        tracing::debug!(
+            ?session_id,
+            ?final_response,
+            "Eliza sending SessionNotification"
+        );
+        cx.send_notification(SessionNotification {
+            session_id: session_id.clone(),
+            update: SessionUpdate::AgentMessageChunk(ContentChunk {
+                content: final_response.into(),
                 meta: None,
-            })?;
+            }),
+            meta: None,
+        })?;
 
         // Complete the request
         request_cx.respond(PromptResponse {
@@ -380,10 +385,10 @@ fn parse_tool_call(input: &str) -> Option<(String, String, String)> {
 
 impl Component for ElizaAgent {
     async fn serve(self, client: impl Component) -> Result<(), sacp::Error> {
-        JrHandlerChain::new()
+        AgentToClient::builder()
             .name("elizacp")
             .on_receive_request({
-                async |initialize: InitializeRequest, request_cx| {
+                async |initialize: InitializeRequest, request_cx, _cx| {
                     tracing::debug!("Received initialize request");
 
                     request_cx.respond(InitializeResponse {
@@ -402,27 +407,26 @@ impl Component for ElizaAgent {
             })
             .on_receive_request({
                 let agent = self.clone();
-                async move |request: NewSessionRequest, request_cx| {
+                async move |request: NewSessionRequest, request_cx, _cx| {
                     agent.handle_new_session(request, request_cx).await
                 }
             })
             .on_receive_request({
                 let agent = self.clone();
-                async move |request: LoadSessionRequest, request_cx| {
+                async move |request: LoadSessionRequest, request_cx, _cx| {
                     agent.handle_load_session(request, request_cx).await
                 }
             })
             .on_receive_request({
                 let agent = self.clone();
-                async move |request: PromptRequest, request_cx| {
+                async move |request: PromptRequest, request_cx, cx| {
                     // Spawn prompt processing to avoid blocking the event loop.
                     // This allows the agent to handle other requests (like session/new)
                     // while processing a prompt.
-                    request_cx.connection_cx().spawn({
+                    let cx_clone = cx.clone();
+                    cx.spawn({
                         let agent = agent.clone();
-                        async move {
-                            agent.process_prompt(request, request_cx).await
-                        }
+                        async move { agent.process_prompt(request, request_cx, cx_clone).await }
                     })
                 }
             })

@@ -18,11 +18,6 @@ use crate::util::json_cast;
 // ============================================================================
 
 impl JrMessage for ClientRequest {
-    fn to_untyped_message(&self) -> Result<crate::UntypedMessage, crate::Error> {
-        let method = self.method().to_string();
-        crate::UntypedMessage::new(&method, self)
-    }
-
     fn method(&self) -> &str {
         match self {
             ClientRequest::InitializeRequest(_) => "initialize",
@@ -35,7 +30,11 @@ impl JrMessage for ClientRequest {
         }
     }
 
-    fn parse_request(method: &str, params: &impl Serialize) -> Option<Result<Self, crate::Error>> {
+    fn to_untyped_message(&self) -> Result<crate::UntypedMessage, crate::Error> {
+        crate::UntypedMessage::new(self.method(), self)
+    }
+
+    fn parse_message(method: &str, params: &impl Serialize) -> Option<Result<Self, crate::Error>> {
         let result = match method {
             "initialize" => json_cast(params).map(ClientRequest::InitializeRequest),
             "authenticate" => json_cast(params).map(ClientRequest::AuthenticateRequest),
@@ -60,14 +59,6 @@ impl JrMessage for ClientRequest {
 
         Some(result)
     }
-
-    fn parse_notification(
-        _method: &str,
-        _params: &impl Serialize,
-    ) -> Option<Result<Self, crate::Error>> {
-        // ClientRequest is for requests only, not notifications
-        None
-    }
 }
 
 impl JrRequest for ClientRequest {
@@ -75,11 +66,6 @@ impl JrRequest for ClientRequest {
 }
 
 impl JrMessage for ClientNotification {
-    fn to_untyped_message(&self) -> Result<crate::UntypedMessage, crate::Error> {
-        let method = self.method().to_string();
-        crate::UntypedMessage::new(&method, self)
-    }
-
     fn method(&self) -> &str {
         match self {
             ClientNotification::CancelNotification(_) => "session/cancel",
@@ -87,18 +73,11 @@ impl JrMessage for ClientNotification {
         }
     }
 
-    fn parse_request(
-        _method: &str,
-        _params: &impl Serialize,
-    ) -> Option<Result<Self, crate::Error>> {
-        // ClientNotification is for notifications only, not requests
-        None
+    fn to_untyped_message(&self) -> Result<crate::UntypedMessage, crate::Error> {
+        crate::UntypedMessage::new(self.method(), self)
     }
 
-    fn parse_notification(
-        method: &str,
-        params: &impl Serialize,
-    ) -> Option<Result<Self, crate::Error>> {
+    fn parse_message(method: &str, params: &impl Serialize) -> Option<Result<Self, crate::Error>> {
         let result = match method {
             "session/cancel" => json_cast(params).map(ClientNotification::CancelNotification),
             _ => {
@@ -127,11 +106,6 @@ impl JrNotification for ClientNotification {}
 // ============================================================================
 
 impl JrMessage for AgentRequest {
-    fn to_untyped_message(&self) -> Result<crate::UntypedMessage, crate::Error> {
-        let method = self.method().to_string();
-        crate::UntypedMessage::new(&method, self)
-    }
-
     fn method(&self) -> &str {
         match self {
             AgentRequest::WriteTextFileRequest(_) => "fs/write_text_file",
@@ -146,7 +120,11 @@ impl JrMessage for AgentRequest {
         }
     }
 
-    fn parse_request(method: &str, params: &impl Serialize) -> Option<Result<Self, crate::Error>> {
+    fn to_untyped_message(&self) -> Result<crate::UntypedMessage, crate::Error> {
+        crate::UntypedMessage::new(self.method(), self)
+    }
+
+    fn parse_message(method: &str, params: &impl Serialize) -> Option<Result<Self, crate::Error>> {
         let result = match method {
             "fs/write_text_file" => json_cast(params).map(AgentRequest::WriteTextFileRequest),
             "fs/read_text_file" => json_cast(params).map(AgentRequest::ReadTextFileRequest),
@@ -177,14 +155,6 @@ impl JrMessage for AgentRequest {
 
         Some(result)
     }
-
-    fn parse_notification(
-        _method: &str,
-        _params: &impl Serialize,
-    ) -> Option<Result<Self, crate::Error>> {
-        // AgentRequest is for requests only, not notifications
-        None
-    }
 }
 
 impl JrRequest for AgentRequest {
@@ -192,11 +162,6 @@ impl JrRequest for AgentRequest {
 }
 
 impl JrMessage for AgentNotification {
-    fn to_untyped_message(&self) -> Result<crate::UntypedMessage, crate::Error> {
-        let method = self.method().to_string();
-        crate::UntypedMessage::new(&method, self)
-    }
-
     fn method(&self) -> &str {
         match self {
             AgentNotification::SessionNotification(_) => "session/update",
@@ -204,18 +169,11 @@ impl JrMessage for AgentNotification {
         }
     }
 
-    fn parse_request(
-        _method: &str,
-        _params: &impl Serialize,
-    ) -> Option<Result<Self, crate::Error>> {
-        // AgentNotification is for notifications only, not requests
-        None
+    fn to_untyped_message(&self) -> Result<crate::UntypedMessage, crate::Error> {
+        crate::UntypedMessage::new(self.method(), self)
     }
 
-    fn parse_notification(
-        method: &str,
-        params: &impl Serialize,
-    ) -> Option<Result<Self, crate::Error>> {
+    fn parse_message(method: &str, params: &impl Serialize) -> Option<Result<Self, crate::Error>> {
         let result = match method {
             "session/update" => json_cast(params).map(AgentNotification::SessionNotification),
             _ => {

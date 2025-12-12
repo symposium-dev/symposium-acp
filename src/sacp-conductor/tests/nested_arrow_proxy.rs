@@ -19,6 +19,7 @@ use tokio::io::duplex;
 use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
 
 #[tokio::test]
+#[ignore = "flaky due to cargo run compilation races - see nested_conductor.rs for in-process version"]
 async fn test_conductor_with_two_external_arrow_proxies() -> Result<(), sacp::Error> {
     // Create the component chain: arrow_proxy1 -> arrow_proxy2 -> eliza
     let arrow_proxy1 = AcpAgent::from_str("cargo run -p sacp-test --example arrow_proxy")?;

@@ -7,12 +7,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [1.3.0](https://github.com/symposium-dev/symposium-acp/compare/yopo-v1.2.1...yopo-v1.3.0) - 2025-11-29
-
-### Added
-
-- *(yopo)* accept multiple command arguments with env var support
-
 ## [1.2.1](https://github.com/symposium-dev/symposium-acp/compare/yopo-v1.2.0...yopo-v1.2.1) - 2025-11-25
 
 ### Other

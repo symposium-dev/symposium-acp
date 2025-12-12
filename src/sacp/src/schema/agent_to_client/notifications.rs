@@ -7,27 +7,15 @@ use crate::jsonrpc::{JrMessage, JrNotification};
 // These are one-way messages that agents send to clients/editors
 
 impl JrMessage for SessionNotification {
-    fn to_untyped_message(&self) -> Result<crate::UntypedMessage, crate::Error> {
-        let method = self.method().to_string();
-        crate::UntypedMessage::new(&method, self)
-    }
-
     fn method(&self) -> &str {
         "session/update"
     }
 
-    fn parse_request(
-        _method: &str,
-        _params: &impl Serialize,
-    ) -> Option<Result<Self, crate::Error>> {
-        // This is a notification, not a request
-        None
+    fn to_untyped_message(&self) -> Result<crate::UntypedMessage, crate::Error> {
+        crate::UntypedMessage::new(self.method(), self)
     }
 
-    fn parse_notification(
-        method: &str,
-        params: &impl Serialize,
-    ) -> Option<Result<Self, crate::Error>> {
+    fn parse_message(method: &str, params: &impl Serialize) -> Option<Result<Self, crate::Error>> {
         if method != "session/update" {
             return None;
         }

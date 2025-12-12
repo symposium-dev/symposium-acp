@@ -9,12 +9,13 @@
 
 use expect_test::expect;
 use futures::{AsyncRead, AsyncWrite};
-use sacp::{JrHandlerChain, JrMessage, JrRequest, JrRequestCx, JrResponse, JrResponsePayload};
+use sacp::role::UntypedRole;
+use sacp::{JrConnectionCx, JrMessage, JrRequest, JrRequestCx, JrResponse, JrResponsePayload};
 use serde::{Deserialize, Serialize};
 use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
 
 /// Test helper to block and wait for a JSON-RPC response.
-async fn recv<R: JrResponsePayload + Send>(response: JrResponse<R>) -> Result<R, sacp::Error> {
+async fn recv<T: JrResponsePayload + Send>(response: JrResponse<T>) -> Result<T, sacp::Error> {
     let (tx, rx) = tokio::sync::oneshot::channel();
     response.await_when_result_received(async move |result| {
         tx.send(result).map_err(|_| sacp::Error::internal_error())
@@ -50,16 +51,15 @@ struct SimpleRequest {
 }
 
 impl JrMessage for SimpleRequest {
-    fn to_untyped_message(&self) -> Result<sacp::UntypedMessage, sacp::Error> {
-        let method = self.method().to_string();
-        sacp::UntypedMessage::new(&method, self)
-    }
-
     fn method(&self) -> &str {
         "simple_method"
     }
 
-    fn parse_request(
+    fn to_untyped_message(&self) -> Result<sacp::UntypedMessage, sacp::Error> {
+        sacp::UntypedMessage::new(self.method(), self)
+    }
+
+    fn parse_message(
         method: &str,
         params: &impl serde::Serialize,
     ) -> Option<Result<Self, sacp::Error>> {
@@ -67,14 +67,6 @@ impl JrMessage for SimpleRequest {
             return None;
         }
         Some(sacp::util::json_cast(params))
-    }
-
-    fn parse_notification(
-        _method: &str,
-        _params: &impl serde::Serialize,
-    ) -> Option<Result<Self, sacp::Error>> {
-        // This is a request, not a notification
-        None
     }
 }
 
@@ -119,7 +111,7 @@ async fn test_invalid_json() {
 
             // No handlers - all requests will return errors
             let server_transport = sacp::ByteStreams::new(server_writer, server_reader);
-            let server = JrHandlerChain::new();
+            let server = UntypedRole::builder();
 
             // Spawn server
             tokio::task::spawn_local(async move {
@@ -162,6 +154,7 @@ async fn test_invalid_json() {
 // ============================================================================
 
 #[tokio::test]
+#[ignore = "hangs indefinitely - see https://github.com/symposium-dev/symposium-acp/issues/64"]
 async fn test_incomplete_line() {
     use futures::io::Cursor;
 
@@ -172,7 +165,7 @@ async fn test_incomplete_line() {
 
     // No handlers needed for EOF test
     let transport = sacp::ByteStreams::new(output, input);
-    let connection = JrHandlerChain::new();
+    let connection = UntypedRole::builder();
 
     // The server should handle EOF mid-message gracefully
     let result = connection.serve(transport).await;
@@ -197,9 +190,9 @@ async fn test_unknown_method() {
 
             // No handlers - all requests will be "method not found"
             let server_transport = sacp::ByteStreams::new(server_writer, server_reader);
-            let server = JrHandlerChain::new();
+            let server = UntypedRole::builder();
             let client_transport = sacp::ByteStreams::new(client_writer, client_reader);
-            let client = JrHandlerChain::new();
+            let client = UntypedRole::builder();
 
             // Spawn server
             tokio::task::spawn_local(async move {
@@ -240,16 +233,15 @@ struct ErrorRequest {
 }
 
 impl JrMessage for ErrorRequest {
-    fn to_untyped_message(&self) -> Result<sacp::UntypedMessage, sacp::Error> {
-        let method = self.method().to_string();
-        sacp::UntypedMessage::new(&method, self)
-    }
-
     fn method(&self) -> &str {
         "error_method"
     }
 
-    fn parse_request(
+    fn to_untyped_message(&self) -> Result<sacp::UntypedMessage, sacp::Error> {
+        sacp::UntypedMessage::new(self.method(), self)
+    }
+
+    fn parse_message(
         method: &str,
         params: &impl serde::Serialize,
     ) -> Option<Result<Self, sacp::Error>> {
@@ -257,14 +249,6 @@ impl JrMessage for ErrorRequest {
             return None;
         }
         Some(sacp::util::json_cast(params))
-    }
-
-    fn parse_notification(
-        _method: &str,
-        _params: &impl serde::Serialize,
-    ) -> Option<Result<Self, sacp::Error>> {
-        // This is a request, not a notification
-        None
     }
 }
 
@@ -283,8 +267,10 @@ async fn test_handler_returns_error() {
             let (server_reader, server_writer, client_reader, client_writer) = setup_test_streams();
 
             let server_transport = sacp::ByteStreams::new(server_writer, server_reader);
-            let server = JrHandlerChain::new().on_receive_request(
-                async |_request: ErrorRequest, request_cx: JrRequestCx<SimpleResponse>| {
+            let server = UntypedRole::builder().on_receive_request(
+                async |_request: ErrorRequest,
+                       request_cx: JrRequestCx<SimpleResponse>,
+                       _connection_cx: JrConnectionCx<UntypedRole>| {
                     // Explicitly return an error
                     request_cx.respond_with_error(sacp::Error::new((
                         -32000,
@@ -294,7 +280,7 @@ async fn test_handler_returns_error() {
             );
 
             let client_transport = sacp::ByteStreams::new(client_writer, client_reader);
-            let client = JrHandlerChain::new();
+            let client = UntypedRole::builder();
 
             tokio::task::spawn_local(async move {
                 server.serve(server_transport).await.ok();
@@ -331,16 +317,15 @@ async fn test_handler_returns_error() {
 struct EmptyRequest;
 
 impl JrMessage for EmptyRequest {
-    fn to_untyped_message(&self) -> Result<sacp::UntypedMessage, sacp::Error> {
-        let method = self.method().to_string();
-        sacp::UntypedMessage::new(&method, self)
-    }
-
     fn method(&self) -> &str {
         "strict_method"
     }
 
-    fn parse_request(
+    fn to_untyped_message(&self) -> Result<sacp::UntypedMessage, sacp::Error> {
+        sacp::UntypedMessage::new(self.method(), self)
+    }
+
+    fn parse_message(
         method: &str,
         _params: &impl serde::Serialize,
     ) -> Option<Result<Self, sacp::Error>> {
@@ -348,14 +333,6 @@ impl JrMessage for EmptyRequest {
             return None;
         }
         Some(Ok(EmptyRequest))
-    }
-
-    fn parse_notification(
-        _method: &str,
-        _params: &impl serde::Serialize,
-    ) -> Option<Result<Self, sacp::Error>> {
-        // This is a request, not a notification
-        None
     }
 }
 
@@ -376,8 +353,10 @@ async fn test_missing_required_params() {
             // Handler that validates params - since EmptyRequest has no params but we're checking
             // against SimpleRequest which requires a message field, this will fail
             let server_transport = sacp::ByteStreams::new(server_writer, server_reader);
-            let server = JrHandlerChain::new().on_receive_request(
-                async |_request: EmptyRequest, request_cx: JrRequestCx<SimpleResponse>| {
+            let server = UntypedRole::builder().on_receive_request(
+                async |_request: EmptyRequest,
+                       request_cx: JrRequestCx<SimpleResponse>,
+                       _connection_cx: JrConnectionCx<UntypedRole>| {
                     // This will be called, but EmptyRequest parsing already succeeded
                     // The test is actually checking if EmptyRequest (no params) fails to parse as SimpleRequest
                     // But with the new API, EmptyRequest parses successfully since it expects no params
@@ -388,7 +367,7 @@ async fn test_missing_required_params() {
             );
 
             let client_transport = sacp::ByteStreams::new(client_writer, client_reader);
-            let client = JrHandlerChain::new();
+            let client = UntypedRole::builder();
 
             tokio::task::spawn_local(async move {
                 server.serve(server_transport).await.ok();

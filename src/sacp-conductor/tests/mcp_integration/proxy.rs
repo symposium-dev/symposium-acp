@@ -1,7 +1,8 @@
 //! Proxy component that provides MCP tools
 
-use sacp::{Component, JrHandlerChain};
-use sacp_proxy::{AcpProxyExt, McpServer, McpServiceRegistry};
+use sacp::Component;
+use sacp::ProxyToConductor;
+use sacp::mcp_server::{McpServer, McpServiceRegistry};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -36,10 +37,9 @@ impl Component for ProxyComponent {
                 |f, args, cx| Box::pin(f(args, cx)),
             );
 
-        JrHandlerChain::new()
+        ProxyToConductor::builder()
             .name("proxy-component")
             .provide_mcp(McpServiceRegistry::default().with_mcp_server("test", test_server)?)
-            .proxy()
             .serve(client)
             .await
     }

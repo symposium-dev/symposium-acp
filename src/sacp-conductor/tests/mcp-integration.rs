@@ -9,21 +9,21 @@ mod mcp_integration;
 
 use elizacp::ElizaAgent;
 use futures::{SinkExt, StreamExt, channel::mpsc};
-use sacp::JrHandlerChain;
 use sacp::schema::{
     ContentBlock, InitializeRequest, NewSessionRequest, PromptRequest, SessionNotification,
     TextContent,
 };
-use sacp_conductor::McpBridgeMode;
 use sacp_conductor::Conductor;
+use sacp_conductor::McpBridgeMode;
+use sacp_test::test_binaries;
 
 use tokio::io::duplex;
 use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
 
 /// Test helper to receive a JSON-RPC response
-async fn recv<R: sacp::JrResponsePayload + Send>(
-    response: sacp::JrResponse<R>,
-) -> Result<R, sacp::Error> {
+async fn recv<T: sacp::JrResponsePayload + Send>(
+    response: sacp::JrResponse<T>,
+) -> Result<T, sacp::Error> {
     let (tx, rx) = tokio::sync::oneshot::channel();
     response.await_when_result_received(async move |result| {
         tx.send(result).map_err(|_| sacp::Error::internal_error())
@@ -32,27 +32,28 @@ async fn recv<R: sacp::JrResponsePayload + Send>(
 }
 
 fn conductor_command() -> Vec<String> {
-    vec![
-        "cargo".to_string(),
-        "run".to_string(),
-        "-p".to_string(),
-        "sacp-conductor".to_string(),
-        "--".to_string(),
-    ]
+    let binary_path = test_binaries::conductor_binary();
+    vec![binary_path.to_string_lossy().to_string()]
 }
 
 async fn run_test_with_mode(
     mode: McpBridgeMode,
     components: Vec<sacp::DynComponent>,
-    editor_task: impl AsyncFnOnce(sacp::JrConnectionCx) -> Result<(), sacp::Error>,
+    editor_task: impl AsyncFnOnce(sacp::JrConnectionCx<sacp::ClientToAgent>) -> Result<(), sacp::Error>,
 ) -> Result<(), sacp::Error> {
+    // Initialize tracing for debug output
+    let _ = tracing_subscriber::fmt()
+        .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
+        .with_test_writer()
+        .try_init();
+
     // Set up editor <-> conductor communication
     let (editor_out, conductor_in) = duplex(1024);
     let (conductor_out, editor_in) = duplex(1024);
 
     let transport = sacp::ByteStreams::new(editor_out.compat_write(), editor_in.compat());
 
-    JrHandlerChain::new()
+    sacp::ClientToAgent::builder()
         .name("editor-to-connector")
         .with_spawned(|_cx| async move {
             Conductor::new("conductor".to_string(), components, mode)
@@ -172,14 +173,21 @@ async fn test_proxy_provides_mcp_tools_http() -> Result<(), sacp::Error> {
 
 #[tokio::test]
 async fn test_agent_handles_prompt() -> Result<(), sacp::Error> {
+    // Initialize tracing for debug output
+    let _ = tracing_subscriber::fmt()
+        .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
+        .with_test_writer()
+        .try_init();
+
     // Create channel to collect log events
     let (mut log_tx, mut log_rx) = mpsc::unbounded();
 
-    JrHandlerChain::new()
+    sacp::ClientToAgent::builder()
         .name("editor-to-connector")
         .on_receive_notification({
             let mut log_tx = log_tx.clone();
-            async move |notification: SessionNotification, _cx| {
+            async move |notification: SessionNotification,
+                        _cx: sacp::JrConnectionCx<sacp::ClientToAgent>| {
                 // Log the notification in debug format
                 log_tx
                     .send(format!("{notification:?}"))

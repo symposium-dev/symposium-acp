@@ -1,15 +1,16 @@
 //! Integration test for AcpAgent debug logging
 
+use sacp::Component;
+use sacp::role::UntypedRole;
 use sacp::schema::InitializeRequest;
-use sacp::{Component, JrHandlerChain};
 use sacp_tokio::{AcpAgent, LineDirection};
 use std::str::FromStr;
 use std::sync::{Arc, Mutex};
 
 /// Test helper to receive a JSON-RPC response
-async fn recv<R: sacp::JrResponsePayload + Send>(
-    response: sacp::JrResponse<R>,
-) -> Result<R, sacp::Error> {
+async fn recv<T: sacp::JrResponsePayload + Send>(
+    response: sacp::JrResponse<T>,
+) -> Result<T, sacp::Error> {
     let (tx, rx) = tokio::sync::oneshot::channel();
     response.await_when_result_received(async move |result| {
         tx.send(result).map_err(|_| sacp::Error::internal_error())
@@ -57,7 +58,7 @@ async fn test_acp_agent_debug_callback() -> Result<(), Box<dyn std::error::Error
 
     let transport = sacp::ByteStreams::new(client_out.compat_write(), client_in.compat());
 
-    JrHandlerChain::new()
+    UntypedRole::builder()
         .name("test-client")
         .with_spawned(|_cx| async move {
             agent

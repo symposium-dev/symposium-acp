@@ -4,8 +4,9 @@
 //! and that requests/notifications are routed correctly based on which
 //! handler claims them.
 
+use sacp::role::UntypedRole;
 use sacp::{
-    JrHandlerChain, JrMessage, JrNotification, JrRequest, JrRequestCx, JrResponse,
+    JrConnectionCx, JrMessage, JrNotification, JrRequest, JrRequestCx, JrResponse,
     JrResponsePayload,
 };
 use serde::{Deserialize, Serialize};
@@ -14,7 +15,7 @@ use std::time::Duration;
 use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
 
 /// Test helper to block and wait for a JSON-RPC response.
-async fn recv<R: JrResponsePayload + Send>(response: JrResponse<R>) -> Result<R, sacp::Error> {
+async fn recv<T: JrResponsePayload + Send>(response: JrResponse<T>) -> Result<T, sacp::Error> {
     let (tx, rx) = tokio::sync::oneshot::channel();
     response.await_when_result_received(async move |result| {
         tx.send(result).map_err(|_| sacp::Error::internal_error())
@@ -32,16 +33,15 @@ struct FooRequest {
 }
 
 impl JrMessage for FooRequest {
-    fn to_untyped_message(&self) -> Result<sacp::UntypedMessage, sacp::Error> {
-        let method = self.method().to_string();
-        sacp::UntypedMessage::new(&method, self)
-    }
-
     fn method(&self) -> &str {
         "foo"
     }
 
-    fn parse_request(
+    fn to_untyped_message(&self) -> Result<sacp::UntypedMessage, sacp::Error> {
+        sacp::UntypedMessage::new(self.method(), self)
+    }
+
+    fn parse_message(
         method: &str,
         params: &impl serde::Serialize,
     ) -> Option<Result<Self, sacp::Error>> {
@@ -49,14 +49,6 @@ impl JrMessage for FooRequest {
             return None;
         }
         Some(sacp::util::json_cast(params))
-    }
-
-    fn parse_notification(
-        _method: &str,
-        _params: &impl serde::Serialize,
-    ) -> Option<Result<Self, sacp::Error>> {
-        // This is a request, not a notification
-        None
     }
 }
 
@@ -85,16 +77,15 @@ struct BarRequest {
 }
 
 impl JrMessage for BarRequest {
-    fn to_untyped_message(&self) -> Result<sacp::UntypedMessage, sacp::Error> {
-        let method = self.method().to_string();
-        sacp::UntypedMessage::new(&method, self)
-    }
-
     fn method(&self) -> &str {
         "bar"
     }
 
-    fn parse_request(
+    fn to_untyped_message(&self) -> Result<sacp::UntypedMessage, sacp::Error> {
+        sacp::UntypedMessage::new(self.method(), self)
+    }
+
+    fn parse_message(
         method: &str,
         params: &impl serde::Serialize,
     ) -> Option<Result<Self, sacp::Error>> {
@@ -102,14 +93,6 @@ impl JrMessage for BarRequest {
             return None;
         }
         Some(sacp::util::json_cast(params))
-    }
-
-    fn parse_notification(
-        _method: &str,
-        _params: &impl serde::Serialize,
-    ) -> Option<Result<Self, sacp::Error>> {
-        // This is a request, not a notification
-        None
     }
 }
 
@@ -150,23 +133,27 @@ async fn test_multiple_handlers_different_methods() {
 
             // Chain both handlers
             let server_transport = sacp::ByteStreams::new(server_writer, server_reader);
-            let server = JrHandlerChain::new()
+            let server = UntypedRole::builder()
                 .on_receive_request(
-                    async |request: FooRequest, request_cx: JrRequestCx<FooResponse>| {
+                    async |request: FooRequest,
+                           request_cx: JrRequestCx<FooResponse>,
+                           _connection_cx: JrConnectionCx<UntypedRole>| {
                         request_cx.respond(FooResponse {
                             result: format!("foo: {}", request.value),
                         })
                     },
                 )
                 .on_receive_request(
-                    async |request: BarRequest, request_cx: JrRequestCx<BarResponse>| {
+                    async |request: BarRequest,
+                           request_cx: JrRequestCx<BarResponse>,
+                           _connection_cx: JrConnectionCx<UntypedRole>| {
                         request_cx.respond(BarResponse {
                             result: format!("bar: {}", request.value),
                         })
                     },
                 );
             let client_transport = sacp::ByteStreams::new(client_writer, client_reader);
-            let client = JrHandlerChain::new();
+            let client = UntypedRole::builder();
 
             tokio::task::spawn_local(async move {
                 if let Err(e) = server.serve(server_transport).await {
@@ -218,16 +205,15 @@ struct TrackRequest {
 }
 
 impl JrMessage for TrackRequest {
-    fn to_untyped_message(&self) -> Result<sacp::UntypedMessage, sacp::Error> {
-        let method = self.method().to_string();
-        sacp::UntypedMessage::new(&method, self)
-    }
-
     fn method(&self) -> &str {
         "track"
     }
 
-    fn parse_request(
+    fn to_untyped_message(&self) -> Result<sacp::UntypedMessage, sacp::Error> {
+        sacp::UntypedMessage::new(self.method(), self)
+    }
+
+    fn parse_message(
         method: &str,
         params: &impl serde::Serialize,
     ) -> Option<Result<Self, sacp::Error>> {
@@ -235,14 +221,6 @@ impl JrMessage for TrackRequest {
             return None;
         }
         Some(sacp::util::json_cast(params))
-    }
-
-    fn parse_notification(
-        _method: &str,
-        _params: &impl serde::Serialize,
-    ) -> Option<Result<Self, sacp::Error>> {
-        // This is a request, not a notification
-        None
     }
 }
 
@@ -272,9 +250,11 @@ async fn test_handler_priority_ordering() {
             let handled_clone1 = handled.clone();
             let handled_clone2 = handled.clone();
             let server_transport = sacp::ByteStreams::new(server_writer, server_reader);
-            let server = JrHandlerChain::new()
+            let server = UntypedRole::builder()
                 .on_receive_request(
-                    async move |request: TrackRequest, request_cx: JrRequestCx<FooResponse>| {
+                    async move |request: TrackRequest,
+                                request_cx: JrRequestCx<FooResponse>,
+                                _connection_cx: JrConnectionCx<UntypedRole>| {
                         handled_clone1.lock().unwrap().push("handler1".to_string());
                         request_cx.respond(FooResponse {
                             result: format!("handler1: {}", request.value),
@@ -282,7 +262,9 @@ async fn test_handler_priority_ordering() {
                     },
                 )
                 .on_receive_request(
-                    async move |request: TrackRequest, request_cx: JrRequestCx<FooResponse>| {
+                    async move |request: TrackRequest,
+                                request_cx: JrRequestCx<FooResponse>,
+                                _connection_cx: JrConnectionCx<UntypedRole>| {
                         handled_clone2.lock().unwrap().push("handler2".to_string());
                         request_cx.respond(FooResponse {
                             result: format!("handler2: {}", request.value),
@@ -290,7 +272,7 @@ async fn test_handler_priority_ordering() {
                     },
                 );
             let client_transport = sacp::ByteStreams::new(client_writer, client_reader);
-            let client = JrHandlerChain::new();
+            let client = UntypedRole::builder();
 
             tokio::task::spawn_local(async move {
                 if let Err(e) = server.serve(server_transport).await {
@@ -338,16 +320,15 @@ struct Method1Request {
 }
 
 impl JrMessage for Method1Request {
-    fn to_untyped_message(&self) -> Result<sacp::UntypedMessage, sacp::Error> {
-        let method = self.method().to_string();
-        sacp::UntypedMessage::new(&method, self)
-    }
-
     fn method(&self) -> &str {
         "method1"
     }
 
-    fn parse_request(
+    fn to_untyped_message(&self) -> Result<sacp::UntypedMessage, sacp::Error> {
+        sacp::UntypedMessage::new(self.method(), self)
+    }
+
+    fn parse_message(
         method: &str,
         params: &impl serde::Serialize,
     ) -> Option<Result<Self, sacp::Error>> {
@@ -355,14 +336,6 @@ impl JrMessage for Method1Request {
             return None;
         }
         Some(sacp::util::json_cast(params))
-    }
-
-    fn parse_notification(
-        _method: &str,
-        _params: &impl serde::Serialize,
-    ) -> Option<Result<Self, sacp::Error>> {
-        // This is a request, not a notification
-        None
     }
 }
 
@@ -376,16 +349,15 @@ struct Method2Request {
 }
 
 impl JrMessage for Method2Request {
-    fn to_untyped_message(&self) -> Result<sacp::UntypedMessage, sacp::Error> {
-        let method = self.method().to_string();
-        sacp::UntypedMessage::new(&method, self)
-    }
-
     fn method(&self) -> &str {
         "method2"
     }
 
-    fn parse_request(
+    fn to_untyped_message(&self) -> Result<sacp::UntypedMessage, sacp::Error> {
+        sacp::UntypedMessage::new(self.method(), self)
+    }
+
+    fn parse_message(
         method: &str,
         params: &impl serde::Serialize,
     ) -> Option<Result<Self, sacp::Error>> {
@@ -393,14 +365,6 @@ impl JrMessage for Method2Request {
             return None;
         }
         Some(sacp::util::json_cast(params))
-    }
-
-    fn parse_notification(
-        _method: &str,
-        _params: &impl serde::Serialize,
-    ) -> Option<Result<Self, sacp::Error>> {
-        // This is a request, not a notification
-        None
     }
 }
 
@@ -430,9 +394,11 @@ async fn test_fallthrough_behavior() {
             let handled_clone1 = handled.clone();
             let handled_clone2 = handled.clone();
             let server_transport = sacp::ByteStreams::new(server_writer, server_reader);
-            let server = JrHandlerChain::new()
+            let server = UntypedRole::builder()
                 .on_receive_request(
-                    async move |request: Method1Request, request_cx: JrRequestCx<FooResponse>| {
+                    async move |request: Method1Request,
+                                request_cx: JrRequestCx<FooResponse>,
+                                _connection_cx: JrConnectionCx<UntypedRole>| {
                         handled_clone1.lock().unwrap().push("method1".to_string());
                         request_cx.respond(FooResponse {
                             result: format!("method1: {}", request.value),
@@ -440,7 +406,9 @@ async fn test_fallthrough_behavior() {
                     },
                 )
                 .on_receive_request(
-                    async move |request: Method2Request, request_cx: JrRequestCx<FooResponse>| {
+                    async move |request: Method2Request,
+                                request_cx: JrRequestCx<FooResponse>,
+                                _connection_cx: JrConnectionCx<UntypedRole>| {
                         handled_clone2.lock().unwrap().push("method2".to_string());
                         request_cx.respond(FooResponse {
                             result: format!("method2: {}", request.value),
@@ -448,7 +416,7 @@ async fn test_fallthrough_behavior() {
                     },
                 );
             let client_transport = sacp::ByteStreams::new(client_writer, client_reader);
-            let client = JrHandlerChain::new();
+            let client = UntypedRole::builder();
 
             tokio::task::spawn_local(async move {
                 if let Err(e) = server.serve(server_transport).await {
@@ -508,15 +476,17 @@ async fn test_no_handler_claims() {
 
             // Handler that only handles "foo"
             let server_transport = sacp::ByteStreams::new(server_writer, server_reader);
-            let server = JrHandlerChain::new().on_receive_request(
-                async |request: FooRequest, request_cx: JrRequestCx<FooResponse>| {
+            let server = UntypedRole::builder().on_receive_request(
+                async |request: FooRequest,
+                       request_cx: JrRequestCx<FooResponse>,
+                       _connection_cx: JrConnectionCx<UntypedRole>| {
                     request_cx.respond(FooResponse {
                         result: format!("foo: {}", request.value),
                     })
                 },
             );
             let client_transport = sacp::ByteStreams::new(client_writer, client_reader);
-            let client = JrHandlerChain::new();
+            let client = UntypedRole::builder();
 
             tokio::task::spawn_local(async move {
                 if let Err(e) = server.serve(server_transport).await {
@@ -557,24 +527,15 @@ struct EventNotification {
 }
 
 impl JrMessage for EventNotification {
-    fn to_untyped_message(&self) -> Result<sacp::UntypedMessage, sacp::Error> {
-        let method = self.method().to_string();
-        sacp::UntypedMessage::new(&method, self)
-    }
-
     fn method(&self) -> &str {
         "event"
     }
 
-    fn parse_request(
-        _method: &str,
-        _params: &impl serde::Serialize,
-    ) -> Option<Result<Self, sacp::Error>> {
-        // This is a notification, not a request
-        None
+    fn to_untyped_message(&self) -> Result<sacp::UntypedMessage, sacp::Error> {
+        sacp::UntypedMessage::new(self.method(), self)
     }
 
-    fn parse_notification(
+    fn parse_message(
         method: &str,
         params: &impl serde::Serialize,
     ) -> Option<Result<Self, sacp::Error>> {
@@ -608,14 +569,15 @@ async fn test_handler_claims_notification() {
             // EventHandler claims notifications
             let events_clone = events.clone();
             let server_transport = sacp::ByteStreams::new(server_writer, server_reader);
-            let server = JrHandlerChain::new().on_receive_notification(
-                async move |notification: EventNotification, _notification_cx| {
+            let server = UntypedRole::builder().on_receive_notification(
+                async move |notification: EventNotification,
+                            _notification_cx: JrConnectionCx<UntypedRole>| {
                     events_clone.lock().unwrap().push(notification.event);
                     Ok(())
                 },
             );
             let client_transport = sacp::ByteStreams::new(client_writer, client_reader);
-            let client = JrHandlerChain::new();
+            let client = UntypedRole::builder();
 
             tokio::task::spawn_local(async move {
                 if let Err(e) = server.serve(server_transport).await {

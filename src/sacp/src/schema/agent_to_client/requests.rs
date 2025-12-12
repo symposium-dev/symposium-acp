@@ -18,28 +18,19 @@ use crate::util::json_cast;
 // ============================================================================
 
 impl JrMessage for RequestPermissionRequest {
-    fn to_untyped_message(&self) -> Result<crate::UntypedMessage, crate::Error> {
-        let method = self.method().to_string();
-        crate::UntypedMessage::new(&method, self)
-    }
-
     fn method(&self) -> &str {
         "session/request_permission"
     }
 
-    fn parse_request(method: &str, params: &impl Serialize) -> Option<Result<Self, crate::Error>> {
+    fn to_untyped_message(&self) -> Result<crate::UntypedMessage, crate::Error> {
+        crate::UntypedMessage::new(self.method(), self)
+    }
+
+    fn parse_message(method: &str, params: &impl Serialize) -> Option<Result<Self, crate::Error>> {
         if method != "session/request_permission" {
             return None;
         }
         Some(json_cast(params))
-    }
-
-    fn parse_notification(
-        _method: &str,
-        _params: &impl Serialize,
-    ) -> Option<Result<Self, crate::Error>> {
-        // This is a request, not a notification
-        None
     }
 }
 
@@ -62,28 +53,19 @@ impl JrResponsePayload for RequestPermissionResponse {
 // ============================================================================
 
 impl JrMessage for WriteTextFileRequest {
-    fn to_untyped_message(&self) -> Result<crate::UntypedMessage, crate::Error> {
-        let method = self.method().to_string();
-        crate::UntypedMessage::new(&method, self)
-    }
-
     fn method(&self) -> &str {
         "fs/write_text_file"
     }
 
-    fn parse_request(method: &str, params: &impl Serialize) -> Option<Result<Self, crate::Error>> {
+    fn to_untyped_message(&self) -> Result<crate::UntypedMessage, crate::Error> {
+        crate::UntypedMessage::new(self.method(), self)
+    }
+
+    fn parse_message(method: &str, params: &impl Serialize) -> Option<Result<Self, crate::Error>> {
         if method != "fs/write_text_file" {
             return None;
         }
         Some(json_cast(params))
-    }
-
-    fn parse_notification(
-        _method: &str,
-        _params: &impl Serialize,
-    ) -> Option<Result<Self, crate::Error>> {
-        // This is a request, not a notification
-        None
     }
 }
 
@@ -106,28 +88,19 @@ impl JrResponsePayload for WriteTextFileResponse {
 // ============================================================================
 
 impl JrMessage for ReadTextFileRequest {
-    fn to_untyped_message(&self) -> Result<crate::UntypedMessage, crate::Error> {
-        let method = self.method().to_string();
-        crate::UntypedMessage::new(&method, self)
-    }
-
     fn method(&self) -> &str {
         "fs/read_text_file"
     }
 
-    fn parse_request(method: &str, params: &impl Serialize) -> Option<Result<Self, crate::Error>> {
+    fn to_untyped_message(&self) -> Result<crate::UntypedMessage, crate::Error> {
+        crate::UntypedMessage::new(self.method(), self)
+    }
+
+    fn parse_message(method: &str, params: &impl Serialize) -> Option<Result<Self, crate::Error>> {
         if method != "fs/read_text_file" {
             return None;
         }
         Some(json_cast(params))
-    }
-
-    fn parse_notification(
-        _method: &str,
-        _params: &impl Serialize,
-    ) -> Option<Result<Self, crate::Error>> {
-        // This is a request, not a notification
-        None
     }
 }
 
@@ -150,28 +123,19 @@ impl JrResponsePayload for ReadTextFileResponse {
 // ============================================================================
 
 impl JrMessage for CreateTerminalRequest {
-    fn to_untyped_message(&self) -> Result<crate::UntypedMessage, crate::Error> {
-        let method = self.method().to_string();
-        crate::UntypedMessage::new(&method, self)
-    }
-
     fn method(&self) -> &str {
         "terminal/create"
     }
 
-    fn parse_request(method: &str, params: &impl Serialize) -> Option<Result<Self, crate::Error>> {
+    fn to_untyped_message(&self) -> Result<crate::UntypedMessage, crate::Error> {
+        crate::UntypedMessage::new(self.method(), self)
+    }
+
+    fn parse_message(method: &str, params: &impl Serialize) -> Option<Result<Self, crate::Error>> {
         if method != "terminal/create" {
             return None;
         }
         Some(json_cast(params))
-    }
-
-    fn parse_notification(
-        _method: &str,
-        _params: &impl Serialize,
-    ) -> Option<Result<Self, crate::Error>> {
-        // This is a request, not a notification
-        None
     }
 }
 
@@ -194,28 +158,19 @@ impl JrResponsePayload for CreateTerminalResponse {
 // ============================================================================
 
 impl JrMessage for TerminalOutputRequest {
-    fn to_untyped_message(&self) -> Result<crate::UntypedMessage, crate::Error> {
-        let method = self.method().to_string();
-        crate::UntypedMessage::new(&method, self)
-    }
-
     fn method(&self) -> &str {
         "terminal/output"
     }
 
-    fn parse_request(method: &str, params: &impl Serialize) -> Option<Result<Self, crate::Error>> {
+    fn to_untyped_message(&self) -> Result<crate::UntypedMessage, crate::Error> {
+        crate::UntypedMessage::new(self.method(), self)
+    }
+
+    fn parse_message(method: &str, params: &impl Serialize) -> Option<Result<Self, crate::Error>> {
         if method != "terminal/output" {
             return None;
         }
         Some(json_cast(params))
-    }
-
-    fn parse_notification(
-        _method: &str,
-        _params: &impl Serialize,
-    ) -> Option<Result<Self, crate::Error>> {
-        // This is a request, not a notification
-        None
     }
 }
 
@@ -238,28 +193,19 @@ impl JrResponsePayload for TerminalOutputResponse {
 // ============================================================================
 
 impl JrMessage for ReleaseTerminalRequest {
-    fn to_untyped_message(&self) -> Result<crate::UntypedMessage, crate::Error> {
-        let method = self.method().to_string();
-        crate::UntypedMessage::new(&method, self)
-    }
-
     fn method(&self) -> &str {
         "terminal/release"
     }
 
-    fn parse_request(method: &str, params: &impl Serialize) -> Option<Result<Self, crate::Error>> {
+    fn to_untyped_message(&self) -> Result<crate::UntypedMessage, crate::Error> {
+        crate::UntypedMessage::new(self.method(), self)
+    }
+
+    fn parse_message(method: &str, params: &impl Serialize) -> Option<Result<Self, crate::Error>> {
         if method != "terminal/release" {
             return None;
         }
         Some(json_cast(params))
-    }
-
-    fn parse_notification(
-        _method: &str,
-        _params: &impl Serialize,
-    ) -> Option<Result<Self, crate::Error>> {
-        // This is a request, not a notification
-        None
     }
 }
 
@@ -282,28 +228,19 @@ impl JrResponsePayload for ReleaseTerminalResponse {
 // ============================================================================
 
 impl JrMessage for WaitForTerminalExitRequest {
-    fn to_untyped_message(&self) -> Result<crate::UntypedMessage, crate::Error> {
-        let method = self.method().to_string();
-        crate::UntypedMessage::new(&method, self)
-    }
-
     fn method(&self) -> &str {
         "terminal/wait_for_exit"
     }
 
-    fn parse_request(method: &str, params: &impl Serialize) -> Option<Result<Self, crate::Error>> {
+    fn to_untyped_message(&self) -> Result<crate::UntypedMessage, crate::Error> {
+        crate::UntypedMessage::new(self.method(), self)
+    }
+
+    fn parse_message(method: &str, params: &impl Serialize) -> Option<Result<Self, crate::Error>> {
         if method != "terminal/wait_for_exit" {
             return None;
         }
         Some(json_cast(params))
-    }
-
-    fn parse_notification(
-        _method: &str,
-        _params: &impl Serialize,
-    ) -> Option<Result<Self, crate::Error>> {
-        // This is a request, not a notification
-        None
     }
 }
 
@@ -326,28 +263,19 @@ impl JrResponsePayload for WaitForTerminalExitResponse {
 // ============================================================================
 
 impl JrMessage for KillTerminalCommandRequest {
-    fn to_untyped_message(&self) -> Result<crate::UntypedMessage, crate::Error> {
-        let method = self.method().to_string();
-        crate::UntypedMessage::new(&method, self)
-    }
-
     fn method(&self) -> &str {
         "terminal/kill"
     }
 
-    fn parse_request(method: &str, params: &impl Serialize) -> Option<Result<Self, crate::Error>> {
+    fn to_untyped_message(&self) -> Result<crate::UntypedMessage, crate::Error> {
+        crate::UntypedMessage::new(self.method(), self)
+    }
+
+    fn parse_message(method: &str, params: &impl Serialize) -> Option<Result<Self, crate::Error>> {
         if method != "terminal/kill" {
             return None;
         }
         Some(json_cast(params))
-    }
-
-    fn parse_notification(
-        _method: &str,
-        _params: &impl Serialize,
-    ) -> Option<Result<Self, crate::Error>> {
-        // This is a request, not a notification
-        None
     }
 }
 
