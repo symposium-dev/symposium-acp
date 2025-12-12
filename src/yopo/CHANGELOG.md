@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.0.0](https://github.com/symposium-dev/symposium-acp/compare/yopo-v1.2.1...yopo-v2.0.0) - 2025-12-12
+
+### Added
+
+- [**breaking**] introduce role-based connection API
+
 ## [1.2.1](https://github.com/symposium-dev/symposium-acp/compare/yopo-v1.2.0...yopo-v1.2.1) - 2025-11-25
 
 ### Other

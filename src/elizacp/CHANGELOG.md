@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [4.0.0](https://github.com/symposium-dev/symposium-acp/compare/elizacp-v3.0.1...elizacp-v4.0.0) - 2025-12-12
+
+### Added
+
+- [**breaking**] introduce role-based connection API
+
 ## [3.0.1](https://github.com/symposium-dev/symposium-acp/compare/elizacp-v3.0.0...elizacp-v3.0.1) - 2025-11-25
 
 ### Fixed
