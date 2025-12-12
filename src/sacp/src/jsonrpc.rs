@@ -580,7 +580,7 @@ impl<H: JrMessageHandler> JrConnectionBuilder<H> {
     ///
     /// ```ignore
     /// # use sacp::role::UntypedRole;
-/// # use sacp::{JrConnectionBuilder};
+    /// # use sacp::{JrConnectionBuilder};
     /// # use sacp::schema::{PromptRequest, PromptResponse, SessionNotification};
     /// # fn example(connection: JrConnectionBuilder<impl sacp::JrMessageHandler<Role = UntypedRole>>) {
     /// connection.on_receive_request(async |request: PromptRequest, request_cx, cx| {
@@ -990,7 +990,7 @@ impl<H: JrMessageHandler> JrConnection<H> {
     ///
     /// ```no_run
     /// # use sacp::role::UntypedRole;
-/// # use sacp::{JrConnectionBuilder};
+    /// # use sacp::{JrConnectionBuilder};
     /// # use sacp::ByteStreams;
     /// # use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
     /// # use sacp_test::*;
@@ -1031,7 +1031,7 @@ impl<H: JrMessageHandler> JrConnection<H> {
     ///
     /// ```no_run
     /// # use sacp::role::UntypedRole;
-/// # use sacp::{JrConnectionBuilder};
+    /// # use sacp::{JrConnectionBuilder};
     /// # use sacp::ByteStreams;
     /// # use sacp::schema::InitializeRequest;
     /// # use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
@@ -1333,7 +1333,7 @@ impl<Role: JrRole> JrConnectionCx<Role> {
     ///
     /// ```
     /// # use sacp::role::UntypedRole;
-/// # use sacp::{JrConnectionBuilder, JrConnectionCx};
+    /// # use sacp::{JrConnectionBuilder, JrConnectionCx};
     /// # use sacp_test::*;
     /// # async fn example(cx: JrConnectionCx<UntypedRole>) -> Result<(), sacp::Error> {
     /// // Set up a backend connection
@@ -1798,6 +1798,12 @@ impl<T: JrResponsePayload> JrRequestCx<T> {
 }
 
 /// Common bounds for any JSON-RPC message.
+///
+/// # Derive Macro
+///
+/// For simple message types, you can use the `JrRequest` or `JrNotification` derive macros
+/// which will implement both `JrMessage` and the respective trait. See [`JrRequest`] and
+/// [`JrNotification`] for examples.
 pub trait JrMessage: 'static + Debug + Sized + Send + Clone {
     /// The method name for the message.
     fn method(&self) -> &str;
@@ -1815,6 +1821,20 @@ pub trait JrMessage: 'static + Debug + Sized + Send + Clone {
 }
 
 /// Defines the "payload" of a successful response to a JSON-RPC request.
+///
+/// # Derive Macro
+///
+/// Use `#[derive(JrResponsePayload)]` to automatically implement this trait:
+///
+/// ```ignore
+/// use sacp::JrResponsePayload;
+/// use serde::{Serialize, Deserialize};
+///
+/// #[derive(Debug, Serialize, Deserialize, JrResponsePayload)]
+/// struct HelloResponse {
+///     greeting: String,
+/// }
+/// ```
 pub trait JrResponsePayload: 'static + Debug + Sized + Send {
     /// Convert this message into a JSON value.
     fn into_json(self, method: &str) -> Result<serde_json::Value, crate::Error>;
@@ -1834,9 +1854,44 @@ impl JrResponsePayload for serde_json::Value {
 }
 
 /// A struct that represents a notification (JSON-RPC message that does not expect a response).
+///
+/// # Derive Macro
+///
+/// Use `#[derive(JrNotification)]` to automatically implement both `JrMessage` and `JrNotification`:
+///
+/// ```ignore
+/// use sacp::JrNotification;
+/// use serde::{Serialize, Deserialize};
+///
+/// #[derive(Debug, Clone, Serialize, Deserialize, JrNotification)]
+/// #[notification(method = "_ping")]
+/// struct PingNotification {
+///     timestamp: u64,
+/// }
+/// ```
 pub trait JrNotification: JrMessage {}
 
 /// A struct that represents a request (JSON-RPC message expecting a response).
+///
+/// # Derive Macro
+///
+/// Use `#[derive(JrRequest)]` to automatically implement both `JrMessage` and `JrRequest`:
+///
+/// ```ignore
+/// use sacp::{JrRequest, JrResponsePayload};
+/// use serde::{Serialize, Deserialize};
+///
+/// #[derive(Debug, Clone, Serialize, Deserialize, JrRequest)]
+/// #[request(method = "_hello", response = HelloResponse)]
+/// struct HelloRequest {
+///     name: String,
+/// }
+///
+/// #[derive(Debug, Serialize, Deserialize, JrResponsePayload)]
+/// struct HelloResponse {
+///     greeting: String,
+/// }
+/// ```
 pub trait JrRequest: JrMessage {
     /// The type of data expected in response.
     type Response: JrResponsePayload;
@@ -2145,7 +2200,7 @@ impl<T: JrResponsePayload> JrResponse<T> {
     ///
     /// ```
     /// # use sacp::role::UntypedRole;
-/// # use sacp::{JrConnectionBuilder, JrConnectionCx};
+    /// # use sacp::{JrConnectionBuilder, JrConnectionCx};
     /// # use sacp_test::*;
     /// # async fn example(cx: JrConnectionCx<UntypedRole>) -> Result<(), sacp::Error> {
     /// // Set up backend connection

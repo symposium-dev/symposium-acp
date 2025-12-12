@@ -2,7 +2,7 @@
 //!
 //! These types are intended to become part of the ACP protocol specification.
 
-use crate::{JrMessage, JrNotification, JrRequest, JrResponsePayload, UntypedMessage};
+use crate::{JrMessage, JrNotification, JrRequest, UntypedMessage};
 use agent_client_protocol_schema::InitializeResponse;
 use serde::{Deserialize, Serialize};
 
