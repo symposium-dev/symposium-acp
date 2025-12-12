@@ -10,8 +10,8 @@ name = "mcp-echo-server"
 path = "src/bin/mcp_echo_server.rs"
 
 [dependencies]
-sacp = { version = "1.1.1", path = "../sacp" }
-yopo = { version = "1.2.1", path = "../yopo" }
+sacp = { version = "3.0.0", path = "../sacp" }
+yopo = { version = "2.0.0", path = "../yopo" }
 rmcp = { workspace = true, features = ["server"] }
 schemars.workspace = true
 
