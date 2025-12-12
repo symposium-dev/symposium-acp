@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.0](https://github.com/symposium-dev/symposium-acp/compare/sacp-rmcp-v0.8.4...sacp-rmcp-v0.9.0) - 2025-12-12
+
+### Added
+
+- [**breaking**] introduce role-based connection API
+
 ## [0.8.4](https://github.com/symposium-dev/symposium-acp/compare/sacp-rmcp-v0.8.3...sacp-rmcp-v0.8.4) - 2025-11-25
 
 ### Other

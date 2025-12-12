@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.0.0](https://github.com/symposium-dev/symposium-acp/compare/sacp-v1.1.1...sacp-v2.0.0) - 2025-12-12
+
+### Added
+
+- *(deps)* [**breaking**] upgrade rmcp from 0.8 to 0.9
+- [**breaking**] introduce role-based connection API
+
+### Other
+
+- Merge pull request #65 from zachcp/fix/update-broken-links
+- fix broken GitHub org references in src/**/*.rs files
+
 ## [1.1.1](https://github.com/symposium-dev/symposium-acp/compare/sacp-v1.1.0...sacp-v1.1.1) - 2025-11-25
 
 ### Other
