@@ -254,6 +254,7 @@ fn make_tool_model<Role: JrRole, M: McpTool<Role>>(tool: &M) -> Tool {
         output_schema: Some(cached_schema_for_type::<M::Output>()),
         annotations: None,
         icons: None,
+        meta: None,
     }
 }
 
