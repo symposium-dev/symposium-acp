@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [5.0.0](https://github.com/symposium-dev/symposium-acp/compare/sacp-conductor-v4.0.0...sacp-conductor-v5.0.0) - 2025-12-12
+
+### Added
+
+- [**breaking**] introduce role-based connection API
+
+### Other
+
+- release
+
 ## [4.0.0](https://github.com/symposium-dev/symposium-acp/compare/sacp-conductor-v3.0.0...sacp-conductor-v4.0.0) - 2025-12-12
 
 ### Added

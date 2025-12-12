@@ -1,6 +1,6 @@
 [package]
 name = "sacp-conductor"
-version = "4.0.0"
+version = "5.0.0"
 edition = "2024"
 description = "Conductor for orchestrating SACP proxy chains"
 license = "MIT OR Apache-2.0"
@@ -12,7 +12,7 @@ categories = ["development-tools"]
 test-support = []
 
 [dependencies]
-sacp = { version = "2.0.0", path = "../sacp" }
+sacp = { version = "3.0.0", path = "../sacp" }
 sacp-tokio = { version = "3.0.0", path = "../sacp-tokio" }
 sacp-trace-viewer = { version = "0.1.0", path = "../sacp-trace-viewer" }
 agent-client-protocol-schema.workspace = true

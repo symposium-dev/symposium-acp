@@ -12,7 +12,7 @@ categories = ["development-tools", "development-tools::debugging"]
 anyhow.workspace = true
 chrono.workspace = true
 clap = { workspace = true, features = ["derive"] }
-sacp = { version = "2.0", path = "../sacp" }
+sacp = { version = "3.0", path = "../sacp" }
 sacp-tokio = { version = "3.0", path = "../sacp-tokio" }
 serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true

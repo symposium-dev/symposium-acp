@@ -9,7 +9,7 @@ keywords = ["acp", "agent", "protocol", "ai", "tokio"]
 categories = ["development-tools"]
 
 [dependencies]
-sacp = { version = "2.0.0", path = "../sacp" }
+sacp = { version = "3.0.0", path = "../sacp" }
 futures.workspace = true
 
 serde.workspace = true

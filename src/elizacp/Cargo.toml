@@ -16,7 +16,7 @@ path = "src/main.rs"
 test = false
 
 [dependencies]
-sacp = { version = "2.0.0", path = "../sacp" }
+sacp = { version = "3.0.0", path = "../sacp" }
 agent-client-protocol-schema.workspace = true
 anyhow.workspace = true
 clap.workspace = true
