@@ -5,6 +5,6 @@ edition = "2024"
 
 [dependencies]
 extension-trait = "1.0.2"
-sacp = { version = "1.1.1", path = "../sacp" }
-sacp-conductor = { version = "3.0.0", path = "../sacp-conductor" }
+sacp = { version = "2.0.0", path = "../sacp" }
+sacp-conductor = { version = "4.0.0", path = "../sacp-conductor" }
 serde_json.workspace = true
