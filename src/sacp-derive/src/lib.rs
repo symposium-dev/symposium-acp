@@ -25,16 +25,27 @@
 //!     timestamp: u64,
 //! }
 //! ```
+//!
+//! # Using within the sacp crate
+//!
+//! When using these derives within the sacp crate itself, add `crate = crate`:
+//!
+//! ```ignore
+//! #[derive(JrRequest)]
+//! #[request(method = "_foo", response = FooResponse, crate = crate)]
+//! struct FooRequest { ... }
+//! ```
 
 use proc_macro::TokenStream;
 use quote::quote;
-use syn::{parse_macro_input, DeriveInput, Expr, Lit, Type};
+use syn::{parse_macro_input, DeriveInput, Expr, Lit, Path, Type};
 
 /// Derive macro for implementing `JrRequest` and `JrMessage` traits.
 ///
 /// # Attributes
 ///
 /// - `#[request(method = "method_name", response = ResponseType)]`
+/// - `#[request(method = "method_name", response = ResponseType, crate = crate)]` - for use within sacp
 ///
 /// # Example
 ///
@@ -51,33 +62,33 @@ pub fn derive_jr_request(input: TokenStream) -> TokenStream {
     let name = &input.ident;
 
     // Parse attributes
-    let (method, response_type) = match parse_request_attrs(&input) {
+    let (method, response_type, krate) = match parse_request_attrs(&input) {
         Ok(attrs) => attrs,
         Err(e) => return e.to_compile_error().into(),
     };
 
     let expanded = quote! {
-        impl sacp::JrMessage for #name {
+        impl #krate::JrMessage for #name {
             fn method(&self) -> &str {
                 #method
             }
 
-            fn to_untyped_message(&self) -> Result<sacp::UntypedMessage, sacp::Error> {
-                sacp::UntypedMessage::new(#method, self)
+            fn to_untyped_message(&self) -> Result<#krate::UntypedMessage, #krate::Error> {
+                #krate::UntypedMessage::new(#method, self)
             }
 
             fn parse_message(
                 method: &str,
                 params: &impl serde::Serialize,
-            ) -> Option<Result<Self, sacp::Error>> {
+            ) -> Option<Result<Self, #krate::Error>> {
                 if method != #method {
                     return None;
                 }
-                Some(sacp::util::json_cast(params))
+                Some(#krate::util::json_cast(params))
             }
         }
 
-        impl sacp::JrRequest for #name {
+        impl #krate::JrRequest for #name {
             type Response = #response_type;
         }
     };
@@ -90,6 +101,7 @@ pub fn derive_jr_request(input: TokenStream) -> TokenStream {
 /// # Attributes
 ///
 /// - `#[notification(method = "method_name")]`
+/// - `#[notification(method = "method_name", crate = crate)]` - for use within sacp
 ///
 /// # Example
 ///
@@ -106,39 +118,43 @@ pub fn derive_jr_notification(input: TokenStream) -> TokenStream {
     let name = &input.ident;
 
     // Parse attributes
-    let method = match parse_notification_attrs(&input) {
-        Ok(method) => method,
+    let (method, krate) = match parse_notification_attrs(&input) {
+        Ok(attrs) => attrs,
         Err(e) => return e.to_compile_error().into(),
     };
 
     let expanded = quote! {
-        impl sacp::JrMessage for #name {
+        impl #krate::JrMessage for #name {
             fn method(&self) -> &str {
                 #method
             }
 
-            fn to_untyped_message(&self) -> Result<sacp::UntypedMessage, sacp::Error> {
-                sacp::UntypedMessage::new(#method, self)
+            fn to_untyped_message(&self) -> Result<#krate::UntypedMessage, #krate::Error> {
+                #krate::UntypedMessage::new(#method, self)
             }
 
             fn parse_message(
                 method: &str,
                 params: &impl serde::Serialize,
-            ) -> Option<Result<Self, sacp::Error>> {
+            ) -> Option<Result<Self, #krate::Error>> {
                 if method != #method {
                     return None;
                 }
-                Some(sacp::util::json_cast(params))
+                Some(#krate::util::json_cast(params))
             }
         }
 
-        impl sacp::JrNotification for #name {}
+        impl #krate::JrNotification for #name {}
     };
 
     TokenStream::from(expanded)
 }
 
 /// Derive macro for implementing `JrResponsePayload` trait.
+///
+/// # Attributes
+///
+/// - `#[response(crate = crate)]` - for use within sacp (optional)
 ///
 /// # Example
 ///
@@ -148,19 +164,21 @@ pub fn derive_jr_notification(input: TokenStream) -> TokenStream {
 ///     greeting: String,
 /// }
 /// ```
-#[proc_macro_derive(JrResponsePayload)]
+#[proc_macro_derive(JrResponsePayload, attributes(response))]
 pub fn derive_jr_response_payload(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as DeriveInput);
     let name = &input.ident;
 
+    let krate = parse_response_attrs(&input).unwrap_or_else(|_| default_crate_path());
+
     let expanded = quote! {
-        impl sacp::JrResponsePayload for #name {
-            fn into_json(self, _method: &str) -> Result<serde_json::Value, sacp::Error> {
-                serde_json::to_value(self).map_err(sacp::Error::into_internal_error)
+        impl #krate::JrResponsePayload for #name {
+            fn into_json(self, _method: &str) -> Result<serde_json::Value, #krate::Error> {
+                serde_json::to_value(self).map_err(#krate::Error::into_internal_error)
             }
 
-            fn from_value(_method: &str, value: serde_json::Value) -> Result<Self, sacp::Error> {
-                sacp::util::json_cast(value)
+            fn from_value(_method: &str, value: serde_json::Value) -> Result<Self, #krate::Error> {
+                #krate::util::json_cast(value)
             }
         }
     };
@@ -168,9 +186,14 @@ pub fn derive_jr_response_payload(input: TokenStream) -> TokenStream {
     TokenStream::from(expanded)
 }
 
-fn parse_request_attrs(input: &DeriveInput) -> syn::Result<(String, Type)> {
+fn default_crate_path() -> Path {
+    syn::parse_quote!(sacp)
+}
+
+fn parse_request_attrs(input: &DeriveInput) -> syn::Result<(String, Type, Path)> {
     let mut method: Option<String> = None;
     let mut response_type: Option<Type> = None;
+    let mut krate: Option<Path> = None;
 
     for attr in &input.attrs {
         if !attr.path().is_ident("request") {
@@ -201,6 +224,15 @@ fn parse_request_attrs(input: &DeriveInput) -> syn::Result<(String, Type)> {
                 return Err(meta.error("expected type for response"));
             }
 
+            if meta.path.is_ident("crate") {
+                let value: Expr = meta.value()?.parse()?;
+                if let Expr::Path(expr_path) = value {
+                    krate = Some(expr_path.path);
+                    return Ok(());
+                }
+                return Err(meta.error("expected path for crate"));
+            }
+
             Err(meta.error("unknown attribute"))
         })?;
     }
@@ -219,11 +251,16 @@ fn parse_request_attrs(input: &DeriveInput) -> syn::Result<(String, Type)> {
         )
     })?;
 
-    Ok((method, response_type))
+    Ok((
+        method,
+        response_type,
+        krate.unwrap_or_else(default_crate_path),
+    ))
 }
 
-fn parse_notification_attrs(input: &DeriveInput) -> syn::Result<String> {
+fn parse_notification_attrs(input: &DeriveInput) -> syn::Result<(String, Path)> {
     let mut method: Option<String> = None;
+    let mut krate: Option<Path> = None;
 
     for attr in &input.attrs {
         if !attr.path().is_ident("notification") {
@@ -242,14 +279,53 @@ fn parse_notification_attrs(input: &DeriveInput) -> syn::Result<String> {
                 return Err(meta.error("expected string literal for method"));
             }
 
+            if meta.path.is_ident("crate") {
+                let value: Expr = meta.value()?.parse()?;
+                if let Expr::Path(expr_path) = value {
+                    krate = Some(expr_path.path);
+                    return Ok(());
+                }
+                return Err(meta.error("expected path for crate"));
+            }
+
             Err(meta.error("unknown attribute"))
         })?;
     }
 
-    method.ok_or_else(|| {
+    let method = method.ok_or_else(|| {
         syn::Error::new_spanned(
             &input.ident,
             "missing required attribute: #[notification(method = \"...\")]",
         )
-    })
+    })?;
+
+    Ok((method, krate.unwrap_or_else(default_crate_path)))
+}
+
+fn parse_response_attrs(input: &DeriveInput) -> syn::Result<Path> {
+    for attr in &input.attrs {
+        if !attr.path().is_ident("response") {
+            continue;
+        }
+
+        let mut krate: Option<Path> = None;
+        attr.parse_nested_meta(|meta| {
+            if meta.path.is_ident("crate") {
+                let value: Expr = meta.value()?.parse()?;
+                if let Expr::Path(expr_path) = value {
+                    krate = Some(expr_path.path);
+                    return Ok(());
+                }
+                return Err(meta.error("expected path for crate"));
+            }
+
+            Err(meta.error("unknown attribute"))
+        })?;
+
+        if let Some(k) = krate {
+            return Ok(k);
+        }
+    }
+
+    Ok(default_crate_path())
 }
