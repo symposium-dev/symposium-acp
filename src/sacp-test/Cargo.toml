@@ -2,14 +2,16 @@
 name = "sacp-test"
 version = "1.0.0"
 edition = "2024"
+description = "Test utilities and mock implementations for SACP"
+license = "MIT OR Apache-2.0"
 
 [[bin]]
 name = "mcp-echo-server"
 path = "src/bin/mcp_echo_server.rs"
 
 [dependencies]
-sacp = { path = "../sacp" }
-yopo = { path = "../yopo" }
+sacp = { version = "1.1.1", path = "../sacp" }
+yopo = { version = "1.2.1", path = "../yopo" }
 rmcp = { workspace = true, features = ["server"] }
 schemars.workspace = true
 
