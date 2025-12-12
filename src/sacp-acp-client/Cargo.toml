@@ -2,6 +2,8 @@
 name = "sacp-acp-client"
 version = "0.1.0"
 edition = "2024"
+description = "ACP client utilities for SACP"
+license = "MIT OR Apache-2.0"
 
 [dependencies]
 extension-trait = "1.0.2"
