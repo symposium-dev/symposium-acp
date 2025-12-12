@@ -7,12 +7,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [2.1.0](https://github.com/symposium-dev/symposium-acp/compare/sacp-tokio-v2.0.1...sacp-tokio-v2.1.0) - 2025-11-29
-
-### Added
-
-- *(yopo)* accept multiple command arguments with env var support
-
 ## [2.0.1](https://github.com/symposium-dev/symposium-acp/compare/sacp-tokio-v2.0.0...sacp-tokio-v2.0.1) - 2025-11-25
 
 ### Other

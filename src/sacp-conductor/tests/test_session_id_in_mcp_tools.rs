@@ -8,9 +8,10 @@
 //! 5. The tool returns the session_id in its response
 //! 6. We verify the session_ids match
 
-use sacp::{Component, JrHandlerChain};
+use sacp::Component;
+use sacp::ProxyToConductor;
+use sacp::mcp_server::{McpServer, McpServiceRegistry};
 use sacp_conductor::Conductor;
-use sacp_proxy::{AcpProxyExt, McpServer, McpServiceRegistry};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use tokio::io::duplex;
@@ -50,15 +51,14 @@ fn create_echo_proxy() -> Result<sacp::DynComponent, sacp::Error> {
 }
 
 struct ProxyWithEchoServer {
-    registry: McpServiceRegistry,
+    registry: McpServiceRegistry<ProxyToConductor>,
 }
 
 impl Component for ProxyWithEchoServer {
     async fn serve(self, client: impl Component) -> Result<(), sacp::Error> {
-        JrHandlerChain::new()
+        ProxyToConductor::builder()
             .name("echo-proxy")
             .provide_mcp(self.registry)
-            .proxy()
             .serve(client)
             .await
     }

@@ -2,12 +2,13 @@
 //!
 //! Provides a convenient API for running one-shot prompts against SACP components.
 
+use sacp::ClientToAgent;
 use sacp::schema::{
     AudioContent, ContentBlock, EmbeddedResourceResource, ImageContent, InitializeRequest,
     NewSessionRequest, PromptRequest, RequestPermissionOutcome, RequestPermissionRequest,
     RequestPermissionResponse, SessionNotification, TextContent, VERSION as PROTOCOL_VERSION,
 };
-use sacp::{Component, Handled, JrHandlerChain, MessageAndCx, UntypedMessage};
+use sacp::{Component, Handled, MessageCx, UntypedMessage};
 use std::path::PathBuf;
 
 /// Converts a `ContentBlock` to its string representation.
@@ -87,12 +88,15 @@ pub async fn prompt_with_callback(
     let prompt_text = prompt_text.to_string();
 
     // Run the client
-    JrHandlerChain::new()
-        .on_receive_message(async |message_and_cx: MessageAndCx<UntypedMessage>| {
-            tracing::trace!("received: {:?}", message_and_cx.message());
-            Ok(Handled::No(message_and_cx))
-        })
+    ClientToAgent::builder()
+        .on_receive_message(
+            async |message: MessageCx<UntypedMessage, UntypedMessage>, _cx| {
+                tracing::trace!("received: {:?}", message.message());
+                Ok(Handled::No(message))
+            },
+        )
         .on_receive_notification(async move |notification: SessionNotification, _cx| {
+            tracing::debug!(?notification, "yopo: received SessionNotification");
             // Call the callback for each agent message chunk
             if let sacp::schema::SessionUpdate::AgentMessageChunk(content_chunk) =
                 notification.update
@@ -101,23 +105,25 @@ pub async fn prompt_with_callback(
             }
             Ok(())
         })
-        .on_receive_request(async move |request: RequestPermissionRequest, request_cx| {
-            // Auto-approve all permission requests by selecting the first option
-            let outcome = if let Some(option) = request.options.first() {
-                RequestPermissionOutcome::Selected {
-                    option_id: option.id.clone(),
-                }
-            } else {
-                RequestPermissionOutcome::Cancelled
-            };
+        .on_receive_request(
+            async move |request: RequestPermissionRequest, request_cx, _cx| {
+                // Auto-approve all permission requests by selecting the first option
+                let outcome = if let Some(option) = request.options.first() {
+                    RequestPermissionOutcome::Selected {
+                        option_id: option.id.clone(),
+                    }
+                } else {
+                    RequestPermissionOutcome::Cancelled
+                };
 
-            request_cx.respond(RequestPermissionResponse {
-                outcome,
-                meta: None,
-            })
-        })
+                request_cx.respond(RequestPermissionResponse {
+                    outcome,
+                    meta: None,
+                })
+            },
+        )
         .connect_to(component)?
-        .with_client(|cx: sacp::JrConnectionCx| async move {
+        .with_client(|cx: sacp::JrConnectionCx<ClientToAgent>| async move {
             // Initialize the agent
             let _init_response = cx
                 .send_request(InitializeRequest {

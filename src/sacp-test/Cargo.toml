@@ -9,7 +9,6 @@ path = "src/bin/mcp_echo_server.rs"
 
 [dependencies]
 sacp = { path = "../sacp" }
-sacp-proxy = { path = "../sacp-proxy" }
 yopo = { path = "../yopo" }
 rmcp = { workspace = true, features = ["server"] }
 schemars.workspace = true

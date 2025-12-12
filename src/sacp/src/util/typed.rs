@@ -8,7 +8,8 @@
 use jsonrpcmsg::Params;
 
 use crate::{
-    Handled, JrConnectionCx, JrNotification, JrRequest, JrRequestCx, MessageAndCx, UntypedMessage,
+    Handled, JrConnectionCx, JrNotification, JrRequest, JrRequestCx, MessageCx, UntypedMessage,
+    role::{HasEndpoint, JrEndpoint, JrRole},
     util::json_cast,
 };
 
@@ -17,18 +18,18 @@ use crate::{
 /// Use this when you receive an [`UntypedMessage`] representing a request and want to
 /// try parsing it as different concrete types, handling whichever type matches.
 ///
-/// This is very similar to using [`JrHandlerChain::apply`](`crate::JrHandlerChain::apply`) except that each match
+/// This is very similar to using [`JrConnectionBuilder::apply`](`crate::JrConnectionBuilder::apply`) except that each match
 /// executes immediately, which can help avoid borrow check errors.
 ///
 /// # Example
 ///
 /// ```
-/// # use sacp::{MessageAndCx};
+/// # use sacp::MessageCx;
 /// # use sacp::schema::{InitializeRequest, InitializeResponse, PromptRequest, PromptResponse};
 /// # use sacp::util::MatchMessage;
-/// # async fn example(message: MessageAndCx) -> Result<(), sacp::Error> {
+/// # async fn example(message: MessageCx) -> Result<(), sacp::Error> {
 /// MatchMessage::new(message)
-///     .if_request(|req: InitializeRequest, cx: sacp::JrRequestCx<InitializeResponse>| async move {
+///     .if_request(|req: InitializeRequest, request_cx: sacp::JrRequestCx<InitializeResponse>| async move {
 ///         // Handle initialization
 ///         let response = InitializeResponse {
 ///             protocol_version: req.protocol_version,
@@ -37,23 +38,23 @@ use crate::{
 ///             meta: None,
 ///             agent_info: None,
 ///         };
-///         cx.respond(response)
+///         request_cx.respond(response)
 ///     })
 ///     .await
-///     .if_request(|req: PromptRequest, cx: sacp::JrRequestCx<PromptResponse>| async move {
+///     .if_request(|req: PromptRequest, request_cx: sacp::JrRequestCx<PromptResponse>| async move {
 ///         // Handle prompts
 ///         let response = PromptResponse {
 ///             stop_reason: sacp::schema::StopReason::EndTurn,
 ///             meta: None,
 ///         };
-///         cx.respond(response)
+///         request_cx.respond(response)
 ///     })
 ///     .await
 ///     .otherwise(|message| async move {
 ///         // Fallback for unrecognized messages
 ///         match message {
-///             MessageAndCx::Request(_, cx) => cx.respond_with_error(sacp::util::internal_error("unknown method")),
-///             MessageAndCx::Notification(_, _) => Ok(()),
+///             MessageCx::Request(_, request_cx) => request_cx.respond_with_error(sacp::util::internal_error("unknown method")),
+///             MessageCx::Notification(_) => Ok(()),
 ///         }
 ///     })
 ///     .await
@@ -65,20 +66,20 @@ use crate::{
 /// the `otherwise` handler receives the original untyped message.
 #[must_use]
 pub struct MatchMessage {
-    state: Result<Handled<MessageAndCx>, crate::Error>,
+    state: Result<Handled<MessageCx>, crate::Error>,
 }
 
 impl MatchMessage {
     /// Create a new pattern matcher for the given untyped request message.
-    pub fn new(message: MessageAndCx) -> Self {
+    pub fn new(message: MessageCx) -> Self {
         Self {
             state: Ok(Handled::No(message)),
         }
     }
 
-    /// Try to handle the message as a request of type `R`.
+    /// Try to handle the message as a request of type `Req`.
     ///
-    /// If the message can be parsed as `R`, the handler `op` is called with the parsed
+    /// If the message can be parsed as `Req`, the handler `op` is called with the parsed
     /// request and a typed request context. If parsing fails or the message was already
     /// handled by a previous `handle_if`, this call has no effect.
     ///
@@ -86,17 +87,16 @@ impl MatchMessage {
     /// `Handled` value to control whether the message should be passed to the next handler.
     ///
     /// Returns `self` to allow chaining multiple `handle_if` calls.
-    pub async fn if_request<R: JrRequest, H>(
+    pub async fn if_request<Req: JrRequest, H>(
         mut self,
-        op: impl AsyncFnOnce(R, JrRequestCx<R::Response>) -> Result<H, crate::Error>,
+        op: impl AsyncFnOnce(Req, JrRequestCx<Req::Response>) -> Result<H, crate::Error>,
     ) -> Self
     where
-        H: crate::IntoHandled<(R, JrRequestCx<R::Response>)>,
+        H: crate::IntoHandled<(Req, JrRequestCx<Req::Response>)>,
     {
-        if let Ok(Handled::No(MessageAndCx::Request(untyped_request, untyped_request_cx))) =
-            self.state
+        if let Ok(Handled::No(MessageCx::Request(untyped_request, untyped_request_cx))) = self.state
         {
-            match R::parse_request(untyped_request.method(), untyped_request.params()) {
+            match Req::parse_message(untyped_request.method(), untyped_request.params()) {
                 Some(Ok(typed_request)) => {
                     let typed_request_cx = untyped_request_cx.cast();
                     match op(typed_request, typed_request_cx).await {
@@ -106,7 +106,7 @@ impl MatchMessage {
                                 // Handler returned the request back, convert to untyped
                                 match request.to_untyped_message() {
                                     Ok(untyped) => {
-                                        self.state = Ok(Handled::No(MessageAndCx::Request(
+                                        self.state = Ok(Handled::No(MessageCx::Request(
                                             untyped,
                                             request_cx.erase_to_json(),
                                         )));
@@ -120,11 +120,85 @@ impl MatchMessage {
                 }
                 Some(Err(err)) => self.state = Err(err),
                 None => {
-                    self.state = Ok(Handled::No(MessageAndCx::Request(
+                    self.state = Ok(Handled::No(MessageCx::Request(
                         untyped_request,
                         untyped_request_cx,
                     )));
                 }
+            }
+        }
+        self
+    }
+
+    /// Try to handle the message as a request of type `Req` from a specific endpoint.
+    ///
+    /// This is similar to [`if_request`](Self::if_request), but first applies endpoint-specific
+    /// message transformation (e.g., unwrapping `SuccessorMessage` envelopes when receiving
+    /// from an agent via a proxy).
+    ///
+    /// # Parameters
+    ///
+    /// * `endpoint` - The endpoint the message is expected to come from
+    /// * `connection_cx` - The connection context for the role
+    /// * `op` - The handler to call if the message matches
+    pub async fn if_request_from<Role, End, Req, H>(
+        mut self,
+        endpoint: End,
+        connection_cx: JrConnectionCx<Role>,
+        op: impl AsyncFnOnce(
+            Req,
+            JrRequestCx<Req::Response>,
+            JrConnectionCx<Role>,
+        ) -> Result<H, crate::Error>,
+    ) -> Self
+    where
+        Role: JrRole + HasEndpoint<End>,
+        End: JrEndpoint,
+        Req: JrRequest,
+        H: crate::IntoHandled<(Req, JrRequestCx<Req::Response>)>,
+    {
+        if let Ok(Handled::No(message_cx)) = self.state {
+            let remote_style = Role::remote_style(endpoint);
+            match remote_style
+                .handle_incoming_message(
+                    message_cx,
+                    connection_cx.clone(),
+                    async |message_cx, connection_cx| match message_cx {
+                        MessageCx::Request(untyped_request, untyped_request_cx) => {
+                            match Req::parse_message(
+                                untyped_request.method(),
+                                untyped_request.params(),
+                            ) {
+                                Some(Ok(typed_request)) => {
+                                    let typed_request_cx = untyped_request_cx.cast();
+                                    match op(typed_request, typed_request_cx, connection_cx).await {
+                                        Ok(result) => match result.into_handled() {
+                                            Handled::Yes => Ok(Handled::Yes),
+                                            Handled::No((request, request_cx)) => {
+                                                let untyped = request.to_untyped_message()?;
+                                                Ok(Handled::No(MessageCx::Request(
+                                                    untyped,
+                                                    request_cx.erase_to_json(),
+                                                )))
+                                            }
+                                        },
+                                        Err(err) => Err(err),
+                                    }
+                                }
+                                Some(Err(err)) => Err(err),
+                                None => Ok(Handled::No(MessageCx::Request(
+                                    untyped_request,
+                                    untyped_request_cx,
+                                ))),
+                            }
+                        }
+                        MessageCx::Notification(_) => Ok(Handled::No(message_cx)),
+                    },
+                )
+                .await
+            {
+                Ok(handled) => self.state = Ok(handled),
+                Err(err) => self.state = Err(err),
             }
         }
         self
@@ -142,29 +216,23 @@ impl MatchMessage {
     /// Returns `self` to allow chaining multiple `handle_if` calls.
     pub async fn if_notification<N: JrNotification, H>(
         mut self,
-        op: impl AsyncFnOnce(N, JrConnectionCx) -> Result<H, crate::Error>,
+        op: impl AsyncFnOnce(N) -> Result<H, crate::Error>,
     ) -> Self
     where
-        H: crate::IntoHandled<(N, JrConnectionCx)>,
+        H: crate::IntoHandled<N>,
     {
-        if let Ok(Handled::No(MessageAndCx::Notification(untyped_notification, notification_cx))) =
-            self.state
-        {
-            match N::parse_notification(
-                untyped_notification.method(),
-                untyped_notification.params(),
-            ) {
+        if let Ok(Handled::No(MessageCx::Notification(untyped_notification))) = self.state {
+            match N::parse_message(untyped_notification.method(), untyped_notification.params()) {
                 Some(Ok(typed_notification)) => {
-                    match op(typed_notification, notification_cx.clone()).await {
+                    match op(typed_notification).await {
                         Ok(result) => match result.into_handled() {
                             Handled::Yes => self.state = Ok(Handled::Yes),
-                            Handled::No((notification, cx)) => {
+                            Handled::No(notification) => {
                                 // Handler returned the notification back, convert to untyped
                                 match notification.to_untyped_message() {
                                     Ok(untyped) => {
-                                        self.state = Ok(Handled::No(MessageAndCx::Notification(
-                                            untyped, cx,
-                                        )));
+                                        self.state =
+                                            Ok(Handled::No(MessageCx::Notification(untyped)));
                                     }
                                     Err(err) => self.state = Err(err),
                                 }
@@ -175,18 +243,80 @@ impl MatchMessage {
                 }
                 Some(Err(err)) => self.state = Err(err),
                 None => {
-                    self.state = Ok(Handled::No(MessageAndCx::Notification(
-                        untyped_notification,
-                        notification_cx,
-                    )));
+                    self.state = Ok(Handled::No(MessageCx::Notification(untyped_notification)));
                 }
             }
         }
         self
     }
 
+    /// Try to handle the message as a notification of type `N` from a specific endpoint.
+    ///
+    /// This is similar to [`if_notification`](Self::if_notification), but first applies endpoint-specific
+    /// message transformation (e.g., unwrapping `SuccessorMessage` envelopes when receiving
+    /// from an agent via a proxy).
+    ///
+    /// # Parameters
+    ///
+    /// * `endpoint` - The endpoint the message is expected to come from
+    /// * `connection_cx` - The connection context for the role
+    /// * `op` - The handler to call if the message matches
+    pub async fn if_notification_from<Role, End, N, H>(
+        mut self,
+        endpoint: End,
+        connection_cx: JrConnectionCx<Role>,
+        op: impl AsyncFnOnce(N, JrConnectionCx<Role>) -> Result<H, crate::Error>,
+    ) -> Self
+    where
+        Role: JrRole + HasEndpoint<End>,
+        End: JrEndpoint,
+        N: JrNotification,
+        H: crate::IntoHandled<N>,
+    {
+        if let Ok(Handled::No(message_cx)) = self.state {
+            let remote_style = Role::remote_style(endpoint);
+            match remote_style
+                .handle_incoming_message(
+                    message_cx,
+                    connection_cx.clone(),
+                    async |message_cx, connection_cx| match message_cx {
+                        MessageCx::Notification(untyped_notification) => {
+                            match N::parse_message(
+                                untyped_notification.method(),
+                                untyped_notification.params(),
+                            ) {
+                                Some(Ok(typed_notification)) => {
+                                    match op(typed_notification, connection_cx).await {
+                                        Ok(result) => match result.into_handled() {
+                                            Handled::Yes => Ok(Handled::Yes),
+                                            Handled::No(notification) => {
+                                                let untyped = notification.to_untyped_message()?;
+                                                Ok(Handled::No(MessageCx::Notification(untyped)))
+                                            }
+                                        },
+                                        Err(err) => Err(err),
+                                    }
+                                }
+                                Some(Err(err)) => Err(err),
+                                None => {
+                                    Ok(Handled::No(MessageCx::Notification(untyped_notification)))
+                                }
+                            }
+                        }
+                        MessageCx::Request(_, _) => Ok(Handled::No(message_cx)),
+                    },
+                )
+                .await
+            {
+                Ok(handled) => self.state = Ok(handled),
+                Err(err) => self.state = Err(err),
+            }
+        }
+        self
+    }
+
     /// Complete matching, returning `Handled::No` if no match was found.
-    pub fn done(self) -> Result<Handled<MessageAndCx>, crate::Error> {
+    pub fn done(self) -> Result<Handled<MessageCx>, crate::Error> {
         match self.state {
             Ok(Handled::Yes) => Ok(Handled::Yes),
             Ok(Handled::No(message)) => Ok(Handled::No(message)),
@@ -201,7 +331,7 @@ impl MatchMessage {
     /// matching chain and get the final result.
     pub async fn otherwise(
         self,
-        op: impl AsyncFnOnce(MessageAndCx) -> Result<(), crate::Error>,
+        op: impl AsyncFnOnce(MessageCx) -> Result<(), crate::Error>,
     ) -> Result<(), crate::Error> {
         match self.state {
             Ok(Handled::Yes) => Ok(()),
@@ -227,8 +357,9 @@ impl MatchMessage {
 /// ```
 /// # use sacp::{UntypedMessage, JrConnectionCx};
 /// # use sacp::schema::SessionNotification;
+/// # use sacp::ClientToAgent;
 /// # use sacp::util::TypeNotification;
-/// # async fn example(message: UntypedMessage, cx: &JrConnectionCx) -> Result<(), sacp::Error> {
+/// # async fn example(message: UntypedMessage, cx: &JrConnectionCx<ClientToAgent>) -> Result<(), sacp::Error> {
 /// TypeNotification::new(message, cx)
 ///     .handle_if(|notif: SessionNotification| async move {
 ///         // Handle session notifications
@@ -248,8 +379,8 @@ impl MatchMessage {
 /// Since notifications don't expect responses, handlers only receive the parsed
 /// notification (not a request context).
 #[must_use]
-pub struct TypeNotification {
-    cx: JrConnectionCx,
+pub struct TypeNotification<Role: JrRole> {
+    cx: JrConnectionCx<Role>,
     state: Option<TypeNotificationState>,
 }
 
@@ -258,9 +389,9 @@ enum TypeNotificationState {
     Handled(Result<(), crate::Error>),
 }
 
-impl TypeNotification {
+impl<Role: JrRole> TypeNotification<Role> {
     /// Create a new pattern matcher for the given untyped notification message.
-    pub fn new(request: UntypedMessage, cx: &JrConnectionCx) -> Self {
+    pub fn new(request: UntypedMessage, cx: &JrConnectionCx<Role>) -> Self {
         let UntypedMessage { method, params } = request;
         let params: Option<Params> = json_cast(params).expect("valid params");
         Self {
@@ -282,7 +413,7 @@ impl TypeNotification {
     ) -> Self {
         self.state = Some(match self.state.take().expect("valid state") {
             TypeNotificationState::Unhandled(method, params) => {
-                match N::parse_notification(&method, &params) {
+                match N::parse_message(&method, &params) {
                     Some(Ok(request)) => TypeNotificationState::Handled(op(request).await),
 
                     Some(Err(err)) => {

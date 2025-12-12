@@ -1,322 +1,411 @@
 use crate::jsonrpc::{Handled, IntoHandled, JrMessageHandler};
-use crate::{JrConnectionCx, JrNotification, JrRequest, MessageAndCx};
+use crate::role::{HasEndpoint, JrEndpoint, JrRole};
+use crate::{JrConnectionCx, JrNotification, JrRequest, MessageCx, UntypedMessage};
 // Types re-exported from crate root
 use super::JrRequestCx;
 use std::marker::PhantomData;
 use std::ops::AsyncFnMut;
 
 /// Null handler that accepts no messages.
-#[derive(Default)]
-pub struct NullHandler {
-    _private: (),
+pub struct NullHandler<Role: JrRole> {
+    role: Role,
 }
 
-impl JrMessageHandler for NullHandler {
+impl<Role: JrRole> NullHandler<Role> {
+    /// Creates a new null handler.
+    pub fn new(role: Role) -> Self {
+        Self { role }
+    }
+
+    /// Returns the role.
+    pub fn role(&self) -> Role {
+        self.role
+    }
+}
+
+impl<Role: JrRole> JrMessageHandler for NullHandler<Role> {
+    type Role = Role;
+
     fn describe_chain(&self) -> impl std::fmt::Debug {
         "(null)"
     }
 
     async fn handle_message(
         &mut self,
-        message: MessageAndCx,
-    ) -> Result<Handled<MessageAndCx>, crate::Error> {
+        message: MessageCx,
+        _cx: JrConnectionCx<Role>,
+    ) -> Result<Handled<MessageCx>, crate::Error> {
         Ok(Handled::No(message))
     }
 }
 
 /// Handler for typed request messages
-pub struct RequestHandler<R, F>
-where
-    R: JrRequest,
-{
+pub struct RequestHandler<Role: JrRole, End: JrEndpoint, Req: JrRequest = UntypedMessage, F = ()> {
     handler: F,
-    phantom: PhantomData<fn(R)>,
+    role: Role,
+    phantom: PhantomData<fn(End, Req)>,
 }
 
-impl<R, F> RequestHandler<R, F>
-where
-    R: JrRequest,
-{
+impl<Role: JrRole, End: JrEndpoint, Req: JrRequest, F> RequestHandler<Role, End, Req, F> {
     /// Creates a new request handler
-    pub fn new(handler: F) -> Self {
+    pub fn new(_endpoint: End, role: Role, handler: F) -> Self {
         Self {
             handler,
+            role,
             phantom: PhantomData,
         }
     }
+
+    /// Returns the role.
+    pub fn role(&self) -> Role {
+        self.role
+    }
 }
 
-impl<R, F, T> JrMessageHandler for RequestHandler<R, F>
+impl<Role: JrRole, End: JrEndpoint, Req, F, T> JrMessageHandler
+    for RequestHandler<Role, End, Req, F>
 where
-    R: JrRequest,
-    F: AsyncFnMut(R, JrRequestCx<R::Response>) -> Result<T, crate::Error>,
-    T: crate::IntoHandled<(R, JrRequestCx<R::Response>)>,
+    Role: HasEndpoint<End>,
+    Req: JrRequest,
+    F: AsyncFnMut(Req, JrRequestCx<Req::Response>, JrConnectionCx<Role>) -> Result<T, crate::Error>,
+    T: crate::IntoHandled<(Req, JrRequestCx<Req::Response>)>,
 {
-    async fn handle_message(
-        &mut self,
-        message_cx: MessageAndCx,
-    ) -> Result<Handled<MessageAndCx>, crate::Error> {
-        match message_cx {
-            MessageAndCx::Request(message, request_cx) => {
-                tracing::debug!(
-                    request_type = std::any::type_name::<R>(),
-                    message = ?message,
-                    "RequestHandler::handle_request"
-                );
-                match R::parse_request(&message.method, &message.params) {
-                    Some(Ok(req)) => {
-                        tracing::trace!(?req, "RequestHandler::handle_request: parse completed");
-                        let typed_request_cx = request_cx.cast();
-                        let result = (self.handler)(req, typed_request_cx).await?;
-                        match result.into_handled() {
-                            Handled::Yes => Ok(Handled::Yes),
-                            Handled::No((request, request_cx)) => {
-                                // Handler returned the request back, convert to untyped
-                                let untyped = request.to_untyped_message()?;
-                                Ok(Handled::No(MessageAndCx::Request(
-                                    untyped,
-                                    request_cx.erase_to_json(),
-                                )))
-                            }
-                        }
-                    }
-                    Some(Err(err)) => {
-                        tracing::trace!(?err, "RequestHandler::handle_request: parse errored");
-                        Err(err)
-                    }
-                    None => {
-                        tracing::trace!("RequestHandler::handle_request: parse failed");
-                        Ok(Handled::No(MessageAndCx::Request(message, request_cx)))
-                    }
-                }
-            }
-
-            MessageAndCx::Notification(..) => Ok(Handled::No(message_cx)),
-        }
-    }
+    type Role = Role;
 
     fn describe_chain(&self) -> impl std::fmt::Debug {
-        std::any::type_name::<R>()
+        std::any::type_name::<Req>()
+    }
+
+    async fn handle_message(
+        &mut self,
+        message_cx: MessageCx,
+        connection_cx: JrConnectionCx<Role>,
+    ) -> Result<Handled<MessageCx>, crate::Error> {
+        let remote_style = Role::remote_style(End::default());
+        remote_style
+            .handle_incoming_message(
+                message_cx,
+                connection_cx,
+                async |message_cx, connection_cx| {
+                    match message_cx {
+                        MessageCx::Request(message, request_cx) => {
+                            tracing::debug!(
+                                request_type = std::any::type_name::<Req>(),
+                                message = ?message,
+                                "RequestHandler::handle_request"
+                            );
+                            match Req::parse_message(&message.method, &message.params) {
+                                Some(Ok(req)) => {
+                                    tracing::trace!(
+                                        ?req,
+                                        "RequestHandler::handle_request: parse completed"
+                                    );
+                                    let typed_request_cx = request_cx.cast();
+                                    let result =
+                                        (self.handler)(req, typed_request_cx, connection_cx)
+                                            .await?;
+                                    match result.into_handled() {
+                                        Handled::Yes => Ok(Handled::Yes),
+                                        Handled::No((request, request_cx)) => {
+                                            // Handler returned the request back, convert to untyped
+                                            let untyped = request.to_untyped_message()?;
+                                            Ok(Handled::No(MessageCx::Request(
+                                                untyped,
+                                                request_cx.erase_to_json(),
+                                            )))
+                                        }
+                                    }
+                                }
+                                Some(Err(err)) => {
+                                    tracing::trace!(
+                                        ?err,
+                                        "RequestHandler::handle_request: parse errored"
+                                    );
+                                    Err(err)
+                                }
+                                None => {
+                                    tracing::trace!("RequestHandler::handle_request: parse failed");
+                                    Ok(Handled::No(MessageCx::Request(message, request_cx)))
+                                }
+                            }
+                        }
+
+                        MessageCx::Notification(..) => Ok(Handled::No(message_cx)),
+                    }
+                },
+            )
+            .await
     }
 }
 
 /// Handler for typed notification messages
-pub struct NotificationHandler<N, F>
-where
-    N: JrNotification,
-{
+pub struct NotificationHandler<
+    Role: JrRole,
+    End: JrEndpoint,
+    Notif: JrNotification = UntypedMessage,
+    F = (),
+> {
     handler: F,
-    phantom: PhantomData<fn(N)>,
+    role: Role,
+    phantom: PhantomData<fn(End, Notif)>,
 }
 
-impl<R, F> NotificationHandler<R, F>
-where
-    R: JrNotification,
+impl<Role: JrRole, End: JrEndpoint, Notif: JrNotification, F>
+    NotificationHandler<Role, End, Notif, F>
 {
     /// Creates a new notification handler
-    pub fn new(handler: F) -> Self {
+    pub fn new(_endpoint: End, role: Role, handler: F) -> Self {
         Self {
             handler,
+            role,
             phantom: PhantomData,
         }
     }
+
+    /// Returns the role.
+    pub fn role(&self) -> Role {
+        self.role
+    }
 }
 
-impl<R, F, T> JrMessageHandler for NotificationHandler<R, F>
+impl<Role: JrRole, End: JrEndpoint, Notif, F, T> JrMessageHandler
+    for NotificationHandler<Role, End, Notif, F>
 where
-    R: JrNotification,
-    F: AsyncFnMut(R, JrConnectionCx) -> Result<T, crate::Error>,
-    T: crate::IntoHandled<(R, JrConnectionCx)>,
+    Role: HasEndpoint<End>,
+    Notif: JrNotification,
+    F: AsyncFnMut(Notif, JrConnectionCx<Role>) -> Result<T, crate::Error>,
+    T: crate::IntoHandled<(Notif, JrConnectionCx<Role>)>,
 {
-    async fn handle_message(
-        &mut self,
-        message_cx: MessageAndCx,
-    ) -> Result<Handled<MessageAndCx>, crate::Error> {
-        match message_cx {
-            MessageAndCx::Notification(message, cx) => {
-                tracing::debug!(
-                    request_type = std::any::type_name::<R>(),
-                    message = ?message,
-                    "NotificationHandler::handle_message"
-                );
-                match R::parse_notification(&message.method, &message.params) {
-                    Some(Ok(notif)) => {
-                        tracing::trace!(
-                            ?notif,
-                            "NotificationHandler::handle_notification: parse completed"
-                        );
-                        let result = (self.handler)(notif, cx.clone()).await?;
-                        match result.into_handled() {
-                            Handled::Yes => Ok(Handled::Yes),
-                            Handled::No((notification, cx)) => {
-                                // Handler returned the notification back, convert to untyped
-                                let untyped = notification.to_untyped_message()?;
-                                Ok(Handled::No(MessageAndCx::Notification(untyped, cx)))
-                            }
-                        }
-                    }
-                    Some(Err(err)) => {
-                        tracing::trace!(
-                            ?err,
-                            "NotificationHandler::handle_notification: parse errored"
-                        );
-                        Err(err)
-                    }
-                    None => {
-                        tracing::trace!("NotificationHandler::handle_notification: parse failed");
-                        Ok(Handled::No(MessageAndCx::Notification(message, cx)))
-                    }
-                }
-            }
-
-            MessageAndCx::Request(..) => Ok(Handled::No(message_cx)),
-        }
-    }
+    type Role = Role;
 
     fn describe_chain(&self) -> impl std::fmt::Debug {
-        std::any::type_name::<R>()
+        std::any::type_name::<Notif>()
+    }
+
+    async fn handle_message(
+        &mut self,
+        message_cx: MessageCx,
+        connection_cx: JrConnectionCx<Role>,
+    ) -> Result<Handled<MessageCx>, crate::Error> {
+        let remote_style = Role::remote_style(End::default());
+        remote_style
+            .handle_incoming_message(
+                message_cx,
+                connection_cx,
+                async |message_cx, connection_cx| {
+                    match message_cx {
+                        MessageCx::Notification(message) => {
+                            tracing::debug!(
+                                request_type = std::any::type_name::<Notif>(),
+                                message = ?message,
+                                "NotificationHandler::handle_message"
+                            );
+                            match Notif::parse_message(&message.method, &message.params) {
+                                Some(Ok(notif)) => {
+                                    tracing::trace!(
+                                        ?notif,
+                                        "NotificationHandler::handle_notification: parse completed"
+                                    );
+                                    let result = (self.handler)(notif, connection_cx).await?;
+                                    match result.into_handled() {
+                                        Handled::Yes => Ok(Handled::Yes),
+                                        Handled::No((notification, _cx)) => {
+                                            // Handler returned the notification back, convert to untyped
+                                            let untyped = notification.to_untyped_message()?;
+                                            Ok(Handled::No(MessageCx::Notification(untyped)))
+                                        }
+                                    }
+                                }
+                                Some(Err(err)) => {
+                                    tracing::trace!(
+                                        ?err,
+                                        "NotificationHandler::handle_notification: parse errored"
+                                    );
+                                    Err(err)
+                                }
+                                None => {
+                                    tracing::trace!(
+                                        "NotificationHandler::handle_notification: parse failed"
+                                    );
+                                    Ok(Handled::No(MessageCx::Notification(message)))
+                                }
+                            }
+                        }
+
+                        MessageCx::Request(..) => Ok(Handled::No(message_cx)),
+                    }
+                },
+            )
+            .await
     }
 }
 
-/// Handler that tries H1 and then H2.
-
-pub struct MessageHandler<R, N, F>
-where
-    R: JrRequest,
-    N: JrNotification,
-{
+/// Handler that handles both requests and notifications of specific types.
+pub struct MessageHandler<
+    Role: JrRole,
+    End: JrEndpoint,
+    Req: JrRequest = UntypedMessage,
+    Notif: JrNotification = UntypedMessage,
+    F = (),
+> {
     handler: F,
-    phantom: PhantomData<fn(R, N)>,
+    role: Role,
+    phantom: PhantomData<fn(End, Req, Notif)>,
 }
 
-impl<R, N, F, T> MessageHandler<R, N, F>
+impl<Role: JrRole, End: JrEndpoint, Req: JrRequest, Notif: JrNotification, F, T>
+    MessageHandler<Role, End, Req, Notif, F>
 where
-    R: JrRequest,
-    N: JrNotification,
-    F: AsyncFnMut(MessageAndCx<R, N>) -> Result<T, crate::Error>,
-    T: IntoHandled<MessageAndCx<R, N>>,
+    F: AsyncFnMut(MessageCx<Req, Notif>, JrConnectionCx<Role>) -> Result<T, crate::Error>,
+    T: IntoHandled<MessageCx<Req, Notif>>,
 {
     /// Creates a new message handler
-    pub fn new(handler: F) -> Self {
+    pub fn new(_endpoint: End, role: Role, handler: F) -> Self {
         Self {
             handler,
+            role,
             phantom: PhantomData,
         }
     }
+
+    /// Returns the role.
+    pub fn role(&self) -> Role {
+        self.role
+    }
 }
 
-impl<R, N, F, T> JrMessageHandler for MessageHandler<R, N, F>
+impl<Role: JrRole, End: JrEndpoint, Req: JrRequest, Notif: JrNotification, F, T> JrMessageHandler
+    for MessageHandler<Role, End, Req, Notif, F>
 where
-    R: JrRequest,
-    N: JrNotification,
-    F: AsyncFnMut(MessageAndCx<R, N>) -> Result<T, crate::Error>,
-    T: IntoHandled<MessageAndCx<R, N>>,
+    Role: HasEndpoint<End>,
+    F: AsyncFnMut(MessageCx<Req, Notif>, JrConnectionCx<Role>) -> Result<T, crate::Error>,
+    T: IntoHandled<MessageCx<Req, Notif>>,
 {
-    async fn handle_message(
-        &mut self,
-        message_cx: MessageAndCx,
-    ) -> Result<Handled<MessageAndCx>, crate::Error> {
-        match message_cx {
-            MessageAndCx::Request(message, request_cx) => {
-                tracing::debug!(
-                    request_type = std::any::type_name::<R>(),
-                    message = ?message,
-                    "MessageHandler::handle_request"
-                );
-                match R::parse_request(&message.method, &message.params) {
-                    Some(Ok(req)) => {
-                        tracing::trace!(?req, "MessageHandler::handle_request: parse completed");
-                        let typed_message = MessageAndCx::Request(req, request_cx.cast());
-                        let result = (self.handler)(typed_message).await?;
-                        match result.into_handled() {
-                            Handled::Yes => Ok(Handled::Yes),
-                            Handled::No(MessageAndCx::Request(request, request_cx)) => {
-                                let untyped = request.to_untyped_message()?;
-                                Ok(Handled::No(MessageAndCx::Request(
-                                    untyped,
-                                    request_cx.erase_to_json(),
-                                )))
-                            }
-                            Handled::No(MessageAndCx::Notification(..)) => {
-                                unreachable!("Request handler returned notification")
-                            }
-                        }
-                    }
-                    Some(Err(err)) => {
-                        tracing::trace!(?err, "MessageHandler::handle_request: parse errored");
-                        Err(err)
-                    }
-                    None => {
-                        tracing::trace!("MessageHandler::handle_request: parse failed");
-                        Ok(Handled::No(MessageAndCx::Request(message, request_cx)))
-                    }
-                }
-            }
-
-            MessageAndCx::Notification(message, cx) => {
-                tracing::debug!(
-                    notification_type = std::any::type_name::<N>(),
-                    message = ?message,
-                    "MessageHandler::handle_notification"
-                );
-                match N::parse_notification(&message.method, &message.params) {
-                    Some(Ok(notif)) => {
-                        tracing::trace!(
-                            ?notif,
-                            "MessageHandler::handle_notification: parse completed"
-                        );
-                        let typed_message = MessageAndCx::Notification(notif, cx);
-                        let result = (self.handler)(typed_message).await?;
-                        match result.into_handled() {
-                            Handled::Yes => Ok(Handled::Yes),
-                            Handled::No(MessageAndCx::Notification(notification, cx)) => {
-                                let untyped = notification.to_untyped_message()?;
-                                Ok(Handled::No(MessageAndCx::Notification(untyped, cx)))
-                            }
-                            Handled::No(MessageAndCx::Request(..)) => {
-                                unreachable!("Notification handler returned request")
-                            }
-                        }
-                    }
-                    Some(Err(err)) => {
-                        tracing::trace!(?err, "MessageHandler::handle_notification: parse errored");
-                        Err(err)
-                    }
-                    None => {
-                        tracing::trace!("MessageHandler::handle_notification: parse failed");
-                        Ok(Handled::No(MessageAndCx::Notification(message, cx)))
-                    }
-                }
-            }
-        }
-    }
+    type Role = Role;
 
     fn describe_chain(&self) -> impl std::fmt::Debug {
         format!(
             "({}, {})",
-            std::any::type_name::<R>(),
-            std::any::type_name::<N>()
+            std::any::type_name::<Req>(),
+            std::any::type_name::<Notif>()
         )
+    }
+
+    async fn handle_message(
+        &mut self,
+        message_cx: MessageCx,
+        connection_cx: JrConnectionCx<Role>,
+    ) -> Result<Handled<MessageCx>, crate::Error> {
+        let remote_style = Role::remote_style(End::default());
+        remote_style
+            .handle_incoming_message(
+                message_cx,
+                connection_cx,
+                async |message_cx, connection_cx| match message_cx {
+                    MessageCx::Request(message, request_cx) => {
+                        tracing::debug!(
+                            request_type = std::any::type_name::<Req>(),
+                            message = ?message,
+                            "MessageHandler::handle_request"
+                        );
+                        match Req::parse_message(&message.method, &message.params) {
+                            Some(Ok(req)) => {
+                                tracing::trace!(
+                                    ?req,
+                                    "MessageHandler::handle_request: parse completed"
+                                );
+                                let typed_message = MessageCx::Request(req, request_cx.cast());
+                                let result = (self.handler)(typed_message, connection_cx).await?;
+                                match result.into_handled() {
+                                    Handled::Yes => Ok(Handled::Yes),
+                                    Handled::No(MessageCx::Request(request, request_cx)) => {
+                                        let untyped = request.to_untyped_message()?;
+                                        Ok(Handled::No(MessageCx::Request(
+                                            untyped,
+                                            request_cx.erase_to_json(),
+                                        )))
+                                    }
+                                    Handled::No(MessageCx::Notification(..)) => {
+                                        unreachable!("Request handler returned notification")
+                                    }
+                                }
+                            }
+                            Some(Err(err)) => {
+                                tracing::trace!(
+                                    ?err,
+                                    "MessageHandler::handle_request: parse errored"
+                                );
+                                Err(err)
+                            }
+                            None => {
+                                tracing::trace!("MessageHandler::handle_request: parse failed");
+                                Ok(Handled::No(MessageCx::Request(message, request_cx)))
+                            }
+                        }
+                    }
+
+                    MessageCx::Notification(message) => {
+                        tracing::debug!(
+                            notification_type = std::any::type_name::<Notif>(),
+                            message = ?message,
+                            "MessageHandler::handle_notification"
+                        );
+                        match Notif::parse_message(&message.method, &message.params) {
+                            Some(Ok(notif)) => {
+                                tracing::trace!(
+                                    ?notif,
+                                    "MessageHandler::handle_notification: parse completed"
+                                );
+                                let typed_message = MessageCx::Notification(notif);
+                                let result = (self.handler)(typed_message, connection_cx).await?;
+                                match result.into_handled() {
+                                    Handled::Yes => Ok(Handled::Yes),
+                                    Handled::No(MessageCx::Notification(notification)) => {
+                                        let untyped = notification.to_untyped_message()?;
+                                        Ok(Handled::No(MessageCx::Notification(untyped)))
+                                    }
+                                    Handled::No(MessageCx::Request(..)) => {
+                                        unreachable!("Notification handler returned request")
+                                    }
+                                }
+                            }
+                            Some(Err(err)) => {
+                                tracing::trace!(
+                                    ?err,
+                                    "MessageHandler::handle_notification: parse errored"
+                                );
+                                Err(err)
+                            }
+                            None => {
+                                tracing::trace!(
+                                    "MessageHandler::handle_notification: parse failed"
+                                );
+                                Ok(Handled::No(MessageCx::Notification(message)))
+                            }
+                        }
+                    }
+                },
+            )
+            .await
     }
 }
 
-/// Chains two handlers together, trying the first handler and falling back to the second
+/// Wraps a handler with an optional name for tracing/debugging.
 pub struct NamedHandler<H> {
     name: Option<String>,
     handler: H,
 }
 
-impl<H> NamedHandler<H> {
+impl<H: JrMessageHandler> NamedHandler<H> {
     /// Creates a new named handler
     pub fn new(name: Option<String>, handler: H) -> Self {
         Self { name, handler }
     }
 }
 
-impl<H> JrMessageHandler for NamedHandler<H>
-where
-    H: JrMessageHandler,
-{
+impl<H: JrMessageHandler> JrMessageHandler for NamedHandler<H> {
+    type Role = H::Role;
+
     fn describe_chain(&self) -> impl std::fmt::Debug {
         format!(
             "NamedHandler({:?}, {:?})",
@@ -327,16 +416,17 @@ where
 
     async fn handle_message(
         &mut self,
-        message: MessageAndCx,
-    ) -> Result<Handled<MessageAndCx>, crate::Error> {
+        message: MessageCx,
+        connection_cx: JrConnectionCx<H::Role>,
+    ) -> Result<Handled<MessageCx>, crate::Error> {
         if let Some(name) = &self.name {
             crate::util::instrumented_with_connection_name(
                 name.clone(),
-                self.handler.handle_message(message),
+                self.handler.handle_message(message, connection_cx),
             )
             .await
         } else {
-            self.handler.handle_message(message).await
+            self.handler.handle_message(message, connection_cx).await
         }
     }
 }
@@ -347,7 +437,11 @@ pub struct ChainedHandler<H1, H2> {
     handler2: H2,
 }
 
-impl<H1, H2> ChainedHandler<H1, H2> {
+impl<H1, H2> ChainedHandler<H1, H2>
+where
+    H1: JrMessageHandler,
+    H2: JrMessageHandler<Role = H1::Role>,
+{
     /// Creates a new chain handler
     pub fn new(handler1: H1, handler2: H2) -> Self {
         Self { handler1, handler2 }
@@ -357,38 +451,30 @@ impl<H1, H2> ChainedHandler<H1, H2> {
 impl<H1, H2> JrMessageHandler for ChainedHandler<H1, H2>
 where
     H1: JrMessageHandler,
-    H2: JrMessageHandler,
+    H2: JrMessageHandler<Role = H1::Role>,
 {
+    type Role = H1::Role;
+
     fn describe_chain(&self) -> impl std::fmt::Debug {
-        return DebugImpl {
-            handler1: &self.handler1,
-            handler2: &self.handler2,
-        };
-
-        struct DebugImpl<'h, H1, H2> {
-            handler1: &'h H1,
-            handler2: &'h H2,
-        }
-
-        impl<H1: JrMessageHandler, H2: JrMessageHandler> std::fmt::Debug for DebugImpl<'_, H1, H2> {
-            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-                write!(
-                    f,
-                    "{:?}, {:?}",
-                    self.handler1.describe_chain(),
-                    self.handler2.describe_chain()
-                )
-            }
-        }
+        format!(
+            "{:?}, {:?}",
+            self.handler1.describe_chain(),
+            self.handler2.describe_chain()
+        )
     }
 
     async fn handle_message(
         &mut self,
-        message: MessageAndCx,
-    ) -> Result<Handled<MessageAndCx>, crate::Error> {
-        match self.handler1.handle_message(message).await? {
+        message: MessageCx,
+        connection_cx: JrConnectionCx<H1::Role>,
+    ) -> Result<Handled<MessageCx>, crate::Error> {
+        match self
+            .handler1
+            .handle_message(message, connection_cx.clone())
+            .await?
+        {
             Handled::Yes => Ok(Handled::Yes),
-            Handled::No(message) => self.handler2.handle_message(message).await,
+            Handled::No(message) => self.handler2.handle_message(message, connection_cx).await,
         }
     }
 }

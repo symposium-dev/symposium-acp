@@ -12,12 +12,12 @@
 //! ```
 
 use clap::Parser;
-use sacp::JrHandlerChain;
 use sacp::schema::{
     ContentBlock, InitializeRequest, NewSessionRequest, PromptRequest, RequestPermissionOutcome,
     RequestPermissionRequest, RequestPermissionResponse, SessionNotification, TextContent,
     VERSION as PROTOCOL_VERSION,
 };
+use sacp::{ClientToAgent, JrConnectionCx};
 use std::path::PathBuf;
 use tokio::process::Child;
 use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
@@ -83,7 +83,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Create transport and connection
     let transport = sacp::ByteStreams::new(child_stdin.compat_write(), child_stdout.compat());
-    let connection = JrHandlerChain::new();
+    let connection = ClientToAgent::builder();
 
     // Run the client
     connection
@@ -92,25 +92,27 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             println!("{:?}", notification.update);
             Ok(())
         })
-        .on_receive_request(async move |request: RequestPermissionRequest, request_cx| {
-            // YOLO: Auto-approve all permission requests by selecting the first option
-            eprintln!("✅ Auto-approving permission request: {:?}", request);
-            let option_id = request.options.first().map(|opt| opt.id.clone());
-            match option_id {
-                Some(id) => request_cx.respond(RequestPermissionResponse {
-                    outcome: RequestPermissionOutcome::Selected { option_id: id },
-                    meta: None,
-                }),
-                None => {
-                    eprintln!("⚠️ No options provided in permission request, cancelling");
-                    request_cx.respond(RequestPermissionResponse {
-                        outcome: RequestPermissionOutcome::Cancelled,
+        .on_receive_request(
+            async move |request: RequestPermissionRequest, request_cx, _connection_cx| {
+                // YOLO: Auto-approve all permission requests by selecting the first option
+                eprintln!("✅ Auto-approving permission request: {:?}", request);
+                let option_id = request.options.first().map(|opt| opt.id.clone());
+                match option_id {
+                    Some(id) => request_cx.respond(RequestPermissionResponse {
+                        outcome: RequestPermissionOutcome::Selected { option_id: id },
                         meta: None,
-                    })
+                    }),
+                    None => {
+                        eprintln!("⚠️ No options provided in permission request, cancelling");
+                        request_cx.respond(RequestPermissionResponse {
+                            outcome: RequestPermissionOutcome::Cancelled,
+                            meta: None,
+                        })
+                    }
                 }
-            }
-        })
-        .with_client(transport, |cx: sacp::JrConnectionCx| async move {
+            },
+        )
+        .with_client(transport, |cx: JrConnectionCx<ClientToAgent>| async move {
             // Initialize the agent
             eprintln!("🤝 Initializing agent...");
             let init_response = cx

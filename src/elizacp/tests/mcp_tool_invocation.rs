@@ -2,17 +2,19 @@
 
 use elizacp::ElizaAgent;
 use expect_test::expect;
+use sacp::Component;
+use sacp::role::UntypedRole;
 use sacp::schema::{
     ContentBlock, InitializeRequest, McpServer, NewSessionRequest, PromptRequest,
     SessionNotification, TextContent,
 };
-use sacp::{Component, JrHandlerChain};
+use sacp_test::test_binaries;
 use std::path::PathBuf;
 
 /// Test helper to receive a JSON-RPC response
-async fn recv<R: sacp::JrResponsePayload + Send>(
-    response: sacp::JrResponse<R>,
-) -> Result<R, sacp::Error> {
+async fn recv<T: sacp::JrResponsePayload + Send>(
+    response: sacp::JrResponse<T>,
+) -> Result<T, sacp::Error> {
     let (tx, rx) = tokio::sync::oneshot::channel();
     response.await_when_result_received(async move |result| {
         tx.send(result).map_err(|_| sacp::Error::internal_error())
@@ -35,7 +37,7 @@ async fn test_elizacp_mcp_tool_call() -> Result<(), sacp::Error> {
     // Create channel to collect session notifications
     let (notification_tx, mut notification_rx) = futures::channel::mpsc::unbounded();
 
-    JrHandlerChain::new()
+    UntypedRole::builder()
         .name("test-client")
         .on_receive_notification({
             let mut notification_tx = notification_tx.clone();
@@ -65,19 +67,14 @@ async fn test_elizacp_mcp_tool_call() -> Result<(), sacp::Error> {
             .await?;
 
             // Create session with an MCP server
-            // Use the mcp-echo-server from sacp-test
+            // Use the mcp-echo-server from sacp-test (pre-built binary)
+            let mcp_server_binary = test_binaries::mcp_echo_server_binary();
             let session_response = recv(client_cx.send_request(NewSessionRequest {
                 cwd: PathBuf::from("/tmp"),
                 mcp_servers: vec![McpServer::Stdio {
                     name: "test".to_string(),
-                    command: PathBuf::from("cargo"),
-                    args: vec![
-                        "run".to_string(),
-                        "-p".to_string(),
-                        "sacp-test".to_string(),
-                        "--bin".to_string(),
-                        "mcp-echo-server".to_string(),
-                    ],
+                    command: mcp_server_binary,
+                    args: vec![],
                     env: vec![],
                 }],
                 meta: None,

@@ -1,8 +1,9 @@
-use sacp::handler::*;
+use sacp::ClientToAgent;
 use sacp::*;
 use serde::{Deserialize, Serialize};
 
 pub mod arrow_proxy;
+pub mod test_binaries;
 
 /// A mock transport for doctests that panics if actually used.
 /// This is only for documentation examples that don't actually run.
@@ -120,13 +121,7 @@ macro_rules! impl_jr_message {
             fn to_untyped_message(&self) -> Result<UntypedMessage, crate::Error> {
                 UntypedMessage::new($method, self)
             }
-            fn parse_request(
-                _method: &str,
-                _params: &impl Serialize,
-            ) -> Option<Result<Self, crate::Error>> {
-                None
-            }
-            fn parse_notification(
+            fn parse_message(
                 _method: &str,
                 _params: &impl Serialize,
             ) -> Option<Result<Self, crate::Error>> {
@@ -252,8 +247,8 @@ pub fn process(data: &str) -> Result<String, crate::Error> {
 }
 
 // Helper to create a mock connection for examples
-pub fn mock_connection() -> JrHandlerChain<NullHandler> {
-    JrHandlerChain::new()
+pub fn mock_connection() -> JrConnectionBuilder<NullHandler<ClientToAgent>> {
+    ClientToAgent::builder()
 }
 
 pub trait Make {

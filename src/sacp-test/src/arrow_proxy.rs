@@ -4,8 +4,7 @@
 //! `session/update` notifications and prepending `>` to the content.
 
 use sacp::schema::{ContentBlock, ContentChunk, SessionNotification, SessionUpdate};
-use sacp::{Component, JrHandlerChain};
-use sacp_proxy::{AcpProxyExt, McpServiceRegistry};
+use sacp::{Agent, Client, Component, ProxyToConductor};
 
 /// Run the arrow proxy that adds `>` to each session update.
 ///
@@ -13,33 +12,29 @@ use sacp_proxy::{AcpProxyExt, McpServiceRegistry};
 ///
 /// * `transport` - Component to the predecessor (conductor or another proxy)
 pub async fn run_arrow_proxy(transport: impl Component + 'static) -> Result<(), sacp::Error> {
-    JrHandlerChain::new()
+    ProxyToConductor::builder()
         .name("arrow-proxy")
-        // Intercept session notifications from successor (agent) and modify them
-        .on_receive_notification_from_successor(
-            async |mut notification: SessionNotification, cx| {
-                // Modify the content by adding > prefix
-                match &mut notification.update {
-                    SessionUpdate::AgentMessageChunk(ContentChunk { content, .. }) => {
-                        // Add > prefix to text content
-                        if let ContentBlock::Text(text_content) = content {
-                            text_content.text = format!(">{}", text_content.text);
-                        }
-                    }
-                    _ => {
-                        // Don't modify other update types
+        // Intercept session notifications from successor (agent) and modify them.
+        // Using on_receive_notification_from(Agent, ...) automatically unwraps
+        // SuccessorMessage envelopes.
+        .on_receive_notification_from(Agent, async |mut notification: SessionNotification, cx| {
+            // Modify the content by adding > prefix
+            match &mut notification.update {
+                SessionUpdate::AgentMessageChunk(ContentChunk { content, .. }) => {
+                    // Add > prefix to text content
+                    if let ContentBlock::Text(text_content) = content {
+                        text_content.text = format!(">{}", text_content.text);
                     }
                 }
+                _ => {
+                    // Don't modify other update types
+                }
+            }
 
-                // Forward modified notification to predecessor
-                cx.send_notification(notification)?;
-                Ok(())
-            },
-        )
-        // Empty MCP registry - no tools provided
-        .provide_mcp(McpServiceRegistry::default())
-        // Enable proxy mode (handles capability handshake and message routing)
-        .proxy()
+            // Forward modified notification to predecessor (client)
+            cx.send_notification_to(Client, notification)?;
+            Ok(())
+        })
         // Start serving
         .connect_to(transport)?
         .serve()

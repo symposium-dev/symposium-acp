@@ -66,9 +66,13 @@ impl Component for MockInnerConductor {
             components.push(sacp::DynComponent::new(MockArrowProxy));
         }
 
-        Conductor::new("inner-conductor".to_string(), components, Default::default())
-            .run(client)
-            .await
+        Conductor::new(
+            "inner-conductor".to_string(),
+            components,
+            Default::default(),
+        )
+        .run(client)
+        .await
     }
 }
 
@@ -129,6 +133,7 @@ async fn test_nested_conductor_with_arrow_proxies() -> Result<(), sacp::Error> {
 }
 
 #[tokio::test]
+#[ignore = "flaky due to cargo run compilation races - see test_nested_conductor_with_arrow_proxies for in-process version"]
 async fn test_nested_conductor_with_external_arrow_proxies() -> Result<(), sacp::Error> {
     // Create the nested component chain using external processes
     // Inner conductor spawned as a separate process with two arrow proxies

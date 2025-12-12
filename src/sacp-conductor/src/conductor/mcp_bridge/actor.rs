@@ -1,6 +1,7 @@
 use futures::{SinkExt as _, StreamExt as _, channel::mpsc};
-use sacp::{Component, DynComponent, JrHandlerChain, MessageAndCx};
-use sacp_proxy::McpDisconnectNotification;
+use sacp::mcp::{McpClientToServer, McpServerEnd};
+use sacp::schema::McpDisconnectNotification;
+use sacp::{Component, DynComponent, MessageCx};
 use tracing::info;
 
 use crate::conductor::ConductorMessage;
@@ -17,14 +18,14 @@ pub struct McpBridgeConnectionActor {
     conductor_tx: mpsc::Sender<ConductorMessage>,
 
     /// Receiver for messages from the conductor to the MCP client
-    to_mcp_client_rx: mpsc::Receiver<MessageAndCx>,
+    to_mcp_client_rx: mpsc::Receiver<MessageCx>,
 }
 
 impl McpBridgeConnectionActor {
     pub fn new(
         component: impl Component,
         conductor_tx: mpsc::Sender<ConductorMessage>,
-        to_mcp_client_rx: mpsc::Receiver<MessageAndCx>,
+        to_mcp_client_rx: mpsc::Receiver<MessageCx>,
     ) -> Self {
         Self {
             transport: DynComponent::new(component),
@@ -42,13 +43,13 @@ impl McpBridgeConnectionActor {
             to_mcp_client_rx,
         } = self;
 
-        let result = JrHandlerChain::new()
+        let result = McpClientToServer::builder()
             .name(format!("mpc-client-to-conductor({connection_id})"))
             // When we receive a message from the MCP client, forward it to the conductor
             .on_receive_message({
                 let mut conductor_tx = conductor_tx.clone();
                 let connection_id = connection_id.clone();
-                async move |message: sacp::MessageAndCx| {
+                async move |message: sacp::MessageCx, _cx| {
                     conductor_tx
                         .send(ConductorMessage::McpClientToMcpServer {
                             connection_id: connection_id.clone(),
@@ -63,7 +64,7 @@ impl McpBridgeConnectionActor {
             .with_client(async move |mcp_client_cx| {
                 let mut to_mcp_client_rx = to_mcp_client_rx;
                 while let Some(message) = to_mcp_client_rx.next().await {
-                    mcp_client_cx.send_proxied_message(message)?;
+                    mcp_client_cx.send_proxied_message_to(McpServerEnd, message)?;
                 }
                 Ok(())
             })
