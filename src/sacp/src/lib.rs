@@ -149,12 +149,12 @@
 //! ## Learning more
 //!
 //! You can learn more in the [docs for `JrConnection`](crate::JrConnection) or on our
-//! [GitHub Pages](https://github.com/symposium-dev/symposium-acp) site.
+//! [GitHub Pages](https://github.com/symposium-acp/symposium-acp) site.
 //!
 //! You may also enjoy looking at some of these examples:
 //!
-//! - **[`simple_agent.rs`](https://github.com/symposium-dev/symposium-acp/blob/main/src/sacp/examples/simple_agent.rs)** - Minimal agent implementation
-//! - **[`yolo_one_shot_client.rs`](https://github.com/symposium-dev/symposium-acp/blob/main/src/sacp/examples/yolo_one_shot_client.rs)** - Complete client that spawns an agent and sends a prompt
+//! - **[`simple_agent.rs`](https://github.com/symposium-org/symposium-acp/blob/main/src/sacp/examples/simple_agent.rs)** - Minimal agent implementation
+//! - **[`yolo_one_shot_client.rs`](https://github.com/symposium-org/symposium-acp/blob/main/src/sacp/examples/yolo_one_shot_client.rs)** - Complete client that spawns an agent and sends a prompt
 //! - **[`elizacp`](https://crates.io/crates/elizacp)** - Full working agent with session management (also useful for testing)
 //! - **[`sacp-conductor`](https://crates.io/crates/sacp-conductor)** - The "conductor" is an ACP agent that composes proxy components with a final agent.
 //!
