@@ -2,7 +2,7 @@
 //!
 //! These types are intended to become part of the ACP protocol specification.
 
-use crate::{JrMessage, JrNotification, JrRequest, JrResponsePayload, UntypedMessage};
+use crate::{JrMessage, JrNotification, JrRequest, UntypedMessage};
 use agent_client_protocol_schema::InitializeResponse;
 use serde::{Deserialize, Serialize};
 
@@ -74,7 +74,8 @@ impl<Notif: JrNotification> JrNotification for SuccessorMessage<Notif> {}
 pub const METHOD_MCP_CONNECT_REQUEST: &str = "_mcp/connect";
 
 /// Creates a new MCP connection. This is equivalent to "running the command".
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, crate::JrRequest)]
+#[request(method = "_mcp/connect", response = McpConnectResponse, crate = crate)]
 pub struct McpConnectRequest {
     /// The ACP URL to connect to (e.g., "acp:uuid")
     pub acp_url: String,
@@ -84,29 +85,9 @@ pub struct McpConnectRequest {
     pub meta: Option<serde_json::Value>,
 }
 
-impl JrMessage for McpConnectRequest {
-    fn method(&self) -> &str {
-        METHOD_MCP_CONNECT_REQUEST
-    }
-
-    fn to_untyped_message(&self) -> Result<UntypedMessage, crate::Error> {
-        UntypedMessage::new(METHOD_MCP_CONNECT_REQUEST, self)
-    }
-
-    fn parse_message(method: &str, params: &impl Serialize) -> Option<Result<Self, crate::Error>> {
-        if method != METHOD_MCP_CONNECT_REQUEST {
-            return None;
-        }
-        Some(crate::util::json_cast(params))
-    }
-}
-
-impl JrRequest for McpConnectRequest {
-    type Response = McpConnectResponse;
-}
-
 /// Response to an MCP connect request
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, crate::JrResponsePayload)]
+#[response(crate = crate)]
 pub struct McpConnectResponse {
     /// Unique identifier for the established MCP connection
     pub connection_id: String,
@@ -116,21 +97,12 @@ pub struct McpConnectResponse {
     pub meta: Option<serde_json::Value>,
 }
 
-impl JrResponsePayload for McpConnectResponse {
-    fn into_json(self, _method: &str) -> Result<serde_json::Value, crate::Error> {
-        serde_json::to_value(self).map_err(crate::Error::into_internal_error)
-    }
-
-    fn from_value(_method: &str, value: serde_json::Value) -> Result<Self, crate::Error> {
-        serde_json::from_value(value).map_err(|_| crate::Error::invalid_params())
-    }
-}
-
 /// JSON-RPC method name for MCP disconnect notifications
 pub const METHOD_MCP_DISCONNECT_NOTIFICATION: &str = "_mcp/disconnect";
 
 /// Disconnects the MCP connection.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, crate::JrNotification)]
+#[notification(method = "_mcp/disconnect", crate = crate)]
 pub struct McpDisconnectNotification {
     /// The id of the connection to disconnect.
     pub connection_id: String,
@@ -139,25 +111,6 @@ pub struct McpDisconnectNotification {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub meta: Option<serde_json::Value>,
 }
-
-impl JrMessage for McpDisconnectNotification {
-    fn method(&self) -> &str {
-        METHOD_MCP_DISCONNECT_NOTIFICATION
-    }
-
-    fn to_untyped_message(&self) -> Result<UntypedMessage, crate::Error> {
-        UntypedMessage::new(METHOD_MCP_DISCONNECT_NOTIFICATION, self)
-    }
-
-    fn parse_message(method: &str, params: &impl Serialize) -> Option<Result<Self, crate::Error>> {
-        if method != METHOD_MCP_DISCONNECT_NOTIFICATION {
-            return None;
-        }
-        Some(crate::util::json_cast(params))
-    }
-}
-
-impl JrNotification for McpDisconnectNotification {}
 
 /// JSON-RPC method name for MCP requests over ACP
 pub const METHOD_MCP_MESSAGE: &str = "_mcp/message";
@@ -235,32 +188,12 @@ pub const METHOD_INITIALIZE_PROXY: &str = "_proxy/initialize";
 /// This is sent to components that have a successor in the chain.
 /// Components that receive this (instead of `InitializeRequest`) know they
 /// are operating as a proxy and should forward messages to their successor.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, crate::JrRequest)]
+#[request(method = "_proxy/initialize", response = InitializeResponse, crate = crate)]
 pub struct InitializeProxyRequest {
     /// The underlying initialize request data.
     #[serde(flatten)]
     pub initialize: agent_client_protocol_schema::InitializeRequest,
-}
-
-impl JrMessage for InitializeProxyRequest {
-    fn method(&self) -> &str {
-        METHOD_INITIALIZE_PROXY
-    }
-
-    fn to_untyped_message(&self) -> Result<UntypedMessage, crate::Error> {
-        UntypedMessage::new(METHOD_INITIALIZE_PROXY, self)
-    }
-
-    fn parse_message(method: &str, params: &impl Serialize) -> Option<Result<Self, crate::Error>> {
-        if method != METHOD_INITIALIZE_PROXY {
-            return None;
-        }
-        Some(crate::util::json_cast(params))
-    }
-}
-
-impl JrRequest for InitializeProxyRequest {
-    type Response = InitializeResponse;
 }
 
 impl From<agent_client_protocol_schema::InitializeRequest> for InitializeProxyRequest {
