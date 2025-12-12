@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.0.1](https://github.com/symposium-dev/symposium-acp/compare/sacp-derive-v2.0.0...sacp-derive-v2.0.1) - 2025-12-12
+
+### Other
+
+- release
+
 ## [2.0.0](https://github.com/symposium-dev/symposium-acp/releases/tag/sacp-derive-v2.0.0) - 2025-12-12
 
 ### Added
