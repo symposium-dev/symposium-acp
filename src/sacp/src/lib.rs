@@ -221,3 +221,6 @@ pub use schema::{
 
 // Re-export commonly used infrastructure types for convenience
 pub use schema::{Error, ErrorCode};
+
+// Re-export derive macros for custom JSON-RPC types
+pub use sacp_derive::{JrNotification, JrRequest, JrResponsePayload};
