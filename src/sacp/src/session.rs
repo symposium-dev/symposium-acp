@@ -135,6 +135,7 @@ where
 #[non_exhaustive]
 pub enum SessionMessage {
     /// Periodic updates with new content, tool requests, etc.
+    /// Use [`MatchMessage`] to match on the message type.
     SessionMessage(MessageCx),
 
     /// When a prompt completes, the stop reason.

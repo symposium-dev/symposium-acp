@@ -3,6 +3,18 @@
 //! When handling [`UntypedMessage`]s, you can use [`MatchMessage`] for simple parsing
 //! or [`MatchMessageFrom`] when you need role-aware endpoint transforms (e.g., unwrapping
 //! proxy envelopes).
+//!
+//! # When to use which
+//!
+//! - **[`MatchMessageFrom`]**: Preferred over implementing [`JrMessageHandler`] directly.
+//!   Use this in connection handlers when you need to match on message types with
+//!   proper endpoint-aware transforms (e.g., unwrapping `SuccessorMessage` envelopes).
+//!
+//! - **[`MatchMessage`]**: Use this when you already have an unwrapped message and
+//!   just need to parse it, such as inside a [`MatchMessageFrom`] callback or when
+//!   processing messages that don't need endpoint transforms.
+//!
+//! [`JrMessageHandler`]: crate::JrMessageHandler
 
 // Types re-exported from crate root
 use jsonrpcmsg::Params;
@@ -16,9 +28,12 @@ use crate::{
 
 /// Role-agnostic helper for pattern-matching on untyped JSON-RPC messages.
 ///
-/// Use this when you just need to parse messages as specific types without
-/// any endpoint-aware transforms. For role-aware matching that handles
-/// proxy envelope unwrapping, use [`MatchMessageFrom`] instead.
+/// Use this when you already have an unwrapped message and just need to parse it,
+/// such as inside a [`MatchMessageFrom`] callback or when processing messages
+/// that don't need endpoint transforms.
+///
+/// For connection handlers where you need proper endpoint-aware transforms,
+/// use [`MatchMessageFrom`] instead.
 ///
 /// # Example
 ///
@@ -249,12 +264,18 @@ impl MatchMessage {
 
 /// Role-aware helper for pattern-matching on untyped JSON-RPC requests.
 ///
+/// **Prefer this over implementing [`JrMessageHandler`] directly.** This provides
+/// a more ergonomic API for matching on message types in connection handlers.
+///
 /// Use this when you need endpoint-aware transforms (e.g., unwrapping proxy envelopes)
-/// before parsing messages. For simple parsing without role awareness, use [`MatchMessage`].
+/// before parsing messages. For simple parsing without role awareness (e.g., inside
+/// a callback), use [`MatchMessage`] instead.
 ///
 /// This wraps [`MatchMessage`] and applies endpoint-specific message transformations
 /// via `remote_style().handle_incoming_message()` before delegating to `MatchMessage`
 /// for the actual parsing.
+///
+/// [`JrMessageHandler`]: crate::JrMessageHandler
 ///
 /// # Example
 ///
