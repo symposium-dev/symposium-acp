@@ -1,7 +1,7 @@
 use sacp::role::UntypedRole;
 use sacp::{
     Component, Handled, JrConnectionCx, JrMessage, JrMessageHandler, JrRequest, JrRequestCx,
-    JrResponsePayload, MessageCx, util::MatchMessage,
+    JrResponsePayload, MessageCx, util::MatchMessageFrom,
 };
 use serde::{Deserialize, Serialize};
 
@@ -56,9 +56,9 @@ impl JrMessageHandler for EchoHandler {
     async fn handle_message(
         &mut self,
         message: MessageCx,
-        _cx: JrConnectionCx<Self::Role>,
+        cx: JrConnectionCx<Self::Role>,
     ) -> Result<Handled<MessageCx>, sacp::Error> {
-        MatchMessage::new(message)
+        MatchMessageFrom::new(message, &cx)
             .if_request(async move |request: EchoRequestResponse, request_cx| {
                 request_cx.respond(request)
             })
@@ -100,12 +100,15 @@ async fn modify_message_en_route() -> Result<(), sacp::Error> {
         async fn handle_message(
             &mut self,
             message: MessageCx,
-            _cx: JrConnectionCx<Self::Role>,
+            cx: JrConnectionCx<Self::Role>,
         ) -> Result<Handled<MessageCx>, sacp::Error> {
-            MatchMessage::new(message)
+            MatchMessageFrom::new(message, &cx)
                 .if_request(async move |mut request: EchoRequestResponse, request_cx| {
                     request.text.push(self.message.clone());
-                    Ok(Handled::No((request, request_cx)))
+                    Ok(Handled::No {
+                        message: (request, request_cx),
+                        retry: false,
+                    })
                 })
                 .await
                 .done()
@@ -154,7 +157,10 @@ async fn modify_message_en_route_inline() -> Result<(), sacp::Error> {
                                 request_cx: JrRequestCx<EchoRequestResponse>,
                                 _connection_cx: JrConnectionCx<UntypedRole>| {
                         request.text.push("b".to_string());
-                        Ok(Handled::No((request, request_cx)))
+                        Ok(Handled::No {
+                            message: (request, request_cx),
+                            retry: false,
+                        })
                     },
                 )
                 .with_handler(EchoHandler)
@@ -209,7 +215,10 @@ async fn modify_message_and_stop() -> Result<(), sacp::Error> {
                                 request_cx: JrRequestCx<EchoRequestResponse>,
                                 _connection_cx: JrConnectionCx<UntypedRole>| {
                         request.text.push("b".to_string());
-                        Ok(Handled::No((request, request_cx)))
+                        Ok(Handled::No {
+                            message: (request, request_cx),
+                            retry: false,
+                        })
                     },
                 )
                 .with_handler(EchoHandler)

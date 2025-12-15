@@ -1,5 +1,6 @@
 //! Core JSON-RPC server support.
 
+use agent_client_protocol_schema::SessionId;
 // Re-export jsonrpcmsg for use in public API
 pub use jsonrpcmsg;
 
@@ -23,7 +24,6 @@ mod reply_actor;
 mod task_actor;
 mod transport_actor;
 
-use crate::Component;
 use crate::handler::{ChainedHandler, NamedHandler};
 use crate::jsonrpc::dynamic_handler::DynamicHandlerMessage;
 pub use crate::jsonrpc::handlers::NullHandler;
@@ -31,6 +31,7 @@ use crate::jsonrpc::handlers::{MessageHandler, NotificationHandler, RequestHandl
 use crate::jsonrpc::outgoing_actor::{OutgoingMessageTx, send_raw_message};
 use crate::jsonrpc::task_actor::{PendingTask, Task, TaskTx};
 use crate::role::{HasDefaultEndpoint, HasEndpoint, JrEndpoint, JrRole};
+use crate::{Agent, Client, Component};
 
 /// Handlers are invoked when new messages arrive at the [`JrConnection`].
 /// They have a chance to inspect the method and parameters and decide whether to "claim" the request
@@ -771,7 +772,7 @@ impl<H: JrMessageHandler> JrConnectionBuilder<H> {
     /// Provide MCP servers to downstream successors.
     ///
     /// This adds a handler that intercepts `session/new` requests to include the
-    /// registered MCP servers, and handles MCP-over-ACP communication.
+    /// registered MCP servers.
     ///
     /// # Example
     ///
@@ -791,7 +792,7 @@ impl<H: JrMessageHandler> JrConnectionBuilder<H> {
     ) -> JrConnectionBuilder<ChainedHandler<H, crate::mcp_server::McpServiceRegistry<Role>>>
     where
         H: JrMessageHandler<Role = Role>,
-        Role: HasEndpoint<crate::role::Agent>,
+        Role: HasEndpoint<Client> + HasEndpoint<Agent>,
     {
         self.with_handler(registry)
     }
@@ -1184,8 +1185,25 @@ enum OutgoingMessage {
 pub enum Handled<T> {
     /// The message was handled
     Yes,
-    /// The message was not handled; returns the original value
-    No(T),
+
+    /// The message was not handled; returns the original value.
+    ///
+    /// If `retry` is true,
+    No {
+        /// The message to be passed to subsequent handlers
+        /// (typically the original message, but it may have been
+        /// mutated.)
+        message: T,
+
+        /// If true, request the message to be queued and retried with
+        /// dynamic handlers as they are added.
+        ///
+        /// This is used for managing session updates since the dynamic
+        /// handler for a session cannot be added until the response to the
+        /// new session request has been processed and there may be updates
+        /// that get processed at the same time.
+        retry: bool,
+    },
 }
 
 /// Trait for converting handler return values into [`Handled`].
@@ -1615,6 +1633,11 @@ impl<Role: JrRole> DynamicHandlerRegistration<Role> {
     fn new(uuid: Uuid, cx: JrConnectionCx<Role>) -> Self {
         Self { uuid, cx }
     }
+
+    /// Prevents the dynamic handler from being removed when dropped.
+    pub fn run_indefinitely(self) {
+        std::mem::forget(self)
+    }
 }
 
 impl<Role: JrRole> Drop for DynamicHandlerRegistration<Role> {
@@ -1966,11 +1989,24 @@ impl<Req: JrRequest, Notif: JrMessage> MessageCx<Req, Notif> {
         }
     }
 
-    /// Convert the message to an untyped message.
+    /// Convert the message in self to an untyped message.
     pub fn to_untyped_message(&self) -> Result<UntypedMessage, crate::Error> {
         match self {
             MessageCx::Request(request, _) => request.to_untyped_message(),
             MessageCx::Notification(notification) => notification.to_untyped_message(),
+        }
+    }
+
+    /// Convert self to an untyped message context.
+    pub fn into_untyped_message_cx(self) -> Result<MessageCx, crate::Error> {
+        match self {
+            MessageCx::Request(request, request_cx) => Ok(MessageCx::Request(
+                request.to_untyped_message()?,
+                request_cx.erase_to_json(),
+            )),
+            MessageCx::Notification(notification) => {
+                Ok(MessageCx::Notification(notification.to_untyped_message()?))
+            }
         }
     }
 
@@ -1987,6 +2023,130 @@ impl<Req: JrRequest, Notif: JrMessage> MessageCx<Req, Notif> {
         match self {
             MessageCx::Request(msg, _) => msg.method(),
             MessageCx::Notification(msg) => msg.method(),
+        }
+    }
+}
+
+impl MessageCx {
+    /// Attempts to parse `self` into a typed message context.
+    ///
+    /// # Returns
+    ///
+    /// * `Ok(Ok(typed))` if this is a request/notification of the given types
+    /// * `Ok(Err(self))` if not
+    /// * `Err` if has the correct method for the given types but parsing fails
+    pub(crate) fn into_typed_message_cx<Req: JrRequest, Notif: JrNotification>(
+        self,
+    ) -> Result<Result<MessageCx<Req, Notif>, MessageCx>, crate::Error> {
+        match self {
+            MessageCx::Request(message, request_cx) => {
+                tracing::debug!(
+                    request_type = std::any::type_name::<Req>(),
+                    message = ?message,
+                    "MessageHandler::handle_request"
+                );
+                match Req::parse_message(&message.method, &message.params) {
+                    Some(Ok(req)) => {
+                        tracing::trace!(?req, "MessageHandler::handle_request: parse completed");
+                        Ok(Ok(MessageCx::Request(req, request_cx.cast())))
+                    }
+                    Some(Err(err)) => {
+                        tracing::trace!(?err, "MessageHandler::handle_request: parse errored");
+                        return Err(err);
+                    }
+                    None => {
+                        tracing::trace!("MessageHandler::handle_request: parse failed");
+                        Ok(Err(MessageCx::Request(message, request_cx)))
+                    }
+                }
+            }
+
+            MessageCx::Notification(message) => {
+                tracing::debug!(
+                    notification_type = std::any::type_name::<Notif>(),
+                    message = ?message,
+                    "MessageHandler::handle_notification"
+                );
+                match Notif::parse_message(&message.method, &message.params) {
+                    Some(Ok(notif)) => {
+                        tracing::trace!(
+                            ?notif,
+                            "MessageHandler::handle_notification: parse completed"
+                        );
+                        Ok(Ok(MessageCx::Notification(notif)))
+                    }
+                    Some(Err(err)) => {
+                        tracing::trace!(?err, "MessageHandler: parse errored");
+                        Err(err)
+                    }
+                    None => {
+                        tracing::trace!("MessageHandler: parse failed");
+                        Ok(Err(MessageCx::Notification(message)))
+                    }
+                }
+            }
+        }
+    }
+
+    /// True if this message has a session-id field
+    pub fn has_field(&self, field_name: &str) -> bool {
+        self.message().params().get(field_name).is_some()
+    }
+
+    /// Extract the ACP session-id from this message (if any).
+    pub(crate) fn has_session_id(&self) -> bool {
+        self.has_field("sessionId")
+    }
+
+    /// Extract the ACP session-id from this message (if any).
+    pub(crate) fn get_session_id(&self) -> Result<Option<SessionId>, crate::Error> {
+        let value = match self.message().params().get("sessionId") {
+            Some(value) => value,
+            None => return Ok(None),
+        };
+        let session_id = serde_json::from_value(value.clone())?;
+        Ok(Some(session_id))
+    }
+
+    /// Try to parse this as a notification of the given type.
+    ///
+    /// # Returns
+    ///
+    /// * `Ok(Ok(typed))` if this is a request/notification of the given types
+    /// * `Ok(Err(self))` if not
+    /// * `Err` if has the correct method for the given types but parsing fails
+    pub fn into_notification<N: JrNotification>(
+        self,
+    ) -> Result<Result<N, MessageCx>, crate::Error> {
+        match self {
+            MessageCx::Request(..) => Ok(Err(self)),
+            MessageCx::Notification(msg) => match N::parse_message(&msg.method, &msg.params) {
+                Some(Ok(n)) => Ok(Ok(n)),
+                Some(Err(err)) => Err(err),
+                None => Ok(Err(MessageCx::Notification(msg))),
+            },
+        }
+    }
+
+    /// Try to parse this as a request of the given type.
+    ///
+    /// # Returns
+    ///
+    /// * `Ok(Ok(typed))` if this is a request/notification of the given types
+    /// * `Ok(Err(self))` if not
+    /// * `Err` if has the correct method for the given types but parsing fails
+    pub fn into_request<Req: JrRequest>(
+        self,
+    ) -> Result<Result<(Req, JrRequestCx<Req::Response>), MessageCx>, crate::Error> {
+        match self {
+            MessageCx::Request(msg, request_cx) => {
+                match Req::parse_message(&msg.method, &msg.params) {
+                    Some(Ok(req)) => Ok(Ok((req, request_cx.cast()))),
+                    Some(Err(err)) => Err(err),
+                    None => Ok(Err(MessageCx::Request(msg, request_cx))),
+                }
+            }
+            MessageCx::Notification(..) => Ok(Err(self)),
         }
     }
 }

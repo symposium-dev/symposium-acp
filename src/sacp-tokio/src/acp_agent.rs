@@ -3,12 +3,9 @@
 //! This module provides [`AcpAgent`], a convenient wrapper around [`sacp::schema::McpServer`]
 //! that can be parsed from either a command string or JSON configuration.
 
-use std::future::Future;
 use std::path::PathBuf;
-use std::pin::Pin;
 use std::str::FromStr;
 use std::sync::Arc;
-use std::task::{Context, Poll};
 
 use tokio::process::Child;
 use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
@@ -82,6 +79,18 @@ pub enum LineDirection {
 pub struct AcpAgent {
     server: sacp::schema::McpServer,
     debug_callback: Option<Arc<dyn Fn(&str, LineDirection) + Send + Sync + 'static>>,
+}
+
+impl std::fmt::Debug for AcpAgent {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("AcpAgent")
+            .field("server", &self.server)
+            .field(
+                "debug_callback",
+                &self.debug_callback.as_ref().map(|_| "..."),
+            )
+            .finish()
+    }
 }
 
 impl AcpAgent {
@@ -183,24 +192,50 @@ impl AcpAgent {
     }
 }
 
-/// A future that holds a `Child` process and never resolves.
-/// When dropped, the child process is killed.
-struct ChildHolder {
-    _child: Child,
-}
+/// A wrapper around Child that kills the process when dropped.
+struct ChildGuard(Child);
 
-impl Future for ChildHolder {
-    type Output = Result<(), sacp::Error>;
-
-    fn poll(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<Self::Output> {
-        // Never ready - just hold the child process alive
-        Poll::Pending
+impl ChildGuard {
+    async fn wait(&mut self) -> std::io::Result<std::process::ExitStatus> {
+        self.0.wait().await
     }
 }
 
-impl Drop for ChildHolder {
+impl Drop for ChildGuard {
     fn drop(&mut self) {
-        let _: Result<_, _> = self._child.start_kill();
+        let _ = self.0.start_kill();
+    }
+}
+
+/// Waits for a child process and returns an error if it exits with non-zero status.
+///
+/// The error message includes any stderr output collected by the background task.
+/// When dropped, the child process is killed.
+async fn monitor_child(
+    child: Child,
+    stderr_rx: tokio::sync::oneshot::Receiver<String>,
+) -> Result<(), sacp::Error> {
+    let mut guard = ChildGuard(child);
+
+    // Wait for the child to exit
+    let status = guard
+        .wait()
+        .await
+        .map_err(|e| sacp::util::internal_error(format!("Failed to wait for process: {}", e)))?;
+
+    if status.success() {
+        Ok(())
+    } else {
+        // Get stderr content if available
+        let stderr = stderr_rx.await.unwrap_or_default();
+
+        let message = if stderr.is_empty() {
+            format!("Process exited with {}", status)
+        } else {
+            format!("Process exited with {}: {}", status, stderr)
+        };
+
+        Err(sacp::util::internal_error(message))
     }
 }
 
@@ -213,21 +248,33 @@ impl sacp::Component for AcpAgent {
 
         let (child_stdin, child_stdout, child_stderr, child) = self.spawn_process()?;
 
-        // Hold the child process - it will be killed when this future completes
-        let _child_holder = ChildHolder { _child: child };
+        // Create a channel to collect stderr for error reporting
+        let (stderr_tx, stderr_rx) = tokio::sync::oneshot::channel::<String>();
 
-        // Spawn a task to read stderr if we have a debug callback
-        if let Some(callback) = self.debug_callback.clone() {
-            tokio::spawn(async move {
-                let stderr_reader = BufReader::new(child_stderr.compat());
-                let mut stderr_lines = stderr_reader.lines();
-                while let Some(line_result) = stderr_lines.next().await {
-                    if let Ok(line) = line_result {
+        // Spawn a task to read stderr, optionally calling the debug callback
+        let debug_callback = self.debug_callback.clone();
+        tokio::spawn(async move {
+            let stderr_reader = BufReader::new(child_stderr.compat());
+            let mut stderr_lines = stderr_reader.lines();
+            let mut collected = String::new();
+            while let Some(line_result) = stderr_lines.next().await {
+                if let Ok(line) = line_result {
+                    // Call debug callback if present
+                    if let Some(ref callback) = debug_callback {
                         callback(&line, LineDirection::Stderr);
                     }
+                    // Always collect for error reporting
+                    if !collected.is_empty() {
+                        collected.push('\n');
+                    }
+                    collected.push_str(&line);
                 }
-            });
-        }
+            }
+            let _ = stderr_tx.send(collected);
+        });
+
+        // Create a future that monitors the child process for early exit
+        let child_monitor = monitor_child(child, stderr_rx);
 
         // Convert stdio to line streams with optional debug inspection
         let incoming_lines = if let Some(callback) = self.debug_callback.clone() {
@@ -270,10 +317,14 @@ impl sacp::Component for AcpAgent {
             ))
         };
 
-        // Create the Lines component and serve it
-        sacp::Lines::new(outgoing_sink, incoming_lines)
-            .serve(client)
-            .await
+        // Race the protocol against child process exit
+        // If the child exits early (e.g., with an error), we return that error
+        let protocol_future = sacp::Lines::new(outgoing_sink, incoming_lines).serve(client);
+
+        tokio::select! {
+            result = protocol_future => result,
+            result = child_monitor => result,
+        }
     }
 }
 

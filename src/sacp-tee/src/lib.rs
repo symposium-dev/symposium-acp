@@ -158,7 +158,10 @@ impl JrMessageHandler for TeeHandler {
                 });
 
                 // Return unhandled with the wrapped context
-                Ok(Handled::No(MessageCx::Request(request, wrapped_cx)))
+                Ok(Handled::No {
+                    message: MessageCx::Request(request, wrapped_cx),
+                    retry: false,
+                })
             }
             MessageCx::Notification(notification) => {
                 // Log the notification
@@ -169,7 +172,10 @@ impl JrMessageHandler for TeeHandler {
                 self.log_entry(entry);
 
                 // Return unhandled so it continues down the chain
-                Ok(Handled::No(MessageCx::Notification(notification)))
+                Ok(Handled::No {
+                    message: MessageCx::Notification(notification),
+                    retry: false,
+                })
             }
         }
     }
