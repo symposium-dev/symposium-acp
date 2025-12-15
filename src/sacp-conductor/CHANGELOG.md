@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [5.0.1](https://github.com/symposium-dev/symposium-acp/compare/sacp-conductor-v5.0.0...sacp-conductor-v5.0.1) - 2025-12-15
+
+### Other
+
+- *(sacp)* rename MatchMessage to MatchMessageFrom
+- new session redirection support
+
 ## [5.0.0](https://github.com/symposium-dev/symposium-acp/compare/sacp-conductor-v4.0.0...sacp-conductor-v5.0.0) - 2025-12-12
 
 ### Added

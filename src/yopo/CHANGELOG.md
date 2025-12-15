@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.0.1](https://github.com/symposium-dev/symposium-acp/compare/yopo-v2.0.0...yopo-v2.0.1) - 2025-12-15
+
+### Other
+
+- *(sacp)* add guidance on when to use MatchMessage vs MatchMessageFrom
+- *(sacp)* rename MatchMessage to MatchMessageFrom
+- new session redirection support
+
 ## [2.0.0](https://github.com/symposium-dev/symposium-acp/compare/yopo-v1.2.1...yopo-v2.0.0) - 2025-12-12
 
 ### Added

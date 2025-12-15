@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.1](https://github.com/symposium-dev/symposium-acp/compare/sacp-tee-v0.2.0...sacp-tee-v0.2.1) - 2025-12-15
+
+### Other
+
+- new session redirection support
+
 ## [0.2.0](https://github.com/symposium-dev/symposium-acp/compare/sacp-tee-v0.1.2...sacp-tee-v0.2.0) - 2025-12-12
 
 ### Added
