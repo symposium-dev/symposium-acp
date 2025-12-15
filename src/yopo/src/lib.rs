@@ -8,7 +8,7 @@ use sacp::schema::{
     RequestPermissionOutcome, RequestPermissionRequest, RequestPermissionResponse,
     SessionNotification, TextContent, VERSION as PROTOCOL_VERSION,
 };
-use sacp::util::{MatchMessage, MatchMessageFrom};
+use sacp::util::MatchMessage;
 use sacp::{Component, Handled, MessageCx, UntypedMessage};
 use std::path::PathBuf;
 
