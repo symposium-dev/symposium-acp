@@ -2095,12 +2095,12 @@ impl MessageCx {
 
     /// Extract the ACP session-id from this message (if any).
     pub(crate) fn has_session_id(&self) -> bool {
-        self.has_field("session-id")
+        self.has_field("sessionId")
     }
 
     /// Extract the ACP session-id from this message (if any).
     pub(crate) fn get_session_id(&self) -> Result<Option<SessionId>, crate::Error> {
-        let value = match self.message().params().get("session-id") {
+        let value = match self.message().params().get("sessionId") {
             Some(value) => value,
             None => return Ok(None),
         };
