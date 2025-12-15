@@ -7,7 +7,7 @@ use crate::jsonrpc::DynamicHandlerRegistration;
 use crate::mcp_server::McpServer;
 use crate::mcp_server::registry::active_session::McpServerSession;
 use crate::schema::NewSessionRequest;
-use crate::util::MatchMessage;
+use crate::util::MatchMessageFrom;
 use crate::{
     Agent, Client, Component, DynComponent, Handled, HasEndpoint, JrConnectionCx,
     JrMessageHandlerSend, JrRole, MessageCx,
@@ -178,7 +178,7 @@ where
         // So we just accept them in either direction for now. The whole thing feels a bit inelegant,
         // but I guess it works.
 
-        MatchMessage::new(message, &connection_cx)
+        MatchMessageFrom::new(message, &connection_cx)
             // session/new requests come from the Client direction (not wrapped)
             .if_request_from(Client, async |mut request, request_cx| {
                 // Add the MCP servers into the session/new request.

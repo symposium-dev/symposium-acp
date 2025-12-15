@@ -8,7 +8,7 @@ use sacp::schema::{
     RequestPermissionOutcome, RequestPermissionRequest, RequestPermissionResponse,
     SessionNotification, TextContent, VERSION as PROTOCOL_VERSION,
 };
-use sacp::util::MatchMessage;
+use sacp::util::MatchMessageFrom;
 use sacp::{Component, Handled, MessageCx, UntypedMessage};
 use std::path::PathBuf;
 
@@ -120,7 +120,7 @@ pub async fn prompt_with_callback(
                 let update = session.read_update().await?;
                 match update {
                     sacp::SessionMessage::SessionMessage(message) => {
-                        MatchMessage::new(message, &cx)
+                        MatchMessageFrom::new(message, &cx)
                             .if_notification(async |notification: SessionNotification| {
                                 tracing::debug!(
                                     ?notification,

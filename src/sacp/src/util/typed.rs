@@ -66,12 +66,12 @@ use crate::{
 /// that handler runs and subsequent handlers are skipped. If parsing fails for all types,
 /// the `otherwise` handler receives the original untyped message.
 #[must_use]
-pub struct MatchMessage<Role: JrRole> {
+pub struct MatchMessageFrom<Role: JrRole> {
     state: Result<Handled<MessageCx>, crate::Error>,
     cx: JrConnectionCx<Role>,
 }
 
-impl<Role: JrRole> MatchMessage<Role> {
+impl<Role: JrRole> MatchMessageFrom<Role> {
     /// Create a new pattern matcher for the given untyped request message.
     pub fn new(message: MessageCx, cx: &JrConnectionCx<Role>) -> Self {
         Self {

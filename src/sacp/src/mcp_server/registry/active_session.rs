@@ -8,7 +8,7 @@ use crate::mcp_server::registry::RegisteredMcpServer;
 use crate::schema::{
     McpConnectRequest, McpConnectResponse, McpDisconnectNotification, McpOverAcpMessage,
 };
-use crate::util::MatchMessage;
+use crate::util::MatchMessageFrom;
 use crate::{
     Agent, Channel, Component, Handled, HasEndpoint, JrConnectionCx, JrMessageHandlerSend,
     JrRequestCx, JrRole, MessageCx, UntypedMessage,
@@ -237,7 +237,7 @@ where
         // So we just accept them in either direction for now. The whole thing feels a bit inelegant,
         // but I guess it works.
 
-        MatchMessage::new(message, &connection_cx)
+        MatchMessageFrom::new(message, &connection_cx)
             // MCP connect requests come from the Agent direction (wrapped in SuccessorMessage)
             .if_request_from(Agent, async |request, request_cx| {
                 self.handle_connect_request(request, request_cx, &connection_cx)

@@ -17,7 +17,7 @@ use crate::{
         InitializeProxyRequest, InitializeRequest, METHOD_INITIALIZE_PROXY,
         METHOD_SUCCESSOR_MESSAGE, SuccessorMessage,
     },
-    util::{MatchMessage, json_cast},
+    util::{MatchMessageFrom, json_cast},
 };
 
 /// Trait for JSON-RPC connection roles.
@@ -239,7 +239,7 @@ impl JrRole for ClientToAgent {
         cx: JrConnectionCx<Self>,
         _state: &mut (),
     ) -> Result<Handled<MessageCx>, crate::Error> {
-        MatchMessage::new(message, &cx)
+        MatchMessageFrom::new(message, &cx)
             .if_message_from(Agent, async |message: MessageCx| {
                 // Subtle: messages that have a session-id field
                 // should be captured by a dynamic message handler
@@ -362,7 +362,7 @@ impl JrRole for ProxyToConductor {
         _state: &mut Self::State,
     ) -> Result<Handled<MessageCx>, crate::Error> {
         // Handle various special messages:
-        let result = MatchMessage::new(message, &cx)
+        let result = MatchMessageFrom::new(message, &cx)
             .if_request_from(Client, async |_req: InitializeRequest, request_cx| {
                 request_cx.respond_with_error(crate::Error::invalid_request().with_data(format!(
                     "proxies must be initialized with `{}`",
@@ -467,7 +467,7 @@ impl JrMessageHandlerSend for ProxySessionMessages {
         message: MessageCx,
         cx: JrConnectionCx<Self::Role>,
     ) -> Result<Handled<MessageCx>, crate::Error> {
-        MatchMessage::new(message, &cx)
+        MatchMessageFrom::new(message, &cx)
             .if_message_from(Agent, async |message| {
                 // If this is for our session-id, proxy it to the client.
                 if let Some(session_id) = message.get_session_id()? {

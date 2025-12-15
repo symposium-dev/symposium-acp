@@ -1,7 +1,7 @@
 use sacp::role::UntypedRole;
 use sacp::{
     Component, Handled, JrConnectionCx, JrMessage, JrMessageHandler, JrRequest, JrRequestCx,
-    JrResponsePayload, MessageCx, util::MatchMessage,
+    JrResponsePayload, MessageCx, util::MatchMessageFrom,
 };
 use serde::{Deserialize, Serialize};
 
@@ -58,7 +58,7 @@ impl JrMessageHandler for EchoHandler {
         message: MessageCx,
         cx: JrConnectionCx<Self::Role>,
     ) -> Result<Handled<MessageCx>, sacp::Error> {
-        MatchMessage::new(message, &cx)
+        MatchMessageFrom::new(message, &cx)
             .if_request(async move |request: EchoRequestResponse, request_cx| {
                 request_cx.respond(request)
             })
@@ -102,7 +102,7 @@ async fn modify_message_en_route() -> Result<(), sacp::Error> {
             message: MessageCx,
             cx: JrConnectionCx<Self::Role>,
         ) -> Result<Handled<MessageCx>, sacp::Error> {
-            MatchMessage::new(message, &cx)
+            MatchMessageFrom::new(message, &cx)
                 .if_request(async move |mut request: EchoRequestResponse, request_cx| {
                     request.text.push(self.message.clone());
                     Ok(Handled::No {
