@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.10.0](https://github.com/symposium-dev/symposium-acp/compare/sacp-rmcp-v0.9.0...sacp-rmcp-v0.10.0) - 2025-12-15
+
+### Other
+
+- new session redirection support
+
 ## [0.9.0](https://github.com/symposium-dev/symposium-acp/compare/sacp-rmcp-v0.8.4...sacp-rmcp-v0.9.0) - 2025-12-12
 
 ### Added

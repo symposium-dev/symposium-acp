@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [4.0.0](https://github.com/symposium-dev/symposium-acp/compare/sacp-v3.0.0...sacp-v4.0.0) - 2025-12-15
+
+### Fixed
+
+- tests now pass
+- *(sacp)* use correct camelCase field name for sessionId lookup
+- *(sacp)* use blocking next() instead of try_next() in session read_update
+
+### Other
+
+- Merge pull request #77 from nikomatsakis/main
+- *(sacp)* add guidance on when to use MatchMessage vs MatchMessageFrom
+- *(sacp)* extract role-agnostic MatchMessage from MatchMessageFrom
+- *(sacp)* rename MatchMessage to MatchMessageFrom
+- process user-handlers first, dynamic later
+- new session redirection support
+
 ## [3.0.0](https://github.com/symposium-dev/symposium-acp/compare/sacp-v2.0.0...sacp-v3.0.0) - 2025-12-12
 
 ### Added
