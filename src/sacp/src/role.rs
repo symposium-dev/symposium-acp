@@ -467,23 +467,28 @@ impl JrMessageHandlerSend for ProxySessionMessages {
         message: MessageCx,
         cx: JrConnectionCx<Self::Role>,
     ) -> Result<Handled<MessageCx>, crate::Error> {
-        // If this is for our session-id, proxy it to the client.
-        if let Some(session_id) = message.get_session_id()? {
-            if session_id == self.session_id {
-                cx.send_proxied_message_to(Client, message)?;
-                return Ok(Handled::Yes);
-            }
-        }
+        MatchMessage::new(message, &cx)
+            .if_message_from(Agent, async |message| {
+                // If this is for our session-id, proxy it to the client.
+                if let Some(session_id) = message.get_session_id()? {
+                    if session_id == self.session_id {
+                        cx.send_proxied_message_to(Client, message)?;
+                        return Ok(Handled::Yes);
+                    }
+                }
 
-        // Otherwise, leave it alone.
-        Ok(Handled::No {
-            message,
-            retry: false,
-        })
+                // Otherwise, leave it alone.
+                Ok(Handled::No {
+                    message,
+                    retry: false,
+                })
+            })
+            .await
+            .done()
     }
 
     fn describe_chain(&self) -> impl std::fmt::Debug {
-        todo!()
+        format!("ProxySessionMessages({})", self.session_id)
     }
 }
 

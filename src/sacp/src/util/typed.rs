@@ -28,8 +28,8 @@ use crate::{
 /// # use sacp::MessageCx;
 /// # use sacp::schema::{InitializeRequest, InitializeResponse, PromptRequest, PromptResponse};
 /// # use sacp::util::MatchMessage;
-/// # async fn example(message: MessageCx) -> Result<(), sacp::Error> {
-/// MatchMessage::new(message)
+/// # async fn example(message: MessageCx, cx: &sacp::JrConnectionCx<sacp::AgentToClient>) -> Result<(), sacp::Error> {
+/// MatchMessage::new(message, cx)
 ///     .if_request(|req: InitializeRequest, request_cx: sacp::JrRequestCx<InitializeResponse>| async move {
 ///         // Handle initialization
 ///         let response = InitializeResponse {
