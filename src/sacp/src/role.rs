@@ -8,16 +8,16 @@
 
 use std::{fmt::Debug, hash::Hash};
 
+use agent_client_protocol_schema::{NewSessionRequest, NewSessionResponse, SessionId};
+
 use crate::{
-    Handled, JrConnectionCx, JrMessage, MessageCx, UntypedMessage,
-    jsonrpc::JrConnectionBuilder,
-    jsonrpc::handlers::NullHandler,
+    Handled, JrConnectionCx, JrMessage, JrMessageHandlerSend, MessageCx, UntypedMessage,
+    jsonrpc::{JrConnectionBuilder, handlers::NullHandler},
     schema::{
         InitializeProxyRequest, InitializeRequest, METHOD_INITIALIZE_PROXY,
         METHOD_SUCCESSOR_MESSAGE, SuccessorMessage,
     },
-    util::MatchMessage,
-    util::json_cast,
+    util::{MatchMessage, json_cast},
 };
 
 /// Trait for JSON-RPC connection roles.
@@ -38,13 +38,22 @@ pub trait JrRole: Debug + Copy + Send + Sync + 'static + Eq + Ord + Hash + Defau
     /// endpoint to avoid ambiguity.
     type HandlerEndpoint: JrEndpoint;
 
+    /// State maintained for connections this role.
+    type State: Default;
+
     /// Method invoked when there is no defined message handler.
+    /// If this returns `no`, an error response will be sent.
     async fn default_message_handler(
         message: MessageCx,
         cx: JrConnectionCx<Self>,
-    ) -> Result<(), crate::Error> {
-        let method = message.method().to_string();
-        message.respond_with_error(crate::Error::method_not_found().with_data(method), cx)
+        state: &mut Self::State,
+    ) -> Result<Handled<MessageCx>, crate::Error> {
+        let _ = cx;
+        let _ = state;
+        Ok(Handled::No {
+            message,
+            retry: false,
+        })
     }
 }
 
@@ -116,7 +125,10 @@ impl RemoteRoleStyle {
                 expected = METHOD_SUCCESSOR_MESSAGE,
                 "handle_incoming_message: Successor style but method doesn't match, returning Handled::No"
             );
-            return Ok(Handled::No(message_cx));
+            return Ok(Handled::No {
+                message: message_cx,
+                retry: false,
+            });
         }
 
         tracing::trace!("handle_incoming_message: Successor style, unwrapping SuccessorMessage");
@@ -133,13 +145,20 @@ impl RemoteRoleStyle {
                 tracing::trace!("handle_incoming_message: inner handler returned Handled::Yes");
                 Ok(Handled::Yes)
             }
-            Handled::No(successor_message_cx) => {
+
+            Handled::No {
+                message: successor_message_cx,
+                retry,
+            } => {
                 tracing::trace!(
                     "handle_incoming_message: inner handler returned Handled::No, re-wrapping"
                 );
-                Ok(Handled::No(successor_message_cx.try_map_message(
-                    |message| SuccessorMessage { message, meta }.to_untyped_message(),
-                )?))
+                Ok(Handled::No {
+                    message: successor_message_cx.try_map_message(|message| {
+                        SuccessorMessage { message, meta }.to_untyped_message()
+                    })?,
+                    retry,
+                })
             }
         }
     }
@@ -187,6 +206,8 @@ pub struct UntypedRole;
 
 impl JrRole for UntypedRole {
     type HandlerEndpoint = UntypedEndpoint;
+
+    type State = ();
 }
 
 impl HasDefaultEndpoint for UntypedRole {}
@@ -210,6 +231,29 @@ pub struct ClientToAgent;
 
 impl JrRole for ClientToAgent {
     type HandlerEndpoint = Agent;
+
+    type State = ();
+
+    async fn default_message_handler(
+        message: MessageCx,
+        cx: JrConnectionCx<Self>,
+        _state: &mut (),
+    ) -> Result<Handled<MessageCx>, crate::Error> {
+        MatchMessage::new(message, &cx)
+            .if_message_from(Agent, async |message: MessageCx| {
+                // Subtle: messages that have a session-id field
+                // should be captured by a dynamic message handler
+                // for that session -- but there is a race condition
+                // between the dynamic handler being added and
+                // possible updates. Therefore, we "retry" all such
+                // messages, so that they will be resent as new handlers
+                // are added.
+                let retry = message.has_session_id();
+                Ok(Handled::No { message, retry })
+            })
+            .await
+            .done()
+    }
 }
 
 impl HasDefaultEndpoint for ClientToAgent {}
@@ -226,6 +270,7 @@ pub struct AgentToClient;
 
 impl JrRole for AgentToClient {
     type HandlerEndpoint = Client;
+    type State = ();
 }
 
 impl HasDefaultEndpoint for AgentToClient {}
@@ -242,6 +287,7 @@ pub struct ConductorToClient;
 
 impl JrRole for ConductorToClient {
     type HandlerEndpoint = Client;
+    type State = ();
 }
 
 impl HasDefaultEndpoint for ConductorToClient {}
@@ -266,6 +312,7 @@ pub struct ConductorToProxy;
 
 impl JrRole for ConductorToProxy {
     type HandlerEndpoint = Agent;
+    type State = ();
 }
 
 impl HasDefaultEndpoint for ConductorToProxy {}
@@ -282,6 +329,7 @@ pub struct ConductorToAgent;
 
 impl JrRole for ConductorToAgent {
     type HandlerEndpoint = Agent;
+    type State = ();
 }
 
 impl HasDefaultEndpoint for ConductorToAgent {}
@@ -300,16 +348,22 @@ impl HasEndpoint<Agent> for ConductorToAgent {
 #[derive(Debug, Default, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct ProxyToConductor;
 
+/// Internal state for handling proxied messages.
+#[derive(Default)]
+pub struct ProxyToConductorState {}
+
 impl JrRole for ProxyToConductor {
     type HandlerEndpoint = Conductor;
+    type State = ProxyToConductorState;
 
     async fn default_message_handler(
         message: MessageCx,
         cx: JrConnectionCx<Self>,
-    ) -> Result<(), crate::Error> {
+        _state: &mut Self::State,
+    ) -> Result<Handled<MessageCx>, crate::Error> {
         // Handle various special messages:
-        let result = MatchMessage::new(message)
-            .if_request(async |_req: InitializeRequest, request_cx| {
+        let result = MatchMessage::new(message, &cx)
+            .if_request_from(Client, async |_req: InitializeRequest, request_cx| {
                 request_cx.respond_with_error(crate::Error::invalid_request().with_data(format!(
                     "proxies must be initialized with `{}`",
                     METHOD_INITIALIZE_PROXY
@@ -318,24 +372,49 @@ impl JrRole for ProxyToConductor {
             .await
             // Initialize Proxy coming from the client -- forward to the agent but
             // convert into a regular initialize.
-            .if_request(async |request: InitializeProxyRequest, request_cx| {
-                let InitializeProxyRequest { initialize } = request;
-                cx.send_request_to(Agent, initialize)
-                    .forward_to_request_cx(request_cx)
-            })
+            .if_request_from(
+                Client,
+                async |request: InitializeProxyRequest, request_cx| {
+                    let InitializeProxyRequest { initialize } = request;
+                    cx.send_request_to(Agent, initialize)
+                        .forward_to_request_cx(request_cx)
+                },
+            )
             .await
             // Incoming request from the agent -- forward to the client
-            .if_request(async |agent_request: SuccessorMessage, request_cx| {
-                let SuccessorMessage {
-                    message: request,
-                    meta: _,
-                } = agent_request;
-                cx.send_request_to(Client, request)
-                    .forward_to_request_cx(request_cx)
+            .if_request_from(
+                Conductor,
+                async |agent_request: SuccessorMessage, request_cx| {
+                    let SuccessorMessage {
+                        message: request,
+                        meta: _,
+                    } = agent_request;
+                    cx.send_request_to(Client, request)
+                        .forward_to_request_cx(request_cx)
+                },
+            )
+            .await
+            // New session coming from the client -- proxy to the agent
+            // and add a dynamic handler for that
+            // session-id.
+            .if_request_from(Client, async |request: NewSessionRequest, request_cx| {
+                cx.send_request_to(Agent, request)
+                    .await_when_result_received({
+                        let cx = cx.clone();
+                        async move |result| {
+                            if let Ok(NewSessionResponse { session_id, .. }) = &result {
+                                cx.add_dynamic_handler(ProxySessionMessages {
+                                    session_id: session_id.clone(),
+                                })?
+                                .run_indefinitely();
+                            }
+                            request_cx.respond_with_result(result)
+                        }
+                    })
             })
             .await
             // Incoming notification from the agent -- forward to the client
-            .if_notification(async |agent_notif: SuccessorMessage| {
+            .if_notification_from(Conductor, async |agent_notif: SuccessorMessage| {
                 let SuccessorMessage {
                     message: notif,
                     meta: _,
@@ -346,16 +425,65 @@ impl JrRole for ProxyToConductor {
             .done()?;
 
         match result {
-            Handled::Yes => Ok(()),
+            Handled::Yes => Ok(Handled::Yes),
+
+            // If we got a retry, pass it up to be retried.
+            Handled::No {
+                message,
+                retry: true,
+            } => Ok(Handled::No {
+                message,
+                retry: true,
+            }),
 
             // All other messages are coming from the client, forward to the agent
-            Handled::No(message) => match message {
-                MessageCx::Request(request, request_cx) => cx
-                    .send_request_to(Agent, request)
-                    .forward_to_request_cx(request_cx),
-                MessageCx::Notification(notif) => cx.send_notification_to(Agent, notif),
+            Handled::No {
+                message,
+                retry: false,
+            } => match message {
+                MessageCx::Request(request, request_cx) => {
+                    cx.send_request_to(Agent, request)
+                        .forward_to_request_cx(request_cx)?;
+                    Ok(Handled::Yes)
+                }
+                MessageCx::Notification(notif) => {
+                    cx.send_notification_to(Agent, notif)?;
+                    Ok(Handled::Yes)
+                }
             },
         }
+    }
+}
+
+struct ProxySessionMessages {
+    session_id: SessionId,
+}
+
+impl JrMessageHandlerSend for ProxySessionMessages {
+    type Role = ProxyToConductor;
+
+    async fn handle_message(
+        &mut self,
+        message: MessageCx,
+        cx: JrConnectionCx<Self::Role>,
+    ) -> Result<Handled<MessageCx>, crate::Error> {
+        // If this is for our session-id, proxy it to the client.
+        if let Some(session_id) = message.get_session_id()? {
+            if session_id == self.session_id {
+                cx.send_proxied_message_to(Client, message)?;
+                return Ok(Handled::Yes);
+            }
+        }
+
+        // Otherwise, leave it alone.
+        Ok(Handled::No {
+            message,
+            retry: false,
+        })
+    }
+
+    fn describe_chain(&self) -> impl std::fmt::Debug {
+        todo!()
     }
 }
 

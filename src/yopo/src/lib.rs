@@ -5,9 +5,10 @@
 use sacp::ClientToAgent;
 use sacp::schema::{
     AudioContent, ContentBlock, EmbeddedResourceResource, ImageContent, InitializeRequest,
-    NewSessionRequest, PromptRequest, RequestPermissionOutcome, RequestPermissionRequest,
-    RequestPermissionResponse, SessionNotification, TextContent, VERSION as PROTOCOL_VERSION,
+    RequestPermissionOutcome, RequestPermissionRequest, RequestPermissionResponse,
+    SessionNotification, TextContent, VERSION as PROTOCOL_VERSION,
 };
+use sacp::util::MatchMessage;
 use sacp::{Component, Handled, MessageCx, UntypedMessage};
 use std::path::PathBuf;
 
@@ -92,33 +93,9 @@ pub async fn prompt_with_callback(
         .on_receive_message(
             async |message: MessageCx<UntypedMessage, UntypedMessage>, _cx| {
                 tracing::trace!("received: {:?}", message.message());
-                Ok(Handled::No(message))
-            },
-        )
-        .on_receive_notification(async move |notification: SessionNotification, _cx| {
-            tracing::debug!(?notification, "yopo: received SessionNotification");
-            // Call the callback for each agent message chunk
-            if let sacp::schema::SessionUpdate::AgentMessageChunk(content_chunk) =
-                notification.update
-            {
-                callback(content_chunk.content).await;
-            }
-            Ok(())
-        })
-        .on_receive_request(
-            async move |request: RequestPermissionRequest, request_cx, _cx| {
-                // Auto-approve all permission requests by selecting the first option
-                let outcome = if let Some(option) = request.options.first() {
-                    RequestPermissionOutcome::Selected {
-                        option_id: option.id.clone(),
-                    }
-                } else {
-                    RequestPermissionOutcome::Cancelled
-                };
-
-                request_cx.respond(RequestPermissionResponse {
-                    outcome,
-                    meta: None,
+                Ok(Handled::No {
+                    message,
+                    retry: false,
                 })
             },
         )
@@ -135,31 +112,68 @@ pub async fn prompt_with_callback(
                 .block_task()
                 .await?;
 
-            // Create a new session
-            let new_session_response = cx
-                .send_request(NewSessionRequest {
-                    cwd: PathBuf::from("."),
-                    mcp_servers: vec![],
-                    meta: None,
-                })
-                .block_task()
-                .await?;
+            let mut session = cx.build_session(PathBuf::from(".")).send_request().await?;
 
-            let session_id = new_session_response.session_id;
+            session.send_prompt(prompt_text)?;
 
-            // Send the prompt
-            let _prompt_response = cx
-                .send_request(PromptRequest {
-                    session_id,
-                    prompt: vec![ContentBlock::Text(TextContent {
-                        annotations: None,
-                        text: prompt_text,
-                        meta: None,
-                    })],
-                    meta: None,
-                })
-                .block_task()
-                .await?;
+            loop {
+                let update = session.read_update().await?;
+                match update {
+                    sacp::SessionMessage::SessionMessage(message) => {
+                        MatchMessage::new(message, &cx)
+                            .if_notification(async |notification: SessionNotification| {
+                                tracing::debug!(
+                                    ?notification,
+                                    "yopo: received SessionNotification"
+                                );
+                                // Call the callback for each agent message chunk
+                                if let sacp::schema::SessionUpdate::AgentMessageChunk(
+                                    content_chunk,
+                                ) = notification.update
+                                {
+                                    callback(content_chunk.content).await;
+                                }
+                                Ok(())
+                            })
+                            .await
+                            .if_request(async |request: RequestPermissionRequest, request_cx| {
+                                // Auto-approve all permission requests by selecting the first option
+                                // that looks "allow-ish"
+                                let outcome = request
+                                    .options
+                                    .iter()
+                                    .find(|option| match option.kind {
+                                        sacp::schema::PermissionOptionKind::AllowOnce
+                                        | sacp::schema::PermissionOptionKind::AllowAlways => true,
+                                        sacp::schema::PermissionOptionKind::RejectOnce
+                                        | sacp::schema::PermissionOptionKind::RejectAlways => false,
+                                    })
+                                    .map(|option| RequestPermissionOutcome::Selected {
+                                        option_id: option.id.clone(),
+                                    })
+                                    .unwrap_or(RequestPermissionOutcome::Cancelled);
+
+                                request_cx.respond(RequestPermissionResponse {
+                                    outcome,
+                                    meta: None,
+                                })?;
+
+                                Ok(())
+                            })
+                            .await
+                            .otherwise(async |_msg| Ok(()))
+                            .await?;
+                    }
+                    sacp::SessionMessage::StopReason(stop_reason) => match stop_reason {
+                        sacp::schema::StopReason::EndTurn => break,
+                        sacp::schema::StopReason::MaxTokens => todo!(),
+                        sacp::schema::StopReason::MaxTurnRequests => todo!(),
+                        sacp::schema::StopReason::Refusal => todo!(),
+                        sacp::schema::StopReason::Cancelled => todo!(),
+                    },
+                    _ => todo!(),
+                }
+            }
 
             Ok(())
         })

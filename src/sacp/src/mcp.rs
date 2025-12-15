@@ -21,6 +21,7 @@ pub struct McpClientToServer;
 
 impl JrRole for McpClientToServer {
     type HandlerEndpoint = McpServerEnd;
+    type State = ();
 }
 
 impl HasDefaultEndpoint for McpClientToServer {}
@@ -44,6 +45,7 @@ pub struct McpServerToClient;
 
 impl JrRole for McpServerToClient {
     type HandlerEndpoint = McpClient;
+    type State = ();
 }
 
 impl HasDefaultEndpoint for McpServerToClient {}

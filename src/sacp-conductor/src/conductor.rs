@@ -828,7 +828,7 @@ impl ConductorHandlerState {
 
         tracing::debug!(?message, "forward_client_to_agent_message");
 
-        MatchMessage::new(message)
+        MatchMessage::new(message, connection_cx)
             .if_request(async |request: InitializeProxyRequest, request_cx| {
                 // Proxy forwarding InitializeProxyRequest to its successor
                 tracing::debug!("forward_client_to_agent_message: InitializeProxyRequest");

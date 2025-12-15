@@ -23,7 +23,7 @@ use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
 
 /// Extension trait for adding rmcp-based MCP servers to a registry.
 pub trait McpServiceRegistryRmcpExt {
-    /// Add an MCP server implemented using the rmcp crate.
+    /// Return a version of the registry with MCP server implemented using the rmcp crate.
     ///
     /// # Parameters
     ///
@@ -33,18 +33,8 @@ pub trait McpServiceRegistryRmcpExt {
     /// # Example
     ///
     /// ```ignore
-    /// registry.add_rmcp_server("my-server", || MyRmcpService::new())?;
+    /// registry.with_rmcp_server("my-server", || MyRmcpService::new())?
     /// ```
-    fn add_rmcp_server<S>(
-        &self,
-        name: impl ToString,
-        make_service: impl Fn() -> S + 'static + Send + Sync,
-    ) -> Result<(), sacp::Error>
-    where
-        S: rmcp::Service<rmcp::RoleServer>;
-
-    /// Add the MCP server to the registry and return `self`. Useful for chaining.
-    /// Equivalent to [`Self::add_rmcp_server`].
     fn with_rmcp_server<S>(
         self,
         name: impl ToString,
@@ -59,20 +49,6 @@ impl<Role: JrRole> McpServiceRegistryRmcpExt for McpServiceRegistry<Role>
 where
     Role: HasEndpoint<Agent>,
 {
-    fn add_rmcp_server<S>(
-        &self,
-        name: impl ToString,
-        make_service: impl Fn() -> S + 'static + Send + Sync,
-    ) -> Result<(), sacp::Error>
-    where
-        S: rmcp::Service<rmcp::RoleServer>,
-    {
-        self.add_mcp_server(name, move || {
-            let service = make_service();
-            RmcpServerComponent { service }
-        })
-    }
-
     fn with_rmcp_server<S>(
         self,
         name: impl ToString,
@@ -81,8 +57,10 @@ where
     where
         S: rmcp::Service<rmcp::RoleServer>,
     {
-        self.add_rmcp_server(name, make_service)?;
-        Ok(self)
+        self.with_custom_mcp_server(name, move |_| {
+            let service = make_service();
+            RmcpServerComponent { service }
+        })
     }
 }
 
