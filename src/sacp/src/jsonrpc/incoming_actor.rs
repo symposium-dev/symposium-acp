@@ -140,6 +140,7 @@ async fn dispatch_request<Role: JrRole>(
 ) -> Result<(), crate::Error> {
     let message = UntypedMessage::new(&request.method, &request.params).expect("well-formed JSON");
 
+    let mut retry_any = false;
     let mut message_cx = match &request.id {
         Some(id) => MessageCx::Request(
             message,
@@ -152,8 +153,24 @@ async fn dispatch_request<Role: JrRole>(
         None => MessageCx::Notification(message),
     };
 
-    // First apply any dynamic handlers.
-    let mut retry_any = false;
+    // First, apply the handlers given by the user.
+    match handler
+        .handle_message(message_cx, json_rpc_cx.clone())
+        .await?
+    {
+        Handled::Yes => {
+            tracing::trace!(method = request.method, ?request.id, handler = ?handler.describe_chain(), "Handled successfully");
+            return Ok(());
+        }
+
+        Handled::No { message: m, retry } => {
+            tracing::trace!(method = ?request.method, ?request.id, handler = ?handler.describe_chain(), "Handler declined message");
+            message_cx = m;
+            retry_any |= retry;
+        }
+    }
+
+    // Next, apply any dynamic handlers.
     for dynamic_handler in dynamic_handlers.values_mut() {
         match dynamic_handler
             .dyn_handle_message(message_cx, json_rpc_cx.clone())
@@ -172,32 +189,21 @@ async fn dispatch_request<Role: JrRole>(
         }
     }
 
-    match handler
-        .handle_message(message_cx, json_rpc_cx.clone())
-        .await?
-    {
+    // Finally, apply the default handler for the role.
+    match Role::default_message_handler(message_cx, json_rpc_cx.clone(), state).await? {
         Handled::Yes => {
-            tracing::trace!(method = request.method, ?request.id, handler = ?handler.describe_chain(), "Handled successfully");
+            tracing::trace!(method = ?request.method, handler = "default", "Handled successfully");
             return Ok(());
         }
-
         Handled::No { message: m, retry } => {
-            tracing::trace!(method = ?request.method, ?request.id, handler = ?handler.describe_chain(), "Handler declined message");
+            tracing::trace!(method = ?request.method, handler = "default", "Not handled");
+            message_cx = m;
             retry_any |= retry;
-            match Role::default_message_handler(m, json_rpc_cx.clone(), state).await? {
-                Handled::Yes => {
-                    tracing::trace!(method = ?request.method, handler = "default", "Handled successfully");
-                    return Ok(());
-                }
-                Handled::No { message: m, retry } => {
-                    tracing::trace!(method = ?request.method, handler = "default", "Not handled");
-                    message_cx = m;
-                    retry_any |= retry;
-                }
-            }
         }
     }
 
+    // If the message was never handled, check whether the retry flag was set.
+    // If so, enqueue it for later processing. Else, reject it.
     if retry_any {
         tracing::debug!(method = ?request.method, "Retrying message as new dynamic handlers are added");
         pending_messages.push(message_cx);
