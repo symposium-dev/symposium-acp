@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.0.1](https://github.com/symposium-dev/symposium-acp/compare/sacp-tokio-v3.0.0...sacp-tokio-v3.0.1) - 2025-12-15
+
+### Fixed
+
+- *(sacp-tokio)* report child process errors with stderr in AcpAgent
+
 ## [3.0.0](https://github.com/symposium-dev/symposium-acp/compare/sacp-tokio-v2.0.1...sacp-tokio-v3.0.0) - 2025-12-12
 
 ### Added
