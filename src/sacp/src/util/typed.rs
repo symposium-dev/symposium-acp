@@ -1,8 +1,8 @@
 //! Utilities for pattern matching on untyped JSON-RPC messages.
 //!
-//! When handling [`UntypedMessage`]s, you can use [`MatchMessage`]
-//! to create a pattern-matching flow that tries to parse messages as specific types,
-//! falling back to a default handler if no type matches.
+//! When handling [`UntypedMessage`]s, you can use [`MatchMessage`] for simple parsing
+//! or [`MatchMessageFrom`] when you need role-aware endpoint transforms (e.g., unwrapping
+//! proxy envelopes).
 
 // Types re-exported from crate root
 use jsonrpcmsg::Params;
@@ -14,22 +14,256 @@ use crate::{
     util::json_cast,
 };
 
-/// Helper for pattern-matching on untyped JSON-RPC requests.
+/// Role-agnostic helper for pattern-matching on untyped JSON-RPC messages.
 ///
-/// Use this when you receive an [`UntypedMessage`] representing a request and want to
-/// try parsing it as different concrete types, handling whichever type matches.
+/// Use this when you just need to parse messages as specific types without
+/// any endpoint-aware transforms. For role-aware matching that handles
+/// proxy envelope unwrapping, use [`MatchMessageFrom`] instead.
 ///
-/// This is very similar to using [`JrConnectionBuilder::apply`](`crate::JrConnectionBuilder::apply`) except that each match
-/// executes immediately, which can help avoid borrow check errors.
+/// # Example
+///
+/// ```
+/// # use sacp::MessageCx;
+/// # use sacp::schema::{InitializeRequest, InitializeResponse};
+/// # use sacp::util::MatchMessage;
+/// # async fn example(message: MessageCx) -> Result<(), sacp::Error> {
+/// MatchMessage::new(message)
+///     .if_request(|req: InitializeRequest, request_cx: sacp::JrRequestCx<InitializeResponse>| async move {
+///         let response = InitializeResponse {
+///             protocol_version: req.protocol_version,
+///             agent_capabilities: Default::default(),
+///             auth_methods: vec![],
+///             meta: None,
+///             agent_info: None,
+///         };
+///         request_cx.respond(response)
+///     })
+///     .await
+///     .otherwise(|message| async move {
+///         match message {
+///             MessageCx::Request(_, request_cx) => {
+///                 request_cx.respond_with_error(sacp::util::internal_error("unknown method"))
+///             }
+///             MessageCx::Notification(_) => Ok(()),
+///         }
+///     })
+///     .await
+/// # }
+/// ```
+#[must_use]
+pub struct MatchMessage {
+    state: Result<Handled<MessageCx>, crate::Error>,
+}
+
+impl MatchMessage {
+    /// Create a new pattern matcher for the given message.
+    pub fn new(message: MessageCx) -> Self {
+        Self {
+            state: Ok(Handled::No {
+                message,
+                retry: false,
+            }),
+        }
+    }
+
+    /// Create a pattern matcher from an existing `Handled` state.
+    ///
+    /// This is useful when composing with [`MatchMessageFrom`] which applies
+    /// endpoint transforms before delegating to `MatchMessage` for parsing.
+    pub fn from_handled(state: Result<Handled<MessageCx>, crate::Error>) -> Self {
+        Self { state }
+    }
+
+    /// Try to handle the message as a request of type `Req`.
+    ///
+    /// If the message can be parsed as `Req`, the handler `op` is called with the parsed
+    /// request and a typed request context. If parsing fails or the message was already
+    /// handled by a previous call, this has no effect.
+    pub async fn if_request<Req: JrRequest, H>(
+        mut self,
+        op: impl AsyncFnOnce(Req, JrRequestCx<Req::Response>) -> Result<H, crate::Error>,
+    ) -> Self
+    where
+        H: crate::IntoHandled<(Req, JrRequestCx<Req::Response>)>,
+    {
+        if let Ok(Handled::No {
+            message: message_cx,
+            retry,
+        }) = self.state
+        {
+            self.state = match message_cx {
+                MessageCx::Request(untyped_request, untyped_request_cx) => {
+                    match Req::parse_message(untyped_request.method(), untyped_request.params()) {
+                        Some(Ok(typed_request)) => {
+                            let typed_request_cx = untyped_request_cx.cast();
+                            match op(typed_request, typed_request_cx).await {
+                                Ok(result) => match result.into_handled() {
+                                    Handled::Yes => Ok(Handled::Yes),
+                                    Handled::No {
+                                        message: (request, request_cx),
+                                        retry: request_retry,
+                                    } => match request.to_untyped_message() {
+                                        Ok(untyped) => Ok(Handled::No {
+                                            message: MessageCx::Request(
+                                                untyped,
+                                                request_cx.erase_to_json(),
+                                            ),
+                                            retry: retry | request_retry,
+                                        }),
+                                        Err(err) => Err(err),
+                                    },
+                                },
+                                Err(err) => Err(err),
+                            }
+                        }
+                        Some(Err(err)) => Err(err),
+                        None => Ok(Handled::No {
+                            message: MessageCx::Request(untyped_request, untyped_request_cx),
+                            retry,
+                        }),
+                    }
+                }
+                MessageCx::Notification(_) => Ok(Handled::No {
+                    message: message_cx,
+                    retry,
+                }),
+            };
+        }
+        self
+    }
+
+    /// Try to handle the message as a notification of type `N`.
+    ///
+    /// If the message can be parsed as `N`, the handler `op` is called with the parsed
+    /// notification. If parsing fails or the message was already handled, this has no effect.
+    pub async fn if_notification<N: JrNotification, H>(
+        mut self,
+        op: impl AsyncFnOnce(N) -> Result<H, crate::Error>,
+    ) -> Self
+    where
+        H: crate::IntoHandled<N>,
+    {
+        if let Ok(Handled::No {
+            message: message_cx,
+            retry,
+        }) = self.state
+        {
+            self.state = match message_cx {
+                MessageCx::Notification(untyped_notification) => {
+                    match N::parse_message(
+                        untyped_notification.method(),
+                        untyped_notification.params(),
+                    ) {
+                        Some(Ok(typed_notification)) => match op(typed_notification).await {
+                            Ok(result) => match result.into_handled() {
+                                Handled::Yes => Ok(Handled::Yes),
+                                Handled::No {
+                                    message: notification,
+                                    retry: notification_retry,
+                                } => match notification.to_untyped_message() {
+                                    Ok(untyped) => Ok(Handled::No {
+                                        message: MessageCx::Notification(untyped),
+                                        retry: retry | notification_retry,
+                                    }),
+                                    Err(err) => Err(err),
+                                },
+                            },
+                            Err(err) => Err(err),
+                        },
+                        Some(Err(err)) => Err(err),
+                        None => Ok(Handled::No {
+                            message: MessageCx::Notification(untyped_notification),
+                            retry,
+                        }),
+                    }
+                }
+                MessageCx::Request(_, _) => Ok(Handled::No {
+                    message: message_cx,
+                    retry,
+                }),
+            };
+        }
+        self
+    }
+
+    /// Try to handle the message as a typed `MessageCx<R, N>`.
+    ///
+    /// This attempts to parse the message as either request type `R` or notification type `N`,
+    /// providing a typed `MessageCx` to the handler if successful.
+    pub async fn if_message<R: JrRequest, N: JrNotification, H>(
+        mut self,
+        op: impl AsyncFnOnce(MessageCx<R, N>) -> Result<H, crate::Error>,
+    ) -> Self
+    where
+        H: crate::IntoHandled<MessageCx<R, N>>,
+    {
+        if let Ok(Handled::No {
+            message: message_cx,
+            retry,
+        }) = self.state
+        {
+            self.state = match message_cx.into_typed_message_cx::<R, N>() {
+                Ok(Ok(typed_message_cx)) => match op(typed_message_cx).await {
+                    Ok(result) => match result.into_handled() {
+                        Handled::Yes => Ok(Handled::Yes),
+                        Handled::No {
+                            message: typed_message_cx,
+                            retry: message_retry,
+                        } => match typed_message_cx.into_untyped_message_cx() {
+                            Ok(untyped) => Ok(Handled::No {
+                                message: untyped,
+                                retry: retry | message_retry,
+                            }),
+                            Err(err) => Err(err),
+                        },
+                    },
+                    Err(err) => Err(err),
+                },
+                Ok(Err(message_cx)) => Ok(Handled::No {
+                    message: message_cx,
+                    retry,
+                }),
+                Err(err) => Err(err),
+            };
+        }
+        self
+    }
+
+    /// Complete matching, returning `Handled::No` if no match was found.
+    pub fn done(self) -> Result<Handled<MessageCx>, crate::Error> {
+        self.state
+    }
+
+    /// Handle messages that didn't match any previous handler.
+    pub async fn otherwise(
+        self,
+        op: impl AsyncFnOnce(MessageCx) -> Result<(), crate::Error>,
+    ) -> Result<(), crate::Error> {
+        match self.state {
+            Ok(Handled::Yes) => Ok(()),
+            Ok(Handled::No { message, retry: _ }) => op(message).await,
+            Err(err) => Err(err),
+        }
+    }
+}
+
+/// Role-aware helper for pattern-matching on untyped JSON-RPC requests.
+///
+/// Use this when you need endpoint-aware transforms (e.g., unwrapping proxy envelopes)
+/// before parsing messages. For simple parsing without role awareness, use [`MatchMessage`].
+///
+/// This wraps [`MatchMessage`] and applies endpoint-specific message transformations
+/// via `remote_style().handle_incoming_message()` before delegating to `MatchMessage`
+/// for the actual parsing.
 ///
 /// # Example
 ///
 /// ```
 /// # use sacp::MessageCx;
 /// # use sacp::schema::{InitializeRequest, InitializeResponse, PromptRequest, PromptResponse};
-/// # use sacp::util::MatchMessage;
+/// # use sacp::util::MatchMessageFrom;
 /// # async fn example(message: MessageCx, cx: &sacp::JrConnectionCx<sacp::AgentToClient>) -> Result<(), sacp::Error> {
-/// MatchMessage::new(message, cx)
+/// MatchMessageFrom::new(message, cx)
 ///     .if_request(|req: InitializeRequest, request_cx: sacp::JrRequestCx<InitializeResponse>| async move {
 ///         // Handle initialization
 ///         let response = InitializeResponse {
@@ -61,10 +295,6 @@ use crate::{
 ///     .await
 /// # }
 /// ```
-///
-/// Each `handle_if` tries to parse the message as the specified type. If parsing succeeds,
-/// that handler runs and subsequent handlers are skipped. If parsing fails for all types,
-/// the `otherwise` handler receives the original untyped message.
 #[must_use]
 pub struct MatchMessageFrom<Role: JrRole> {
     state: Result<Handled<MessageCx>, crate::Error>,
@@ -115,7 +345,6 @@ impl<Role: JrRole> MatchMessageFrom<Role> {
     /// # Parameters
     ///
     /// * `endpoint` - The endpoint the message is expected to come from
-    /// * `connection_cx` - The connection context for the role
     /// * `op` - The handler to call if the message matches
     pub async fn if_request_from<End: JrEndpoint, Req: JrRequest, H>(
         mut self,
@@ -126,65 +355,18 @@ impl<Role: JrRole> MatchMessageFrom<Role> {
         Role: HasEndpoint<End>,
         H: crate::IntoHandled<(Req, JrRequestCx<Req::Response>)>,
     {
-        if let Ok(Handled::No {
-            message: message_cx,
-            retry,
-        }) = self.state
-        {
+        if let Ok(Handled::No { message, retry: _ }) = self.state {
             let remote_style = Role::remote_style(endpoint);
-            match remote_style
+            self.state = remote_style
                 .handle_incoming_message(
-                    message_cx,
+                    message,
                     self.cx.clone(),
-                    async |message_cx, _connection_cx| match message_cx {
-                        MessageCx::Request(untyped_request, untyped_request_cx) => {
-                            match Req::parse_message(
-                                untyped_request.method(),
-                                untyped_request.params(),
-                            ) {
-                                Some(Ok(typed_request)) => {
-                                    let typed_request_cx = untyped_request_cx.cast();
-                                    match op(typed_request, typed_request_cx).await {
-                                        Ok(result) => match result.into_handled() {
-                                            Handled::Yes => Ok(Handled::Yes),
-                                            Handled::No {
-                                                message: (request, request_cx),
-                                                retry: request_retry,
-                                            } => {
-                                                let untyped = request.to_untyped_message()?;
-                                                Ok(Handled::No {
-                                                    message: MessageCx::Request(
-                                                        untyped,
-                                                        request_cx.erase_to_json(),
-                                                    ),
-                                                    retry: retry | request_retry,
-                                                })
-                                            }
-                                        },
-                                        Err(err) => Err(err),
-                                    }
-                                }
-                                Some(Err(err)) => Err(err),
-                                None => Ok(Handled::No {
-                                    message: MessageCx::Request(
-                                        untyped_request,
-                                        untyped_request_cx,
-                                    ),
-                                    retry,
-                                }),
-                            }
-                        }
-                        MessageCx::Notification(_) => Ok(Handled::No {
-                            message: message_cx,
-                            retry,
-                        }),
+                    async |message_cx, _connection_cx| {
+                        // Delegate to MatchMessage for parsing
+                        MatchMessage::new(message_cx).if_request(op).await.done()
                     },
                 )
-                .await
-            {
-                Ok(handled) => self.state = Ok(handled),
-                Err(err) => self.state = Err(err),
-            }
+                .await;
         }
         self
     }
@@ -221,7 +403,6 @@ impl<Role: JrRole> MatchMessageFrom<Role> {
     /// # Parameters
     ///
     /// * `endpoint` - The endpoint the message is expected to come from
-    /// * `connection_cx` - The connection context for the role
     /// * `op` - The handler to call if the message matches
     pub async fn if_notification_from<End: JrEndpoint, N: JrNotification, H>(
         mut self,
@@ -232,63 +413,34 @@ impl<Role: JrRole> MatchMessageFrom<Role> {
         Role: HasEndpoint<End>,
         H: crate::IntoHandled<N>,
     {
-        if let Ok(Handled::No {
-            message: message_cx,
-            retry,
-        }) = self.state
-        {
+        if let Ok(Handled::No { message, retry: _ }) = self.state {
             let remote_style = Role::remote_style(endpoint);
-            match remote_style
+            self.state = remote_style
                 .handle_incoming_message(
-                    message_cx,
+                    message,
                     self.cx.clone(),
-                    async |message_cx, _connection_cx| match message_cx {
-                        MessageCx::Notification(untyped_notification) => {
-                            match N::parse_message(
-                                untyped_notification.method(),
-                                untyped_notification.params(),
-                            ) {
-                                Some(Ok(typed_notification)) => {
-                                    match op(typed_notification).await {
-                                        Ok(result) => match result.into_handled() {
-                                            Handled::Yes => Ok(Handled::Yes),
-                                            Handled::No {
-                                                message: notification,
-                                                retry: notification_retry,
-                                            } => {
-                                                let untyped = notification.to_untyped_message()?;
-                                                Ok(Handled::No {
-                                                    message: MessageCx::Notification(untyped),
-                                                    retry: retry | notification_retry,
-                                                })
-                                            }
-                                        },
-                                        Err(err) => Err(err),
-                                    }
-                                }
-                                Some(Err(err)) => Err(err),
-                                None => Ok(Handled::No {
-                                    message: MessageCx::Notification(untyped_notification),
-                                    retry,
-                                }),
-                            }
-                        }
-                        MessageCx::Request(_, _) => Ok(Handled::No {
-                            message: message_cx,
-                            retry,
-                        }),
+                    async |message_cx, _connection_cx| {
+                        // Delegate to MatchMessage for parsing
+                        MatchMessage::new(message_cx)
+                            .if_notification(op)
+                            .await
+                            .done()
                     },
                 )
-                .await
-            {
-                Ok(handled) => self.state = Ok(handled),
-                Err(err) => self.state = Err(err),
-            }
+                .await;
         }
         self
     }
 
-    /// Complete matching, returning `Handled::No` if no match was found.
+    /// Try to handle the message as a typed `MessageCx<R, N>` from a specific endpoint.
+    ///
+    /// This is similar to [`MatchMessage::if_message`], but first applies endpoint-specific
+    /// message transformation (e.g., unwrapping `SuccessorMessage` envelopes).
+    ///
+    /// # Parameters
+    ///
+    /// * `endpoint` - The endpoint the message is expected to come from
+    /// * `op` - The handler to call if the message matches
     pub async fn if_message_from<End: JrEndpoint, R: JrRequest, N: JrNotification, H>(
         mut self,
         endpoint: End,
@@ -298,44 +450,18 @@ impl<Role: JrRole> MatchMessageFrom<Role> {
         Role: HasEndpoint<End>,
         H: crate::IntoHandled<MessageCx<R, N>>,
     {
-        if let Ok(Handled::No {
-            message: message_cx,
-            retry,
-        }) = self.state
-        {
+        if let Ok(Handled::No { message, retry: _ }) = self.state {
             let remote_style = Role::remote_style(endpoint);
-            match remote_style
+            self.state = remote_style
                 .handle_incoming_message(
-                    message_cx,
+                    message,
                     self.cx.clone(),
-                    async |message_cx, _connection_cx| match message_cx
-                        .into_typed_message_cx::<R, N>()?
-                    {
-                        Ok(typed_message_cx) => match op(typed_message_cx).await {
-                            Ok(result) => match result.into_handled() {
-                                Handled::Yes => Ok(Handled::Yes),
-                                Handled::No {
-                                    message: typed_message_cx,
-                                    retry: message_retry,
-                                } => Ok(Handled::No {
-                                    message: typed_message_cx.into_untyped_message_cx()?,
-                                    retry: retry | message_retry,
-                                }),
-                            },
-                            Err(err) => Err(err),
-                        },
-
-                        Err(message_cx) => Ok(Handled::No {
-                            message: message_cx,
-                            retry,
-                        }),
+                    async |message_cx, _connection_cx| {
+                        // Delegate to MatchMessage for parsing
+                        MatchMessage::new(message_cx).if_message(op).await.done()
                     },
                 )
-                .await
-            {
-                Ok(handled) => self.state = Ok(handled),
-                Err(err) => self.state = Err(err),
-            }
+                .await;
         }
         self
     }
