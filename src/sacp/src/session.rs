@@ -193,11 +193,11 @@ where
 
     /// Read an update from the agent in response to the prompt.
     pub async fn read_update(&mut self) -> Result<SessionMessage, crate::Error> {
-        let message = self
-            .update_rx
-            .try_next()
-            .map_err(crate::util::internal_error)?
-            .expect("always-has-open-rx");
+        use futures::StreamExt;
+        let message =
+            self.update_rx.next().await.ok_or_else(|| {
+                crate::util::internal_error("session channel closed unexpectedly")
+            })?;
 
         Ok(message)
     }
