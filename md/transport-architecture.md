@@ -65,12 +65,12 @@ Responsibilities:
 #### Incoming Protocol Actor
 ```
 Input:  mpsc::UnboundedReceiver<jsonrpcmsg::Message>
-Output: Routes to reply_actor or handler chain
+Output: Routes to reply_actor or registered handlers
 ```
 
 Responsibilities:
 - Route responses to reply_actor (matches by ID)
-- Route requests/notifications to handler chain
+- Route requests/notifications to registered handlers
 - Convert `jsonrpcmsg::Request` to `UntypedMessage` for handlers
 
 #### Reply Actor
@@ -149,7 +149,7 @@ Transport Incoming Actor
     |
 Incoming Protocol Actor
     | - Route responses → reply_actor
-    | - Route requests → handler chain
+    | - Route requests → registered handlers
     v
 Handler or Reply Actor
 ```
@@ -269,7 +269,7 @@ Benefits:
 The refactored API separates handler setup from transport selection:
 
 ```rust
-// Build handler chain
+// Build connection with handlers
 let connection = JrConnection::new()
     .name("my-component")
     .on_receive_request(|req: InitializeRequest, cx| {

@@ -1,6 +1,6 @@
-//! Integration tests for JSON-RPC handler chain behavior.
+//! Integration tests for JSON-RPC connection builder behavior.
 //!
-//! These tests verify that multiple handlers can be chained together
+//! These tests verify that multiple handlers can be registered on a connection builder
 //! and that requests/notifications are routed correctly based on which
 //! handler claims them.
 

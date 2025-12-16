@@ -17,7 +17,7 @@
 //! let registry = McpServiceRegistry::new()
 //!     .with_mcp_server("my-server", server)?;
 //!
-//! // Use the registry in your handler chain
+//! // Use the registry in your connection
 //! UntypedRole::builder()
 //!     .with_handler(registry)
 //!     .serve(connection)

@@ -191,7 +191,7 @@ impl Conductor {
         self
     }
 
-    pub fn into_handler_chain(self) -> JrConnectionBuilder<ConductorMessageHandler> {
+    pub fn into_connection_builder(self) -> JrConnectionBuilder<ConductorMessageHandler> {
         let (mut conductor_tx, mut conductor_rx) = mpsc::channel(128 /* chosen arbitrarily */);
 
         let mut state = ConductorHandlerState {
@@ -228,13 +228,13 @@ impl Conductor {
     ///
     /// This is equivalent to:
     /// ```ignore
-    /// conductor.into_handler_chain()
+    /// conductor.into_connection_builder()
     ///     .connect_to(transport)
     ///     .serve()
     ///     .await
     /// ```
     pub async fn run(self, transport: impl Component + 'static) -> Result<(), sacp::Error> {
-        self.into_handler_chain()
+        self.into_connection_builder()
             .connect_to(transport)?
             .serve()
             .await

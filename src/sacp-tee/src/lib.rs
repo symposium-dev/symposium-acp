@@ -205,7 +205,7 @@ impl Component for Tee {
             }
         });
 
-        // Create the handler chain
+        // Create the connection
         ProxyToConductor::builder()
             .name("sacp-tee")
             .with_handler(TeeHandler::new(log_tx))

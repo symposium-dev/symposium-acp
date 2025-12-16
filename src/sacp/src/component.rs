@@ -66,7 +66,7 @@ use crate::Channel;
 ///
 /// impl Component for MyProxy {
 ///     async fn serve(self, client: impl Component) -> Result<(), sacp::Error> {
-///         // Set up handler chain that forwards to client
+///         // Set up connection that forwards to client
 ///         sacp::UntypedRole::builder()
 ///             .name("my-proxy")
 ///             .on_receive_request(async |req: MyRequest, cx| {
@@ -97,7 +97,7 @@ use crate::Channel;
 pub trait Component: Send + 'static {
     /// Serve this component by forwarding to a client component.
     ///
-    /// Most components implement this method to set up their handler chain and
+    /// Most components implement this method to set up their connection and
     /// forward messages to the provided client.
     ///
     /// # Arguments

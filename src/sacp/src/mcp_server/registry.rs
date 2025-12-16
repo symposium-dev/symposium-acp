@@ -23,7 +23,7 @@ mod active_session;
 /// # Handling requests
 ///
 /// You must add the registry (or a clone of it) to the [`JrConnectionBuilder`] so that it can intercept MCP requests.
-/// Typically you do this by providing it as an argument to the handler chain methods.
+/// Typically you do this by providing it as an argument to the connection builder methods.
 ///
 /// [`JrConnectionBuilder`]: crate::JrConnectionBuilder
 #[derive(Clone, Default, Debug)]
@@ -43,7 +43,7 @@ where
 
     /// Add an [`McpServer`] to the registry.
     ///
-    /// This server will be added to all new sessions where this registry is in the handler chain.
+    /// This server will be added to all new sessions where this registry is registered on the connection.
     ///
     /// See the [`McpServer`] documentation for more information.
     pub fn with_mcp_server(
@@ -127,7 +127,7 @@ where
     /// This method appends the MCP server configurations for all servers registered
     /// with this registry to the `mcp_servers` field of the request. This is useful
     /// when you want to manually populate a request with MCP servers outside of the
-    /// automatic handler chain processing.
+    /// automatic connection processing.
     pub fn add_registered_mcp_servers_to(
         &self,
         request: &mut NewSessionRequest,

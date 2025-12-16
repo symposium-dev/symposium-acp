@@ -189,7 +189,7 @@ pub trait JrMessageHandler {
         cx: JrConnectionCx<Self::Role>,
     ) -> Result<Handled<MessageCx>, crate::Error>;
 
-    /// Returns a debug description of the handler chain for diagnostics
+    /// Returns a debug description of the registered handlers for diagnostics.
     fn describe_chain(&self) -> impl std::fmt::Debug;
 }
 
@@ -213,7 +213,7 @@ pub trait JrMessageHandlerSend: Send {
         cx: JrConnectionCx<Self::Role>,
     ) -> impl Future<Output = Result<Handled<MessageCx>, crate::Error>> + Send;
 
-    /// Describe this handler chain.
+    /// Returns a debug description of the registered handlers for diagnostics.
     fn describe_chain(&self) -> impl std::fmt::Debug;
 }
 
@@ -554,7 +554,7 @@ impl<Role: JrRole> JrConnectionBuilder<NullHandler<Role>> {
 }
 
 impl<H: JrMessageHandler> JrConnectionBuilder<H> {
-    /// Create a new handler chain with the given handler and roles.
+    /// Create a new connection builder with the given handler.
     pub fn new_with(handler: H) -> Self {
         Self {
             name: Default::default(),
@@ -573,29 +573,29 @@ impl<H: JrMessageHandler> JrConnectionBuilder<H> {
 
     /// Returns a reference to the remote role.
 
-    /// Add a new [`JrMessageHandler`] to the chain.
+    /// Merge another [`JrConnectionBuilder`] into this one.
     ///
     /// Prefer [`Self::on_receive_request`] or [`Self::on_receive_notification`].
     /// This is a low-level method that is not intended for general use.
-    pub fn with_handler_chain<H1>(
+    pub fn with_connection_builder<H1>(
         mut self,
-        handler_chain: JrConnectionBuilder<H1>,
+        other: JrConnectionBuilder<H1>,
     ) -> JrConnectionBuilder<ChainedHandler<H, NamedHandler<H1>>>
     where
         H1: JrMessageHandler<Role = H::Role>,
     {
         self.pending_tasks.extend(
-            handler_chain
+            other
                 .pending_tasks
                 .into_iter()
-                .map(|t| t.named(handler_chain.name.clone())),
+                .map(|t| t.named(other.name.clone())),
         );
 
         JrConnectionBuilder {
             name: self.name,
             handler: ChainedHandler::new(
                 self.handler,
-                NamedHandler::new(handler_chain.name, handler_chain.handler),
+                NamedHandler::new(other.name, other.handler),
             ),
             pending_tasks: self.pending_tasks,
         }
@@ -968,10 +968,10 @@ impl<H: JrMessageHandler> JrConnectionBuilder<H> {
         })
     }
 
-    /// Apply the handler chain to a single message.
+    /// Apply the registered handlers to a single message.
     ///
-    /// This method processes one message through the entire handler chain, attempting to
-    /// match it against each registered handler in order. This is useful when implementing
+    /// This method processes one message through all registered handlers, attempting to
+    /// match it against each handler in order. This is useful when implementing
     /// custom message handling logic or when you need fine-grained control over message
     /// processing.
     ///
@@ -992,7 +992,7 @@ impl<H: JrMessageHandler> JrConnectionBuilder<H> {
     ///
     /// # Example: Borrow Checker Challenges
     ///
-    /// When building a handler chain with `async {}` blocks (non-move), you might encounter
+    /// When building a connection with `async {}` blocks (non-move), you might encounter
     /// borrow checker errors if multiple handlers need access to the same mutable state:
     ///
     /// ```compile_fail
@@ -1333,7 +1333,7 @@ pub enum Handled<T> {
 /// Trait for converting handler return values into [`Handled`].
 ///
 /// This trait allows handlers to return either `()` (which becomes `Handled::Yes`)
-/// or an explicit `Handled<T>` value for more control over handler chain propagation.
+/// or an explicit `Handled<T>` value for more control over handler propagation.
 pub trait IntoHandled<T> {
     /// Convert this value into a `Handled<T>`.
     fn into_handled(self) -> Handled<T>;
@@ -1718,7 +1718,7 @@ impl<Role: JrRole> JrConnectionCx<Role> {
     ///
     /// Dynamic message handlers are called first for every incoming message.
     ///
-    /// If they decline to handle the message, then the message is passed to the regular handler chain.
+    /// If they decline to handle the message, then the message is passed to the regular registered handlers.
     ///
     /// The handler will stay registered until the [`DynamicHandlerRegistration`] is dropped.
     pub fn add_dynamic_handler(
@@ -2858,7 +2858,7 @@ where
 ///     tokio::io::stdin().compat(),
 /// );
 ///
-/// // Use as a component in a handler chain
+/// // Use as a component in a connection
 /// sacp::role::UntypedRole::builder()
 ///     .name("my-client")
 ///     .serve(component)
