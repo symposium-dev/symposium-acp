@@ -243,7 +243,17 @@ where
         _cx: JrConnectionCx<Self::Role>,
     ) -> Result<Handled<MessageCx>, crate::Error> {
         // If this is a message for our session, grab it.
+        tracing::trace!(
+            ?message,
+            handler_session_id = ?self.session_id,
+            "ActiveSessionHandler::handle_message"
+        );
         if let Some(session_id) = message.get_session_id()? {
+            tracing::trace!(
+                message_session_id = ?session_id,
+                handler_session_id = ?self.session_id,
+                "ActiveSessionHandler::handle_message"
+            );
             if session_id == self.session_id {
                 self.update_tx
                     .unbounded_send(SessionMessage::SessionMessage(message))

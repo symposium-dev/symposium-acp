@@ -33,9 +33,133 @@ use crate::jsonrpc::task_actor::{PendingTask, Task, TaskTx};
 use crate::role::{HasDefaultEndpoint, HasEndpoint, JrEndpoint, JrRole};
 use crate::{Agent, Client, Component};
 
-/// Handlers are invoked when new messages arrive at the [`JrConnection`].
-/// They have a chance to inspect the method and parameters and decide whether to "claim" the request
-/// (i.e., handle it). If they do not claim it, the request will be passed to the next handler.
+/// Handlers process incoming JSON-RPC messages on a [`JrConnection`].
+///
+/// When messages arrive, they flow through a chain of handlers. Each handler can
+/// either **claim** the message (handle it) or **decline** it (pass to the next handler).
+///
+/// # Message Flow
+///
+/// Messages flow through three layers of handlers in order:
+///
+/// ```text
+/// ┌─────────────────────────────────────────────────────────────────┐
+/// │                     Incoming Message                            │
+/// └─────────────────────────────────────────────────────────────────┘
+///                              │
+///                              ▼
+/// ┌─────────────────────────────────────────────────────────────────┐
+/// │  1. User Handlers (registered via on_receive_request, etc.)     │
+/// │     - Tried in registration order                               │
+/// │     - First handler to return Handled::Yes claims the message   │
+/// └─────────────────────────────────────────────────────────────────┘
+///                              │ Handled::No
+///                              ▼
+/// ┌─────────────────────────────────────────────────────────────────┐
+/// │  2. Dynamic Handlers (added at runtime)                         │
+/// │     - Used for session-specific message handling                │
+/// │     - Added via JrConnectionCx::add_dynamic_handler             │
+/// └─────────────────────────────────────────────────────────────────┘
+///                              │ Handled::No
+///                              ▼
+/// ┌─────────────────────────────────────────────────────────────────┐
+/// │  3. Role Default Handler                                        │
+/// │     - Fallback based on the connection's JrRole                 │
+/// │     - Handles protocol-level messages (e.g., proxy forwarding)  │
+/// └─────────────────────────────────────────────────────────────────┘
+///                              │ Handled::No
+///                              ▼
+/// ┌─────────────────────────────────────────────────────────────────┐
+/// │  Unhandled: Error response sent (or queued if retry=true)       │
+/// └─────────────────────────────────────────────────────────────────┘
+/// ```
+///
+/// # The `Handled` Return Value
+///
+/// Each handler returns [`Handled`] to indicate whether it processed the message:
+///
+/// - **`Handled::Yes`** - Message was handled. No further handlers are invoked.
+/// - **`Handled::No { message, retry }`** - Message was not handled. The message
+///   (possibly modified) is passed to the next handler in the chain.
+///
+/// For convenience, handlers can return `()` which is equivalent to `Handled::Yes`.
+///
+/// # The Retry Mechanism
+///
+/// The `retry` flag in `Handled::No` controls what happens when no handler claims a message:
+///
+/// - **`retry: false`** (default) - Send a "method not found" error response immediately.
+/// - **`retry: true`** - Queue the message and retry it when new dynamic handlers are added.
+///
+/// This mechanism exists because of a timing issue with sessions: when a `session/new`
+/// response is being processed, the dynamic handler for that session hasn't been registered
+/// yet, but `session/update` notifications for that session may already be arriving.
+/// By setting `retry: true`, these early notifications are queued until the session's
+/// dynamic handler is added.
+///
+/// # Handler Registration
+///
+/// Most users register handlers using the builder methods on [`JrConnectionBuilder`]:
+///
+/// ```ignore
+/// Role::builder()
+///     .on_receive_request(async |req: InitializeRequest, request_cx, cx| {
+///         request_cx.respond(InitializeResponse::make())
+///     })
+///     .on_receive_notification(async |notif: SessionNotification, cx| {
+///         // Process notification
+///         Ok(())
+///     })
+///     .serve(transport)
+///     .await?;
+/// ```
+///
+/// The type parameter on the closure determines which messages are dispatched to it.
+/// Messages that don't match the type are automatically passed to the next handler.
+///
+/// # Implementing Custom Handlers
+///
+/// For advanced use cases, you can implement `JrMessageHandler` directly:
+///
+/// ```ignore
+/// struct MyHandler;
+///
+/// impl JrMessageHandler for MyHandler {
+///     type Role = ClientToAgent;
+///
+///     async fn handle_message(
+///         &mut self,
+///         message: MessageCx,
+///         cx: JrConnectionCx<Self::Role>,
+///     ) -> Result<Handled<MessageCx>, Error> {
+///         if message.method() == "my/custom/method" {
+///             // Handle it
+///             Ok(Handled::Yes)
+///         } else {
+///             // Pass to next handler
+///             Ok(Handled::No { message, retry: false })
+///         }
+///     }
+///
+///     fn describe_chain(&self) -> impl std::fmt::Debug {
+///         "MyHandler"
+///     }
+/// }
+/// ```
+///
+/// # Important: Handlers Must Not Block
+///
+/// The connection processes messages on a single async task. While a handler is running,
+/// no other messages can be processed. For expensive operations, use [`JrConnectionCx::spawn`]
+/// to run work concurrently:
+///
+/// ```ignore
+/// cx.spawn(async move {
+///     let result = expensive_operation().await?;
+///     connection_cx.send_notification(result)?;
+///     Ok(())
+/// })?;
+/// ```
 #[allow(async_fn_in_trait)]
 pub trait JrMessageHandler {
     /// The role type for this handler's connection.
