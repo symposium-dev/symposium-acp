@@ -228,3 +228,16 @@ pub use sacp_derive::{JrNotification, JrRequest, JrResponsePayload};
 
 mod session;
 pub use session::*;
+
+/// This macro is used for the value of the `to_future_hack` parameter of [`mcp_server::McpServerBuilder::tool_fn`].
+///
+/// It expands to `|t, args, cx| Box::pin(t(args, cx))`.
+///
+/// This is needed until [return-type-notation](https://github.com/rust-lang/rust/issues/109417)
+/// is stabilized.
+#[macro_export]
+macro_rules! tool_fn {
+    () => {
+        |t, args, cx| Box::pin(t(args, cx))
+    };
+}

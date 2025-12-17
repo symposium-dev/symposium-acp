@@ -82,7 +82,7 @@ impl Component for ProxyWithMcpAndHandler {
                         result: format!("Echo: {}", params.message),
                     })
                 },
-                |f, args, cx| Box::pin(f(args, cx)),
+                sacp::tool_fn!(),
             )
             .build();
 
