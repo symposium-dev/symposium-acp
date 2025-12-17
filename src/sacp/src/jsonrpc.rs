@@ -539,7 +539,7 @@ pub struct JrConnectionBuilder<'scope, Role: JrRole> {
     handlers: Vec<Box<dyn DynamicHandler<Role> + 'scope>>,
 
     /// Pending tasks
-    pending_tasks: Vec<PendingTask<Role>>,
+    pending_tasks: Vec<PendingTask<'scope, Role>>,
 }
 
 impl<Role: JrRole> JrConnectionBuilder<'static, Role> {
@@ -613,10 +613,10 @@ impl<'scope, Role: JrRole> JrConnectionBuilder<'scope, Role> {
     #[track_caller]
     pub fn with_spawned<F>(
         mut self,
-        task: impl FnOnce(JrConnectionCx<Role>) -> F + Send + 'static,
+        task: impl FnOnce(JrConnectionCx<Role>) -> F + Send + 'scope,
     ) -> Self
     where
-        F: Future<Output = Result<(), crate::Error>> + Send + 'static,
+        F: Future<Output = Result<(), crate::Error>> + Send + 'scope,
     {
         let location = Location::caller();
         self.pending_tasks.push(PendingTask::new(location, task));
@@ -1005,12 +1005,6 @@ impl<'scope, Role: JrRole> JrConnectionBuilder<'scope, Role> {
             tx: transport_outgoing_tx,
         } = transport_channel;
 
-        // Spawn pending tasks
-        for pending_task in pending_tasks {
-            let task = pending_task.into_task(cx.clone());
-            task.spawn(&cx.task_tx)?;
-        }
-
         // Wrap handlers in a VecHandler
         let handler = VecHandler::new(handlers);
 
@@ -1023,6 +1017,7 @@ impl<'scope, Role: JrRole> JrConnectionBuilder<'scope, Role> {
             transport_incoming_rx,
             dynamic_handler_rx,
             handler,
+            pending_tasks,
         })
     }
 
@@ -1163,7 +1158,8 @@ pub struct JrConnection<'scope, Role: JrRole> {
     cx: JrConnectionCx<Role>,
     name: Option<String>,
     outgoing_rx: mpsc::UnboundedReceiver<OutgoingMessage>,
-    new_task_rx: mpsc::UnboundedReceiver<Task>,
+    new_task_rx: mpsc::UnboundedReceiver<Task<'static>>,
+    pending_tasks: Vec<PendingTask<'scope, Role>>,
     transport_outgoing_tx: mpsc::UnboundedSender<Result<jsonrpcmsg::Message, crate::Error>>,
     transport_incoming_rx: mpsc::UnboundedReceiver<Result<jsonrpcmsg::Message, crate::Error>>,
     dynamic_handler_rx: mpsc::UnboundedReceiver<DynamicHandlerMessage<Role>>,
@@ -1294,6 +1290,7 @@ impl<'scope, Role: JrRole> JrConnection<'scope, Role> {
             transport_outgoing_tx,
             transport_incoming_rx,
             dynamic_handler_rx,
+            pending_tasks,
         } = self;
         let (reply_tx, reply_rx) = mpsc::unbounded();
 
@@ -1323,7 +1320,7 @@ impl<'scope, Role: JrRole> JrConnection<'scope, Role> {
                     tracing::trace!(?r, "reply actor terminated");
                     r?;
                 }
-                r = task_actor::task_actor(new_task_rx).fuse() => {
+                r = task_actor::task_actor(new_task_rx, pending_tasks, &cx).fuse() => {
                     tracing::trace!(?r, "task actor terminated");
                     r?;
                 }
@@ -1473,14 +1470,14 @@ pub struct JrConnectionCx<Role: JrRole> {
     #[expect(dead_code)]
     role: Role,
     message_tx: OutgoingMessageTx,
-    task_tx: TaskTx,
+    task_tx: TaskTx<'static>,
     dynamic_handler_tx: mpsc::UnboundedSender<DynamicHandlerMessage<Role>>,
 }
 
 impl<Role: JrRole> JrConnectionCx<Role> {
     fn new(
         message_tx: mpsc::UnboundedSender<OutgoingMessage>,
-        task_tx: mpsc::UnboundedSender<Task>,
+        task_tx: mpsc::UnboundedSender<Task<'static>>,
         dynamic_handler_tx: mpsc::UnboundedSender<DynamicHandlerMessage<Role>>,
     ) -> Self {
         Self {
@@ -2530,7 +2527,7 @@ impl JrNotification for UntypedMessage {}
 /// by making blocking explicit and encouraging non-blocking patterns.
 pub struct JrResponse<T> {
     method: String,
-    task_tx: TaskTx,
+    task_tx: TaskTx<'static>,
     response_rx: oneshot::Receiver<Result<serde_json::Value, crate::Error>>,
     to_result: Box<dyn Fn(serde_json::Value) -> Result<T, crate::Error> + Send>,
 }
@@ -2538,7 +2535,7 @@ pub struct JrResponse<T> {
 impl JrResponse<serde_json::Value> {
     fn new(
         method: String,
-        task_tx: mpsc::UnboundedSender<Task>,
+        task_tx: mpsc::UnboundedSender<Task<'static>>,
         response_rx: oneshot::Receiver<Result<serde_json::Value, crate::Error>>,
     ) -> Self {
         Self {
