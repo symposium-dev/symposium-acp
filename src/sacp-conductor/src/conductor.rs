@@ -191,7 +191,7 @@ impl Conductor {
         self
     }
 
-    pub fn into_connection_builder(self) -> JrConnectionBuilder<ConductorMessageHandler> {
+    pub fn into_connection_builder(self) -> JrConnectionBuilder<'static, ConductorMessageHandler> {
         let (mut conductor_tx, mut conductor_rx) = mpsc::channel(128 /* chosen arbitrarily */);
 
         let mut state = ConductorHandlerState {

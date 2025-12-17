@@ -531,17 +531,17 @@ impl<H: JrMessageHandlerSend> JrMessageHandler for H {
 /// # }
 /// ```
 #[must_use]
-pub struct JrConnectionBuilder<H: JrMessageHandler> {
+pub struct JrConnectionBuilder<'scope, H: JrMessageHandler> {
     name: Option<String>,
 
     /// Handler for incoming messages.
     handler: H,
 
     /// Pending tasks
-    pending_tasks: Vec<PendingTask<H::Role>>,
+    pending_tasks: Vec<PendingTask<'scope, H::Role>>,
 }
 
-impl<Role: JrRole> JrConnectionBuilder<NullHandler<Role>> {
+impl<Role: JrRole> JrConnectionBuilder<'_, NullHandler<Role>> {
     /// Create a new JrConnection with the given role.
     /// This type follows a builder pattern; use other methods to configure and then invoke
     /// [`Self::serve`] (to use as a server) or [`Self::with_client`] to use as a client.
@@ -554,7 +554,7 @@ impl<Role: JrRole> JrConnectionBuilder<NullHandler<Role>> {
     }
 }
 
-impl<H: JrMessageHandler> JrConnectionBuilder<H> {
+impl<H: JrMessageHandler> JrConnectionBuilder<'_, H> {
     /// Create a new connection builder with the given handler.
     pub fn new_with(handler: H) -> Self {
         Self {
@@ -563,7 +563,9 @@ impl<H: JrMessageHandler> JrConnectionBuilder<H> {
             pending_tasks: Default::default(),
         }
     }
+}
 
+impl<'scope, H: JrMessageHandler> JrConnectionBuilder<'scope, H> {
     /// Set the "name" of this connection -- used only for debugging logs.
     pub fn name(mut self, name: impl ToString) -> Self {
         self.name = Some(name.to_string());
@@ -576,8 +578,8 @@ impl<H: JrMessageHandler> JrConnectionBuilder<H> {
     /// This is a low-level method that is not intended for general use.
     pub fn with_connection_builder<H1>(
         mut self,
-        other: JrConnectionBuilder<H1>,
-    ) -> JrConnectionBuilder<ChainedHandler<H, NamedHandler<H1>>>
+        other: JrConnectionBuilder<'scope, H1>,
+    ) -> JrConnectionBuilder<'scope, ChainedHandler<H, NamedHandler<H1>>>
     where
         H1: JrMessageHandler<Role = H::Role>,
     {
@@ -602,7 +604,7 @@ impl<H: JrMessageHandler> JrConnectionBuilder<H> {
     ///
     /// Prefer [`Self::on_receive_request`] or [`Self::on_receive_notification`].
     /// This is a low-level method that is not intended for general use.
-    pub fn with_handler<H1>(self, handler: H1) -> JrConnectionBuilder<ChainedHandler<H, H1>>
+    pub fn with_handler<H1>(self, handler: H1) -> JrConnectionBuilder<'scope, ChainedHandler<H, H1>>
     where
         H1: JrMessageHandler<Role = H::Role>,
     {
@@ -617,10 +619,10 @@ impl<H: JrMessageHandler> JrConnectionBuilder<H> {
     #[track_caller]
     pub fn with_spawned<F>(
         mut self,
-        task: impl FnOnce(JrConnectionCx<H::Role>) -> F + Send + 'static,
+        task: impl FnOnce(JrConnectionCx<H::Role>) -> F + Send + 'scope,
     ) -> Self
     where
-        F: Future<Output = Result<(), crate::Error>> + Send + 'static,
+        F: Future<Output = Result<(), crate::Error>> + Send + 'scope,
     {
         let location = Location::caller();
         self.pending_tasks.push(PendingTask::new(location, task));
@@ -667,6 +669,7 @@ impl<H: JrMessageHandler> JrConnectionBuilder<H> {
         self,
         op: F,
     ) -> JrConnectionBuilder<
+        'scope,
         ChainedHandler<
             H,
             MessageHandler<H::Role, <H::Role as JrRole>::HandlerEndpoint, Req, Notif, F>,
@@ -729,6 +732,7 @@ impl<H: JrMessageHandler> JrConnectionBuilder<H> {
         self,
         op: F,
     ) -> JrConnectionBuilder<
+        'scope,
         ChainedHandler<H, RequestHandler<H::Role, <H::Role as JrRole>::HandlerEndpoint, Req, F>>,
     >
     where
@@ -789,6 +793,7 @@ impl<H: JrMessageHandler> JrConnectionBuilder<H> {
         self,
         op: F,
     ) -> JrConnectionBuilder<
+        'scope,
         ChainedHandler<
             H,
             NotificationHandler<H::Role, <H::Role as JrRole>::HandlerEndpoint, Notif, F>,
@@ -821,7 +826,7 @@ impl<H: JrMessageHandler> JrConnectionBuilder<H> {
         self,
         endpoint: End,
         op: F,
-    ) -> JrConnectionBuilder<ChainedHandler<H, MessageHandler<H::Role, End, Req, Notif, F>>>
+    ) -> JrConnectionBuilder<'scope, ChainedHandler<H, MessageHandler<H::Role, End, Req, Notif, F>>>
     where
         H::Role: HasEndpoint<End>,
         F: AsyncFnMut(MessageCx<Req, Notif>, JrConnectionCx<H::Role>) -> Result<T, crate::Error>
@@ -857,7 +862,7 @@ impl<H: JrMessageHandler> JrConnectionBuilder<H> {
         self,
         endpoint: End,
         op: F,
-    ) -> JrConnectionBuilder<ChainedHandler<H, RequestHandler<H::Role, End, Req, F>>>
+    ) -> JrConnectionBuilder<'scope, ChainedHandler<H, RequestHandler<H::Role, End, Req, F>>>
     where
         H::Role: HasEndpoint<End>,
         F: AsyncFnMut(
@@ -884,7 +889,7 @@ impl<H: JrMessageHandler> JrConnectionBuilder<H> {
         self,
         endpoint: End,
         op: F,
-    ) -> JrConnectionBuilder<ChainedHandler<H, NotificationHandler<H::Role, End, Notif, F>>>
+    ) -> JrConnectionBuilder<'scope, ChainedHandler<H, NotificationHandler<H::Role, End, Notif, F>>>
     where
         H::Role: HasEndpoint<End>,
         F: AsyncFnMut(Notif, JrConnectionCx<H::Role>) -> Result<T, crate::Error> + Send,
@@ -913,7 +918,7 @@ impl<H: JrMessageHandler> JrConnectionBuilder<H> {
     pub fn with_mcp_server<Role: JrRole>(
         self,
         registry: McpServer<Role>,
-    ) -> JrConnectionBuilder<ChainedHandler<H, McpServer<Role>>>
+    ) -> JrConnectionBuilder<'scope, ChainedHandler<H, McpServer<Role>>>
     where
         H: JrMessageHandler<Role = Role>,
         Role: HasEndpoint<Client> + HasEndpoint<Agent>,
@@ -926,7 +931,7 @@ impl<H: JrMessageHandler> JrConnectionBuilder<H> {
     pub fn connect_to(
         self,
         transport: impl Component + 'static,
-    ) -> Result<JrConnection<H>, crate::Error> {
+    ) -> Result<JrConnection<'scope, H>, crate::Error> {
         let Self {
             name,
             handler,
@@ -950,17 +955,12 @@ impl<H: JrMessageHandler> JrConnectionBuilder<H> {
             tx: transport_outgoing_tx,
         } = transport_channel;
 
-        // Spawn pending tasks
-        for pending_task in pending_tasks {
-            let task = pending_task.into_task(cx.clone());
-            task.spawn(&cx.task_tx)?;
-        }
-
         Ok(JrConnection {
             cx,
             name,
             outgoing_rx,
             new_task_rx,
+            pending_tasks,
             transport_outgoing_tx,
             transport_incoming_rx,
             dynamic_handler_rx,
@@ -1084,18 +1084,19 @@ impl<H: JrMessageHandler> JrConnectionBuilder<H> {
 ///
 /// Most users won't construct this directly - instead use `JrConnectionBuilder::connect_to()` or
 /// `JrConnectionBuilder::serve()` for convenience.
-pub struct JrConnection<H: JrMessageHandler> {
+pub struct JrConnection<'scope, H: JrMessageHandler> {
     cx: JrConnectionCx<H::Role>,
     name: Option<String>,
     outgoing_rx: mpsc::UnboundedReceiver<OutgoingMessage>,
-    new_task_rx: mpsc::UnboundedReceiver<Task>,
+    new_task_rx: mpsc::UnboundedReceiver<Task<'static>>,
+    pending_tasks: Vec<PendingTask<'scope, H::Role>>,
     transport_outgoing_tx: mpsc::UnboundedSender<Result<jsonrpcmsg::Message, crate::Error>>,
     transport_incoming_rx: mpsc::UnboundedReceiver<Result<jsonrpcmsg::Message, crate::Error>>,
     dynamic_handler_rx: mpsc::UnboundedReceiver<DynamicHandlerMessage<H::Role>>,
     handler: H,
 }
 
-impl<H: JrMessageHandler> JrConnection<H> {
+impl<'scope, H: JrMessageHandler> JrConnection<'scope, H> {
     /// Run the connection in server mode with the provided transport.
     ///
     /// This drives the connection by continuously processing messages from the transport
@@ -1209,6 +1210,7 @@ impl<H: JrMessageHandler> JrConnection<H> {
             name,
             outgoing_rx,
             new_task_rx,
+            pending_tasks,
             handler,
             transport_outgoing_tx,
             transport_incoming_rx,
@@ -1242,7 +1244,7 @@ impl<H: JrMessageHandler> JrConnection<H> {
                     tracing::trace!(?r, "reply actor terminated");
                     r?;
                 }
-                r = task_actor::task_actor(new_task_rx).fuse() => {
+                r = task_actor::task_actor(new_task_rx, pending_tasks, &cx).fuse() => {
                     tracing::trace!(?r, "task actor terminated");
                     r?;
                 }
@@ -1392,14 +1394,14 @@ pub struct JrConnectionCx<Role: JrRole> {
     #[expect(dead_code)]
     role: Role,
     message_tx: OutgoingMessageTx,
-    task_tx: TaskTx,
+    task_tx: TaskTx<'static>,
     dynamic_handler_tx: mpsc::UnboundedSender<DynamicHandlerMessage<Role>>,
 }
 
 impl<Role: JrRole> JrConnectionCx<Role> {
     fn new(
         message_tx: mpsc::UnboundedSender<OutgoingMessage>,
-        task_tx: mpsc::UnboundedSender<Task>,
+        task_tx: mpsc::UnboundedSender<Task<'static>>,
         dynamic_handler_tx: mpsc::UnboundedSender<DynamicHandlerMessage<Role>>,
     ) -> Self {
         Self {
@@ -1496,8 +1498,10 @@ impl<Role: JrRole> JrConnectionCx<Role> {
     #[track_caller]
     pub fn spawn_connection<H: JrMessageHandler>(
         &self,
-        connection: JrConnection<H>,
-        serve_future: impl FnOnce(JrConnection<H>) -> BoxFuture<'static, Result<(), crate::Error>>,
+        connection: JrConnection<'static, H>,
+        serve_future: impl FnOnce(
+            JrConnection<'static, H>,
+        ) -> BoxFuture<'static, Result<(), crate::Error>>,
     ) -> Result<JrConnectionCx<H::Role>, crate::Error> {
         let cx = connection.cx.clone();
         let future = serve_future(connection);
@@ -2435,7 +2439,7 @@ impl JrNotification for UntypedMessage {}
 /// by making blocking explicit and encouraging non-blocking patterns.
 pub struct JrResponse<T> {
     method: String,
-    task_tx: TaskTx,
+    task_tx: TaskTx<'static>,
     response_rx: oneshot::Receiver<Result<serde_json::Value, crate::Error>>,
     to_result: Box<dyn Fn(serde_json::Value) -> Result<T, crate::Error> + Send>,
 }
@@ -2443,7 +2447,7 @@ pub struct JrResponse<T> {
 impl JrResponse<serde_json::Value> {
     fn new(
         method: String,
-        task_tx: mpsc::UnboundedSender<Task>,
+        task_tx: mpsc::UnboundedSender<Task<'static>>,
         response_rx: oneshot::Receiver<Result<serde_json::Value, crate::Error>>,
     ) -> Self {
         Self {
