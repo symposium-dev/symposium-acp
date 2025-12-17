@@ -155,6 +155,7 @@ async fn test_bidirectional_communication() {
                         value: request.value + 1,
                     })
                 },
+                sacp::on_request!(),
             );
 
             let side_b_transport = sacp::ByteStreams::new(client_writer, client_reader);
@@ -208,6 +209,7 @@ async fn test_request_ids() {
                         value: request.value + 1,
                     })
                 },
+                sacp::on_request!(),
             );
 
             let client_transport = sacp::ByteStreams::new(client_writer, client_reader);
@@ -269,6 +271,7 @@ async fn test_out_of_order_responses() {
                     tokio::time::sleep(tokio::time::Duration::from_millis(request.delay_ms)).await;
                     request_cx.respond(SlowResponse { id: request.id })
                 },
+                sacp::on_request!(),
             );
 
             let client_transport = sacp::ByteStreams::new(client_writer, client_reader);

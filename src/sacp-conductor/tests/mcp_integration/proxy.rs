@@ -34,7 +34,7 @@ impl Component for ProxyComponent {
                         result: format!("Echo: {}", params.message),
                     })
                 },
-                sacp::tool_fn!(),
+                |f: &_, args, cx| Box::pin(f(args, cx)),
             )
             .build();
 

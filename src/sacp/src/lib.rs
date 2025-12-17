@@ -20,22 +20,28 @@
 //! // Start by creating an agent connection
 //! UntypedRole::builder()
 //! .name("my-agent") // Give it a name for logging purposes
-//! .on_receive_request(async move |initialize: InitializeRequest, request_cx, _cx| {
-//!     // Create one or more request handlers -- these are attempted in order.
-//!     // You can do anything you want in here, but you should eventually
-//!     // respond to the request with `request_cx.respond(...)`:
-//!     request_cx.respond(InitializeResponse {
-//!         protocol_version: initialize.protocol_version,
-//!         agent_capabilities: AgentCapabilities::default(),
-//!         auth_methods: Default::default(),
-//!         agent_info: Default::default(),
-//!         meta: Default::default(),
-//!     })
-//! })
-//! .on_receive_message(async move |message: MessageCx, cx| {
-//!     // You can also handle any kind of message:
-//!     message.respond_with_error(sacp::util::internal_error("TODO"), cx)
-//! })
+//! .on_receive_request(
+//!     async move |initialize: InitializeRequest, request_cx, _cx| {
+//!         // Create one or more request handlers -- these are attempted in order.
+//!         // You can do anything you want in here, but you should eventually
+//!         // respond to the request with `request_cx.respond(...)`:
+//!         request_cx.respond(InitializeResponse {
+//!             protocol_version: initialize.protocol_version,
+//!             agent_capabilities: AgentCapabilities::default(),
+//!             auth_methods: Default::default(),
+//!             agent_info: Default::default(),
+//!             meta: Default::default(),
+//!         })
+//!     },
+//!     sacp::on_request!(),
+//! )
+//! .on_receive_message(
+//!     async move |message: MessageCx, cx| {
+//!         // You can also handle any kind of message:
+//!         message.respond_with_error(sacp::util::internal_error("TODO"), cx)
+//!     },
+//!     sacp::on_message!(),
+//! )
 //! .serve(sacp::ByteStreams::new(
 //!     tokio::io::stdout().compat_write(),
 //!     tokio::io::stdin().compat(),
@@ -231,13 +237,55 @@ pub use session::*;
 
 /// This macro is used for the value of the `to_future_hack` parameter of [`mcp_server::McpServerBuilder::tool_fn`].
 ///
-/// It expands to `|t, args, cx| Box::pin(t(args, cx))`.
+/// It expands to `|f, args, cx| Box::pin(f(args, cx))`.
 ///
 /// This is needed until [return-type-notation](https://github.com/rust-lang/rust/issues/109417)
 /// is stabilized.
 #[macro_export]
 macro_rules! tool_fn {
     () => {
-        |t, args, cx| Box::pin(t(args, cx))
+        |f: &mut _, args, cx| Box::pin(f(args, cx))
+    };
+}
+
+/// This macro is used for the value of the `to_future_hack` parameter of
+/// [`JrConnectionBuilder::on_receive_request`] and [`JrConnectionBuilder::on_receive_request_from`].
+///
+/// It expands to `|f, req, req_cx, cx| Box::pin(f(req, req_cx, cx))`.
+///
+/// This is needed until [return-type-notation](https://github.com/rust-lang/rust/issues/109417)
+/// is stabilized.
+#[macro_export]
+macro_rules! on_request {
+    () => {
+        |f: &mut _, req, req_cx, cx| Box::pin(f(req, req_cx, cx))
+    };
+}
+
+/// This macro is used for the value of the `to_future_hack` parameter of
+/// [`JrConnectionBuilder::on_receive_notification`] and [`JrConnectionBuilder::on_receive_notification_from`].
+///
+/// It expands to `|f, notif, cx| Box::pin(f(notif, cx))`.
+///
+/// This is needed until [return-type-notation](https://github.com/rust-lang/rust/issues/109417)
+/// is stabilized.
+#[macro_export]
+macro_rules! on_notification {
+    () => {
+        |f: &mut _, notif, cx| Box::pin(f(notif, cx))
+    };
+}
+
+/// This macro is used for the value of the `to_future_hack` parameter of
+/// [`JrConnectionBuilder::on_receive_message`] and [`JrConnectionBuilder::on_receive_message_from`].
+///
+/// It expands to `|f, msg_cx, cx| Box::pin(f(msg_cx, cx))`.
+///
+/// This is needed until [return-type-notation](https://github.com/rust-lang/rust/issues/109417)
+/// is stabilized.
+#[macro_export]
+macro_rules! on_message {
+    () => {
+        |f: &mut _, msg_cx, cx| Box::pin(f(msg_cx, cx))
     };
 }

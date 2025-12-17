@@ -87,11 +87,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Run the client
     connection
-        .on_receive_notification(async move |notification: SessionNotification, _cx| {
-            // Print session updates to stdout (so 2>/dev/null shows only agent output)
-            println!("{:?}", notification.update);
-            Ok(())
-        })
+        .on_receive_notification(
+            async move |notification: SessionNotification, _cx| {
+                // Print session updates to stdout (so 2>/dev/null shows only agent output)
+                println!("{:?}", notification.update);
+                Ok(())
+            },
+            sacp::on_notification!(),
+        )
         .on_receive_request(
             async move |request: RequestPermissionRequest, request_cx, _connection_cx| {
                 // YOLO: Auto-approve all permission requests by selecting the first option
@@ -111,6 +114,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     }
                 }
             },
+            sacp::on_request!(),
         )
         .with_client(transport, |cx: JrConnectionCx<ClientToAgent>| async move {
             // Initialize the agent

@@ -387,7 +387,7 @@ impl Component for ElizaAgent {
     async fn serve(self, client: impl Component) -> Result<(), sacp::Error> {
         AgentToClient::builder()
             .name("elizacp")
-            .on_receive_request({
+            .on_receive_request(
                 async |initialize: InitializeRequest, request_cx, _cx| {
                     tracing::debug!("Received initialize request");
 
@@ -403,33 +403,43 @@ impl Component for ElizaAgent {
                         agent_info: Default::default(),
                         meta: Default::default(),
                     })
-                }
-            })
-            .on_receive_request({
-                let agent = self.clone();
-                async move |request: NewSessionRequest, request_cx, _cx| {
-                    agent.handle_new_session(request, request_cx).await
-                }
-            })
-            .on_receive_request({
-                let agent = self.clone();
-                async move |request: LoadSessionRequest, request_cx, _cx| {
-                    agent.handle_load_session(request, request_cx).await
-                }
-            })
-            .on_receive_request({
-                let agent = self.clone();
-                async move |request: PromptRequest, request_cx, cx| {
-                    // Spawn prompt processing to avoid blocking the event loop.
-                    // This allows the agent to handle other requests (like session/new)
-                    // while processing a prompt.
-                    let cx_clone = cx.clone();
-                    cx.spawn({
-                        let agent = agent.clone();
-                        async move { agent.process_prompt(request, request_cx, cx_clone).await }
-                    })
-                }
-            })
+                },
+                sacp::on_request!(),
+            )
+            .on_receive_request(
+                {
+                    let agent = self.clone();
+                    async move |request: NewSessionRequest, request_cx, _cx| {
+                        agent.handle_new_session(request, request_cx).await
+                    }
+                },
+                sacp::on_request!(),
+            )
+            .on_receive_request(
+                {
+                    let agent = self.clone();
+                    async move |request: LoadSessionRequest, request_cx, _cx| {
+                        agent.handle_load_session(request, request_cx).await
+                    }
+                },
+                sacp::on_request!(),
+            )
+            .on_receive_request(
+                {
+                    let agent = self.clone();
+                    async move |request: PromptRequest, request_cx, cx| {
+                        // Spawn prompt processing to avoid blocking the event loop.
+                        // This allows the agent to handle other requests (like session/new)
+                        // while processing a prompt.
+                        let cx_clone = cx.clone();
+                        cx.spawn({
+                            let agent = agent.clone();
+                            async move { agent.process_prompt(request, request_cx, cx_clone).await }
+                        })
+                    }
+                },
+                sacp::on_request!(),
+            )
             .connect_to(client)?
             .serve()
             .await

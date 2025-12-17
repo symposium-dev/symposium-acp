@@ -98,6 +98,7 @@ pub async fn prompt_with_callback(
                     retry: false,
                 })
             },
+            sacp::on_message!(),
         )
         .connect_to(component)?
         .with_client(|cx: sacp::JrConnectionCx<ClientToAgent>| async move {

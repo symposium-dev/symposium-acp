@@ -88,6 +88,7 @@ impl Component for InitComponent {
                                 request_cx.respond(response)
                             })
                     },
+                    sacp::on_request!(),
                 )
                 // Handle InitializeRequest (we're the agent)
                 .on_receive_request_from(
@@ -107,6 +108,7 @@ impl Component for InitComponent {
 
                         request_cx.respond(response)
                     },
+                    sacp::on_request!(),
                 )
                 .serve(client)
                 .await

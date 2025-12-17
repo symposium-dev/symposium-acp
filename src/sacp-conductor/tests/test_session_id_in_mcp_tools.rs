@@ -40,7 +40,7 @@ fn create_echo_proxy() -> Result<sacp::DynComponent, sacp::Error> {
                     acp_url: context.acp_url(),
                 })
             },
-            sacp::tool_fn!(),
+            |f: &_, args, cx| Box::pin(f(args, cx)),
         )
         .build();
 
