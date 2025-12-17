@@ -9,8 +9,8 @@ use crate::schema::{
 };
 use crate::util::MatchMessageFrom;
 use crate::{
-    Agent, Channel, Component, Handled, HasEndpoint, JrConnectionCx, JrMessageHandlerSend,
-    JrRequestCx, JrRole, MessageCx, UntypedMessage,
+    Agent, Channel, Component, Handled, HasEndpoint, JrConnectionCx, JrMessageHandler, JrRequestCx,
+    JrRole, MessageCx, UntypedMessage,
 };
 use std::sync::Arc;
 
@@ -213,7 +213,7 @@ where
     }
 }
 
-impl<Role: JrRole> JrMessageHandlerSend for McpActiveSession<Role>
+impl<Role: JrRole> JrMessageHandler for McpActiveSession<Role>
 where
     Role: HasEndpoint<Agent>,
 {

@@ -2,10 +2,13 @@ use futures::future::BoxFuture;
 use uuid::Uuid;
 
 use crate::role::JrRole;
-use crate::{Handled, JrConnectionCx, MessageCx, jsonrpc::JrMessageHandlerSend};
+use crate::{Handled, JrConnectionCx, MessageCx, jsonrpc::JrMessageHandler};
 
-/// Internal dyn-safe wrapper around `JrMessageHandlerSend`
-pub(crate) trait DynamicHandler<Role: JrRole>: Send {
+/// Dyn-safe wrapper around `JrMessageHandler`.
+///
+/// This trait allows handlers to be stored as `Box<dyn DynamicHandler<Role>>`,
+/// enabling runtime handler registration without type parameter explosion.
+pub trait DynamicHandler<Role: JrRole>: Send {
     fn dyn_handle_message(
         &mut self,
         message: MessageCx,
@@ -15,13 +18,13 @@ pub(crate) trait DynamicHandler<Role: JrRole>: Send {
     fn dyn_describe_chain(&self) -> String;
 }
 
-impl<H: JrMessageHandlerSend> DynamicHandler<H::Role> for H {
+impl<H: JrMessageHandler> DynamicHandler<H::Role> for H {
     fn dyn_handle_message(
         &mut self,
         message: MessageCx,
         cx: JrConnectionCx<H::Role>,
     ) -> BoxFuture<'_, Result<Handled<MessageCx>, crate::Error>> {
-        Box::pin(JrMessageHandlerSend::handle_message(self, message, cx))
+        Box::pin(JrMessageHandler::handle_message(self, message, cx))
     }
 
     fn dyn_describe_chain(&self) -> String {

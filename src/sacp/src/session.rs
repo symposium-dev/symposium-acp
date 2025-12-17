@@ -7,7 +7,7 @@ use agent_client_protocol_schema::{
 use futures::channel::mpsc;
 
 use crate::{
-    Agent, Handled, HasEndpoint, JrConnectionCx, JrMessageHandlerSend, JrRole, MessageCx,
+    Agent, Handled, HasEndpoint, JrConnectionCx, JrMessageHandler, JrRole, MessageCx,
     jsonrpc::DynamicHandlerRegistration, mcp_server::McpServer, schema::SessionId,
     util::MatchMessageFrom,
 };
@@ -229,7 +229,7 @@ where
     }
 }
 
-impl<Role> JrMessageHandlerSend for ActiveSessionHandler<Role>
+impl<Role> JrMessageHandler for ActiveSessionHandler<Role>
 where
     Role: HasEndpoint<Agent>,
 {

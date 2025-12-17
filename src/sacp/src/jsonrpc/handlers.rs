@@ -1,3 +1,4 @@
+use crate::jsonrpc::dynamic_handler::DynamicHandler;
 use crate::jsonrpc::{Handled, IntoHandled, JrMessageHandler};
 use crate::role::{HasEndpoint, JrEndpoint, JrRole};
 use crate::{JrConnectionCx, JrNotification, JrRequest, MessageCx, UntypedMessage};
@@ -5,6 +6,52 @@ use crate::{JrConnectionCx, JrNotification, JrRequest, MessageCx, UntypedMessage
 use super::JrRequestCx;
 use std::marker::PhantomData;
 use std::ops::AsyncFnMut;
+
+/// Handler that iterates through a vector of dynamic handlers.
+pub struct VecHandler<'scope, Role: JrRole> {
+    handlers: Vec<Box<dyn DynamicHandler<Role> + 'scope>>,
+}
+
+impl<'scope, Role: JrRole> VecHandler<'scope, Role> {
+    /// Creates a new VecHandler with the given handlers.
+    pub fn new(handlers: Vec<Box<dyn DynamicHandler<Role> + 'scope>>) -> Self {
+        Self { handlers }
+    }
+}
+
+impl<'scope, Role: JrRole> JrMessageHandler for VecHandler<'scope, Role> {
+    type Role = Role;
+
+    async fn handle_message(
+        &mut self,
+        mut message: MessageCx,
+        cx: JrConnectionCx<Role>,
+    ) -> Result<Handled<MessageCx>, crate::Error> {
+        let mut retry_any = false;
+        for handler in &mut self.handlers {
+            match handler.dyn_handle_message(message, cx.clone()).await? {
+                Handled::Yes => return Ok(Handled::Yes),
+                Handled::No { message: m, retry } => {
+                    message = m;
+                    retry_any |= retry;
+                }
+            }
+        }
+        Ok(Handled::No {
+            message,
+            retry: retry_any,
+        })
+    }
+
+    fn describe_chain(&self) -> impl std::fmt::Debug {
+        let descriptions: Vec<String> = self
+            .handlers
+            .iter()
+            .map(|h| h.dyn_describe_chain())
+            .collect();
+        descriptions
+    }
+}
 
 /// Null handler that accepts no messages.
 pub struct NullHandler<Role: JrRole> {
@@ -80,14 +127,17 @@ impl<Role: JrRole, End: JrEndpoint, Req, F, T, ToFut> JrMessageHandler
 where
     Role: HasEndpoint<End>,
     Req: JrRequest,
-    F: AsyncFnMut(Req, JrRequestCx<Req::Response>, JrConnectionCx<Role>) -> Result<T, crate::Error>,
+    F: AsyncFnMut(Req, JrRequestCx<Req::Response>, JrConnectionCx<Role>) -> Result<T, crate::Error>
+        + Send,
     T: crate::IntoHandled<(Req, JrRequestCx<Req::Response>)>,
     ToFut: Fn(
-        &mut F,
-        Req,
-        JrRequestCx<Req::Response>,
-        JrConnectionCx<Role>,
-    ) -> crate::BoxFuture<'_, Result<T, crate::Error>>,
+            &mut F,
+            Req,
+            JrRequestCx<Req::Response>,
+            JrConnectionCx<Role>,
+        ) -> crate::BoxFuture<'_, Result<T, crate::Error>>
+        + Send
+        + Sync,
 {
     type Role = Role;
 
@@ -211,9 +261,11 @@ impl<Role: JrRole, End: JrEndpoint, Notif, F, T, ToFut> JrMessageHandler
 where
     Role: HasEndpoint<End>,
     Notif: JrNotification,
-    F: AsyncFnMut(Notif, JrConnectionCx<Role>) -> Result<T, crate::Error>,
+    F: AsyncFnMut(Notif, JrConnectionCx<Role>) -> Result<T, crate::Error> + Send,
     T: crate::IntoHandled<(Notif, JrConnectionCx<Role>)>,
-    ToFut: Fn(&mut F, Notif, JrConnectionCx<Role>) -> crate::BoxFuture<'_, Result<T, crate::Error>>,
+    ToFut: Fn(&mut F, Notif, JrConnectionCx<Role>) -> crate::BoxFuture<'_, Result<T, crate::Error>>
+        + Send
+        + Sync,
 {
     type Role = Role;
 
@@ -337,13 +389,15 @@ impl<Role: JrRole, End: JrEndpoint, Req: JrRequest, Notif: JrNotification, F, T,
     JrMessageHandler for MessageHandler<Role, End, Req, Notif, F, ToFut>
 where
     Role: HasEndpoint<End>,
-    F: AsyncFnMut(MessageCx<Req, Notif>, JrConnectionCx<Role>) -> Result<T, crate::Error>,
+    F: AsyncFnMut(MessageCx<Req, Notif>, JrConnectionCx<Role>) -> Result<T, crate::Error> + Send,
     T: IntoHandled<MessageCx<Req, Notif>>,
     ToFut: Fn(
-        &mut F,
-        MessageCx<Req, Notif>,
-        JrConnectionCx<Role>,
-    ) -> crate::BoxFuture<'_, Result<T, crate::Error>>,
+            &mut F,
+            MessageCx<Req, Notif>,
+            JrConnectionCx<Role>,
+        ) -> crate::BoxFuture<'_, Result<T, crate::Error>>
+        + Send
+        + Sync,
 {
     type Role = Role;
 
@@ -450,66 +504,6 @@ impl<H: JrMessageHandler> JrMessageHandler for NamedHandler<H> {
             .await
         } else {
             self.handler.handle_message(message, connection_cx).await
-        }
-    }
-}
-
-/// Chains two handlers together, trying the first handler and falling back to the second
-pub struct ChainedHandler<H1, H2> {
-    handler1: H1,
-    handler2: H2,
-}
-
-impl<H1, H2> ChainedHandler<H1, H2>
-where
-    H1: JrMessageHandler,
-    H2: JrMessageHandler<Role = H1::Role>,
-{
-    /// Creates a new chain handler
-    pub fn new(handler1: H1, handler2: H2) -> Self {
-        Self { handler1, handler2 }
-    }
-}
-
-impl<H1, H2> JrMessageHandler for ChainedHandler<H1, H2>
-where
-    H1: JrMessageHandler,
-    H2: JrMessageHandler<Role = H1::Role>,
-{
-    type Role = H1::Role;
-
-    fn describe_chain(&self) -> impl std::fmt::Debug {
-        format!(
-            "{:?}, {:?}",
-            self.handler1.describe_chain(),
-            self.handler2.describe_chain()
-        )
-    }
-
-    async fn handle_message(
-        &mut self,
-        message: MessageCx,
-        connection_cx: JrConnectionCx<H1::Role>,
-    ) -> Result<Handled<MessageCx>, crate::Error> {
-        match self
-            .handler1
-            .handle_message(message, connection_cx.clone())
-            .await?
-        {
-            Handled::Yes => Ok(Handled::Yes),
-            Handled::No {
-                message,
-                retry: retry1,
-            } => match self.handler2.handle_message(message, connection_cx).await? {
-                Handled::Yes => Ok(Handled::Yes),
-                Handled::No {
-                    message,
-                    retry: retry2,
-                } => Ok(Handled::No {
-                    message,
-                    retry: retry1 | retry2,
-                }),
-            },
         }
     }
 }

@@ -24,10 +24,10 @@ mod reply_actor;
 mod task_actor;
 mod transport_actor;
 
-use crate::handler::{ChainedHandler, NamedHandler};
-use crate::jsonrpc::dynamic_handler::DynamicHandlerMessage;
+use crate::handler::NamedHandler;
+use crate::jsonrpc::dynamic_handler::{DynamicHandler, DynamicHandlerMessage};
 pub use crate::jsonrpc::handlers::NullHandler;
-use crate::jsonrpc::handlers::{MessageHandler, NotificationHandler, RequestHandler};
+use crate::jsonrpc::handlers::{MessageHandler, NotificationHandler, RequestHandler, VecHandler};
 use crate::jsonrpc::outgoing_actor::{OutgoingMessageTx, send_raw_message};
 use crate::jsonrpc::task_actor::{PendingTask, Task, TaskTx};
 use crate::mcp_server::McpServer;
@@ -162,7 +162,12 @@ use crate::{Agent, Client, Component};
 /// })?;
 /// ```
 #[allow(async_fn_in_trait)]
-pub trait JrMessageHandler {
+/// A handler for incoming JSON-RPC messages.
+///
+/// This trait is implemented by types that can process incoming messages on a connection.
+/// Handlers are registered with a [`JrConnectionBuilder`] and are called in order until
+/// one claims the message.
+pub trait JrMessageHandler: Send {
     /// The role type for this handler's connection.
     type Role: JrRole;
 
@@ -176,38 +181,14 @@ pub trait JrMessageHandler {
     ///
     /// # Parameters
     ///
-    /// * `cx` - The context of the request. This gives access to the request ID and the method name and is used to send a reply; can also be used to send other messages to the other party.
-    /// * `params` - The parameters of the request.
+    /// * `message` - The incoming message to handle.
+    /// * `cx` - The connection context, used to send messages and access connection state.
     ///
     /// # Returns
     ///
     /// * `Ok(Handled::Yes)` if the message was claimed. It will not be propagated further.
     /// * `Ok(Handled::No(message))` if not; the (possibly changed) message will be passed to the remaining handlers.
     /// * `Err` if an internal error occurs (this will bring down the server).
-    async fn handle_message(
-        &mut self,
-        message: MessageCx,
-        cx: JrConnectionCx<Self::Role>,
-    ) -> Result<Handled<MessageCx>, crate::Error>;
-
-    /// Returns a debug description of the registered handlers for diagnostics.
-    fn describe_chain(&self) -> impl std::fmt::Debug;
-}
-
-/// A version of [`JrMessageHandler`] where the `handle_message` code is required to be `Send`;
-/// any type implementing this trait must also implement [`JrMessageHandler`].
-///
-/// If you are implementing [`JrMessageHandler`] explicitly, as opposed to using helper
-/// methods like [`JrConnectionBuilder::on_receive_message`], then it is better to implement this Send trait
-/// when possible.
-pub trait JrMessageHandlerSend: Send {
-    /// The role type for this handler's connection.
-    type Role: JrRole;
-
-    /// Returns a (sendable) future that will potentially handle the message.
-    /// The [`Handled`] return value indicates whether the message was handled or not.
-    /// If the message was not handled, it may have been modified, and the modified message
-    /// (and return cx) should be used from that point forward.
     fn handle_message(
         &mut self,
         message: MessageCx,
@@ -216,22 +197,6 @@ pub trait JrMessageHandlerSend: Send {
 
     /// Returns a debug description of the registered handlers for diagnostics.
     fn describe_chain(&self) -> impl std::fmt::Debug;
-}
-
-impl<H: JrMessageHandlerSend> JrMessageHandler for H {
-    type Role = <H as JrMessageHandlerSend>::Role;
-
-    async fn handle_message(
-        &mut self,
-        message: MessageCx,
-        cx: JrConnectionCx<Self::Role>,
-    ) -> Result<Handled<MessageCx>, crate::Error> {
-        JrMessageHandlerSend::handle_message(self, message, cx).await
-    }
-
-    fn describe_chain(&self) -> impl std::fmt::Debug {
-        JrMessageHandlerSend::describe_chain(self)
-    }
 }
 
 /// A JSON-RPC connection that can act as either a server, client, or both.
@@ -567,37 +532,39 @@ impl<H: JrMessageHandlerSend> JrMessageHandler for H {
 /// # }
 /// ```
 #[must_use]
-pub struct JrConnectionBuilder<H: JrMessageHandler> {
+pub struct JrConnectionBuilder<'scope, Role: JrRole> {
     name: Option<String>,
 
-    /// Handler for incoming messages.
-    handler: H,
+    /// Handlers for incoming messages, stored as dyn trait objects.
+    handlers: Vec<Box<dyn DynamicHandler<Role> + 'scope>>,
 
     /// Pending tasks
-    pending_tasks: Vec<PendingTask<H::Role>>,
+    pending_tasks: Vec<PendingTask<Role>>,
 }
 
-impl<Role: JrRole> JrConnectionBuilder<NullHandler<Role>> {
+impl<Role: JrRole> JrConnectionBuilder<'static, Role> {
     /// Create a new JrConnection with the given role.
     /// This type follows a builder pattern; use other methods to configure and then invoke
     /// [`Self::serve`] (to use as a server) or [`Self::with_client`] to use as a client.
-    pub(crate) fn new(role: Role) -> Self {
+    pub(crate) fn new(_role: Role) -> Self {
         Self {
             name: Default::default(),
-            handler: NullHandler::new(role),
+            handlers: Default::default(),
             pending_tasks: Default::default(),
         }
     }
 }
 
-impl<H: JrMessageHandler> JrConnectionBuilder<H> {
+impl<'scope, Role: JrRole> JrConnectionBuilder<'scope, Role> {
     /// Create a new connection builder with the given handler.
-    pub fn new_with(handler: H) -> Self {
-        Self {
+    pub fn new_with<H: JrMessageHandler<Role = Role> + 'scope>(handler: H) -> Self {
+        let mut builder = Self {
             name: Default::default(),
-            handler,
+            handlers: Default::default(),
             pending_tasks: Default::default(),
-        }
+        };
+        builder.handlers.push(Box::new(handler));
+        builder
     }
 
     /// Set the "name" of this connection -- used only for debugging logs.
@@ -610,13 +577,7 @@ impl<H: JrMessageHandler> JrConnectionBuilder<H> {
     ///
     /// Prefer [`Self::on_receive_request`] or [`Self::on_receive_notification`].
     /// This is a low-level method that is not intended for general use.
-    pub fn with_connection_builder<H1>(
-        mut self,
-        other: JrConnectionBuilder<H1>,
-    ) -> JrConnectionBuilder<ChainedHandler<H, NamedHandler<H1>>>
-    where
-        H1: JrMessageHandler<Role = H::Role>,
-    {
+    pub fn with_connection_builder(mut self, other: JrConnectionBuilder<'scope, Role>) -> Self {
         self.pending_tasks.extend(
             other
                 .pending_tasks
@@ -624,36 +585,35 @@ impl<H: JrMessageHandler> JrConnectionBuilder<H> {
                 .map(|t| t.named(other.name.clone())),
         );
 
-        JrConnectionBuilder {
-            name: self.name,
-            handler: ChainedHandler::new(
-                self.handler,
-                NamedHandler::new(other.name, other.handler),
-            ),
-            pending_tasks: self.pending_tasks,
+        // Wrap other's handlers in a NamedHandler if it has a name
+        if let Some(name) = other.name {
+            let other_handler = VecHandler::new(other.handlers);
+            self.handlers
+                .push(Box::new(NamedHandler::new(Some(name), other_handler)));
+        } else {
+            self.handlers.extend(other.handlers);
         }
+
+        self
     }
 
     /// Add a new [`JrMessageHandler`] to the chain.
     ///
     /// Prefer [`Self::on_receive_request`] or [`Self::on_receive_notification`].
     /// This is a low-level method that is not intended for general use.
-    pub fn with_handler<H1>(self, handler: H1) -> JrConnectionBuilder<ChainedHandler<H, H1>>
+    pub fn with_handler<H>(mut self, handler: H) -> Self
     where
-        H1: JrMessageHandler<Role = H::Role>,
+        H: JrMessageHandler<Role = Role> + 'scope,
     {
-        JrConnectionBuilder {
-            name: self.name,
-            handler: ChainedHandler::new(self.handler, handler),
-            pending_tasks: self.pending_tasks,
-        }
+        self.handlers.push(Box::new(handler));
+        self
     }
 
     /// Enqueue a task to run once the connection is actively serving traffic.
     #[track_caller]
     pub fn with_spawned<F>(
         mut self,
-        task: impl FnOnce(JrConnectionCx<H::Role>) -> F + Send + 'static,
+        task: impl FnOnce(JrConnectionCx<Role>) -> F + Send + 'static,
     ) -> Self
     where
         F: Future<Output = Result<(), crate::Error>> + Send + 'static,
@@ -702,33 +662,28 @@ impl<H: JrMessageHandler> JrConnectionBuilder<H> {
     /// For most use cases, prefer [`on_receive_request`](Self::on_receive_request) or
     /// [`on_receive_notification`](Self::on_receive_notification) which provide cleaner APIs
     /// for handling requests or notifications separately.
-    pub fn on_receive_message<Req, Notif, F, T, ToFut>(
-        self,
-        op: F,
-        to_future_hack: ToFut,
-    ) -> JrConnectionBuilder<
-        ChainedHandler<
-            H,
-            MessageHandler<H::Role, <H::Role as JrRole>::HandlerEndpoint, Req, Notif, F, ToFut>,
-        >,
-    >
+    pub fn on_receive_message<Req, Notif, F, T, ToFut>(self, op: F, to_future_hack: ToFut) -> Self
     where
-        H::Role: HasDefaultEndpoint,
-        H::Role: HasEndpoint<<H::Role as JrRole>::HandlerEndpoint>,
+        Role: HasDefaultEndpoint,
+        Role: HasEndpoint<<Role as JrRole>::HandlerEndpoint>,
         Req: JrRequest,
         Notif: JrNotification,
-        F: AsyncFnMut(MessageCx<Req, Notif>, JrConnectionCx<H::Role>) -> Result<T, crate::Error>
-            + Send,
+        F: AsyncFnMut(MessageCx<Req, Notif>, JrConnectionCx<Role>) -> Result<T, crate::Error>
+            + Send
+            + 'scope,
         T: IntoHandled<MessageCx<Req, Notif>>,
         ToFut: Fn(
-            &mut F,
-            MessageCx<Req, Notif>,
-            JrConnectionCx<H::Role>,
-        ) -> BoxFuture<'_, Result<T, crate::Error>>,
+                &mut F,
+                MessageCx<Req, Notif>,
+                JrConnectionCx<Role>,
+            ) -> BoxFuture<'_, Result<T, crate::Error>>
+            + Send
+            + Sync
+            + 'scope,
     {
         self.with_handler(MessageHandler::new(
-            <H::Role as JrRole>::HandlerEndpoint::default(),
-            <H::Role>::default(),
+            <Role as JrRole>::HandlerEndpoint::default(),
+            Role::default(),
             op,
             to_future_hack,
         ))
@@ -775,32 +730,31 @@ impl<H: JrMessageHandler> JrConnectionBuilder<H> {
         self,
         op: F,
         to_future_hack: ToFut,
-    ) -> JrConnectionBuilder<
-        ChainedHandler<
-            H,
-            RequestHandler<H::Role, <H::Role as JrRole>::HandlerEndpoint, Req, F, ToFut>,
-        >,
-    >
+    ) -> Self
     where
-        H::Role: HasDefaultEndpoint,
-        H::Role: HasEndpoint<<H::Role as JrRole>::HandlerEndpoint>,
+        Role: HasDefaultEndpoint,
+        Role: HasEndpoint<<Role as JrRole>::HandlerEndpoint>,
         F: AsyncFnMut(
                 Req,
                 JrRequestCx<Req::Response>,
-                JrConnectionCx<H::Role>,
+                JrConnectionCx<Role>,
             ) -> Result<T, crate::Error>
-            + Send,
+            + Send
+            + 'scope,
         T: IntoHandled<(Req, JrRequestCx<Req::Response>)>,
         ToFut: Fn(
-            &mut F,
-            Req,
-            JrRequestCx<Req::Response>,
-            JrConnectionCx<H::Role>,
-        ) -> BoxFuture<'_, Result<T, crate::Error>>,
+                &mut F,
+                Req,
+                JrRequestCx<Req::Response>,
+                JrConnectionCx<Role>,
+            ) -> BoxFuture<'_, Result<T, crate::Error>>
+            + Send
+            + Sync
+            + 'scope,
     {
         self.with_handler(RequestHandler::new(
-            <H::Role as JrRole>::HandlerEndpoint::default(),
-            <H::Role>::default(),
+            <Role as JrRole>::HandlerEndpoint::default(),
+            Role::default(),
             op,
             to_future_hack,
         ))
@@ -845,27 +799,21 @@ impl<H: JrMessageHandler> JrConnectionBuilder<H> {
     ///
     /// `Notif` can be either a single notification type or an enum of multiple notification types.
     /// See the [type-driven dispatch](Self#type-driven-message-dispatch) section for details.
-    pub fn on_receive_notification<Notif, F, T, ToFut>(
-        self,
-        op: F,
-        to_future_hack: ToFut,
-    ) -> JrConnectionBuilder<
-        ChainedHandler<
-            H,
-            NotificationHandler<H::Role, <H::Role as JrRole>::HandlerEndpoint, Notif, F, ToFut>,
-        >,
-    >
+    pub fn on_receive_notification<Notif, F, T, ToFut>(self, op: F, to_future_hack: ToFut) -> Self
     where
-        H::Role: HasDefaultEndpoint,
-        H::Role: HasEndpoint<<H::Role as JrRole>::HandlerEndpoint>,
+        Role: HasDefaultEndpoint,
+        Role: HasEndpoint<<Role as JrRole>::HandlerEndpoint>,
         Notif: JrNotification,
-        F: AsyncFnMut(Notif, JrConnectionCx<H::Role>) -> Result<T, crate::Error> + Send,
-        T: IntoHandled<(Notif, JrConnectionCx<H::Role>)>,
-        ToFut: Fn(&mut F, Notif, JrConnectionCx<H::Role>) -> BoxFuture<'_, Result<T, crate::Error>>,
+        F: AsyncFnMut(Notif, JrConnectionCx<Role>) -> Result<T, crate::Error> + Send + 'scope,
+        T: IntoHandled<(Notif, JrConnectionCx<Role>)>,
+        ToFut: Fn(&mut F, Notif, JrConnectionCx<Role>) -> BoxFuture<'_, Result<T, crate::Error>>
+            + Send
+            + Sync
+            + 'scope,
     {
         self.with_handler(NotificationHandler::new(
-            <H::Role as JrRole>::HandlerEndpoint::default(),
-            <H::Role>::default(),
+            <Role as JrRole>::HandlerEndpoint::default(),
+            Role::default(),
             op,
             to_future_hack,
         ))
@@ -892,21 +840,25 @@ impl<H: JrMessageHandler> JrConnectionBuilder<H> {
         endpoint: End,
         op: F,
         to_future_hack: ToFut,
-    ) -> JrConnectionBuilder<ChainedHandler<H, MessageHandler<H::Role, End, Req, Notif, F, ToFut>>>
+    ) -> Self
     where
-        H::Role: HasEndpoint<End>,
-        F: AsyncFnMut(MessageCx<Req, Notif>, JrConnectionCx<H::Role>) -> Result<T, crate::Error>
-            + Send,
+        Role: HasEndpoint<End>,
+        F: AsyncFnMut(MessageCx<Req, Notif>, JrConnectionCx<Role>) -> Result<T, crate::Error>
+            + Send
+            + 'scope,
         T: IntoHandled<MessageCx<Req, Notif>>,
         ToFut: Fn(
-            &mut F,
-            MessageCx<Req, Notif>,
-            JrConnectionCx<H::Role>,
-        ) -> BoxFuture<'_, Result<T, crate::Error>>,
+                &mut F,
+                MessageCx<Req, Notif>,
+                JrConnectionCx<Role>,
+            ) -> BoxFuture<'_, Result<T, crate::Error>>
+            + Send
+            + Sync
+            + 'scope,
     {
         self.with_handler(MessageHandler::new(
             endpoint,
-            <H::Role>::default(),
+            Role::default(),
             op,
             to_future_hack,
         ))
@@ -939,26 +891,30 @@ impl<H: JrMessageHandler> JrConnectionBuilder<H> {
         endpoint: End,
         op: F,
         to_future_hack: ToFut,
-    ) -> JrConnectionBuilder<ChainedHandler<H, RequestHandler<H::Role, End, Req, F, ToFut>>>
+    ) -> Self
     where
-        H::Role: HasEndpoint<End>,
+        Role: HasEndpoint<End>,
         F: AsyncFnMut(
                 Req,
                 JrRequestCx<Req::Response>,
-                JrConnectionCx<H::Role>,
+                JrConnectionCx<Role>,
             ) -> Result<T, crate::Error>
-            + Send,
+            + Send
+            + 'scope,
         T: IntoHandled<(Req, JrRequestCx<Req::Response>)>,
         ToFut: Fn(
-            &mut F,
-            Req,
-            JrRequestCx<Req::Response>,
-            JrConnectionCx<H::Role>,
-        ) -> BoxFuture<'_, Result<T, crate::Error>>,
+                &mut F,
+                Req,
+                JrRequestCx<Req::Response>,
+                JrConnectionCx<Role>,
+            ) -> BoxFuture<'_, Result<T, crate::Error>>
+            + Send
+            + Sync
+            + 'scope,
     {
         self.with_handler(RequestHandler::new(
             endpoint,
-            <H::Role>::default(),
+            Role::default(),
             op,
             to_future_hack,
         ))
@@ -978,16 +934,19 @@ impl<H: JrMessageHandler> JrConnectionBuilder<H> {
         endpoint: End,
         op: F,
         to_future_hack: ToFut,
-    ) -> JrConnectionBuilder<ChainedHandler<H, NotificationHandler<H::Role, End, Notif, F, ToFut>>>
+    ) -> Self
     where
-        H::Role: HasEndpoint<End>,
-        F: AsyncFnMut(Notif, JrConnectionCx<H::Role>) -> Result<T, crate::Error> + Send,
-        T: IntoHandled<(Notif, JrConnectionCx<H::Role>)>,
-        ToFut: Fn(&mut F, Notif, JrConnectionCx<H::Role>) -> BoxFuture<'_, Result<T, crate::Error>>,
+        Role: HasEndpoint<End>,
+        F: AsyncFnMut(Notif, JrConnectionCx<Role>) -> Result<T, crate::Error> + Send + 'scope,
+        T: IntoHandled<(Notif, JrConnectionCx<Role>)>,
+        ToFut: Fn(&mut F, Notif, JrConnectionCx<Role>) -> BoxFuture<'_, Result<T, crate::Error>>
+            + Send
+            + Sync
+            + 'scope,
     {
         self.with_handler(NotificationHandler::new(
             endpoint,
-            <H::Role>::default(),
+            Role::default(),
             op,
             to_future_hack,
         ))
@@ -1010,12 +969,8 @@ impl<H: JrMessageHandler> JrConnectionBuilder<H> {
     ///     .serve(connection)
     ///     .await?;
     /// ```
-    pub fn with_mcp_server<Role: JrRole>(
-        self,
-        registry: McpServer<Role>,
-    ) -> JrConnectionBuilder<ChainedHandler<H, McpServer<Role>>>
+    pub fn with_mcp_server(self, registry: McpServer<Role>) -> Self
     where
-        H: JrMessageHandler<Role = Role>,
         Role: HasEndpoint<Client> + HasEndpoint<Agent>,
     {
         self.with_handler(registry)
@@ -1026,10 +981,10 @@ impl<H: JrMessageHandler> JrConnectionBuilder<H> {
     pub fn connect_to(
         self,
         transport: impl Component + 'static,
-    ) -> Result<JrConnection<H>, crate::Error> {
+    ) -> Result<JrConnection<'scope, Role>, crate::Error> {
         let Self {
             name,
-            handler,
+            handlers,
             pending_tasks,
         } = self;
 
@@ -1055,6 +1010,9 @@ impl<H: JrMessageHandler> JrConnectionBuilder<H> {
             let task = pending_task.into_task(cx.clone());
             task.spawn(&cx.task_tx)?;
         }
+
+        // Wrap handlers in a VecHandler
+        let handler = VecHandler::new(handlers);
 
         Ok(JrConnection {
             cx,
@@ -1144,9 +1102,26 @@ impl<H: JrMessageHandler> JrConnectionBuilder<H> {
     pub async fn apply(
         &mut self,
         message: MessageCx,
-        cx: JrConnectionCx<H::Role>,
+        cx: JrConnectionCx<Role>,
     ) -> Result<Handled<MessageCx>, crate::Error> {
-        self.handler.handle_message(message, cx).await
+        let mut retry_any = false;
+        let mut current_message = message;
+        for handler in &mut self.handlers {
+            match handler
+                .dyn_handle_message(current_message, cx.clone())
+                .await?
+            {
+                Handled::Yes => return Ok(Handled::Yes),
+                Handled::No { message: m, retry } => {
+                    current_message = m;
+                    retry_any |= retry;
+                }
+            }
+        }
+        Ok(Handled::No {
+            message: current_message,
+            retry: retry_any,
+        })
     }
 
     /// Convenience method to connect to a transport and serve.
@@ -1168,7 +1143,7 @@ impl<H: JrMessageHandler> JrConnectionBuilder<H> {
     pub async fn with_client(
         self,
         transport: impl Component + 'static,
-        main_fn: impl AsyncFnOnce(JrConnectionCx<H::Role>) -> Result<(), crate::Error>,
+        main_fn: impl AsyncFnOnce(JrConnectionCx<Role>) -> Result<(), crate::Error>,
     ) -> Result<(), crate::Error> {
         self.connect_to(transport)?.with_client(main_fn).await
     }
@@ -1184,18 +1159,18 @@ impl<H: JrMessageHandler> JrConnectionBuilder<H> {
 ///
 /// Most users won't construct this directly - instead use `JrConnectionBuilder::connect_to()` or
 /// `JrConnectionBuilder::serve()` for convenience.
-pub struct JrConnection<H: JrMessageHandler> {
-    cx: JrConnectionCx<H::Role>,
+pub struct JrConnection<'scope, Role: JrRole> {
+    cx: JrConnectionCx<Role>,
     name: Option<String>,
     outgoing_rx: mpsc::UnboundedReceiver<OutgoingMessage>,
     new_task_rx: mpsc::UnboundedReceiver<Task>,
     transport_outgoing_tx: mpsc::UnboundedSender<Result<jsonrpcmsg::Message, crate::Error>>,
     transport_incoming_rx: mpsc::UnboundedReceiver<Result<jsonrpcmsg::Message, crate::Error>>,
-    dynamic_handler_rx: mpsc::UnboundedReceiver<DynamicHandlerMessage<H::Role>>,
-    handler: H,
+    dynamic_handler_rx: mpsc::UnboundedReceiver<DynamicHandlerMessage<Role>>,
+    handler: VecHandler<'scope, Role>,
 }
 
-impl<H: JrMessageHandler> JrConnection<H> {
+impl<'scope, Role: JrRole> JrConnection<'scope, Role> {
     /// Run the connection in server mode with the provided transport.
     ///
     /// This drives the connection by continuously processing messages from the transport
@@ -1308,7 +1283,7 @@ impl<H: JrMessageHandler> JrConnection<H> {
     /// Returns an error if the connection closes before `main_fn` completes.
     pub async fn with_client(
         self,
-        main_fn: impl AsyncFnOnce(JrConnectionCx<H::Role>) -> Result<(), crate::Error>,
+        main_fn: impl AsyncFnOnce(JrConnectionCx<Role>) -> Result<(), crate::Error>,
     ) -> Result<(), crate::Error> {
         let JrConnection {
             cx,
@@ -1606,11 +1581,13 @@ impl<Role: JrRole> JrConnectionCx<Role> {
     /// # }
     /// ```
     #[track_caller]
-    pub fn spawn_connection<H: JrMessageHandler>(
+    pub fn spawn_connection<OtherRole: JrRole>(
         &self,
-        connection: JrConnection<H>,
-        serve_future: impl FnOnce(JrConnection<H>) -> BoxFuture<'static, Result<(), crate::Error>>,
-    ) -> Result<JrConnectionCx<H::Role>, crate::Error> {
+        connection: JrConnection<'static, OtherRole>,
+        serve_future: impl FnOnce(
+            JrConnection<'static, OtherRole>,
+        ) -> BoxFuture<'static, Result<(), crate::Error>>,
+    ) -> Result<JrConnectionCx<OtherRole>, crate::Error> {
         let cx = connection.cx.clone();
         let future = serve_future(connection);
         Task::new(std::panic::Location::caller(), future).spawn(&self.task_tx)?;
@@ -1835,7 +1812,7 @@ impl<Role: JrRole> JrConnectionCx<Role> {
     /// The handler will stay registered until the [`DynamicHandlerRegistration`] is dropped.
     pub fn add_dynamic_handler(
         &self,
-        handler: impl JrMessageHandlerSend<Role = Role> + 'static,
+        handler: impl JrMessageHandler<Role = Role> + 'static,
     ) -> Result<DynamicHandlerRegistration<Role>, crate::Error> {
         let uuid = Uuid::new_v4();
         self.dynamic_handler_tx

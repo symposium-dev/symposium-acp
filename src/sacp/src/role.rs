@@ -11,8 +11,8 @@ use std::{fmt::Debug, hash::Hash};
 use agent_client_protocol_schema::{NewSessionRequest, NewSessionResponse, SessionId};
 
 use crate::{
-    Handled, JrConnectionCx, JrMessage, JrMessageHandlerSend, MessageCx, UntypedMessage,
-    jsonrpc::{JrConnectionBuilder, handlers::NullHandler},
+    Handled, JrConnectionCx, JrMessage, JrMessageHandler, MessageCx, UntypedMessage,
+    jsonrpc::JrConnectionBuilder,
     schema::{
         InitializeProxyRequest, InitializeRequest, METHOD_INITIALIZE_PROXY,
         METHOD_SUCCESSOR_MESSAGE, SuccessorMessage,
@@ -220,7 +220,7 @@ impl HasEndpoint<UntypedEndpoint> for UntypedRole {
 
 impl UntypedRole {
     /// Create a connection builder with an untyped role.
-    pub fn builder() -> JrConnectionBuilder<NullHandler<UntypedRole>> {
+    pub fn builder() -> JrConnectionBuilder<'static, UntypedRole> {
         JrConnectionBuilder::new(UntypedRole)
     }
 }
@@ -459,7 +459,7 @@ struct ProxySessionMessages {
     session_id: SessionId,
 }
 
-impl JrMessageHandlerSend for ProxySessionMessages {
+impl JrMessageHandler for ProxySessionMessages {
     type Role = ProxyToConductor;
 
     async fn handle_message(
@@ -516,42 +516,42 @@ impl HasEndpoint<Agent> for ProxyToConductor {
 
 impl ClientToAgent {
     /// Create a connection builder for a client talking to an agent.
-    pub fn builder() -> JrConnectionBuilder<NullHandler<ClientToAgent>> {
+    pub fn builder() -> JrConnectionBuilder<'static, ClientToAgent> {
         JrConnectionBuilder::new(ClientToAgent)
     }
 }
 
 impl AgentToClient {
     /// Create a connection builder for an agent talking to a client.
-    pub fn builder() -> JrConnectionBuilder<NullHandler<AgentToClient>> {
+    pub fn builder() -> JrConnectionBuilder<'static, AgentToClient> {
         JrConnectionBuilder::new(AgentToClient)
     }
 }
 
 impl ProxyToConductor {
     /// Create a connection builder for a proxy talking to a conductor.
-    pub fn builder() -> JrConnectionBuilder<NullHandler<ProxyToConductor>> {
+    pub fn builder() -> JrConnectionBuilder<'static, ProxyToConductor> {
         JrConnectionBuilder::new(ProxyToConductor)
     }
 }
 
 impl ConductorToProxy {
     /// Create a connection builder for a conductor talking to a proxy.
-    pub fn builder() -> JrConnectionBuilder<NullHandler<ConductorToProxy>> {
+    pub fn builder() -> JrConnectionBuilder<'static, ConductorToProxy> {
         JrConnectionBuilder::new(ConductorToProxy)
     }
 }
 
 impl ConductorToAgent {
     /// Create a connection builder for a conductor talking to an agent.
-    pub fn builder() -> JrConnectionBuilder<NullHandler<ConductorToAgent>> {
+    pub fn builder() -> JrConnectionBuilder<'static, ConductorToAgent> {
         JrConnectionBuilder::new(ConductorToAgent)
     }
 }
 
 impl ConductorToClient {
     /// Create a connection builder for a conductor talking to a client.
-    pub fn builder() -> JrConnectionBuilder<NullHandler<ConductorToClient>> {
+    pub fn builder() -> JrConnectionBuilder<'static, ConductorToClient> {
         JrConnectionBuilder::new(ConductorToClient)
     }
 }
