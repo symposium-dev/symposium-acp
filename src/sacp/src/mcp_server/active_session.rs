@@ -3,8 +3,7 @@ use futures::{SinkExt, StreamExt};
 use fxhash::FxHashMap;
 
 use crate::mcp::{McpClientToServer, McpServerEnd};
-use crate::mcp_server::McpContext;
-use crate::mcp_server::registry::RegisteredMcpServer;
+use crate::mcp_server::{McpContext, McpServerConnect};
 use crate::schema::{
     McpConnectRequest, McpConnectResponse, McpDisconnectNotification, McpOverAcpMessage,
 };
@@ -19,7 +18,7 @@ use std::sync::Arc;
 /// This is added as a 'dynamic' handler to the connection context
 /// (see [`JrConnectionCx::add_dynamic_handler`]) and handles MCP-over-ACP messages
 /// with the appropriate ACP url.
-pub(super) struct McpServerSession<Role: JrRole>
+pub(super) struct McpActiveSession<Role: JrRole>
 where
     Role: HasEndpoint<Agent>,
 {
@@ -31,21 +30,21 @@ where
     acp_url: String,
 
     /// The MCP server we are managing
-    mcp_server: Arc<RegisteredMcpServer<Role>>,
+    mcp_connect: Arc<dyn McpServerConnect<Role>>,
 
     /// Active connections to MCP server tasks
     connections: FxHashMap<String, mpsc::Sender<MessageCx>>,
 }
 
-impl<Role: JrRole> McpServerSession<Role>
+impl<Role: JrRole> McpActiveSession<Role>
 where
     Role: HasEndpoint<Agent>,
 {
-    pub fn new(role: Role, acp_url: String, mcp_server: Arc<RegisteredMcpServer<Role>>) -> Self {
+    pub fn new(role: Role, acp_url: String, mcp_connect: Arc<dyn McpServerConnect<Role>>) -> Self {
         Self {
             role,
             acp_url,
-            mcp_server,
+            mcp_connect,
             connections: FxHashMap::default(),
         }
     }
@@ -113,7 +112,7 @@ where
         };
 
         // Get the MCP server component
-        let spawned_server = self.mcp_server.spawn.spawn(McpContext {
+        let spawned_server = self.mcp_connect.connect(McpContext {
             acp_url: request.acp_url.clone(),
             connection_cx: outer_cx.clone(),
         });
@@ -211,7 +210,7 @@ where
     }
 }
 
-impl<Role: JrRole> JrMessageHandlerSend for McpServerSession<Role>
+impl<Role: JrRole> JrMessageHandlerSend for McpActiveSession<Role>
 where
     Role: HasEndpoint<Agent>,
 {

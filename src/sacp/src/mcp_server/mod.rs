@@ -6,28 +6,54 @@
 //! ## Quick Start
 //!
 //! ```rust,ignore
-//! use sacp::mcp_server::{McpServer, McpServiceRegistry, McpTool};
+//! use sacp::mcp_server::{McpServer, McpTool};
 //!
 //! // Create an MCP server with tools
-//! let server = McpServer::new()
+//! let server = McpServer::builder("my-server".to_string())
 //!     .instructions("A helpful assistant")
-//!     .tool(MyTool);
+//!     .tool(MyTool)
+//!     .build();
 //!
-//! // Register it with the service registry
-//! let registry = McpServiceRegistry::new()
-//!     .with_mcp_server("my-server", server)?;
-//!
-//! // Use the registry in your handler chain
-//! UntypedRole::builder()
-//!     .with_handler(registry)
-//!     .serve(connection)
+//! // Use the server as a handler on your connection
+//! ProxyToConductor::builder()
+//!     .with_handler(server)
+//!     .serve(client)
 //!     .await?;
 //! ```
+//!
+//! ## Custom MCP Server Implementations
+//!
+//! You can implement [`McpServerConnect`] to create custom MCP servers:
+//!
+//! ```rust,ignore
+//! use sacp::mcp_server::{McpServer, McpServerConnect, McpContext};
+//! use sacp::{DynComponent, JrRole};
+//!
+//! struct MyCustomServer;
+//!
+//! impl<Role: JrRole> McpServerConnect<Role> for MyCustomServer {
+//!     fn name(&self) -> String {
+//!         "my-custom-server".to_string()
+//!     }
+//!
+//!     fn connect(&self, cx: McpContext<Role>) -> DynComponent {
+//!         // Return a component that serves MCP requests
+//!         DynComponent::new(my_mcp_component)
+//!     }
+//! }
+//!
+//! let server = McpServer::new(MyCustomServer);
+//! ```
 
-mod registry;
+mod active_session;
+mod builder;
+mod connect;
+mod context;
 mod server;
 mod tool;
 
-pub use registry::{McpContext, McpServiceRegistry};
+pub use builder::McpServerBuilder;
+pub use connect::McpServerConnect;
+pub use context::McpContext;
 pub use server::McpServer;
 pub use tool::McpTool;

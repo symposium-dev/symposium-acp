@@ -1,297 +1,117 @@
 //! MCP server builder for creating MCP servers.
 
-use std::{marker::PhantomData, pin::pin, sync::Arc};
+use std::sync::Arc;
 
-use futures::future::Either;
-use fxhash::FxHashMap;
-use rmcp::{
-    ErrorData, ServerHandler,
-    handler::server::tool::cached_schema_for_type,
-    model::{CallToolResult, ListToolsResult, Tool},
+use agent_client_protocol_schema::NewSessionRequest;
+use uuid::Uuid;
+
+use crate::{
+    Agent, Client, HasEndpoint, JrConnectionCx, JrMessageHandler, JrRole,
+    jsonrpc::DynamicHandlerRegistration,
+    mcp_server::{McpServerConnect, active_session::McpActiveSession, builder::McpServerBuilder},
+    util::MatchMessageFrom,
 };
-use schemars::JsonSchema;
-use serde::{Serialize, de::DeserializeOwned};
-use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
 
-use super::{McpContext, McpTool};
-use crate::{BoxFuture, ByteStreams, Component, JrRole};
-
-/// Our MCP server implementation.
-#[derive(Clone, Default)]
+/// An MCP server that can be attached to ACP connections.
+///
+/// `McpServer` wraps an [`McpServerConnect`] implementation and can be used either:
+/// - As a message handler via [`JrConnectionBuilder::with_handler`], automatically
+///   attaching to new sessions
+/// - Manually via [`Self::add_to_new_session`] for more control
+///
+/// # Creating an MCP Server
+///
+/// Use [`McpServer::builder`] to create a server with tools:
+///
+/// ```rust,ignore
+/// let server = McpServer::builder("my-server".to_string())
+///     .instructions("A helpful assistant")
+///     .tool(MyTool)
+///     .build();
+/// ```
+///
+/// Or implement [`McpServerConnect`] for custom server behavior:
+///
+/// ```rust,ignore
+/// let server = McpServer::new(MyCustomServerConnect);
+/// ```
 pub struct McpServer<Role: JrRole> {
-    #[expect(dead_code)]
-    role: Role,
-    instructions: Option<String>,
-    tool_models: Vec<rmcp::model::Tool>,
-    tools: FxHashMap<String, Arc<dyn ErasedMcpTool<Role>>>,
+    connect: Arc<dyn McpServerConnect<Role>>,
 }
 
-impl<Role: JrRole> McpServer<Role> {
+impl<Role: JrRole> McpServer<Role>
+where
+    Role: HasEndpoint<Agent>,
+{
     /// Create an empty server with no content.
-    pub fn new() -> Self {
-        Self::default()
+    pub fn builder(name: impl ToString) -> McpServerBuilder<Role> {
+        McpServerBuilder::new(name.to_string())
     }
 
-    /// Set the server instructions that are provided to the client.
-    pub fn instructions(mut self, instructions: impl ToString) -> Self {
-        self.instructions = Some(instructions.to_string());
-        self
-    }
-
-    /// Add a tool to the server.
-    pub fn tool(mut self, tool: impl McpTool<Role> + 'static) -> Self {
-        let tool_model = make_tool_model(&tool);
-        self.tool_models.push(tool_model);
-        self.tools.insert(tool.name(), make_erased_mcp_tool(tool));
-        self
-    }
-
-    /// Convenience wrapper for defining a tool without having to create a struct.
+    /// Create an MCP server from something that implements the [`McpServerConnect`] trait.
     ///
-    /// # Parameters
+    /// # See also
     ///
-    /// * `name`: The name of the tool.
-    /// * `description`: The description of the tool.
-    /// * `func`: The function that implements the tool. Use an async closure like `async |args, cx| { .. }`.
-    /// * `to_future_hack`: A function that converts the tool function into a future.
-    ///   You should always write `|t, args, cx| Box::pin(t(args, cx))`.
-    ///   This is needed to sidestep current Rust language limitations.
-    ///
-    /// # Examples
-    ///
-    /// ```rust,ignore
-    /// McpServer::new()
-    ///     .tool_fn(
-    ///         "greet",
-    ///         "Greet someone by name",
-    ///         async |input: GreetInput, _cx| Ok(format!("Hello, {}!", input.name)),
-    ///         |t, args, cx| Box::pin(t(args, cx)),
-    ///     )
-    /// ```
-    pub fn tool_fn<P, R, F, H>(
-        self,
-        name: impl ToString,
-        description: impl ToString,
-        func: F,
-        to_future_hack: H,
-    ) -> Self
-    where
-        P: JsonSchema + DeserializeOwned + 'static + Send,
-        R: JsonSchema + Serialize + 'static + Send,
-        F: AsyncFn(P, McpContext<Role>) -> Result<R, crate::Error> + Send + Sync + 'static,
-        H: Fn(&F, P, McpContext<Role>) -> BoxFuture<'_, Result<R, crate::Error>>
-            + Send
-            + Sync
-            + 'static,
-    {
-        struct ToolFnTool<P, R, F, H> {
-            name: String,
-            description: String,
-            func: F,
-            to_future_hack: H,
-            phantom: PhantomData<fn(P) -> R>,
-        }
-
-        impl<P, R, F, H, Role> McpTool<Role> for ToolFnTool<P, R, F, H>
-        where
-            Role: JrRole,
-            P: JsonSchema + DeserializeOwned + 'static + Send,
-            R: JsonSchema + Serialize + 'static + Send,
-            F: AsyncFn(P, McpContext<Role>) -> Result<R, crate::Error> + Send + Sync + 'static,
-            H: Fn(&F, P, McpContext<Role>) -> BoxFuture<'_, Result<R, crate::Error>>
-                + Send
-                + Sync
-                + 'static,
-        {
-            type Input = P;
-            type Output = R;
-
-            fn name(&self) -> String {
-                self.name.clone()
-            }
-
-            fn description(&self) -> String {
-                self.description.clone()
-            }
-
-            async fn call_tool(&self, params: P, cx: McpContext<Role>) -> Result<R, crate::Error> {
-                (self.to_future_hack)(&self.func, params, cx).await
-            }
-        }
-
-        self.tool(ToolFnTool {
-            name: name.to_string(),
-            description: description.to_string(),
-            func,
-            to_future_hack,
-            phantom: PhantomData::<fn(P) -> R>,
-        })
-    }
-
-    /// Create a connection to communicate with this server given the MCP context.
-    /// This is pub(crate) because it is only used internally by the MCP server registry.
-    pub(crate) fn new_connection(&self, mcp_cx: McpContext<Role>) -> McpServerConnection<Role> {
-        McpServerConnection {
-            service: self.clone(),
-            mcp_cx,
+    /// See [`Self::builder`] to construct MCP servers from Rust code.
+    pub fn new(c: impl McpServerConnect<Role>) -> Self {
+        McpServer {
+            connect: Arc::new(c),
         }
     }
-}
 
-/// An MCP server instance connected to the ACP framework.
-pub(crate) struct McpServerConnection<Role: JrRole> {
-    service: McpServer<Role>,
-    mcp_cx: McpContext<Role>,
-}
-
-impl<Role: JrRole> Component for McpServerConnection<Role> {
-    async fn serve(self, client: impl Component) -> Result<(), crate::Error> {
-        // Create tokio byte streams that rmcp expects
-        let (mcp_server_stream, mcp_client_stream) = tokio::io::duplex(8192);
-        let (mcp_server_read, mcp_server_write) = tokio::io::split(mcp_server_stream);
-        let (mcp_client_read, mcp_client_write) = tokio::io::split(mcp_client_stream);
-
-        // Create ByteStreams component for the client side
-        let byte_streams =
-            ByteStreams::new(mcp_client_write.compat_write(), mcp_client_read.compat());
-
-        // Spawn task to connect byte_streams to the provided client
-        tokio::spawn(async move {
-            let _ = byte_streams.serve(client).await;
+    /// Attach this server to the new session, spawning off a dynamic handler that will
+    /// manage requests coming from this session.
+    ///
+    /// # Return value
+    ///
+    /// Returns a [`DynamicHandlerRegistration`] for the handler that intercepts messages
+    /// related to this MCP server. Once the value is dropped, the MCP server messages
+    /// will no longer be received, so you need to keep this value alive as long as the session
+    /// is in use. You can also invoke [`DynamicHandlerRegistration::run_indefinitely`]
+    /// if you want to keep the handler running indefinitely.
+    pub fn add_to_new_session(
+        &self,
+        request: &mut NewSessionRequest,
+        cx: &JrConnectionCx<Role>,
+    ) -> Result<DynamicHandlerRegistration<Role>, crate::Error> {
+        let acp_url = format!("acp:{}", Uuid::new_v4());
+        let connection =
+            McpActiveSession::new(Role::default(), acp_url.clone(), self.connect.clone());
+        request.mcp_servers.push(crate::schema::McpServer::Http {
+            name: self.connect.name(),
+            url: acp_url,
+            headers: Default::default(),
         });
+        cx.add_dynamic_handler(connection)
+    }
+}
 
-        // Run the rmcp server with the server side of the duplex stream
-        let running_server = rmcp::ServiceExt::serve(self, (mcp_server_read, mcp_server_write))
+impl<Role: JrRole> JrMessageHandler for McpServer<Role>
+where
+    Role: HasEndpoint<Client> + HasEndpoint<Agent>,
+{
+    type Role = Role;
+
+    async fn handle_message(
+        &mut self,
+        message: crate::MessageCx,
+        cx: crate::JrConnectionCx<Self::Role>,
+    ) -> Result<crate::Handled<crate::MessageCx>, crate::Error> {
+        MatchMessageFrom::new(message, &cx)
+            .if_request_from(
+                Client,
+                async |mut request: NewSessionRequest, request_cx| {
+                    self.add_to_new_session(&mut request, &cx)?
+                        .run_indefinitely();
+                    cx.send_request_to(Agent, request)
+                        .forward_to_request_cx(request_cx)
+                },
+            )
             .await
-            .map_err(crate::Error::into_internal_error)?;
-
-        // Wait for the server to finish
-        running_server
-            .waiting()
-            .await
-            .map(|_quit_reason| ())
-            .map_err(crate::Error::into_internal_error)
-    }
-}
-
-impl<Role: JrRole> ServerHandler for McpServerConnection<Role> {
-    async fn call_tool(
-        &self,
-        request: rmcp::model::CallToolRequestParam,
-        context: rmcp::service::RequestContext<rmcp::RoleServer>,
-    ) -> Result<CallToolResult, ErrorData> {
-        // Lookup the tool definition, erroring if not found
-        let Some(tool) = self.service.tools.get(&request.name[..]) else {
-            return Err(rmcp::model::ErrorData::invalid_params(
-                format!("tool `{}` not found", request.name),
-                None,
-            ));
-        };
-
-        // Convert input into JSON
-        let serde_value = serde_json::to_value(request.arguments).expect("valid json");
-
-        // Execute the user's tool, unless cancellation occurs
-        match futures::future::select(
-            tool.call_tool(serde_value, self.mcp_cx.clone()),
-            pin!(context.ct.cancelled()),
-        )
-        .await
-        {
-            // If completed successfully
-            Either::Left((m, _)) => match m {
-                Ok(result) => Ok(CallToolResult::structured(result)),
-                Err(error) => Err(to_rmcp_error(error)),
-            },
-
-            // If cancelled
-            Either::Right(((), _)) => {
-                Err(rmcp::ErrorData::internal_error("operation cancelled", None))
-            }
-        }
+            .done()
     }
 
-    async fn list_tools(
-        &self,
-        _request: Option<rmcp::model::PaginatedRequestParam>,
-        _context: rmcp::service::RequestContext<rmcp::RoleServer>,
-    ) -> Result<rmcp::model::ListToolsResult, ErrorData> {
-        // Just return all tools
-        Ok(ListToolsResult::with_all_items(
-            self.service.tool_models.clone(),
-        ))
-    }
-
-    fn get_info(&self) -> rmcp::model::ServerInfo {
-        // Basic server info
-        rmcp::model::ServerInfo {
-            protocol_version: rmcp::model::ProtocolVersion::default(),
-            capabilities: rmcp::model::ServerCapabilities::builder()
-                .enable_tools()
-                .build(),
-            server_info: rmcp::model::Implementation::default(),
-            instructions: self.service.instructions.clone(),
-        }
-    }
-}
-
-/// Erased version of the MCP tool trait that is dyn-compatible.
-trait ErasedMcpTool<Role: JrRole>: Send + Sync {
-    fn call_tool(
-        &self,
-        input: serde_json::Value,
-        context: McpContext<Role>,
-    ) -> BoxFuture<'_, Result<serde_json::Value, crate::Error>>;
-}
-
-/// Create an `rmcp` tool model from our [`McpTool`] trait.
-fn make_tool_model<Role: JrRole, M: McpTool<Role>>(tool: &M) -> Tool {
-    rmcp::model::Tool {
-        name: tool.name().into(),
-        title: tool.title(),
-        description: Some(tool.description().into()),
-        input_schema: cached_schema_for_type::<M::Input>(),
-        output_schema: Some(cached_schema_for_type::<M::Output>()),
-        annotations: None,
-        icons: None,
-        meta: None,
-    }
-}
-
-/// Create a [`ErasedMcpTool`] from a [`McpTool`], erasing the type details.
-fn make_erased_mcp_tool<'s, Role: JrRole, M: McpTool<Role> + 's>(
-    tool: M,
-) -> Arc<dyn ErasedMcpTool<Role> + 's> {
-    struct ErasedMcpToolImpl<M> {
-        tool: M,
-    }
-
-    impl<Role, M> ErasedMcpTool<Role> for ErasedMcpToolImpl<M>
-    where
-        Role: JrRole,
-        M: McpTool<Role>,
-    {
-        fn call_tool(
-            &self,
-            input: serde_json::Value,
-            context: McpContext<Role>,
-        ) -> BoxFuture<'_, Result<serde_json::Value, crate::Error>> {
-            Box::pin(async move {
-                let input = serde_json::from_value(input).map_err(crate::util::internal_error)?;
-                serde_json::to_value(self.tool.call_tool(input, context).await?)
-                    .map_err(crate::util::internal_error)
-            })
-        }
-    }
-
-    Arc::new(ErasedMcpToolImpl { tool })
-}
-
-/// Convert a [`crate::Error`] into an [`rmcp::ErrorData`].
-fn to_rmcp_error(error: crate::Error) -> rmcp::ErrorData {
-    rmcp::ErrorData {
-        code: rmcp::model::ErrorCode(error.code),
-        message: error.message.into(),
-        data: error.data,
+    fn describe_chain(&self) -> impl std::fmt::Debug {
+        format!("McpServer({})", self.connect.name())
     }
 }

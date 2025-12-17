@@ -8,7 +8,8 @@ use futures::channel::mpsc;
 
 use crate::{
     Agent, Handled, HasEndpoint, JrConnectionCx, JrMessageHandlerSend, JrRole, MessageCx,
-    jsonrpc::DynamicHandlerRegistration, mcp_server::McpServiceRegistry, schema::SessionId,
+    jsonrpc::DynamicHandlerRegistration, mcp_server::McpServer, schema::SessionId,
+    util::MatchMessageFrom,
 };
 
 impl<Role: JrRole> JrConnectionCx<Role>
@@ -91,12 +92,9 @@ where
     }
 
     /// Add the MCP servers from the given registry to this session.
-    pub fn with_mcp_servers(
-        mut self,
-        mcp_server: &McpServiceRegistry<Role>,
-    ) -> Result<Self, crate::Error> {
+    pub fn with_mcp_server(mut self, mcp_server: &McpServer<Role>) -> Result<Self, crate::Error> {
         self.dynamic_handler_registrations
-            .extend(mcp_server.add_registered_mcp_servers_to(&mut self.request, &self.connection)?);
+            .push(mcp_server.add_to_new_session(&mut self.request, &self.connection)?);
         Ok(self)
     }
 
@@ -240,23 +238,38 @@ where
     async fn handle_message(
         &mut self,
         message: MessageCx,
-        _cx: JrConnectionCx<Self::Role>,
+        cx: JrConnectionCx<Self::Role>,
     ) -> Result<Handled<MessageCx>, crate::Error> {
         // If this is a message for our session, grab it.
-        if let Some(session_id) = message.get_session_id()? {
-            if session_id == self.session_id {
-                self.update_tx
-                    .unbounded_send(SessionMessage::SessionMessage(message))
-                    .map_err(crate::util::internal_error)?;
-                return Ok(Handled::Yes);
-            }
-        }
+        tracing::trace!(
+            ?message,
+            handler_session_id = ?self.session_id,
+            "ActiveSessionHandler::handle_message"
+        );
+        MatchMessageFrom::new(message, &cx)
+            .if_message_from(Agent, async |message| {
+                if let Some(session_id) = message.get_session_id()? {
+                    tracing::trace!(
+                        message_session_id = ?session_id,
+                        handler_session_id = ?self.session_id,
+                        "ActiveSessionHandler::handle_message"
+                    );
+                    if session_id == self.session_id {
+                        self.update_tx
+                            .unbounded_send(SessionMessage::SessionMessage(message))
+                            .map_err(crate::util::internal_error)?;
+                        return Ok(Handled::Yes);
+                    }
+                }
 
-        // Otherwise, pass it through.
-        Ok(Handled::No {
-            message,
-            retry: false,
-        })
+                // Otherwise, pass it through.
+                Ok(Handled::No {
+                    message,
+                    retry: false,
+                })
+            })
+            .await
+            .done()
     }
 
     fn describe_chain(&self) -> impl std::fmt::Debug {

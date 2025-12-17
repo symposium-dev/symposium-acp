@@ -7,7 +7,54 @@ use crate::JrRole;
 
 use super::McpContext;
 
-/// Defines an MCP tool.
+/// Trait for defining MCP tools.
+///
+/// Implement this trait to create a tool that can be registered with an MCP server.
+/// The tool's input and output types must implement JSON Schema for automatic
+/// documentation.
+///
+/// # Example
+///
+/// ```rust,ignore
+/// use sacp::mcp_server::{McpTool, McpContext};
+/// use schemars::JsonSchema;
+/// use serde::{Deserialize, Serialize};
+///
+/// #[derive(JsonSchema, Deserialize)]
+/// struct EchoInput {
+///     message: String,
+/// }
+///
+/// #[derive(JsonSchema, Serialize)]
+/// struct EchoOutput {
+///     echoed: String,
+/// }
+///
+/// struct EchoTool;
+///
+/// impl<Role: sacp::JrRole> McpTool<Role> for EchoTool {
+///     type Input = EchoInput;
+///     type Output = EchoOutput;
+///
+///     fn name(&self) -> String {
+///         "echo".to_string()
+///     }
+///
+///     fn description(&self) -> String {
+///         "Echoes back the input message".to_string()
+///     }
+///
+///     async fn call_tool(
+///         &self,
+///         input: EchoInput,
+///         _context: McpContext<Role>,
+///     ) -> Result<EchoOutput, sacp::Error> {
+///         Ok(EchoOutput {
+///             echoed: format!("Echo: {}", input.message),
+///         })
+///     }
+/// }
+/// ```
 pub trait McpTool<Role: JrRole>: Send + Sync {
     /// The type of input the tool accepts.
     type Input: JsonSchema + DeserializeOwned + Send + 'static;

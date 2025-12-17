@@ -288,7 +288,7 @@ impl ConductorArgs {
                 }
 
                 conductor
-                    .into_handler_chain()
+                    .into_connection_builder()
                     .connect_to(stdio)?
                     .serve()
                     .await

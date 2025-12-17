@@ -38,9 +38,11 @@ pub(crate) enum DynamicHandlerMessage<Role: JrRole> {
 impl<Role: JrRole> std::fmt::Debug for DynamicHandlerMessage<Role> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::AddDynamicHandler(arg0, _arg1) => {
-                f.debug_tuple("AddDynamicHandler").field(arg0).finish()
-            }
+            Self::AddDynamicHandler(arg0, arg1) => f
+                .debug_tuple("AddDynamicHandler")
+                .field(arg0)
+                .field(&arg1.dyn_describe_chain())
+                .finish(),
             Self::RemoveDynamicHandler(arg0) => {
                 f.debug_tuple("RemoveDynamicHandler").field(arg0).finish()
             }

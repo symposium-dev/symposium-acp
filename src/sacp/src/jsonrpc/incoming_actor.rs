@@ -21,7 +21,7 @@ use super::Handled;
 ///
 /// This actor handles JSON-RPC protocol semantics:
 /// - Routes responses to reply_actor (for request/response correlation)
-/// - Routes requests/notifications to handler chain
+/// - Routes requests/notifications to registered handlers
 /// - Converts jsonrpcmsg::Request to UntypedMessage for handlers
 ///
 /// This is the protocol layer - it has no knowledge of how messages arrived.

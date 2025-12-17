@@ -149,7 +149,8 @@
 //! ## Learning more
 //!
 //! You can learn more in the [docs for `JrConnection`](crate::JrConnection) or on our
-//! [GitHub Pages](https://github.com/symposium-dev/symposium-acp) site.
+//! [GitHub Pages](https://github.com/symposium-dev/symposium-acp) site. For details on
+//! how messages flow through handlers, see [`JrMessageHandler`].
 //!
 //! You may also enjoy looking at some of these examples:
 //!
