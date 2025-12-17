@@ -34,7 +34,7 @@ use crate::{
 ///         "greet",
 ///         "Greet someone by name",
 ///         async |input: GreetInput, _cx| Ok(format!("Hello, {}!", input.name)),
-///         |t, args, cx| Box::pin(t(args, cx)),
+///         sacp::tool_fn!(),
 ///     )
 ///     .build();
 /// ```
@@ -87,7 +87,7 @@ where
     /// * `description`: The description of the tool.
     /// * `func`: The function that implements the tool. Use an async closure like `async |args, cx| { .. }`.
     /// * `to_future_hack`: A function that converts the tool function into a future.
-    ///   You should always write `|t, args, cx| Box::pin(t(args, cx))`.
+    ///   You should always use the [`sacp::tool_fn!()`](crate::tool_fn) macro here.
     ///   This is needed to sidestep current Rust language limitations.
     ///
     /// # Examples
@@ -98,7 +98,7 @@ where
     ///         "greet",
     ///         "Greet someone by name",
     ///         async |input: GreetInput, _cx| Ok(format!("Hello, {}!", input.name)),
-    ///         |t, args, cx| Box::pin(t(args, cx)),
+    ///         sacp::tool_fn!(),
     ///     )
     /// ```
     pub fn tool_fn<P, R, F, H>(
