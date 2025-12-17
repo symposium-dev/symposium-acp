@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [7.0.0](https://github.com/symposium-dev/symposium-acp/compare/sacp-conductor-v6.0.0...sacp-conductor-v7.0.0) - 2025-12-17
+
+### Other
+
+- update examples and tests to use new MCP server API
+- update MCP server documentation for new API
+- rename handler chain terminology to connection builder
+
 ## [5.0.1](https://github.com/symposium-dev/symposium-acp/compare/sacp-conductor-v5.0.0...sacp-conductor-v5.0.1) - 2025-12-15
 
 ### Other

@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [6.0.1](https://github.com/symposium-dev/symposium-acp/compare/sacp-tee-v6.0.0...sacp-tee-v6.0.1) - 2025-12-17
+
+### Other
+
+- rename handler chain terminology to connection builder
+
 ## [0.2.1](https://github.com/symposium-dev/symposium-acp/compare/sacp-tee-v0.2.0...sacp-tee-v0.2.1) - 2025-12-15
 
 ### Other

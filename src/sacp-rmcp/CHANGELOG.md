@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [7.0.0](https://github.com/symposium-dev/symposium-acp/compare/sacp-rmcp-v6.0.0...sacp-rmcp-v7.0.0) - 2025-12-17
+
+### Other
+
+- update examples and tests to use new MCP server API
+- update MCP server documentation for new API
+
 ## [0.10.0](https://github.com/symposium-dev/symposium-acp/compare/sacp-rmcp-v0.9.0...sacp-rmcp-v0.10.0) - 2025-12-15
 
 ### Other

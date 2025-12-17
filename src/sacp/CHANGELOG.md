@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [7.0.0](https://github.com/symposium-dev/symposium-acp/compare/sacp-v6.0.0...sacp-v7.0.0) - 2025-12-17
+
+### Fixed
+
+- match session messages from *agent*, not *client*
+
+### Other
+
+- update examples and tests to use new MCP server API
+- update MCP server documentation for new API
+- rename handler chain terminology to connection builder
+- improved docs
+
 ## [4.0.0](https://github.com/symposium-dev/symposium-acp/compare/sacp-v3.0.0...sacp-v4.0.0) - 2025-12-15
 
 ### Fixed
