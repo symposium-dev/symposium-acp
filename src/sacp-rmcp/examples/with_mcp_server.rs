@@ -15,8 +15,8 @@ use rmcp::{
     tool, tool_handler, tool_router,
 };
 use sacp::ProxyToConductor;
-use sacp::mcp_server::McpServiceRegistry;
-use sacp_rmcp::McpServiceRegistryRmcpExt;
+use sacp::mcp_server::McpServer;
+use sacp_rmcp::McpServerExt;
 use serde::{Deserialize, Serialize};
 use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
 
@@ -84,14 +84,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     tracing::info!("MCP server proxy starting");
 
+    // Create an MCP server from the rmcp service
+    let mcp_server = McpServer::from_rmcp("example", ExampleMcpServer::new);
+
     // Set up the proxy connection with our MCP server
     // ProxyToConductor already has proxy behavior built into its default_message_handler
     ProxyToConductor::builder()
         .name("mcp-server-proxy")
-        // Register the MCP server named "example"
-        .provide_mcp(
-            McpServiceRegistry::default().with_rmcp_server("example", ExampleMcpServer::new)?,
-        )
+        // Register the MCP server as a handler
+        .with_handler(mcp_server)
         // Start serving
         .connect_to(sacp::ByteStreams::new(
             tokio::io::stdout().compat_write(),

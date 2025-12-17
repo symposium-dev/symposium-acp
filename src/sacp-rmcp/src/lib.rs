@@ -5,13 +5,13 @@
 //!
 //! ## Usage
 //!
-//! Create an MCP server from an rmcp service:
+//! Create an MCP server from an rmcp service using the extension trait:
 //!
 //! ```ignore
 //! use sacp::mcp_server::McpServer;
-//! use sacp_rmcp::RmcpServer;
+//! use sacp_rmcp::McpServerExt;
 //!
-//! let server = McpServer::new(RmcpServer::new("my-server", || MyRmcpService::new()));
+//! let server = McpServer::from_rmcp("my-server", MyRmcpService::new);
 //!
 //! // Use as a handler
 //! ProxyToConductor::builder()
@@ -21,59 +21,55 @@
 //! ```
 
 use rmcp::ServiceExt;
-use sacp::mcp_server::{McpContext, McpServerConnect};
-use sacp::{ByteStreams, Component, DynComponent, JrRole};
+use sacp::mcp_server::{McpContext, McpServer, McpServerConnect};
+use sacp::{Agent, ByteStreams, Component, DynComponent, HasEndpoint, JrRole};
 use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
 
-/// Wrapper that implements [`McpServerConnect`] for rmcp services.
-///
-/// Use this to integrate existing rmcp-based MCP servers with the SACP framework.
-///
-/// # Example
-///
-/// ```ignore
-/// use sacp::mcp_server::McpServer;
-/// use sacp_rmcp::RmcpServer;
-///
-/// // Create an MCP server from an rmcp service factory
-/// let server = McpServer::new(RmcpServer::new("my-server", || MyRmcpService::new()));
-/// ```
-pub struct RmcpServer<F> {
-    name: String,
-    make_service: F,
-}
-
-impl<F> RmcpServer<F> {
-    /// Create a new rmcp server wrapper.
-    ///
-    /// # Parameters
-    ///
-    /// - `name`: The name of the server (used in session responses).
-    /// - `make_service`: A function that creates a new rmcp service instance.
-    ///   This is called for each new connection.
-    pub fn new(name: impl ToString, make_service: F) -> Self {
-        Self {
-            name: name.to_string(),
-            make_service,
-        }
-    }
-}
-
-impl<Role, F, S> McpServerConnect<Role> for RmcpServer<F>
+pub trait McpServerExt<Role: JrRole>
 where
-    Role: JrRole,
-    F: Fn() -> S + Send + Sync + 'static,
-    S: rmcp::Service<rmcp::RoleServer>,
+    Role: HasEndpoint<Agent>,
 {
-    fn name(&self) -> String {
-        self.name.clone()
-    }
+    /// Create an MCP server from something that implements the [`McpServerConnect`] trait.
+    ///
+    /// # See also
+    ///
+    /// See [`Self::builder`] to construct MCP servers from Rust code.
+    fn from_rmcp<S>(
+        name: impl ToString,
+        new_fn: impl Fn() -> S + Send + Sync + 'static,
+    ) -> McpServer<Role>
+    where
+        S: rmcp::Service<rmcp::RoleServer>,
+    {
+        struct RmcpServer<F> {
+            name: String,
+            new_fn: F,
+        }
 
-    fn connect(&self, _cx: McpContext<Role>) -> DynComponent {
-        let service = (self.make_service)();
-        DynComponent::new(RmcpServerComponent { service })
+        impl<Role, F, S> McpServerConnect<Role> for RmcpServer<F>
+        where
+            Role: JrRole,
+            F: Fn() -> S + Send + Sync + 'static,
+            S: rmcp::Service<rmcp::RoleServer>,
+        {
+            fn name(&self) -> String {
+                self.name.clone()
+            }
+
+            fn connect(&self, _cx: McpContext<Role>) -> DynComponent {
+                let service = (self.new_fn)();
+                DynComponent::new(RmcpServerComponent { service })
+            }
+        }
+
+        McpServer::new(RmcpServer {
+            name: name.to_string(),
+            new_fn,
+        })
     }
 }
+
+impl<Role: JrRole> McpServerExt<Role> for McpServer<Role> where Role: HasEndpoint<Agent> {}
 
 /// Component wrapper for rmcp services.
 struct RmcpServerComponent<S> {

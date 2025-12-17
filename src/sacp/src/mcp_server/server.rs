@@ -44,8 +44,8 @@ where
     Role: HasEndpoint<Agent>,
 {
     /// Create an empty server with no content.
-    pub fn builder(name: String) -> McpServerBuilder<Role> {
-        McpServerBuilder::new(name)
+    pub fn builder(name: impl ToString) -> McpServerBuilder<Role> {
+        McpServerBuilder::new(name.to_string())
     }
 
     /// Create an MCP server from something that implements the [`McpServerConnect`] trait.

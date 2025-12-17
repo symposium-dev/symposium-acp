@@ -10,7 +10,7 @@
 
 use sacp::Component;
 use sacp::ProxyToConductor;
-use sacp::mcp_server::{McpServerConnect, McpServiceRegistry};
+use sacp::mcp_server::McpServer;
 use sacp_conductor::Conductor;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -30,7 +30,7 @@ struct EchoOutput {
 /// Create a proxy that provides an MCP server with a session_id echo tool
 fn create_echo_proxy() -> Result<sacp::DynComponent, sacp::Error> {
     // Create MCP server with an echo tool that returns the session_id
-    let mcp_server = McpServerConnect::new()
+    let mcp_server = McpServer::builder("echo_server".to_string())
         .instructions("Test MCP server with session_id echo tool")
         .tool_fn(
             "echo",
@@ -41,24 +41,22 @@ fn create_echo_proxy() -> Result<sacp::DynComponent, sacp::Error> {
                 })
             },
             |f, args, cx| Box::pin(f(args, cx)),
-        );
-
-    // Create registry with the server
-    let registry = McpServiceRegistry::default().with_mcp_server("echo_server", mcp_server)?;
+        )
+        .build();
 
     // Create proxy component
-    Ok(sacp::DynComponent::new(ProxyWithEchoServer { registry }))
+    Ok(sacp::DynComponent::new(ProxyWithEchoServer { mcp_server }))
 }
 
 struct ProxyWithEchoServer {
-    registry: McpServiceRegistry<ProxyToConductor>,
+    mcp_server: McpServer<ProxyToConductor>,
 }
 
 impl Component for ProxyWithEchoServer {
     async fn serve(self, client: impl Component) -> Result<(), sacp::Error> {
         ProxyToConductor::builder()
             .name("echo-proxy")
-            .provide_mcp(self.registry)
+            .with_handler(self.mcp_server)
             .serve(client)
             .await
     }
