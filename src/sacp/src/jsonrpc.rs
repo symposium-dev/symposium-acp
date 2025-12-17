@@ -673,6 +673,7 @@ impl<H: JrMessageHandler> JrConnectionBuilder<H> {
         >,
     >
     where
+        H::Role: HasDefaultEndpoint,
         H::Role: HasEndpoint<<H::Role as JrRole>::HandlerEndpoint>,
         Req: JrRequest,
         Notif: JrNotification,
@@ -731,6 +732,7 @@ impl<H: JrMessageHandler> JrConnectionBuilder<H> {
         ChainedHandler<H, RequestHandler<H::Role, <H::Role as JrRole>::HandlerEndpoint, Req, F>>,
     >
     where
+        H::Role: HasDefaultEndpoint,
         H::Role: HasEndpoint<<H::Role as JrRole>::HandlerEndpoint>,
         F: AsyncFnMut(
                 Req,
@@ -793,6 +795,7 @@ impl<H: JrMessageHandler> JrConnectionBuilder<H> {
         >,
     >
     where
+        H::Role: HasDefaultEndpoint,
         H::Role: HasEndpoint<<H::Role as JrRole>::HandlerEndpoint>,
         Notif: JrNotification,
         F: AsyncFnMut(Notif, JrConnectionCx<H::Role>) -> Result<T, crate::Error> + Send,
