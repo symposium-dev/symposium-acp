@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [7.0.1](https://github.com/symposium-dev/symposium-acp/compare/sacp-conductor-v7.0.0...sacp-conductor-v7.0.1) - 2025-12-17
+
+### Fixed
+
+- *(sacp)* ensure NewSessionRequest flows through handler chain
+
+### Other
+
+- *(sacp)* add tool_fn!() macro for MCP tool registration
+
 ## [7.0.0](https://github.com/symposium-dev/symposium-acp/compare/sacp-conductor-v6.0.0...sacp-conductor-v7.0.0) - 2025-12-17
 
 ### Other

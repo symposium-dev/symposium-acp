@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [7.0.1](https://github.com/symposium-dev/symposium-acp/compare/sacp-tokio-v7.0.0...sacp-tokio-v7.0.1) - 2025-12-17
+
+### Other
+
+- updated the following local packages: sacp
+
 ## [6.0.1](https://github.com/symposium-dev/symposium-acp/compare/sacp-tokio-v6.0.0...sacp-tokio-v6.0.1) - 2025-12-17
 
 ### Other
