@@ -1,70 +1,81 @@
 //! # sacp-rmcp - rmcp integration for SACP
 //!
 //! This crate provides integration between [rmcp](https://docs.rs/rmcp) MCP servers
-//! and the SACP proxy framework.
+//! and the SACP MCP server framework.
 //!
 //! ## Usage
 //!
-//! Add rmcp-based MCP servers to your proxy using the extension trait:
+//! Create an MCP server from an rmcp service:
 //!
 //! ```ignore
-//! use sacp::mcp_server::McpServiceRegistry;
-//! use sacp_rmcp::McpServiceRegistryRmcpExt;
+//! use sacp::mcp_server::McpServer;
+//! use sacp_rmcp::RmcpServer;
 //!
-//! let registry = McpServiceRegistry::new();
-//! registry.add_rmcp_server("my-server", || MyRmcpService::new())?;
+//! let server = McpServer::new(RmcpServer::new("my-server", || MyRmcpService::new()));
+//!
+//! // Use as a handler
+//! ProxyToConductor::builder()
+//!     .with_handler(server)
+//!     .serve(client)
+//!     .await?;
 //! ```
 
 use rmcp::ServiceExt;
-use sacp::Agent;
-use sacp::mcp_server::McpServiceRegistry;
-use sacp::{ByteStreams, Component, HasEndpoint, JrRole};
+use sacp::mcp_server::{McpContext, McpServerConnect};
+use sacp::{ByteStreams, Component, DynComponent, JrRole};
 use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
 
-/// Extension trait for adding rmcp-based MCP servers to a registry.
-pub trait McpServiceRegistryRmcpExt {
-    /// Return a version of the registry with MCP server implemented using the rmcp crate.
+/// Wrapper that implements [`McpServerConnect`] for rmcp services.
+///
+/// Use this to integrate existing rmcp-based MCP servers with the SACP framework.
+///
+/// # Example
+///
+/// ```ignore
+/// use sacp::mcp_server::McpServer;
+/// use sacp_rmcp::RmcpServer;
+///
+/// // Create an MCP server from an rmcp service factory
+/// let server = McpServer::new(RmcpServer::new("my-server", || MyRmcpService::new()));
+/// ```
+pub struct RmcpServer<F> {
+    name: String,
+    make_service: F,
+}
+
+impl<F> RmcpServer<F> {
+    /// Create a new rmcp server wrapper.
     ///
     /// # Parameters
     ///
-    /// - `name`: The name of the server.
-    /// - `make_service`: A function that creates the service (e.g., `YourService::new`).
-    ///
-    /// # Example
-    ///
-    /// ```ignore
-    /// registry.with_rmcp_server("my-server", || MyRmcpService::new())?
-    /// ```
-    fn with_rmcp_server<S>(
-        self,
-        name: impl ToString,
-        make_service: impl Fn() -> S + 'static + Send + Sync,
-    ) -> Result<Self, sacp::Error>
-    where
-        S: rmcp::Service<rmcp::RoleServer>,
-        Self: Sized;
-}
-
-impl<Role: JrRole> McpServiceRegistryRmcpExt for McpServiceRegistry<Role>
-where
-    Role: HasEndpoint<Agent>,
-{
-    fn with_rmcp_server<S>(
-        self,
-        name: impl ToString,
-        make_service: impl Fn() -> S + 'static + Send + Sync,
-    ) -> Result<Self, sacp::Error>
-    where
-        S: rmcp::Service<rmcp::RoleServer>,
-    {
-        self.with_custom_mcp_server(name, move |_| {
-            let service = make_service();
-            RmcpServerComponent { service }
-        })
+    /// - `name`: The name of the server (used in session responses).
+    /// - `make_service`: A function that creates a new rmcp service instance.
+    ///   This is called for each new connection.
+    pub fn new(name: impl ToString, make_service: F) -> Self {
+        Self {
+            name: name.to_string(),
+            make_service,
+        }
     }
 }
 
-/// Component wrapper for rmcp services
+impl<Role, F, S> McpServerConnect<Role> for RmcpServer<F>
+where
+    Role: JrRole,
+    F: Fn() -> S + Send + Sync + 'static,
+    S: rmcp::Service<rmcp::RoleServer>,
+{
+    fn name(&self) -> String {
+        self.name.clone()
+    }
+
+    fn connect(&self, _cx: McpContext<Role>) -> DynComponent {
+        let service = (self.make_service)();
+        DynComponent::new(RmcpServerComponent { service })
+    }
+}
+
+/// Component wrapper for rmcp services.
 struct RmcpServerComponent<S> {
     service: S,
 }

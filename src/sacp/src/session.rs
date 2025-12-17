@@ -8,7 +8,7 @@ use futures::channel::mpsc;
 
 use crate::{
     Agent, Handled, HasEndpoint, JrConnectionCx, JrMessageHandlerSend, JrRole, MessageCx,
-    jsonrpc::DynamicHandlerRegistration, mcp_server::McpServiceRegistry, schema::SessionId,
+    jsonrpc::DynamicHandlerRegistration, mcp_server::McpServer, schema::SessionId,
     util::MatchMessageFrom,
 };
 
@@ -92,12 +92,9 @@ where
     }
 
     /// Add the MCP servers from the given registry to this session.
-    pub fn with_mcp_servers(
-        mut self,
-        mcp_server: &McpServiceRegistry<Role>,
-    ) -> Result<Self, crate::Error> {
+    pub fn with_mcp_server(mut self, mcp_server: &McpServer<Role>) -> Result<Self, crate::Error> {
         self.dynamic_handler_registrations
-            .extend(mcp_server.add_registered_mcp_servers_to(&mut self.request, &self.connection)?);
+            .push(mcp_server.add_to_new_session(&mut self.request, &self.connection)?);
         Ok(self)
     }
 

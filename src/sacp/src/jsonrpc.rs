@@ -30,6 +30,7 @@ pub use crate::jsonrpc::handlers::NullHandler;
 use crate::jsonrpc::handlers::{MessageHandler, NotificationHandler, RequestHandler};
 use crate::jsonrpc::outgoing_actor::{OutgoingMessageTx, send_raw_message};
 use crate::jsonrpc::task_actor::{PendingTask, Task, TaskTx};
+use crate::mcp_server::McpServer;
 use crate::role::{HasDefaultEndpoint, HasEndpoint, JrEndpoint, JrRole};
 use crate::{Agent, Client, Component};
 
@@ -569,10 +570,6 @@ impl<H: JrMessageHandler> JrConnectionBuilder<H> {
         self
     }
 
-    /// Returns a reference to the local role.
-
-    /// Returns a reference to the remote role.
-
     /// Merge another [`JrConnectionBuilder`] into this one.
     ///
     /// Prefer [`Self::on_receive_request`] or [`Self::on_receive_notification`].
@@ -893,10 +890,10 @@ impl<H: JrMessageHandler> JrConnectionBuilder<H> {
         self.with_handler(NotificationHandler::new(endpoint, <H::Role>::default(), op))
     }
 
-    /// Provide MCP servers to downstream successors.
+    /// In a proxy, add this MCP server to new sessions passing through the proxy.
     ///
     /// This adds a handler that intercepts `session/new` requests to include the
-    /// registered MCP servers.
+    /// registered MCP server.
     ///
     /// # Example
     ///
@@ -910,10 +907,10 @@ impl<H: JrMessageHandler> JrConnectionBuilder<H> {
     ///     .serve(connection)
     ///     .await?;
     /// ```
-    pub fn provide_mcp<Role: JrRole>(
+    pub fn with_mcp_server<Role: JrRole>(
         self,
-        registry: crate::mcp_server::McpServiceRegistry<Role>,
-    ) -> JrConnectionBuilder<ChainedHandler<H, crate::mcp_server::McpServiceRegistry<Role>>>
+        registry: McpServer<Role>,
+    ) -> JrConnectionBuilder<ChainedHandler<H, McpServer<Role>>>
     where
         H: JrMessageHandler<Role = Role>,
         Role: HasEndpoint<Client> + HasEndpoint<Agent>,

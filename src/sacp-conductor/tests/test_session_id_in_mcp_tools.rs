@@ -10,7 +10,7 @@
 
 use sacp::Component;
 use sacp::ProxyToConductor;
-use sacp::mcp_server::{McpServer, McpServiceRegistry};
+use sacp::mcp_server::{McpServerConnect, McpServiceRegistry};
 use sacp_conductor::Conductor;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -30,7 +30,7 @@ struct EchoOutput {
 /// Create a proxy that provides an MCP server with a session_id echo tool
 fn create_echo_proxy() -> Result<sacp::DynComponent, sacp::Error> {
     // Create MCP server with an echo tool that returns the session_id
-    let mcp_server = McpServer::new()
+    let mcp_server = McpServerConnect::new()
         .instructions("Test MCP server with session_id echo tool")
         .tool_fn(
             "echo",

@@ -2,7 +2,7 @@
 
 use sacp::Component;
 use sacp::ProxyToConductor;
-use sacp::mcp_server::{McpServer, McpServiceRegistry};
+use sacp::mcp_server::{McpServerConnect, McpServiceRegistry};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -24,7 +24,7 @@ struct ProxyComponent;
 
 impl Component for ProxyComponent {
     async fn serve(self, client: impl Component) -> Result<(), sacp::Error> {
-        let test_server = McpServer::new()
+        let test_server = McpServerConnect::new()
             .instructions("A simple test MCP server with an echo tool")
             .tool_fn(
                 "echo",
