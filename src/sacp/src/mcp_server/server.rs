@@ -6,7 +6,7 @@ use agent_client_protocol_schema::NewSessionRequest;
 use uuid::Uuid;
 
 use crate::{
-    Agent, Client, HasEndpoint, JrConnectionCx, JrMessageHandler, JrRole,
+    Agent, Client, Handled, HasEndpoint, JrConnectionCx, JrMessageHandler, JrRole,
     jsonrpc::DynamicHandlerRegistration,
     mcp_server::{McpServerConnect, active_session::McpActiveSession, builder::McpServerBuilder},
     util::MatchMessageFrom,
@@ -103,8 +103,10 @@ where
                 async |mut request: NewSessionRequest, request_cx| {
                     self.add_to_new_session(&mut request, &cx)?
                         .run_indefinitely();
-                    cx.send_request_to(Agent, request)
-                        .forward_to_request_cx(request_cx)
+                    Ok(Handled::No {
+                        message: (request, request_cx),
+                        retry: false,
+                    })
                 },
             )
             .await
