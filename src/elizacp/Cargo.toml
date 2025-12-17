@@ -1,6 +1,6 @@
 [package]
 name = "elizacp"
-version = "6.0.1"
+version = "7.0.0"
 edition = "2024"
 description = "Classic Eliza chatbot as an ACP agent for testing"
 license = "MIT OR Apache-2.0"
@@ -31,7 +31,7 @@ tokio-util.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
 uuid.workspace = true
-sacp-tokio = { version = "6.0.1", path = "../sacp-tokio" }
+sacp-tokio = { version = "7.0.0", path = "../sacp-tokio" }
 
 [dev-dependencies]
 expect-test.workspace = true

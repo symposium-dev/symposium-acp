@@ -13,8 +13,8 @@ test-support = []
 
 [dependencies]
 sacp = { version = "7.0.0", path = "../sacp" }
-sacp-tokio = { version = "6.0.1", path = "../sacp-tokio" }
-sacp-trace-viewer = { version = "6.0.0", path = "../sacp-trace-viewer" }
+sacp-tokio = { version = "7.0.0", path = "../sacp-tokio" }
+sacp-trace-viewer = { version = "7.0.0", path = "../sacp-trace-viewer" }
 agent-client-protocol-schema.workspace = true
 anyhow.workspace = true
 axum.workspace = true
