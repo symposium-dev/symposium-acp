@@ -6,21 +6,24 @@
 
 use std::future::Future;
 
+use crate::{JrConnectionCx, role::JrRole};
+
 /// A responder runs background tasks alongside a connection.
 ///
 /// Responders are composed using [`ChainResponder`] and run in parallel
 /// when the connection is active.
-pub trait JrResponder: Send {
+pub trait JrResponder<Role: JrRole>: Send {
     /// Run this responder to completion.
-    fn run(self) -> impl Future<Output = Result<(), crate::Error>> + Send;
+    fn run(self, cx: JrConnectionCx<Role>)
+    -> impl Future<Output = Result<(), crate::Error>> + Send;
 }
 
 /// A no-op responder that completes immediately.
 #[derive(Default)]
 pub struct NullResponder;
 
-impl JrResponder for NullResponder {
-    async fn run(self) -> Result<(), crate::Error> {
+impl<Role: JrRole> JrResponder<Role> for NullResponder {
+    async fn run(self, _cx: JrConnectionCx<Role>) -> Result<(), crate::Error> {
         Ok(())
     }
 }
@@ -38,9 +41,47 @@ impl<A, B> ChainResponder<A, B> {
     }
 }
 
-impl<A: JrResponder, B: JrResponder> JrResponder for ChainResponder<A, B> {
-    async fn run(self) -> Result<(), crate::Error> {
-        let ((), ()) = futures::future::try_join(self.a.run(), self.b.run()).await?;
+impl<Role: JrRole, A: JrResponder<Role>, B: JrResponder<Role>> JrResponder<Role>
+    for ChainResponder<A, B>
+{
+    async fn run(self, cx: JrConnectionCx<Role>) -> Result<(), crate::Error> {
+        // Box the futures to avoid stack overflow with deeply nested responder chains
+        let a_fut = Box::pin(self.a.run(cx.clone()));
+        let b_fut = Box::pin(self.b.run(cx.clone()));
+        let ((), ()) = futures::future::try_join(a_fut, b_fut).await?;
         Ok(())
+    }
+}
+
+/// A responder created from a closure via [`with_spawned`](crate::JrConnectionBuilder::with_spawned).
+pub struct SpawnedResponder<F> {
+    task_fn: F,
+    location: &'static std::panic::Location<'static>,
+}
+
+impl<F> SpawnedResponder<F> {
+    /// Create a new spawned responder from a closure.
+    pub fn new(location: &'static std::panic::Location<'static>, task_fn: F) -> Self {
+        Self { task_fn, location }
+    }
+}
+
+impl<Role, F, Fut> JrResponder<Role> for SpawnedResponder<F>
+where
+    Role: JrRole,
+    F: FnOnce(JrConnectionCx<Role>) -> Fut + Send,
+    Fut: Future<Output = Result<(), crate::Error>> + Send,
+{
+    async fn run(self, cx: JrConnectionCx<Role>) -> Result<(), crate::Error> {
+        let location = self.location;
+        (self.task_fn)(cx).await.map_err(|err| {
+            let data = err.data.clone();
+            err.with_data(serde_json::json! {
+                {
+                    "spawned_at": format!("{}:{}:{}", location.file(), location.line(), location.column()),
+                    "data": data,
+                }
+            })
+        })
     }
 }

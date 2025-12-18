@@ -38,7 +38,7 @@ use crate::{
 /// ```rust,ignore
 /// let server = McpServer::new(MyCustomServerConnect);
 /// ```
-pub struct McpServer<Role: JrRole, Responder: JrResponder = NullResponder>
+pub struct McpServer<Role: JrRole, Responder: JrResponder<Role> = NullResponder>
 where
     Role: HasEndpoint<Agent>,
 {
@@ -64,7 +64,7 @@ where
     }
 }
 
-impl<Role: JrRole, Responder: JrResponder> McpServer<Role, Responder>
+impl<Role: JrRole, Responder: JrResponder<Role>> McpServer<Role, Responder>
 where
     Role: HasEndpoint<Agent>,
 {

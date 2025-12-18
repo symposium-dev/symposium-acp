@@ -10,17 +10,17 @@ use futures::{
 use crate::JrConnectionCx;
 use crate::role::JrRole;
 
-pub type TaskTx<'scope> = mpsc::UnboundedSender<Task<'scope>>;
+pub type TaskTx = mpsc::UnboundedSender<Task>;
 
 #[must_use]
-pub(crate) struct Task<'scope> {
-    future: BoxFuture<'scope, Result<(), crate::Error>>,
+pub(crate) struct Task {
+    future: BoxFuture<'static, Result<(), crate::Error>>,
 }
 
-impl<'scope> Task<'scope> {
+impl Task {
     pub fn new(
         location: &'static Location<'static>,
-        task_future: impl IntoFuture<Output = Result<(), crate::Error>, IntoFuture: Send + 'scope>,
+        task_future: impl IntoFuture<Output = Result<(), crate::Error>, IntoFuture: Send + 'static>,
     ) -> Self {
         let task_future = task_future.into_future();
         Task {
@@ -42,18 +42,7 @@ impl<'scope> Task<'scope> {
         }
     }
 
-    /// Return a new task that executes with the given name
-    fn named(self, name: Option<String>) -> Task<'scope> {
-        if let Some(name) = name {
-            Task {
-                future: crate::util::instrumented_with_connection_name(name, self.future).boxed(),
-            }
-        } else {
-            self
-        }
-    }
-
-    pub fn spawn(self, task_tx: &TaskTx<'scope>) -> Result<(), crate::Error> {
+    pub fn spawn(self, task_tx: &TaskTx) -> Result<(), crate::Error> {
         task_tx
             .unbounded_send(self)
             .map_err(crate::util::internal_error)?;
@@ -61,17 +50,12 @@ impl<'scope> Task<'scope> {
     }
 }
 
-/// The "task actor" manages other tasks
-pub(super) async fn task_actor<'scope, Role: JrRole>(
-    mut task_rx: mpsc::UnboundedReceiver<Task<'static>>,
-    pending_tasks: Vec<PendingTask<'scope, Role>>,
-    cx: &JrConnectionCx<Role>,
+/// The "task actor" manages dynamically spawned tasks.
+pub(super) async fn task_actor<Role: JrRole>(
+    mut task_rx: mpsc::UnboundedReceiver<Task>,
+    _cx: &JrConnectionCx<Role>,
 ) -> Result<(), crate::Error> {
     let mut futures = FuturesUnordered::new();
-
-    for pending_task in pending_tasks {
-        futures.push(pending_task.into_task(cx.clone()).future);
-    }
 
     loop {
         // If we have no futures to run, wait until we do.
@@ -103,47 +87,5 @@ pub(super) async fn task_actor<'scope, Role: JrRole>(
                 }
             }
         }
-    }
-}
-
-pub(crate) struct PendingTask<'scope, Role: JrRole> {
-    task_fn: Box<dyn PendingTaskFn<'scope, Role> + 'scope>,
-}
-
-impl<'scope, Role: JrRole> PendingTask<'scope, Role> {
-    pub fn new<Fut>(
-        location: &'static Location<'static>,
-        task_function: impl FnOnce(JrConnectionCx<Role>) -> Fut + Send + 'scope,
-    ) -> Self
-    where
-        Fut: Future<Output = Result<(), crate::Error>> + Send + 'scope,
-    {
-        PendingTask {
-            task_fn: Box::new(move |cx| Task::new(location, task_function(cx))),
-        }
-    }
-
-    /// Return a new pending task that will execute with the given name
-    pub fn named(self, name: Option<String>) -> Self {
-        PendingTask {
-            task_fn: Box::new(move |cx| self.into_task(cx).named(name)),
-        }
-    }
-
-    pub fn into_task(self, cx: JrConnectionCx<Role>) -> Task<'scope> {
-        self.task_fn.into_task(cx)
-    }
-}
-
-trait PendingTaskFn<'scope, Role: JrRole>: Send {
-    fn into_task(self: Box<Self>, cx: JrConnectionCx<Role>) -> Task<'scope>;
-}
-
-impl<'scope, Role: JrRole, F> PendingTaskFn<'scope, Role> for F
-where
-    F: FnOnce(JrConnectionCx<Role>) -> Task<'scope> + Send,
-{
-    fn into_task(self: Box<Self>, cx: JrConnectionCx<Role>) -> Task<'scope> {
-        (*self)(cx)
     }
 }

@@ -46,7 +46,7 @@ use crate::{
 ///     )
 ///     .build();
 /// ```
-pub struct McpServerBuilder<Role: JrRole, Responder: JrResponder = NullResponder>
+pub struct McpServerBuilder<Role: JrRole, Responder: JrResponder<Role> = NullResponder>
 where
     Role: HasEndpoint<Agent>,
 {
@@ -77,7 +77,7 @@ where
     }
 }
 
-impl<Role: JrRole, Responder: JrResponder> McpServerBuilder<Role, Responder>
+impl<Role: JrRole, Responder: JrResponder<Role>> McpServerBuilder<Role, Responder>
 where
     Role: HasEndpoint<Agent>,
 {
@@ -99,7 +99,7 @@ where
 
     /// Private fn: adds the tool but also adds a responder that will be
     /// run while the MCP server is active.
-    fn tool_with_responder<R: JrResponder>(
+    fn tool_with_responder<R: JrResponder<Role>>(
         self,
         tool: impl McpTool<Role> + 'static,
         tool_responder: R,

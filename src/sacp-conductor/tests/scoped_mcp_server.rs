@@ -85,7 +85,7 @@ struct ScopedProxy;
 
 fn make_mcp_server<Role: JrRole>(
     values: &Mutex<Vec<String>>,
-) -> McpServer<Role, impl sacp::JrResponder + use<'_, Role>>
+) -> McpServer<Role, impl sacp::JrResponder<Role> + use<'_, Role>>
 where
     Role: HasEndpoint<Agent>,
 {

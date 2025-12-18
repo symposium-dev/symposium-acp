@@ -4,7 +4,7 @@ use std::future::Future;
 
 use futures::{StreamExt, channel::mpsc};
 
-use crate::{JrRole, jsonrpc::responder::JrResponder, mcp_server::McpContext};
+use crate::{JrConnectionCx, JrRole, jsonrpc::responder::JrResponder, mcp_server::McpContext};
 
 /// A tool call request sent through the channel.
 pub struct ToolCall<P, R, Role: JrRole> {
@@ -20,7 +20,7 @@ pub struct ToolFnResponder<F, P, R, Role: JrRole> {
     pub(crate) call_rx: mpsc::Receiver<ToolCall<P, R, Role>>,
 }
 
-impl<F, P, R, Role, Fut> JrResponder for ToolFnResponder<F, P, R, Role>
+impl<F, P, R, Role, Fut> JrResponder<Role> for ToolFnResponder<F, P, R, Role>
 where
     Role: JrRole,
     P: Send,
@@ -28,7 +28,7 @@ where
     F: FnMut(P, McpContext<Role>) -> Fut + Send,
     Fut: Future<Output = Result<R, crate::Error>> + Send,
 {
-    async fn run(mut self) -> Result<(), crate::Error> {
+    async fn run(mut self, _cx: JrConnectionCx<Role>) -> Result<(), crate::Error> {
         while let Some(ToolCall {
             params,
             mcp_cx,

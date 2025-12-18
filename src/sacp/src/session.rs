@@ -75,7 +75,7 @@ where
 /// Session builder for a new session request.
 /// Allows you to add MCP servers or set other details for this session.
 #[must_use = "use `send_request` to send the request"]
-pub struct SessionBuilder<Role, Responder: JrResponder = NullResponder>
+pub struct SessionBuilder<Role, Responder: JrResponder<Role> = NullResponder>
 where
     Role: HasEndpoint<Agent>,
 {
@@ -102,7 +102,7 @@ where
 impl<Role, Responder> SessionBuilder<Role, Responder>
 where
     Role: HasEndpoint<Agent>,
-    Responder: JrResponder,
+    Responder: JrResponder<Role>,
 {
     /// Add the MCP servers from the given registry to this session.
     pub fn with_mcp_server<R>(
@@ -110,7 +110,7 @@ where
         mcp_server: McpServer<Role, R>,
     ) -> Result<SessionBuilder<Role, ChainResponder<Responder, R>>, crate::Error>
     where
-        R: JrResponder,
+        R: JrResponder<Role>,
     {
         let (handler, responder) = mcp_server.into_handler_and_responder();
         self.dynamic_handler_registrations
@@ -138,23 +138,17 @@ where
             .connection
             .attach_session(response, self.dynamic_handler_registrations)?;
 
-        run_until(self.responder.run(), op(active_session)).await
+        run_until(
+            self.responder.run(self.connection.clone()),
+            op(active_session),
+        )
+        .await
     }
 
     /// Send the request to create the session.
-    ///
-    /// # Parameters
-    ///
-    /// * `responder_run` - A function that runs the responder. Typically you
-    ///   just want to pass `McpResponder::run`. This parameter is a bit of a hack
-    ///   that is required due to Rust language limitations
-    ///   (see [rust-lang/rust#109417](https://github.com/rust-lang/rust/issues/109417)).
-    pub async fn send_request<F>(
-        self,
-        responder_run: impl FnOnce(Responder) -> F,
-    ) -> Result<ActiveSession<Role>, crate::Error>
+    pub async fn send_request(self) -> Result<ActiveSession<Role>, crate::Error>
     where
-        F: Future<Output = Result<(), crate::Error>> + 'static + Send,
+        Responder: 'static,
     {
         let response = self
             .connection
@@ -162,7 +156,8 @@ where
             .block_task()
             .await?;
 
-        self.connection.spawn(responder_run(self.responder))?;
+        let cx = self.connection.clone();
+        self.connection.spawn(self.responder.run(cx))?;
 
         self.connection
             .attach_session(response, self.dynamic_handler_registrations)

@@ -34,7 +34,7 @@ impl HasEndpoint<McpServerEnd> for McpClientToServer {
 
 impl McpClientToServer {
     /// Create a connection builder for an MCP client talking to an MCP server.
-    pub fn builder<'any>() -> JrConnectionBuilder<'any, NullHandler<McpClientToServer>> {
+    pub fn builder() -> JrConnectionBuilder<NullHandler<McpClientToServer>> {
         JrConnectionBuilder::new(McpClientToServer)
     }
 }
@@ -58,7 +58,7 @@ impl HasEndpoint<McpClient> for McpServerToClient {
 
 impl McpServerToClient {
     /// Create a connection builder for an MCP server talking to an MCP client.
-    pub fn builder<'any>() -> JrConnectionBuilder<'any, NullHandler<McpServerToClient>> {
+    pub fn builder() -> JrConnectionBuilder<NullHandler<McpServerToClient>> {
         JrConnectionBuilder::new(McpServerToClient)
     }
 }
