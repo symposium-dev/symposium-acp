@@ -30,7 +30,7 @@ pub use crate::jsonrpc::handlers::NullHandler;
 use crate::jsonrpc::handlers::{MessageHandler, NotificationHandler, RequestHandler};
 use crate::jsonrpc::outgoing_actor::{OutgoingMessageTx, send_raw_message};
 use crate::jsonrpc::task_actor::{PendingTask, Task, TaskTx};
-use crate::mcp_server::McpServer;
+use crate::mcp_server::{McpMessageHandler, McpServer};
 use crate::role::{HasDefaultEndpoint, HasEndpoint, JrEndpoint, JrRole};
 use crate::{Agent, Client, Component};
 
@@ -917,13 +917,15 @@ impl<'scope, H: JrMessageHandler> JrConnectionBuilder<'scope, H> {
     /// ```
     pub fn with_mcp_server<Role: JrRole>(
         self,
-        registry: McpServer<Role>,
-    ) -> JrConnectionBuilder<'scope, ChainedHandler<H, McpServer<Role>>>
+        server: McpServer<'scope, Role>,
+    ) -> JrConnectionBuilder<'scope, ChainedHandler<H, McpMessageHandler<Role>>>
     where
         H: JrMessageHandler<Role = Role>,
         Role: HasEndpoint<Client> + HasEndpoint<Agent>,
     {
-        self.with_handler(registry)
+        let (message_handler, future) = server.into_handler_and_future();
+        self.with_handler(message_handler)
+            .with_spawned(move |_cx| future)
     }
 
     /// Connect these handlers to a transport layer.

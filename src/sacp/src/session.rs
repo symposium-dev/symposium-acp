@@ -1,15 +1,20 @@
 use std::path::Path;
 
 use agent_client_protocol_schema::{
-    NewSessionRequest, NewSessionResponse, PromptRequest, PromptResponse, SessionModeState,
-    StopReason,
+    ContentBlock, ContentChunk, NewSessionRequest, NewSessionResponse, PromptRequest,
+    PromptResponse, SessionModeState, SessionNotification, SessionUpdate, StopReason,
 };
-use futures::channel::mpsc;
+use futures::{
+    channel::{mpsc, oneshot},
+    future::BoxFuture,
+};
 
 use crate::{
     Agent, Handled, HasEndpoint, JrConnectionCx, JrMessageHandlerSend, JrRole, MessageCx,
-    jsonrpc::DynamicHandlerRegistration, mcp_server::McpServer, schema::SessionId,
-    util::MatchMessageFrom,
+    jsonrpc::DynamicHandlerRegistration,
+    mcp_server::McpServer,
+    schema::SessionId,
+    util::{MatchMessage, MatchMessageFrom, both, run_until},
 };
 
 impl<Role: JrRole> JrConnectionCx<Role>
@@ -17,7 +22,7 @@ where
     Role: HasEndpoint<Agent>,
 {
     /// Session builder for a new session request.
-    pub fn build_session(&self, cwd: impl AsRef<Path>) -> SessionBuilder<Role> {
+    pub fn build_session<'scope>(&self, cwd: impl AsRef<Path>) -> SessionBuilder<'scope, Role> {
         SessionBuilder::new(
             self,
             NewSessionRequest {
@@ -70,16 +75,17 @@ where
 /// Session builder for a new session request.
 /// Allows you to add MCP servers or set other details for this session.
 #[must_use = "use `send_request` to send the request"]
-pub struct SessionBuilder<Role>
+pub struct SessionBuilder<'scope, Role>
 where
     Role: HasEndpoint<Agent>,
 {
     connection: JrConnectionCx<Role>,
     request: NewSessionRequest,
     dynamic_handler_registrations: Vec<DynamicHandlerRegistration<Role>>,
+    future: BoxFuture<'scope, Result<(), crate::Error>>,
 }
 
-impl<Role> SessionBuilder<Role>
+impl<'scope, Role> SessionBuilder<'scope, Role>
 where
     Role: HasEndpoint<Agent>,
 {
@@ -88,23 +94,53 @@ where
             connection: connection.clone(),
             request,
             dynamic_handler_registrations: Default::default(),
+            future: Box::pin(std::future::ready(Ok(()))),
         }
     }
 
     /// Add the MCP servers from the given registry to this session.
-    pub fn with_mcp_server(mut self, mcp_server: &McpServer<Role>) -> Result<Self, crate::Error> {
+    pub fn with_mcp_server(
+        mut self,
+        mcp_server: McpServer<'scope, Role>,
+    ) -> Result<Self, crate::Error> {
+        let (handler, future) = mcp_server.into_handler_and_future();
         self.dynamic_handler_registrations
-            .push(mcp_server.add_to_new_session(&mut self.request, &self.connection)?);
+            .push(handler.add_to_new_session(&mut self.request, &self.connection)?);
+        self.future = Box::pin(both(future, self.future));
         Ok(self)
     }
 
     /// Send the request to create the session.
-    pub async fn send_request(self) -> Result<ActiveSession<Role>, crate::Error> {
+    pub async fn run_session<R>(
+        self,
+        op: impl AsyncFnOnce(ActiveSession<Role>) -> Result<R, crate::Error>,
+    ) -> Result<R, crate::Error> {
         let response = self
             .connection
             .send_request_to(Agent, self.request)
             .block_task()
             .await?;
+
+        let active_session = self
+            .connection
+            .attach_session(response, self.dynamic_handler_registrations)?;
+
+        run_until(self.future, op(active_session)).await
+    }
+
+    /// Send the request to create the session.
+    pub async fn send_request(self) -> Result<ActiveSession<Role>, crate::Error>
+    where
+        'scope: 'static,
+    {
+        let response = self
+            .connection
+            .send_request_to(Agent, self.request)
+            .block_task()
+            .await?;
+
+        self.connection.spawn(self.future)?;
+
         self.connection
             .attach_session(response, self.dynamic_handler_registrations)
     }
@@ -131,6 +167,7 @@ where
 
 /// Incoming message from the agent
 #[non_exhaustive]
+#[derive(Debug)]
 pub enum SessionMessage {
     /// Periodic updates with new content, tool requests, etc.
     /// Use [`MatchMessage`] to match on the message type.
@@ -199,6 +236,33 @@ where
             })?;
 
         Ok(message)
+    }
+
+    /// Read all updates until the end of the turn and create a string.
+    /// Ignores non-text updates.
+    pub async fn read_to_string(&mut self) -> Result<String, crate::Error> {
+        let mut output = String::new();
+        loop {
+            let update = self.read_update().await?;
+            tracing::trace!(?update, "read_to_string update");
+            match update {
+                SessionMessage::SessionMessage(message_cx) => MatchMessage::new(message_cx)
+                    .if_notification(async |notif: SessionNotification| match notif.update {
+                        SessionUpdate::AgentMessageChunk(ContentChunk {
+                            content: ContentBlock::Text(text),
+                            meta: _,
+                        }) => {
+                            output.push_str(&text.text);
+                            Ok(())
+                        }
+                        _ => Ok(()),
+                    })
+                    .await
+                    .otherwise_ignore()?,
+                SessionMessage::StopReason(_stop_reason) => break,
+            }
+        }
+        Ok(output)
     }
 }
 

@@ -220,7 +220,7 @@ impl HasEndpoint<UntypedEndpoint> for UntypedRole {
 
 impl UntypedRole {
     /// Create a connection builder with an untyped role.
-    pub fn builder() -> JrConnectionBuilder<'static, NullHandler<UntypedRole>> {
+    pub fn builder<'any>() -> JrConnectionBuilder<'any, NullHandler<UntypedRole>> {
         JrConnectionBuilder::new(UntypedRole)
     }
 }
@@ -516,42 +516,42 @@ impl HasEndpoint<Agent> for ProxyToConductor {
 
 impl ClientToAgent {
     /// Create a connection builder for a client talking to an agent.
-    pub fn builder() -> JrConnectionBuilder<'static, NullHandler<ClientToAgent>> {
+    pub fn builder<'any>() -> JrConnectionBuilder<'any, NullHandler<ClientToAgent>> {
         JrConnectionBuilder::new(ClientToAgent)
     }
 }
 
 impl AgentToClient {
     /// Create a connection builder for an agent talking to a client.
-    pub fn builder() -> JrConnectionBuilder<'static, NullHandler<AgentToClient>> {
+    pub fn builder<'any>() -> JrConnectionBuilder<'any, NullHandler<AgentToClient>> {
         JrConnectionBuilder::new(AgentToClient)
     }
 }
 
 impl ProxyToConductor {
     /// Create a connection builder for a proxy talking to a conductor.
-    pub fn builder() -> JrConnectionBuilder<'static, NullHandler<ProxyToConductor>> {
+    pub fn builder<'any>() -> JrConnectionBuilder<'any, NullHandler<ProxyToConductor>> {
         JrConnectionBuilder::new(ProxyToConductor)
     }
 }
 
 impl ConductorToProxy {
     /// Create a connection builder for a conductor talking to a proxy.
-    pub fn builder() -> JrConnectionBuilder<'static, NullHandler<ConductorToProxy>> {
+    pub fn builder<'any>() -> JrConnectionBuilder<'any, NullHandler<ConductorToProxy>> {
         JrConnectionBuilder::new(ConductorToProxy)
     }
 }
 
 impl ConductorToAgent {
     /// Create a connection builder for a conductor talking to an agent.
-    pub fn builder() -> JrConnectionBuilder<'static, NullHandler<ConductorToAgent>> {
+    pub fn builder<'any>() -> JrConnectionBuilder<'any, NullHandler<ConductorToAgent>> {
         JrConnectionBuilder::new(ConductorToAgent)
     }
 }
 
 impl ConductorToClient {
     /// Create a connection builder for a conductor talking to a client.
-    pub fn builder() -> JrConnectionBuilder<'static, NullHandler<ConductorToClient>> {
+    pub fn builder<'any>() -> JrConnectionBuilder<'any, NullHandler<ConductorToClient>> {
         JrConnectionBuilder::new(ConductorToClient)
     }
 }

@@ -55,5 +55,5 @@ mod tool;
 pub use builder::McpServerBuilder;
 pub use connect::McpServerConnect;
 pub use context::McpContext;
-pub use server::McpServer;
+pub use server::{McpMessageHandler, McpServer};
 pub use tool::McpTool;

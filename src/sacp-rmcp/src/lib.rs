@@ -37,7 +37,7 @@ where
     fn from_rmcp<S>(
         name: impl ToString,
         new_fn: impl Fn() -> S + Send + Sync + 'static,
-    ) -> McpServer<Role>
+    ) -> McpServer<'static, Role>
     where
         S: rmcp::Service<rmcp::RoleServer>,
     {
@@ -62,14 +62,17 @@ where
             }
         }
 
-        McpServer::new(RmcpServer {
-            name: name.to_string(),
-            new_fn,
-        })
+        McpServer::new(
+            RmcpServer {
+                name: name.to_string(),
+                new_fn,
+            },
+            Box::pin(futures::future::ready(Ok(()))),
+        )
     }
 }
 
-impl<Role: JrRole> McpServerExt<Role> for McpServer<Role> where Role: HasEndpoint<Agent> {}
+impl<Role: JrRole> McpServerExt<Role> for McpServer<'_, Role> where Role: HasEndpoint<Agent> {}
 
 /// Component wrapper for rmcp services.
 struct RmcpServerComponent<S> {

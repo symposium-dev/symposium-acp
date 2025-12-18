@@ -49,14 +49,14 @@ fn create_echo_proxy() -> Result<sacp::DynComponent, sacp::Error> {
 }
 
 struct ProxyWithEchoServer {
-    mcp_server: McpServer<ProxyToConductor>,
+    mcp_server: McpServer<'static, ProxyToConductor>,
 }
 
 impl Component for ProxyWithEchoServer {
     async fn serve(self, client: impl Component) -> Result<(), sacp::Error> {
         ProxyToConductor::builder()
             .name("echo-proxy")
-            .with_handler(self.mcp_server)
+            .with_mcp_server(self.mcp_server)
             .serve(client)
             .await
     }
