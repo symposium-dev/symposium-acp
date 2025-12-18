@@ -42,17 +42,6 @@ impl Task {
         }
     }
 
-    /// Return a new task that executes with the given name
-    fn named(self, name: Option<String>) -> Task {
-        if let Some(name) = name {
-            Task {
-                future: crate::util::instrumented_with_connection_name(name, self.future).boxed(),
-            }
-        } else {
-            self
-        }
-    }
-
     pub fn spawn(self, task_tx: &TaskTx) -> Result<(), crate::Error> {
         task_tx
             .unbounded_send(self)
@@ -61,9 +50,10 @@ impl Task {
     }
 }
 
-/// The "task actor" manages other tasks
-pub(super) async fn task_actor(
+/// The "task actor" manages dynamically spawned tasks.
+pub(super) async fn task_actor<Role: JrRole>(
     mut task_rx: mpsc::UnboundedReceiver<Task>,
+    _cx: &JrConnectionCx<Role>,
 ) -> Result<(), crate::Error> {
     let mut futures = FuturesUnordered::new();
 
@@ -97,47 +87,5 @@ pub(super) async fn task_actor(
                 }
             }
         }
-    }
-}
-
-pub(crate) struct PendingTask<Role: JrRole> {
-    task_fn: Box<dyn PendingTaskFn<Role>>,
-}
-
-impl<Role: JrRole> PendingTask<Role> {
-    pub fn new<Fut>(
-        location: &'static Location<'static>,
-        task_function: impl FnOnce(JrConnectionCx<Role>) -> Fut + Send + 'static,
-    ) -> Self
-    where
-        Fut: Future<Output = Result<(), crate::Error>> + Send + 'static,
-    {
-        PendingTask {
-            task_fn: Box::new(move |cx| Task::new(location, task_function(cx))),
-        }
-    }
-
-    /// Return a new pending task that will execute with the given name
-    pub fn named(self, name: Option<String>) -> Self {
-        PendingTask {
-            task_fn: Box::new(move |cx| self.into_task(cx).named(name)),
-        }
-    }
-
-    pub fn into_task(self, cx: JrConnectionCx<Role>) -> Task {
-        self.task_fn.into_task(cx)
-    }
-}
-
-trait PendingTaskFn<Role: JrRole>: 'static + Send {
-    fn into_task(self: Box<Self>, cx: JrConnectionCx<Role>) -> Task;
-}
-
-impl<Role: JrRole, F> PendingTaskFn<Role> for F
-where
-    F: FnOnce(JrConnectionCx<Role>) -> Task + 'static + Send,
-{
-    fn into_task(self: Box<Self>, cx: JrConnectionCx<Role>) -> Task {
-        (*self)(cx)
     }
 }

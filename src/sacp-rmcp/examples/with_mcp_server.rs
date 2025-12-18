@@ -92,7 +92,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     ProxyToConductor::builder()
         .name("mcp-server-proxy")
         // Register the MCP server as a handler
-        .with_handler(mcp_server)
+        .with_mcp_server(mcp_server)
         // Start serving
         .connect_to(sacp::ByteStreams::new(
             tokio::io::stdout().compat_write(),

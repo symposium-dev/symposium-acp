@@ -260,6 +260,14 @@ impl MatchMessage {
             Err(err) => Err(err),
         }
     }
+
+    /// Handle messages that didn't match any previous handler.
+    pub fn otherwise_ignore(self) -> Result<(), crate::Error> {
+        match self.state {
+            Ok(_) => Ok(()),
+            Err(err) => Err(err),
+        }
+    }
 }
 
 /// Role-aware helper for pattern-matching on untyped JSON-RPC requests.

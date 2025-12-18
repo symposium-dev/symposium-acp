@@ -117,14 +117,14 @@ impl ElizaAgent {
     ) -> Result<(), sacp::Error> {
         let session_id = request.session_id.clone();
 
+        // Extract text from the prompt
+        let input_text = extract_text_from_prompt(&request.prompt);
+
         tracing::debug!(
-            "Processing prompt in session {}: {} content blocks",
+            "Processing prompt in session {}: {input_text:?} over {} content blocks",
             session_id,
             request.prompt.len()
         );
-
-        // Extract text from the prompt
-        let input_text = extract_text_from_prompt(&request.prompt);
 
         // Check for MCP commands first before invoking Eliza
         let final_response = if let Some(server_name) = parse_list_tools_command(&input_text) {

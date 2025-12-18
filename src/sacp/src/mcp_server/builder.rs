@@ -1,8 +1,12 @@
 //! MCP server builder for creating MCP servers.
 
-use std::{marker::PhantomData, pin::pin, sync::Arc};
+use std::{pin::pin, sync::Arc};
 
-use futures::future::Either;
+use futures::{
+    SinkExt,
+    channel::{mpsc, oneshot},
+    future::{BoxFuture, Either},
+};
 use fxhash::FxHashMap;
 use rmcp::{
     ErrorData, ServerHandler,
@@ -15,8 +19,12 @@ use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
 
 use super::{McpContext, McpTool};
 use crate::{
-    Agent, BoxFuture, ByteStreams, Component, DynComponent, HasEndpoint, JrRole,
-    mcp_server::{McpServer, McpServerConnect},
+    Agent, ByteStreams, Component, DynComponent, HasEndpoint, JrRole,
+    jsonrpc::responder::{ChainResponder, JrResponder, NullResponder},
+    mcp_server::{
+        McpServer, McpServerConnect,
+        responder::{ToolCall, ToolFnResponder},
+    },
 };
 
 /// Builder for creating MCP servers with tools.
@@ -38,20 +46,24 @@ use crate::{
 ///     )
 ///     .build();
 /// ```
-#[derive(Clone)]
-pub struct McpServerBuilder<Role: JrRole>
+pub struct McpServerBuilder<Role: JrRole, Responder: JrResponder<Role> = NullResponder>
 where
     Role: HasEndpoint<Agent>,
 {
-    #[expect(dead_code)]
     role: Role,
     name: String,
+    data: McpServerData<Role>,
+    responder: Responder,
+}
+
+#[derive(Default)]
+struct McpServerData<Role: JrRole> {
     instructions: Option<String>,
     tool_models: Vec<rmcp::model::Tool>,
     tools: FxHashMap<String, Arc<dyn ErasedMcpTool<Role>>>,
 }
 
-impl<Role: JrRole> McpServerBuilder<Role>
+impl<Role: JrRole> McpServerBuilder<Role, NullResponder>
 where
     Role: HasEndpoint<Agent>,
 {
@@ -59,24 +71,46 @@ where
         Self {
             name: name,
             role: Role::default(),
-            instructions: Default::default(),
-            tool_models: Default::default(),
-            tools: Default::default(),
+            data: McpServerData::default(),
+            responder: NullResponder::default(),
         }
     }
+}
 
+impl<Role: JrRole, Responder: JrResponder<Role>> McpServerBuilder<Role, Responder>
+where
+    Role: HasEndpoint<Agent>,
+{
     /// Set the server instructions that are provided to the client.
     pub fn instructions(mut self, instructions: impl ToString) -> Self {
-        self.instructions = Some(instructions.to_string());
+        self.data.instructions = Some(instructions.to_string());
         self
     }
 
     /// Add a tool to the server.
     pub fn tool(mut self, tool: impl McpTool<Role> + 'static) -> Self {
         let tool_model = make_tool_model(&tool);
-        self.tool_models.push(tool_model);
-        self.tools.insert(tool.name(), make_erased_mcp_tool(tool));
+        self.data.tool_models.push(tool_model);
+        self.data
+            .tools
+            .insert(tool.name(), make_erased_mcp_tool(tool));
         self
+    }
+
+    /// Private fn: adds the tool but also adds a responder that will be
+    /// run while the MCP server is active.
+    fn tool_with_responder<R: JrResponder<Role>>(
+        self,
+        tool: impl McpTool<Role> + 'static,
+        tool_responder: R,
+    ) -> McpServerBuilder<Role, ChainResponder<Responder, R>> {
+        let this = self.tool(tool);
+        McpServerBuilder {
+            role: this.role,
+            name: this.name,
+            data: this.data,
+            responder: ChainResponder::new(this.responder, tool_responder),
+        }
     }
 
     /// Convenience wrapper for defining a tool without having to create a struct.
@@ -86,55 +120,40 @@ where
     /// * `name`: The name of the tool.
     /// * `description`: The description of the tool.
     /// * `func`: The function that implements the tool. Use an async closure like `async |args, cx| { .. }`.
-    /// * `to_future_hack`: A function that converts the tool function into a future.
-    ///   You should always use the [`sacp::tool_fn!()`](crate::tool_fn) macro here.
-    ///   This is needed to sidestep current Rust language limitations.
     ///
     /// # Examples
     ///
     /// ```rust,ignore
-    /// McpServer::new()
+    /// McpServer::builder("my-server")
     ///     .tool_fn(
     ///         "greet",
     ///         "Greet someone by name",
     ///         async |input: GreetInput, _cx| Ok(format!("Hello, {}!", input.name)),
-    ///         sacp::tool_fn!(),
     ///     )
     /// ```
-    pub fn tool_fn<P, R, F, H>(
+    pub fn tool_fn<P, R, F, Fut>(
         self,
         name: impl ToString,
         description: impl ToString,
         func: F,
-        to_future_hack: H,
-    ) -> Self
+    ) -> McpServerBuilder<Role, ChainResponder<Responder, ToolFnResponder<F, P, R, Role>>>
     where
         P: JsonSchema + DeserializeOwned + 'static + Send,
         R: JsonSchema + Serialize + 'static + Send,
-        F: AsyncFn(P, McpContext<Role>) -> Result<R, crate::Error> + Send + Sync + 'static,
-        H: Fn(&F, P, McpContext<Role>) -> BoxFuture<'_, Result<R, crate::Error>>
-            + Send
-            + Sync
-            + 'static,
+        F: FnMut(P, McpContext<Role>) -> Fut + Send + Sync,
+        Fut: std::future::Future<Output = Result<R, crate::Error>> + Send,
     {
-        struct ToolFnTool<P, R, F, H> {
+        struct ToolFnTool<P, R, Role: JrRole> {
             name: String,
             description: String,
-            func: F,
-            to_future_hack: H,
-            phantom: PhantomData<fn(P) -> R>,
+            call_tx: mpsc::Sender<ToolCall<P, R, Role>>,
         }
 
-        impl<P, R, F, H, Role> McpTool<Role> for ToolFnTool<P, R, F, H>
+        impl<P, R, Role> McpTool<Role> for ToolFnTool<P, R, Role>
         where
             Role: JrRole,
             P: JsonSchema + DeserializeOwned + 'static + Send,
             R: JsonSchema + Serialize + 'static + Send,
-            F: AsyncFn(P, McpContext<Role>) -> Result<R, crate::Error> + Send + Sync + 'static,
-            H: Fn(&F, P, McpContext<Role>) -> BoxFuture<'_, Result<R, crate::Error>>
-                + Send
-                + Sync
-                + 'static,
         {
             type Input = P;
             type Output = R;
@@ -147,28 +166,51 @@ where
                 self.description.clone()
             }
 
-            async fn call_tool(&self, params: P, cx: McpContext<Role>) -> Result<R, crate::Error> {
-                (self.to_future_hack)(&self.func, params, cx).await
+            async fn call_tool(
+                &self,
+                params: P,
+                mcp_cx: McpContext<Role>,
+            ) -> Result<R, crate::Error> {
+                let (result_tx, result_rx) = oneshot::channel();
+
+                self.call_tx
+                    .clone()
+                    .send(ToolCall {
+                        params,
+                        mcp_cx,
+                        result_tx,
+                    })
+                    .await
+                    .map_err(crate::util::internal_error)?;
+
+                result_rx.await.map_err(crate::util::internal_error)?
             }
         }
 
-        self.tool(ToolFnTool {
-            name: name.to_string(),
-            description: description.to_string(),
-            func,
-            to_future_hack,
-            phantom: PhantomData::<fn(P) -> R>,
-        })
+        let (call_tx, call_rx) = mpsc::channel(128);
+        self.tool_with_responder(
+            ToolFnTool {
+                name: name.to_string(),
+                description: description.to_string(),
+                call_tx,
+            },
+            ToolFnResponder { func, call_rx },
+        )
     }
 
     /// Create an MCP server from this builder.
     ///
     /// This builder can be attached to new sessions (see [`SessionBuilder::with_mcp_server`])
     /// or served up as part of a proxy (see [`JrConnectionBuilder::with_mcp_server`]).
-    pub fn build(self) -> McpServer<Role> {
-        McpServer::new(McpServerBuilt {
-            builder: Arc::new(self),
-        })
+    pub fn build(self) -> McpServer<Role, Responder> {
+        McpServer::new(
+            McpServerBuilt {
+                role: self.role,
+                name: self.name,
+                data: Arc::new(self.data),
+            },
+            self.responder,
+        )
     }
 }
 
@@ -176,20 +218,23 @@ struct McpServerBuilt<Role: JrRole>
 where
     Role: HasEndpoint<Agent>,
 {
-    builder: Arc<McpServerBuilder<Role>>,
+    #[expect(dead_code)]
+    role: Role,
+    name: String,
+    data: Arc<McpServerData<Role>>,
 }
 
-impl<Role: JrRole> McpServerConnect<Role> for McpServerBuilt<Role>
+impl<'scope, Role: JrRole> McpServerConnect<Role> for McpServerBuilt<Role>
 where
     Role: HasEndpoint<Agent>,
 {
     fn name(&self) -> String {
-        self.builder.name.clone()
+        self.name.clone()
     }
 
     fn connect(&self, mcp_cx: McpContext<Role>) -> DynComponent {
         DynComponent::new(McpServerConnection {
-            builder: self.builder.clone(),
+            data: self.data.clone(),
             mcp_cx,
         })
     }
@@ -200,7 +245,7 @@ pub(crate) struct McpServerConnection<Role: JrRole>
 where
     Role: HasEndpoint<Agent>,
 {
-    builder: Arc<McpServerBuilder<Role>>,
+    data: Arc<McpServerData<Role>>,
     mcp_cx: McpContext<Role>,
 }
 
@@ -247,7 +292,7 @@ where
         context: rmcp::service::RequestContext<rmcp::RoleServer>,
     ) -> Result<CallToolResult, ErrorData> {
         // Lookup the tool definition, erroring if not found
-        let Some(tool) = self.builder.tools.get(&request.name[..]) else {
+        let Some(tool) = self.data.tools.get(&request.name[..]) else {
             return Err(rmcp::model::ErrorData::invalid_params(
                 format!("tool `{}` not found", request.name),
                 None,
@@ -284,7 +329,7 @@ where
     ) -> Result<rmcp::model::ListToolsResult, ErrorData> {
         // Just return all tools
         Ok(ListToolsResult::with_all_items(
-            self.builder.tool_models.clone(),
+            self.data.tool_models.clone(),
         ))
     }
 
@@ -296,7 +341,7 @@ where
                 .enable_tools()
                 .build(),
             server_info: rmcp::model::Implementation::default(),
-            instructions: self.builder.instructions.clone(),
+            instructions: self.data.instructions.clone(),
         }
     }
 }

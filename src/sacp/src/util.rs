@@ -63,3 +63,38 @@ pub fn into_jsonrpc_error(err: crate::Error) -> crate::jsonrpcmsg::Error {
         data: err.data,
     }
 }
+
+/// Run two fallible futures concurrently, returning when both complete successfully
+/// or when either fails.
+pub async fn both<E>(
+    a: impl Future<Output = Result<(), E>>,
+    b: impl Future<Output = Result<(), E>>,
+) -> Result<(), E> {
+    let ((), ()) = futures::future::try_join(a, b).await?;
+    Ok(())
+}
+
+/// Run `background` until `foreground` completes.
+///
+/// Returns the result of `foreground`. If `background` errors before
+/// `foreground` completes, the error is propagated. If `background`
+/// completes with `Ok(())`, we continue waiting for `foreground`.
+pub async fn run_until<T, E>(
+    background: impl Future<Output = Result<(), E>>,
+    foreground: impl Future<Output = Result<T, E>>,
+) -> Result<T, E> {
+    use futures::future::{Either, select};
+    use std::pin::pin;
+
+    match select(pin!(background), pin!(foreground)).await {
+        Either::Left((bg_result, fg_future)) => {
+            // Background finished first
+            bg_result?; // propagate error, or if Ok(()), keep waiting
+            fg_future.await
+        }
+        Either::Right((fg_result, _bg_future)) => {
+            // Foreground finished first, drop background
+            fg_result
+        }
+    }
+}
