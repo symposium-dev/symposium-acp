@@ -22,7 +22,7 @@
 
 use rmcp::ServiceExt;
 use sacp::mcp_server::{McpContext, McpServer, McpServerConnect};
-use sacp::{Agent, ByteStreams, Component, DynComponent, HasEndpoint, JrRole};
+use sacp::{Agent, ByteStreams, Component, DynComponent, HasEndpoint, JrRole, NullResponder};
 use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
 
 pub trait McpServerExt<Role: JrRole>
@@ -37,7 +37,7 @@ where
     fn from_rmcp<S>(
         name: impl ToString,
         new_fn: impl Fn() -> S + Send + Sync + 'static,
-    ) -> McpServer<'static, Role>
+    ) -> McpServer<Role, NullResponder>
     where
         S: rmcp::Service<rmcp::RoleServer>,
     {
@@ -67,12 +67,12 @@ where
                 name: name.to_string(),
                 new_fn,
             },
-            Box::pin(futures::future::ready(Ok(()))),
+            NullResponder,
         )
     }
 }
 
-impl<Role: JrRole> McpServerExt<Role> for McpServer<'_, Role> where Role: HasEndpoint<Agent> {}
+impl<Role: JrRole> McpServerExt<Role> for McpServer<Role> where Role: HasEndpoint<Agent> {}
 
 /// Component wrapper for rmcp services.
 struct RmcpServerComponent<S> {

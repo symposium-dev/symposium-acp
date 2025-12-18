@@ -82,7 +82,6 @@ impl Component for ProxyWithMcpAndHandler {
                         result: format!("Echo: {}", params.message),
                     })
                 },
-                sacp::tool_fn!(),
             )
             .build();
 

@@ -40,7 +40,6 @@ fn create_echo_proxy() -> Result<sacp::DynComponent, sacp::Error> {
                     acp_url: context.acp_url(),
                 })
             },
-            sacp::tool_fn!(),
         )
         .build();
 
@@ -48,11 +47,11 @@ fn create_echo_proxy() -> Result<sacp::DynComponent, sacp::Error> {
     Ok(sacp::DynComponent::new(ProxyWithEchoServer { mcp_server }))
 }
 
-struct ProxyWithEchoServer {
-    mcp_server: McpServer<'static, ProxyToConductor>,
+struct ProxyWithEchoServer<R: sacp::JrResponder> {
+    mcp_server: McpServer<ProxyToConductor, R>,
 }
 
-impl Component for ProxyWithEchoServer {
+impl<R: sacp::JrResponder + 'static> Component for ProxyWithEchoServer<R> {
     async fn serve(self, client: impl Component) -> Result<(), sacp::Error> {
         ProxyToConductor::builder()
             .name("echo-proxy")

@@ -112,7 +112,10 @@ pub async fn prompt_with_callback(
                 .block_task()
                 .await?;
 
-            let mut session = cx.build_session(PathBuf::from(".")).send_request().await?;
+            let mut session = cx
+                .build_session(PathBuf::from("."))
+                .send_request(sacp::JrResponder::run)
+                .await?;
 
             session.send_prompt(prompt_text)?;
 

@@ -14,13 +14,14 @@ use uuid::Uuid;
 use boxfnonce::SendBoxFnOnce;
 use futures::channel::{mpsc, oneshot};
 use futures::future::{self, BoxFuture, Either};
-use futures::{AsyncRead, AsyncWrite, FutureExt, StreamExt};
+use futures::{AsyncRead, AsyncWrite, StreamExt};
 
 mod dynamic_handler;
 pub(crate) mod handlers;
 mod incoming_actor;
 mod outgoing_actor;
 mod reply_actor;
+pub(crate) mod responder;
 mod task_actor;
 mod transport_actor;
 
@@ -29,6 +30,7 @@ use crate::jsonrpc::dynamic_handler::DynamicHandlerMessage;
 pub use crate::jsonrpc::handlers::NullHandler;
 use crate::jsonrpc::handlers::{MessageHandler, NotificationHandler, RequestHandler};
 use crate::jsonrpc::outgoing_actor::{OutgoingMessageTx, send_raw_message};
+use crate::jsonrpc::responder::{ChainResponder, JrResponder, NullResponder};
 use crate::jsonrpc::task_actor::{PendingTask, Task, TaskTx};
 use crate::mcp_server::{McpMessageHandler, McpServer};
 use crate::role::{HasDefaultEndpoint, HasEndpoint, JrEndpoint, JrRole};
@@ -531,17 +533,20 @@ impl<H: JrMessageHandlerSend> JrMessageHandler for H {
 /// # }
 /// ```
 #[must_use]
-pub struct JrConnectionBuilder<'scope, H: JrMessageHandler> {
+pub struct JrConnectionBuilder<'scope, H: JrMessageHandler, R: JrResponder = NullResponder> {
     name: Option<String>,
 
     /// Handler for incoming messages.
     handler: H,
 
+    /// Responder for background tasks.
+    responder: R,
+
     /// Pending tasks
     pending_tasks: Vec<PendingTask<'scope, H::Role>>,
 }
 
-impl<Role: JrRole> JrConnectionBuilder<'_, NullHandler<Role>> {
+impl<Role: JrRole> JrConnectionBuilder<'_, NullHandler<Role>, NullResponder> {
     /// Create a new JrConnection with the given role.
     /// This type follows a builder pattern; use other methods to configure and then invoke
     /// [`Self::serve`] (to use as a server) or [`Self::with_client`] to use as a client.
@@ -549,23 +554,25 @@ impl<Role: JrRole> JrConnectionBuilder<'_, NullHandler<Role>> {
         Self {
             name: Default::default(),
             handler: NullHandler::new(role),
+            responder: NullResponder,
             pending_tasks: Default::default(),
         }
     }
 }
 
-impl<H: JrMessageHandler> JrConnectionBuilder<'_, H> {
+impl<H: JrMessageHandler> JrConnectionBuilder<'_, H, NullResponder> {
     /// Create a new connection builder with the given handler.
     pub fn new_with(handler: H) -> Self {
         Self {
             name: Default::default(),
             handler,
+            responder: NullResponder,
             pending_tasks: Default::default(),
         }
     }
 }
 
-impl<'scope, H: JrMessageHandler> JrConnectionBuilder<'scope, H> {
+impl<'scope, H: JrMessageHandler, R: JrResponder> JrConnectionBuilder<'scope, H, R> {
     /// Set the "name" of this connection -- used only for debugging logs.
     pub fn name(mut self, name: impl ToString) -> Self {
         self.name = Some(name.to_string());
@@ -576,12 +583,13 @@ impl<'scope, H: JrMessageHandler> JrConnectionBuilder<'scope, H> {
     ///
     /// Prefer [`Self::on_receive_request`] or [`Self::on_receive_notification`].
     /// This is a low-level method that is not intended for general use.
-    pub fn with_connection_builder<H1>(
+    pub fn with_connection_builder<H1, R1>(
         mut self,
-        other: JrConnectionBuilder<'scope, H1>,
-    ) -> JrConnectionBuilder<'scope, ChainedHandler<H, NamedHandler<H1>>>
+        other: JrConnectionBuilder<'scope, H1, R1>,
+    ) -> JrConnectionBuilder<'scope, ChainedHandler<H, NamedHandler<H1>>, ChainResponder<R, R1>>
     where
         H1: JrMessageHandler<Role = H::Role>,
+        R1: JrResponder,
     {
         self.pending_tasks.extend(
             other
@@ -596,6 +604,7 @@ impl<'scope, H: JrMessageHandler> JrConnectionBuilder<'scope, H> {
                 self.handler,
                 NamedHandler::new(other.name, other.handler),
             ),
+            responder: ChainResponder::new(self.responder, other.responder),
             pending_tasks: self.pending_tasks,
         }
     }
@@ -604,13 +613,33 @@ impl<'scope, H: JrMessageHandler> JrConnectionBuilder<'scope, H> {
     ///
     /// Prefer [`Self::on_receive_request`] or [`Self::on_receive_notification`].
     /// This is a low-level method that is not intended for general use.
-    pub fn with_handler<H1>(self, handler: H1) -> JrConnectionBuilder<'scope, ChainedHandler<H, H1>>
+    pub fn with_handler<H1>(
+        self,
+        handler: H1,
+    ) -> JrConnectionBuilder<'scope, ChainedHandler<H, H1>, R>
     where
         H1: JrMessageHandler<Role = H::Role>,
     {
         JrConnectionBuilder {
             name: self.name,
             handler: ChainedHandler::new(self.handler, handler),
+            responder: self.responder,
+            pending_tasks: self.pending_tasks,
+        }
+    }
+
+    /// Add a new [`JrResponder`] to the chain.
+    pub fn with_responder<R1>(
+        self,
+        responder: R1,
+    ) -> JrConnectionBuilder<'scope, H, ChainResponder<R, R1>>
+    where
+        R1: JrResponder,
+    {
+        JrConnectionBuilder {
+            name: self.name,
+            handler: self.handler,
+            responder: ChainResponder::new(self.responder, responder),
             pending_tasks: self.pending_tasks,
         }
     }
@@ -674,6 +703,7 @@ impl<'scope, H: JrMessageHandler> JrConnectionBuilder<'scope, H> {
             H,
             MessageHandler<H::Role, <H::Role as JrRole>::HandlerEndpoint, Req, Notif, F>,
         >,
+        R,
     >
     where
         H::Role: HasDefaultEndpoint,
@@ -734,6 +764,7 @@ impl<'scope, H: JrMessageHandler> JrConnectionBuilder<'scope, H> {
     ) -> JrConnectionBuilder<
         'scope,
         ChainedHandler<H, RequestHandler<H::Role, <H::Role as JrRole>::HandlerEndpoint, Req, F>>,
+        R,
     >
     where
         H::Role: HasDefaultEndpoint,
@@ -798,6 +829,7 @@ impl<'scope, H: JrMessageHandler> JrConnectionBuilder<'scope, H> {
             H,
             NotificationHandler<H::Role, <H::Role as JrRole>::HandlerEndpoint, Notif, F>,
         >,
+        R,
     >
     where
         H::Role: HasDefaultEndpoint,
@@ -826,7 +858,11 @@ impl<'scope, H: JrMessageHandler> JrConnectionBuilder<'scope, H> {
         self,
         endpoint: End,
         op: F,
-    ) -> JrConnectionBuilder<'scope, ChainedHandler<H, MessageHandler<H::Role, End, Req, Notif, F>>>
+    ) -> JrConnectionBuilder<
+        'scope,
+        ChainedHandler<H, MessageHandler<H::Role, End, Req, Notif, F>>,
+        R,
+    >
     where
         H::Role: HasEndpoint<End>,
         F: AsyncFnMut(MessageCx<Req, Notif>, JrConnectionCx<H::Role>) -> Result<T, crate::Error>
@@ -862,7 +898,7 @@ impl<'scope, H: JrMessageHandler> JrConnectionBuilder<'scope, H> {
         self,
         endpoint: End,
         op: F,
-    ) -> JrConnectionBuilder<'scope, ChainedHandler<H, RequestHandler<H::Role, End, Req, F>>>
+    ) -> JrConnectionBuilder<'scope, ChainedHandler<H, RequestHandler<H::Role, End, Req, F>>, R>
     where
         H::Role: HasEndpoint<End>,
         F: AsyncFnMut(
@@ -889,7 +925,11 @@ impl<'scope, H: JrMessageHandler> JrConnectionBuilder<'scope, H> {
         self,
         endpoint: End,
         op: F,
-    ) -> JrConnectionBuilder<'scope, ChainedHandler<H, NotificationHandler<H::Role, End, Notif, F>>>
+    ) -> JrConnectionBuilder<
+        'scope,
+        ChainedHandler<H, NotificationHandler<H::Role, End, Notif, F>>,
+        R,
+    >
     where
         H::Role: HasEndpoint<End>,
         F: AsyncFnMut(Notif, JrConnectionCx<H::Role>) -> Result<T, crate::Error> + Send,
@@ -915,17 +955,21 @@ impl<'scope, H: JrMessageHandler> JrConnectionBuilder<'scope, H> {
     ///     .serve(connection)
     ///     .await?;
     /// ```
-    pub fn with_mcp_server<Role: JrRole>(
+    pub fn with_mcp_server<Role: JrRole, McpR: JrResponder>(
         self,
-        server: McpServer<'scope, Role>,
-    ) -> JrConnectionBuilder<'scope, ChainedHandler<H, McpMessageHandler<Role>>>
+        server: McpServer<Role, McpR>,
+    ) -> JrConnectionBuilder<
+        'scope,
+        ChainedHandler<H, McpMessageHandler<Role>>,
+        ChainResponder<R, McpR>,
+    >
     where
         H: JrMessageHandler<Role = Role>,
         Role: HasEndpoint<Client> + HasEndpoint<Agent>,
     {
-        let (message_handler, future) = server.into_handler_and_future();
+        let (message_handler, mcp_responder) = server.into_handler_and_responder();
         self.with_handler(message_handler)
-            .with_spawned(move |_cx| future)
+            .with_responder(mcp_responder)
     }
 
     /// Connect these handlers to a transport layer.
@@ -933,10 +977,11 @@ impl<'scope, H: JrMessageHandler> JrConnectionBuilder<'scope, H> {
     pub fn connect_to(
         self,
         transport: impl Component + 'static,
-    ) -> Result<JrConnection<'scope, H>, crate::Error> {
+    ) -> Result<JrConnection<'scope, H, R>, crate::Error> {
         let Self {
             name,
             handler,
+            responder,
             pending_tasks,
         } = self;
 
@@ -967,6 +1012,7 @@ impl<'scope, H: JrMessageHandler> JrConnectionBuilder<'scope, H> {
             transport_incoming_rx,
             dynamic_handler_rx,
             handler,
+            responder,
         })
     }
 
@@ -1086,7 +1132,7 @@ impl<'scope, H: JrMessageHandler> JrConnectionBuilder<'scope, H> {
 ///
 /// Most users won't construct this directly - instead use `JrConnectionBuilder::connect_to()` or
 /// `JrConnectionBuilder::serve()` for convenience.
-pub struct JrConnection<'scope, H: JrMessageHandler> {
+pub struct JrConnection<'scope, H: JrMessageHandler, R: JrResponder = NullResponder> {
     cx: JrConnectionCx<H::Role>,
     name: Option<String>,
     outgoing_rx: mpsc::UnboundedReceiver<OutgoingMessage>,
@@ -1096,9 +1142,10 @@ pub struct JrConnection<'scope, H: JrMessageHandler> {
     transport_incoming_rx: mpsc::UnboundedReceiver<Result<jsonrpcmsg::Message, crate::Error>>,
     dynamic_handler_rx: mpsc::UnboundedReceiver<DynamicHandlerMessage<H::Role>>,
     handler: H,
+    responder: R,
 }
 
-impl<'scope, H: JrMessageHandler> JrConnection<'scope, H> {
+impl<'scope, H: JrMessageHandler, R: JrResponder> JrConnection<'scope, H, R> {
     /// Run the connection in server mode with the provided transport.
     ///
     /// This drives the connection by continuously processing messages from the transport
@@ -1203,10 +1250,10 @@ impl<'scope, H: JrMessageHandler> JrConnection<'scope, H> {
     /// # Errors
     ///
     /// Returns an error if the connection closes before `main_fn` completes.
-    pub async fn with_client(
+    pub async fn with_client<T>(
         self,
-        main_fn: impl AsyncFnOnce(JrConnectionCx<H::Role>) -> Result<(), crate::Error>,
-    ) -> Result<(), crate::Error> {
+        main_fn: impl AsyncFnOnce(JrConnectionCx<H::Role>) -> Result<T, crate::Error>,
+    ) -> Result<T, crate::Error> {
         let JrConnection {
             cx,
             name,
@@ -1214,6 +1261,7 @@ impl<'scope, H: JrMessageHandler> JrConnection<'scope, H> {
             new_task_rx,
             pending_tasks,
             handler,
+            responder,
             transport_outgoing_tx,
             transport_incoming_rx,
             dynamic_handler_rx,
@@ -1221,41 +1269,30 @@ impl<'scope, H: JrMessageHandler> JrConnection<'scope, H> {
         let (reply_tx, reply_rx) = mpsc::unbounded();
 
         crate::util::instrument_with_connection_name(name, async move {
-            futures::select!(
-                // Protocol layer: OutgoingMessage → jsonrpcmsg::Message
-                r = outgoing_actor::outgoing_protocol_actor(
-                    outgoing_rx,
-                    reply_tx.clone(),
-                    transport_outgoing_tx,
-                ).fuse() => {
-                    tracing::trace!(?r, "outgoing protocol actor terminated");
-                    r?;
-                }
-                // Protocol layer: jsonrpcmsg::Message → handler/reply routing
-                r = incoming_actor::incoming_protocol_actor(
-                    &cx,
-                    transport_incoming_rx,
-                    dynamic_handler_rx,
-                    reply_tx.clone(),
-                    handler,
-                ).fuse() => {
-                    tracing::trace!(?r, "incoming protocol actor terminated");
-                    r?;
-                }
-                r = reply_actor::reply_actor(reply_rx).fuse() => {
-                    tracing::trace!(?r, "reply actor terminated");
-                    r?;
-                }
-                r = task_actor::task_actor(new_task_rx, pending_tasks, &cx).fuse() => {
-                    tracing::trace!(?r, "task actor terminated");
-                    r?;
-                }
-                r = main_fn(cx.clone()).fuse() => {
-                    tracing::trace!(?r, "main actor terminated");
-                    r?;
-                }
-            );
-            Ok(())
+            let background = async {
+                futures::try_join!(
+                    // Protocol layer: OutgoingMessage → jsonrpcmsg::Message
+                    outgoing_actor::outgoing_protocol_actor(
+                        outgoing_rx,
+                        reply_tx.clone(),
+                        transport_outgoing_tx,
+                    ),
+                    // Protocol layer: jsonrpcmsg::Message → handler/reply routing
+                    incoming_actor::incoming_protocol_actor(
+                        &cx,
+                        transport_incoming_rx,
+                        dynamic_handler_rx,
+                        reply_tx.clone(),
+                        handler,
+                    ),
+                    reply_actor::reply_actor(reply_rx),
+                    task_actor::task_actor(new_task_rx, pending_tasks, &cx),
+                    responder.run(),
+                )?;
+                Ok(())
+            };
+
+            crate::util::run_until(background, main_fn(cx.clone())).await
         })
         .await
     }

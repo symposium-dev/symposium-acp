@@ -83,7 +83,9 @@ async fn test_scoped_mcp_server_through_session() -> Result<(), sacp::Error> {
 
 struct ScopedProxy;
 
-fn make_mcp_server<Role: JrRole>(values: &Mutex<Vec<String>>) -> McpServer<'_, Role>
+fn make_mcp_server<Role: JrRole>(
+    values: &Mutex<Vec<String>>,
+) -> McpServer<Role, impl sacp::JrResponder + use<'_, Role>>
 where
     Role: HasEndpoint<Agent>,
 {
@@ -102,17 +104,11 @@ where
                 values.extend(input.elements);
                 Ok(values.len())
             },
-            sacp::tool_fn!(),
         )
-        .tool_fn(
-            "get",
-            "Get the collected values",
-            async |(): (), _cx| {
-                let values = values.lock().expect("not poisoned");
-                Ok(values.clone())
-            },
-            sacp::tool_fn!(),
-        )
+        .tool_fn("get", "Get the collected values", async |(): (), _cx| {
+            let values = values.lock().expect("not poisoned");
+            Ok(values.clone())
+        })
         .build()
 }
 

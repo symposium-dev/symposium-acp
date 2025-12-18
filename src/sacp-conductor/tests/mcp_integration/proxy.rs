@@ -34,7 +34,6 @@ impl Component for ProxyComponent {
                         result: format!("Echo: {}", params.message),
                     })
                 },
-                sacp::tool_fn!(),
             )
             .build();
 

@@ -3,9 +3,9 @@
 use std::{pin::pin, sync::Arc};
 
 use futures::{
-    SinkExt, StreamExt,
+    SinkExt,
     channel::{mpsc, oneshot},
-    future::Either,
+    future::{BoxFuture, Either},
 };
 use fxhash::FxHashMap;
 use rmcp::{
@@ -19,8 +19,12 @@ use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
 
 use super::{McpContext, McpTool};
 use crate::{
-    Agent, BoxFuture, ByteStreams, Component, DynComponent, HasEndpoint, JrRole,
-    mcp_server::{McpServer, McpServerConnect},
+    Agent, ByteStreams, Component, DynComponent, HasEndpoint, JrRole,
+    jsonrpc::responder::{ChainResponder, JrResponder, NullResponder},
+    mcp_server::{
+        McpServer, McpServerConnect,
+        responder::{ToolCall, ToolFnResponder},
+    },
 };
 
 /// Builder for creating MCP servers with tools.
@@ -42,14 +46,14 @@ use crate::{
 ///     )
 ///     .build();
 /// ```
-pub struct McpServerBuilder<'scope, Role: JrRole>
+pub struct McpServerBuilder<Role: JrRole, Responder: JrResponder = NullResponder>
 where
     Role: HasEndpoint<Agent>,
 {
     role: Role,
     name: String,
     data: McpServerData<Role>,
-    tool_future: BoxFuture<'scope, Result<(), crate::Error>>,
+    responder: Responder,
 }
 
 #[derive(Default)]
@@ -59,7 +63,7 @@ struct McpServerData<Role: JrRole> {
     tools: FxHashMap<String, Arc<dyn ErasedMcpTool<Role>>>,
 }
 
-impl<'scope, Role: JrRole> McpServerBuilder<'scope, Role>
+impl<Role: JrRole> McpServerBuilder<Role, NullResponder>
 where
     Role: HasEndpoint<Agent>,
 {
@@ -68,10 +72,15 @@ where
             name: name,
             role: Role::default(),
             data: McpServerData::default(),
-            tool_future: Box::pin(async { Ok(()) }),
+            responder: NullResponder::default(),
         }
     }
+}
 
+impl<Role: JrRole, Responder: JrResponder> McpServerBuilder<Role, Responder>
+where
+    Role: HasEndpoint<Agent>,
+{
     /// Set the server instructions that are provided to the client.
     pub fn instructions(mut self, instructions: impl ToString) -> Self {
         self.data.instructions = Some(instructions.to_string());
@@ -88,20 +97,22 @@ where
         self
     }
 
-    /// Private fn: adds the tool but also adds a future that will be
-    /// run while the MCP server is active
-    fn tool_with_future(
+    /// Private fn: adds the tool but also adds a responder that will be
+    /// run while the MCP server is active.
+    fn tool_with_responder<R: JrResponder>(
         self,
         tool: impl McpTool<Role> + 'static,
-        tool_future: impl Future<Output = Result<(), crate::Error>> + Send + 'scope,
-    ) -> Self {
-        let mut this = self.tool(tool);
-        this.tool_future = Box::pin(async move {
-            let ((), ()) = futures::future::try_join(tool_future, this.tool_future).await?;
-            Ok(())
-        });
-        this
+        tool_responder: R,
+    ) -> McpServerBuilder<Role, ChainResponder<Responder, R>> {
+        let this = self.tool(tool);
+        McpServerBuilder {
+            role: this.role,
+            name: this.name,
+            data: this.data,
+            responder: ChainResponder::new(this.responder, tool_responder),
+        }
     }
+
     /// Convenience wrapper for defining a tool without having to create a struct.
     ///
     /// # Parameters
@@ -109,43 +120,29 @@ where
     /// * `name`: The name of the tool.
     /// * `description`: The description of the tool.
     /// * `func`: The function that implements the tool. Use an async closure like `async |args, cx| { .. }`.
-    /// * `to_future_hack`: A function that converts the tool function into a future.
-    ///   You should always use the [`sacp::tool_fn!()`](crate::tool_fn) macro here.
-    ///   This is needed to sidestep current Rust language limitations.
     ///
     /// # Examples
     ///
     /// ```rust,ignore
-    /// McpServer::new()
+    /// McpServer::builder("my-server")
     ///     .tool_fn(
     ///         "greet",
     ///         "Greet someone by name",
     ///         async |input: GreetInput, _cx| Ok(format!("Hello, {}!", input.name)),
-    ///         sacp::tool_fn!(),
     ///     )
     /// ```
-    pub fn tool_fn<P, R, F, H>(
+    pub fn tool_fn<P, R, F, Fut>(
         self,
         name: impl ToString,
         description: impl ToString,
         func: F,
-        to_future_hack: H,
-    ) -> Self
+    ) -> McpServerBuilder<Role, ChainResponder<Responder, ToolFnResponder<F, P, R, Role>>>
     where
         P: JsonSchema + DeserializeOwned + 'static + Send,
         R: JsonSchema + Serialize + 'static + Send,
-        F: AsyncFn(P, McpContext<Role>) -> Result<R, crate::Error> + Send + Sync + 'scope,
-        H: Fn(&F, P, McpContext<Role>) -> BoxFuture<'scope, Result<R, crate::Error>>
-            + Send
-            + Sync
-            + 'scope,
+        F: FnMut(P, McpContext<Role>) -> Fut + Send + Sync,
+        Fut: std::future::Future<Output = Result<R, crate::Error>> + Send,
     {
-        struct ToolCall<P, R, Role: JrRole> {
-            params: P,
-            mcp_cx: McpContext<Role>,
-            result_tx: oneshot::Sender<Result<R, crate::Error>>,
-        }
-
         struct ToolFnTool<P, R, Role: JrRole> {
             name: String,
             description: String,
@@ -190,27 +187,14 @@ where
             }
         }
 
-        let (call_tx, mut call_rx) = mpsc::channel(128);
-        self.tool_with_future(
+        let (call_tx, call_rx) = mpsc::channel(128);
+        self.tool_with_responder(
             ToolFnTool {
                 name: name.to_string(),
                 description: description.to_string(),
                 call_tx,
             },
-            async move {
-                while let Some(ToolCall {
-                    params,
-                    mcp_cx,
-                    result_tx,
-                }) = call_rx.next().await
-                {
-                    let result = to_future_hack(&func, params, mcp_cx).await;
-                    result_tx
-                        .send(result)
-                        .map_err(|_| crate::util::internal_error("failed to send MCP result"))?;
-                }
-                Ok(())
-            },
+            ToolFnResponder { func, call_rx },
         )
     }
 
@@ -218,14 +202,14 @@ where
     ///
     /// This builder can be attached to new sessions (see [`SessionBuilder::with_mcp_server`])
     /// or served up as part of a proxy (see [`JrConnectionBuilder::with_mcp_server`]).
-    pub fn build(self) -> McpServer<'scope, Role> {
+    pub fn build(self) -> McpServer<Role, Responder> {
         McpServer::new(
             McpServerBuilt {
                 role: self.role,
                 name: self.name,
                 data: Arc::new(self.data),
             },
-            self.tool_future,
+            self.responder,
         )
     }
 }

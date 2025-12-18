@@ -4,17 +4,17 @@ use agent_client_protocol_schema::{
     ContentBlock, ContentChunk, NewSessionRequest, NewSessionResponse, PromptRequest,
     PromptResponse, SessionModeState, SessionNotification, SessionUpdate, StopReason,
 };
-use futures::{
-    channel::{mpsc, oneshot},
-    future::BoxFuture,
-};
+use futures::channel::mpsc;
 
 use crate::{
     Agent, Handled, HasEndpoint, JrConnectionCx, JrMessageHandlerSend, JrRole, MessageCx,
-    jsonrpc::DynamicHandlerRegistration,
+    jsonrpc::{
+        DynamicHandlerRegistration,
+        responder::{ChainResponder, JrResponder, NullResponder},
+    },
     mcp_server::McpServer,
     schema::SessionId,
-    util::{MatchMessage, MatchMessageFrom, both, run_until},
+    util::{MatchMessage, MatchMessageFrom, run_until},
 };
 
 impl<Role: JrRole> JrConnectionCx<Role>
@@ -22,7 +22,7 @@ where
     Role: HasEndpoint<Agent>,
 {
     /// Session builder for a new session request.
-    pub fn build_session<'scope>(&self, cwd: impl AsRef<Path>) -> SessionBuilder<'scope, Role> {
+    pub fn build_session(&self, cwd: impl AsRef<Path>) -> SessionBuilder<Role, NullResponder> {
         SessionBuilder::new(
             self,
             NewSessionRequest {
@@ -75,17 +75,17 @@ where
 /// Session builder for a new session request.
 /// Allows you to add MCP servers or set other details for this session.
 #[must_use = "use `send_request` to send the request"]
-pub struct SessionBuilder<'scope, Role>
+pub struct SessionBuilder<Role, Responder: JrResponder = NullResponder>
 where
     Role: HasEndpoint<Agent>,
 {
     connection: JrConnectionCx<Role>,
     request: NewSessionRequest,
     dynamic_handler_registrations: Vec<DynamicHandlerRegistration<Role>>,
-    future: BoxFuture<'scope, Result<(), crate::Error>>,
+    responder: Responder,
 }
 
-impl<'scope, Role> SessionBuilder<'scope, Role>
+impl<Role> SessionBuilder<Role, NullResponder>
 where
     Role: HasEndpoint<Agent>,
 {
@@ -94,20 +94,33 @@ where
             connection: connection.clone(),
             request,
             dynamic_handler_registrations: Default::default(),
-            future: Box::pin(std::future::ready(Ok(()))),
+            responder: NullResponder,
         }
     }
+}
 
+impl<Role, Responder> SessionBuilder<Role, Responder>
+where
+    Role: HasEndpoint<Agent>,
+    Responder: JrResponder,
+{
     /// Add the MCP servers from the given registry to this session.
-    pub fn with_mcp_server(
+    pub fn with_mcp_server<R>(
         mut self,
-        mcp_server: McpServer<'scope, Role>,
-    ) -> Result<Self, crate::Error> {
-        let (handler, future) = mcp_server.into_handler_and_future();
+        mcp_server: McpServer<Role, R>,
+    ) -> Result<SessionBuilder<Role, ChainResponder<Responder, R>>, crate::Error>
+    where
+        R: JrResponder,
+    {
+        let (handler, responder) = mcp_server.into_handler_and_responder();
         self.dynamic_handler_registrations
             .push(handler.add_to_new_session(&mut self.request, &self.connection)?);
-        self.future = Box::pin(both(future, self.future));
-        Ok(self)
+        Ok(SessionBuilder {
+            connection: self.connection,
+            request: self.request,
+            dynamic_handler_registrations: self.dynamic_handler_registrations,
+            responder: ChainResponder::new(self.responder, responder),
+        })
     }
 
     /// Send the request to create the session.
@@ -125,13 +138,23 @@ where
             .connection
             .attach_session(response, self.dynamic_handler_registrations)?;
 
-        run_until(self.future, op(active_session)).await
+        run_until(self.responder.run(), op(active_session)).await
     }
 
     /// Send the request to create the session.
-    pub async fn send_request(self) -> Result<ActiveSession<Role>, crate::Error>
+    ///
+    /// # Parameters
+    ///
+    /// * `responder_run` - A function that runs the responder. Typically you
+    ///   just want to pass `McpResponder::run`. This parameter is a bit of a hack
+    ///   that is required due to Rust language limitations
+    ///   (see [rust-lang/rust#109417](https://github.com/rust-lang/rust/issues/109417)).
+    pub async fn send_request<F>(
+        self,
+        responder_run: impl FnOnce(Responder) -> F,
+    ) -> Result<ActiveSession<Role>, crate::Error>
     where
-        'scope: 'static,
+        F: Future<Output = Result<(), crate::Error>> + 'static + Send,
     {
         let response = self
             .connection
@@ -139,7 +162,7 @@ where
             .block_task()
             .await?;
 
-        self.connection.spawn(self.future)?;
+        self.connection.spawn(responder_run(self.responder))?;
 
         self.connection
             .attach_session(response, self.dynamic_handler_registrations)

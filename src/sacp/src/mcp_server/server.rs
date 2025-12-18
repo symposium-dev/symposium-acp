@@ -3,12 +3,14 @@
 use std::sync::Arc;
 
 use agent_client_protocol_schema::NewSessionRequest;
-use futures::future::BoxFuture;
 use uuid::Uuid;
 
 use crate::{
     Agent, Client, Handled, HasEndpoint, JrConnectionCx, JrMessageHandlerSend, JrRole,
-    jsonrpc::DynamicHandlerRegistration,
+    jsonrpc::{
+        DynamicHandlerRegistration,
+        responder::{JrResponder, NullResponder},
+    },
     mcp_server::{McpServerConnect, active_session::McpActiveSession, builder::McpServerBuilder},
     util::MatchMessageFrom,
 };
@@ -36,55 +38,53 @@ use crate::{
 /// ```rust,ignore
 /// let server = McpServer::new(MyCustomServerConnect);
 /// ```
-pub struct McpServer<'scope, Role: JrRole>
+pub struct McpServer<Role: JrRole, Responder: JrResponder = NullResponder>
 where
     Role: HasEndpoint<Agent>,
 {
     /// The "message handler" handles incoming messages to the MCP server (speaks the MCP protocol).
     message_handler: McpMessageHandler<Role>,
 
-    /// The "future" is a task that should be run alongside the message handler.
-    /// Some futures direct messages back through channels to this future.
+    /// The "responder" is a task that should be run alongside the message handler.
+    /// Some futures direct messages back through channels to this future which actually
+    /// handles responding to the client.
     ///
     /// This is how we bridge the gap between the rmcp implementation,
     /// which requires `'static`, and our APIs, which do not.
-    future: BoxFuture<'scope, Result<(), crate::Error>>,
+    responder: Responder,
 }
 
-impl<'scope, Role: JrRole> McpServer<'scope, Role>
+impl<Role: JrRole> McpServer<Role, NullResponder>
 where
     Role: HasEndpoint<Agent>,
 {
     /// Create an empty server with no content.
-    pub fn builder(name: impl ToString) -> McpServerBuilder<'scope, Role> {
+    pub fn builder(name: impl ToString) -> McpServerBuilder<Role, NullResponder> {
         McpServerBuilder::new(name.to_string())
     }
+}
 
+impl<Role: JrRole, Responder: JrResponder> McpServer<Role, Responder>
+where
+    Role: HasEndpoint<Agent>,
+{
     /// Create an MCP server from something that implements the [`McpServerConnect`] trait.
     ///
     /// # See also
     ///
     /// See [`Self::builder`] to construct MCP servers from Rust code.
-    pub fn new(
-        c: impl McpServerConnect<Role>,
-        future: BoxFuture<'scope, Result<(), crate::Error>>,
-    ) -> Self {
+    pub fn new(c: impl McpServerConnect<Role>, responder: Responder) -> Self {
         McpServer {
             message_handler: McpMessageHandler {
                 connect: Arc::new(c),
             },
-            future,
+            responder,
         }
     }
 
     /// Split this MCP server into the message handler and a future that must be run while the handler is active.
-    pub(crate) fn into_handler_and_future(
-        self,
-    ) -> (
-        McpMessageHandler<Role>,
-        BoxFuture<'scope, Result<(), crate::Error>>,
-    ) {
-        (self.message_handler, self.future)
+    pub(crate) fn into_handler_and_responder(self) -> (McpMessageHandler<Role>, Responder) {
+        (self.message_handler, self.responder)
     }
 }
 

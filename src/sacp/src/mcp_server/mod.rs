@@ -49,11 +49,13 @@ mod active_session;
 mod builder;
 mod connect;
 mod context;
+mod responder;
 mod server;
 mod tool;
 
 pub use builder::McpServerBuilder;
 pub use connect::McpServerConnect;
 pub use context::McpContext;
+pub use responder::{ToolCall, ToolFnResponder};
 pub use server::{McpMessageHandler, McpServer};
 pub use tool::McpTool;
