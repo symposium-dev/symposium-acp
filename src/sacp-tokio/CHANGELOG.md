@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [9.0.0](https://github.com/symposium-dev/symposium-acp/compare/sacp-tokio-v8.0.0...sacp-tokio-v9.0.0) - 2025-12-19
+
+### Added
+
+- *(sacp-tokio)* add convenience constructors for known ACP agents
+
 ## [8.0.0](https://github.com/symposium-dev/symposium-acp/compare/sacp-tokio-v7.0.0...sacp-tokio-v8.0.0) - 2025-12-17
 
 ### Other

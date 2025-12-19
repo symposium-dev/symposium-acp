@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [9.0.0](https://github.com/symposium-dev/symposium-acp/compare/elizacp-v8.0.0...elizacp-v9.0.0) - 2025-12-19
+
+### Added
+
+- *(sacp)* [**breaking**] require Send for JrMessageHandler with boxing witness macros
+- *(sacp)* [**breaking**] add scoped lifetime support for MCP servers
+
+### Other
+
+- Merge pull request #88 from nikomatsakis/main
+
 ## [8.0.0](https://github.com/symposium-dev/symposium-acp/compare/elizacp-v7.0.0...elizacp-v8.0.0) - 2025-12-17
 
 ### Other

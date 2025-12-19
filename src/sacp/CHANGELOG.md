@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [9.0.0](https://github.com/symposium-dev/symposium-acp/compare/sacp-v8.0.0...sacp-v9.0.0) - 2025-12-19
+
+### Added
+
+- *(sacp)* [**breaking**] require Send for JrMessageHandler with boxing witness macros
+- *(sacp)* [**breaking**] use AsyncFnMut for tool closures with macro workaround
+- *(sacp)* [**breaking**] merge pending_tasks into JrResponder and remove 'scope lifetime
+- *(sacp)* [**breaking**] add scoped lifetime support for MCP servers
+- *(sacp)* [**breaking**] add scoped lifetime to JrConnectionBuilder and JrConnection
+
+### Other
+
+- *(sacp)* update doc examples to use new macro witness API
+- *(sacp)* simplify return types with impl Trait
+- *(sacp)* simplify handler return types with impl Trait
+- Merge pull request #88 from nikomatsakis/main
+- *(sacp)* [**breaking**] remove to_future_hack from tool_fn API
+
 ## [8.0.0](https://github.com/symposium-dev/symposium-acp/compare/sacp-v7.0.0...sacp-v8.0.0) - 2025-12-17
 
 ### Fixed

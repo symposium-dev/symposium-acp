@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [9.0.0](https://github.com/symposium-dev/symposium-acp/compare/sacp-conductor-v8.0.0...sacp-conductor-v9.0.0) - 2025-12-19
+
+### Added
+
+- *(sacp)* [**breaking**] require Send for JrMessageHandler with boxing witness macros
+- *(sacp)* [**breaking**] use AsyncFnMut for tool closures with macro workaround
+- *(sacp)* [**breaking**] merge pending_tasks into JrResponder and remove 'scope lifetime
+- *(sacp)* [**breaking**] add scoped lifetime support for MCP servers
+- *(sacp)* [**breaking**] add scoped lifetime to JrConnectionBuilder and JrConnection
+
+### Fixed
+
+- *(sacp-conductor)* use pre-built binaries in all integration tests
+- *(sacp-conductor)* use pre-built binaries in trace_generation test
+
+### Other
+
+- *(sacp)* simplify return types with impl Trait
+- *(sacp-conductor)* formatting and accept impl ToString for name
+- Merge pull request #88 from nikomatsakis/main
+- *(sacp)* [**breaking**] remove to_future_hack from tool_fn API
+
 ## [8.0.0](https://github.com/symposium-dev/symposium-acp/compare/sacp-conductor-v7.0.0...sacp-conductor-v8.0.0) - 2025-12-17
 
 ### Fixed
