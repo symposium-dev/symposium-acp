@@ -33,7 +33,7 @@ use crate::jsonrpc::outgoing_actor::{OutgoingMessageTx, send_raw_message};
 use crate::jsonrpc::responder::SpawnedResponder;
 use crate::jsonrpc::responder::{ChainResponder, JrResponder, NullResponder};
 use crate::jsonrpc::task_actor::{Task, TaskTx};
-use crate::mcp_server::{McpMessageHandler, McpServer};
+use crate::mcp_server::McpServer;
 use crate::role::{HasDefaultEndpoint, HasEndpoint, JrEndpoint, JrRole};
 use crate::{Agent, Client, Component};
 
@@ -547,7 +547,7 @@ impl<H: JrMessageHandler, R: JrResponder<H::Role>> JrConnectionBuilder<H, R> {
     pub fn with_connection_builder<H1, R1>(
         self,
         other: JrConnectionBuilder<H1, R1>,
-    ) -> JrConnectionBuilder<ChainedHandler<H, NamedHandler<H1>>, ChainResponder<R, R1>>
+    ) -> JrConnectionBuilder<impl JrMessageHandler<Role = H::Role>, impl JrResponder<H::Role>>
     where
         H1: JrMessageHandler<Role = H::Role>,
         R1: JrResponder<H::Role>,
@@ -566,7 +566,10 @@ impl<H: JrMessageHandler, R: JrResponder<H::Role>> JrConnectionBuilder<H, R> {
     ///
     /// Prefer [`Self::on_receive_request`] or [`Self::on_receive_notification`].
     /// This is a low-level method that is not intended for general use.
-    pub fn with_handler<H1>(self, handler: H1) -> JrConnectionBuilder<ChainedHandler<H, H1>, R>
+    pub fn with_handler<H1>(
+        self,
+        handler: H1,
+    ) -> JrConnectionBuilder<impl JrMessageHandler<Role = H::Role>, R>
     where
         H1: JrMessageHandler<Role = H::Role>,
     {
@@ -578,7 +581,10 @@ impl<H: JrMessageHandler, R: JrResponder<H::Role>> JrConnectionBuilder<H, R> {
     }
 
     /// Add a new [`JrResponder`] to the chain.
-    pub fn with_responder<R1>(self, responder: R1) -> JrConnectionBuilder<H, ChainResponder<R, R1>>
+    pub fn with_responder<R1>(
+        self,
+        responder: R1,
+    ) -> JrConnectionBuilder<H, impl JrResponder<H::Role>>
     where
         R1: JrResponder<H::Role>,
     {
@@ -591,10 +597,7 @@ impl<H: JrMessageHandler, R: JrResponder<H::Role>> JrConnectionBuilder<H, R> {
 
     /// Enqueue a task to run once the connection is actively serving traffic.
     #[track_caller]
-    pub fn with_spawned<F, Fut>(
-        self,
-        task: F,
-    ) -> JrConnectionBuilder<H, ChainResponder<R, SpawnedResponder<F>>>
+    pub fn with_spawned<F, Fut>(self, task: F) -> JrConnectionBuilder<H, impl JrResponder<H::Role>>
     where
         F: FnOnce(JrConnectionCx<H::Role>) -> Fut + Send,
         Fut: Future<Output = Result<(), crate::Error>> + Send,
@@ -952,7 +955,7 @@ impl<H: JrMessageHandler, R: JrResponder<H::Role>> JrConnectionBuilder<H, R> {
     pub fn with_mcp_server<Role: JrRole, McpR: JrResponder<Role>>(
         self,
         server: McpServer<Role, McpR>,
-    ) -> JrConnectionBuilder<ChainedHandler<H, McpMessageHandler<Role>>, ChainResponder<R, McpR>>
+    ) -> JrConnectionBuilder<impl JrMessageHandler<Role = Role>, impl JrResponder<Role>>
     where
         H: JrMessageHandler<Role = Role>,
         Role: HasEndpoint<Client> + HasEndpoint<Agent>,

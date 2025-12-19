@@ -122,10 +122,6 @@ use sacp::schema::{
 };
 use sacp::{Agent, Client, Component, Error, JrMessage};
 use sacp::{
-    ChainResponder, JrResponder, NullResponder,
-    role::{ConductorToAgent, ConductorToClient, ConductorToProxy},
-};
-use sacp::{
     HasDefaultEndpoint, JrConnectionBuilder, JrConnectionCx, JrNotification, JrRequest,
     JrRequestCx, JrResponse, JrRole, MessageCx, UntypedMessage,
 };
@@ -136,6 +132,10 @@ use sacp::{
         NewSessionResponse,
     },
     util::MatchMessageFrom,
+};
+use sacp::{
+    JrResponder,
+    role::{ConductorToAgent, ConductorToClient, ConductorToProxy},
 };
 use tracing::{debug, info};
 
@@ -196,10 +196,7 @@ impl Conductor {
 
     pub fn into_connection_builder(
         self,
-    ) -> JrConnectionBuilder<
-        ConductorMessageHandler,
-        ChainResponder<NullResponder, ConductorResponder>,
-    > {
+    ) -> JrConnectionBuilder<ConductorMessageHandler, impl JrResponder<ConductorToClient>> {
         let (conductor_tx, conductor_rx) = mpsc::channel(128 /* chosen arbitrarily */);
 
         let responder = ConductorResponder {
