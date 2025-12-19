@@ -46,10 +46,7 @@ use crate::{
 ///     )
 ///     .build();
 /// ```
-pub struct McpServerBuilder<Role: JrRole, Responder: JrResponder<Role> = NullResponder>
-where
-    Role: HasEndpoint<Agent>,
-{
+pub struct McpServerBuilder<Role, Responder> {
     role: Role,
     name: String,
     data: McpServerData<Role>,
@@ -57,7 +54,7 @@ where
 }
 
 #[derive(Default)]
-struct McpServerData<Role: JrRole> {
+struct McpServerData<Role> {
     instructions: Option<String>,
     tool_models: Vec<rmcp::model::Tool>,
     tools: FxHashMap<String, Arc<dyn ErasedMcpTool<Role>>>,
@@ -113,7 +110,11 @@ where
         }
     }
 
-    /// Convenience wrapper for defining a tool without having to create a struct.
+    /// Convenience wrapper for defining a "single-threaded" tool without having to create a struct.
+    /// By "single-threaded", we mean that only one invocation of the tool can be running at a time.
+    /// Typically agents invoke a tool once per session and then block waiting for the result,
+    /// so this is fine, but they could attempt to run multiple invocations concurrently, in which
+    /// case those invocations would be serialized.
     ///
     /// # Parameters
     ///
@@ -125,23 +126,29 @@ where
     ///
     /// ```rust,ignore
     /// McpServer::builder("my-server")
-    ///     .tool_fn(
+    ///     .tool_fn_mut(
     ///         "greet",
     ///         "Greet someone by name",
     ///         async |input: GreetInput, _cx| Ok(format!("Hello, {}!", input.name)),
     ///     )
     /// ```
-    pub fn tool_fn<P, R, F, Fut>(
+    pub fn tool_fn_mut<P, R, F>(
         self,
         name: impl ToString,
         description: impl ToString,
         func: F,
+        tool_future_hack: impl for<'a> Fn(
+            &'a mut F,
+            P,
+            McpContext<Role>,
+        ) -> BoxFuture<'a, Result<R, crate::Error>>
+        + Send
+        + 'static,
     ) -> McpServerBuilder<Role, ChainResponder<Responder, ToolFnResponder<F, P, R, Role>>>
     where
         P: JsonSchema + DeserializeOwned + 'static + Send,
         R: JsonSchema + Serialize + 'static + Send,
-        F: FnMut(P, McpContext<Role>) -> Fut + Send + Sync,
-        Fut: std::future::Future<Output = Result<R, crate::Error>> + Send,
+        F: AsyncFnMut(P, McpContext<Role>) -> Result<R, crate::Error> + Send,
     {
         struct ToolFnTool<P, R, Role: JrRole> {
             name: String,
@@ -194,7 +201,11 @@ where
                 description: description.to_string(),
                 call_tx,
             },
-            ToolFnResponder { func, call_rx },
+            ToolFnResponder {
+                func,
+                call_rx,
+                tool_future_fn: Box::new(tool_future_hack),
+            },
         )
     }
 

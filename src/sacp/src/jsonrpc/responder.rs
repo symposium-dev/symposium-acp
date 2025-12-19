@@ -14,8 +14,7 @@ use crate::{JrConnectionCx, role::JrRole};
 /// when the connection is active.
 pub trait JrResponder<Role: JrRole>: Send {
     /// Run this responder to completion.
-    fn run(self, cx: JrConnectionCx<Role>)
-    -> impl Future<Output = Result<(), crate::Error>> + Send;
+    fn run(self, cx: JrConnectionCx<Role>) -> impl Future<Output = Result<(), crate::Error>> + Send;
 }
 
 /// A no-op responder that completes immediately.

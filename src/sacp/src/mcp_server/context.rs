@@ -2,7 +2,7 @@ use crate::{JrConnectionCx, JrRole};
 
 /// Context about the ACP and MCP connection available to an MCP server.
 #[derive(Clone)]
-pub struct McpContext<Role: JrRole> {
+pub struct McpContext<Role> {
     pub(super) acp_url: String,
     pub(super) connection_cx: JrConnectionCx<Role>,
 }

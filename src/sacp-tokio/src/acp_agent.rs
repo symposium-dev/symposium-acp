@@ -102,6 +102,25 @@ impl AcpAgent {
         }
     }
 
+    /// Create an ACP agent for Zed Industries' Claude Code tool.
+    /// Just runs `npx -y @zed-industries/claude-code-acp@latest`.
+    pub fn zed_claude_code() -> Self {
+        Self::from_str("npx -y @zed-industries/claude-code-acp@latest").expect("valid bash command")
+    }
+
+    /// Create an ACP agent for Zed Industries' Codex tool.
+    /// Just runs `npx -y @zed-industries/codex-acp@latest`.
+    pub fn zed_codex() -> Self {
+        Self::from_str("npx -y @zed-industries/codex-acp@latest").expect("valid bash command")
+    }
+
+    /// Create an ACP agent for Google's Gemini CLI.
+    /// Just runs `npx -y -- @google/gemini-cli@latest --experimental-acp`.
+    pub fn google_gemini() -> Self {
+        Self::from_str("npx -y -- @google/gemini-cli@latest --experimental-acp")
+            .expect("valid bash command")
+    }
+
     /// Get the underlying [`sacp::schema::McpServer`] configuration.
     pub fn server(&self) -> &sacp::schema::McpServer {
         &self.server

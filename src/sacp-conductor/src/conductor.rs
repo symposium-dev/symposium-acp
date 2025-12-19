@@ -116,12 +116,15 @@ use futures::{
     SinkExt, StreamExt,
     channel::mpsc::{self},
 };
-use sacp::role::{ConductorToAgent, ConductorToClient, ConductorToProxy};
 use sacp::schema::{
     McpConnectRequest, McpConnectResponse, McpDisconnectNotification, McpOverAcpMessage,
     SuccessorMessage,
 };
 use sacp::{Agent, Client, Component, Error, JrMessage};
+use sacp::{
+    ChainResponder, JrResponder, NullResponder,
+    role::{ConductorToAgent, ConductorToClient, ConductorToProxy},
+};
 use sacp::{
     HasDefaultEndpoint, JrConnectionBuilder, JrConnectionCx, JrNotification, JrRequest,
     JrRequestCx, JrResponse, JrRole, MessageCx, UntypedMessage,
@@ -156,12 +159,12 @@ pub struct Conductor {
 
 impl Conductor {
     pub fn new(
-        name: String,
+        name: impl ToString,
         component_list: impl ComponentList + 'static,
         mcp_bridge_mode: crate::McpBridgeMode,
     ) -> Self {
         Conductor {
-            name,
+            name: name.to_string(),
             component_list: Box::new(component_list),
             mcp_bridge_mode,
             trace_writer: None,
@@ -193,11 +196,15 @@ impl Conductor {
 
     pub fn into_connection_builder(
         self,
-    ) -> JrConnectionBuilder<ConductorMessageHandler, impl sacp::JrResponder<ConductorToClient>>
-    {
-        let (mut conductor_tx, mut conductor_rx) = mpsc::channel(128 /* chosen arbitrarily */);
+    ) -> JrConnectionBuilder<
+        ConductorMessageHandler,
+        ChainResponder<NullResponder, ConductorResponder>,
+    > {
+        let (conductor_tx, conductor_rx) = mpsc::channel(128 /* chosen arbitrarily */);
 
-        let mut state = ConductorHandlerState {
+        let responder = ConductorResponder {
+            conductor_rx,
+            conductor_tx: conductor_tx.clone(),
             component_list: Some(self.component_list),
             bridge_listeners: Default::default(),
             bridge_connections: Default::default(),
@@ -208,23 +215,9 @@ impl Conductor {
             pending_requests: Default::default(),
         };
 
-        JrConnectionBuilder::new_with(ConductorMessageHandler {
-            conductor_tx: conductor_tx.clone(),
-        })
-        .name(self.name)
-        .with_spawned(async move |cx| {
-            // Components are now spawned lazily in forward_initialize_request
-            // when the first Initialize request is received.
-
-            // This is the "central actor" of the conductor. Most other things forward messages
-            // via `conductor_tx` into this loop. This lets us serialize the conductor's activity.
-            while let Some(message) = conductor_rx.next().await {
-                state
-                    .handle_conductor_message(&cx, message, &mut conductor_tx)
-                    .await?;
-            }
-            Ok(())
-        })
+        JrConnectionBuilder::new_with(ConductorMessageHandler { conductor_tx })
+            .name(self.name)
+            .with_responder(responder)
     }
 
     /// Convenience method to run the conductor with a transport.
@@ -252,43 +245,6 @@ impl sacp::Component for Conductor {
 
 pub struct ConductorMessageHandler {
     conductor_tx: mpsc::Sender<ConductorMessage>,
-}
-
-/// The conductor manages the proxy chain lifecycle and message routing.
-///
-/// It maintains connections to all components in the chain and routes messages
-/// bidirectionally between the editor, components, and agent.
-///
-struct ConductorHandlerState {
-    /// Manages the TCP listeners for MCP connections that will be proxied over ACP.
-    bridge_listeners: McpBridgeListeners,
-
-    /// Manages active connections to MCP clients.
-    bridge_connections: HashMap<String, McpBridgeConnection>,
-
-    /// The component list for lazy initialization.
-    /// Set to None after components are instantiated.
-    component_list: Option<Box<dyn ComponentList>>,
-
-    /// The chain of proxies before the agent (if any).
-    ///
-    /// Populated lazily when the first Initialize request is received.
-    proxies: Vec<JrConnectionCx<ConductorToProxy>>,
-
-    /// If the conductor is operating in agent mode, this will be the agent.
-    /// If the conductor is operating in proxy mode, this will be None.
-    ///
-    /// Populated lazily when the first Initialize request is received.
-    agent: Option<JrConnectionCx<ConductorToAgent>>,
-
-    /// Mode for the MCP bridge (determines how to spawn bridge processes).
-    mcp_bridge_mode: crate::McpBridgeMode,
-
-    /// Optional trace writer for sequence diagram visualization.
-    trace_writer: Option<crate::trace::TraceWriter>,
-
-    /// Tracks pending requests for response tracing: id -> (from, to)
-    pending_requests: HashMap<String, (String, String)>,
 }
 
 impl JrMessageHandler for ConductorMessageHandler {
@@ -336,7 +292,65 @@ impl JrMessageHandler for ConductorMessageHandler {
     }
 }
 
-impl ConductorHandlerState {
+/// The conductor manages the proxy chain lifecycle and message routing.
+///
+/// It maintains connections to all components in the chain and routes messages
+/// bidirectionally between the editor, components, and agent.
+///
+pub struct ConductorResponder {
+    conductor_rx: mpsc::Receiver<ConductorMessage>,
+
+    conductor_tx: mpsc::Sender<ConductorMessage>,
+
+    /// Manages the TCP listeners for MCP connections that will be proxied over ACP.
+    bridge_listeners: McpBridgeListeners,
+
+    /// Manages active connections to MCP clients.
+    bridge_connections: HashMap<String, McpBridgeConnection>,
+
+    /// The component list for lazy initialization.
+    /// Set to None after components are instantiated.
+    component_list: Option<Box<dyn ComponentList>>,
+
+    /// The chain of proxies before the agent (if any).
+    ///
+    /// Populated lazily when the first Initialize request is received.
+    proxies: Vec<JrConnectionCx<ConductorToProxy>>,
+
+    /// If the conductor is operating in agent mode, this will be the agent.
+    /// If the conductor is operating in proxy mode, this will be None.
+    ///
+    /// Populated lazily when the first Initialize request is received.
+    agent: Option<JrConnectionCx<ConductorToAgent>>,
+
+    /// Mode for the MCP bridge (determines how to spawn bridge processes).
+    mcp_bridge_mode: crate::McpBridgeMode,
+
+    /// Optional trace writer for sequence diagram visualization.
+    trace_writer: Option<crate::trace::TraceWriter>,
+
+    /// Tracks pending requests for response tracing: id -> (from, to)
+    pending_requests: HashMap<String, (String, String)>,
+}
+
+impl JrResponder<ConductorToClient> for ConductorResponder {
+    async fn run(mut self, cx: JrConnectionCx<ConductorToClient>) -> Result<(), sacp::Error> {
+        // Components are now spawned lazily in forward_initialize_request
+        // when the first Initialize request is received.
+
+        let mut conductor_tx = self.conductor_tx.clone();
+
+        // This is the "central actor" of the conductor. Most other things forward messages
+        // via `conductor_tx` into this loop. This lets us serialize the conductor's activity.
+        while let Some(message) = self.conductor_rx.next().await {
+            self.handle_conductor_message(&cx, message, &mut conductor_tx)
+                .await?;
+        }
+        Ok(())
+    }
+}
+
+impl ConductorResponder {
     /// Convert a component index to a trace-friendly name.
     fn component_name(&self, index: usize) -> String {
         if self.is_agent_component(index) {

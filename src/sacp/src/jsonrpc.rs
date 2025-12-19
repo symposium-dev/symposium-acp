@@ -1390,7 +1390,7 @@ impl<T> IntoHandled<T> for Handled<T> {
 /// See the [Event Loop and Concurrency](JrConnection#event-loop-and-concurrency) section
 /// for more details.
 #[derive(Clone, Debug)]
-pub struct JrConnectionCx<Role: JrRole> {
+pub struct JrConnectionCx<Role> {
     #[expect(dead_code)]
     role: Role,
     message_tx: OutgoingMessageTx,

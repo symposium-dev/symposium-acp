@@ -26,7 +26,7 @@ impl Component for ProxyComponent {
     async fn serve(self, client: impl Component) -> Result<(), sacp::Error> {
         let test_server = McpServer::builder("test")
             .instructions("A simple test MCP server with an echo tool")
-            .tool_fn(
+            .tool_fn_mut(
                 "echo",
                 "Echoes back the input message",
                 async |params: EchoParams, _context| {
@@ -34,6 +34,7 @@ impl Component for ProxyComponent {
                         result: format!("Echo: {}", params.message),
                     })
                 },
+                sacp::tool_fn_mut!(),
             )
             .build();
 

@@ -6,7 +6,10 @@
 
 use elizacp::ElizaAgent;
 use sacp::mcp_server::McpServer;
-use sacp::{Agent, ClientToAgent, Component, DynComponent, HasEndpoint, JrRole, ProxyToConductor};
+use sacp::{
+    Agent, ClientToAgent, Component, DynComponent, HasEndpoint, JrResponder, JrRole,
+    ProxyToConductor,
+};
 use sacp_conductor::{Conductor, McpBridgeMode};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -83,9 +86,9 @@ async fn test_scoped_mcp_server_through_session() -> Result<(), sacp::Error> {
 
 struct ScopedProxy;
 
-fn make_mcp_server<Role: JrRole>(
-    values: &Mutex<Vec<String>>,
-) -> McpServer<Role, impl sacp::JrResponder<Role> + use<'_, Role>>
+fn make_mcp_server<'a, Role: JrRole>(
+    values: &'a Mutex<Vec<String>>,
+) -> McpServer<Role, impl JrResponder<Role>>
 where
     Role: HasEndpoint<Agent>,
 {
@@ -96,7 +99,7 @@ where
 
     McpServer::builder("test".to_string())
         .instructions("A test MCP server with scoped tool")
-        .tool_fn(
+        .tool_fn_mut(
             "push",
             "Push a value to the collected values",
             async |input: PushInput, _cx| {
@@ -104,11 +107,17 @@ where
                 values.extend(input.elements);
                 Ok(values.len())
             },
+            sacp::tool_fn_mut!(),
         )
-        .tool_fn("get", "Get the collected values", async |(): (), _cx| {
-            let values = values.lock().expect("not poisoned");
-            Ok(values.clone())
-        })
+        .tool_fn_mut(
+            "get",
+            "Get the collected values",
+            async |(): (), _cx| {
+                let values = values.lock().expect("not poisoned");
+                Ok(values.clone())
+            },
+            sacp::tool_fn_mut!(),
+        )
         .build()
 }
 

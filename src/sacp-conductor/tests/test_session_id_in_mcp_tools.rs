@@ -32,7 +32,7 @@ fn create_echo_proxy() -> Result<sacp::DynComponent, sacp::Error> {
     // Create MCP server with an echo tool that returns the session_id
     let mcp_server = McpServer::builder("echo_server".to_string())
         .instructions("Test MCP server with session_id echo tool")
-        .tool_fn(
+        .tool_fn_mut(
             "echo",
             "Returns the current session_id",
             async |_input: EchoInput, context| {
@@ -40,6 +40,7 @@ fn create_echo_proxy() -> Result<sacp::DynComponent, sacp::Error> {
                     acp_url: context.acp_url(),
                 })
             },
+            sacp::tool_fn_mut!(),
         )
         .build();
 
@@ -51,7 +52,7 @@ struct ProxyWithEchoServer<R: sacp::JrResponder<ProxyToConductor>> {
     mcp_server: McpServer<ProxyToConductor, R>,
 }
 
-impl<R: sacp::JrResponder<ProxyToConductor> + 'static> Component for ProxyWithEchoServer<R> {
+impl<R: sacp::JrResponder<ProxyToConductor> + 'static + Send> Component for ProxyWithEchoServer<R> {
     async fn serve(self, client: impl Component) -> Result<(), sacp::Error> {
         ProxyToConductor::builder()
             .name("echo-proxy")

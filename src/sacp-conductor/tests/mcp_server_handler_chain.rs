@@ -74,7 +74,7 @@ impl Component for ProxyWithMcpAndHandler {
         // Create an MCP server with a simple tool
         let mcp_server = McpServer::builder("test-server".to_string())
             .instructions("A test MCP server")
-            .tool_fn(
+            .tool_fn_mut(
                 "echo",
                 "Echoes back the input",
                 async |params: EchoParams, _cx| {
@@ -82,6 +82,7 @@ impl Component for ProxyWithMcpAndHandler {
                         result: format!("Echo: {}", params.message),
                     })
                 },
+                sacp::tool_fn_mut!(),
             )
             .build();
 
