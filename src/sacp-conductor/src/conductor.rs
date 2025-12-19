@@ -116,12 +116,15 @@ use futures::{
     SinkExt, StreamExt,
     channel::mpsc::{self},
 };
-use sacp::{ChainResponder, JrResponder, NullResponder, role::{ConductorToAgent, ConductorToClient, ConductorToProxy}};
 use sacp::schema::{
     McpConnectRequest, McpConnectResponse, McpDisconnectNotification, McpOverAcpMessage,
     SuccessorMessage,
 };
 use sacp::{Agent, Client, Component, Error, JrMessage};
+use sacp::{
+    ChainResponder, JrResponder, NullResponder,
+    role::{ConductorToAgent, ConductorToClient, ConductorToProxy},
+};
 use sacp::{
     HasDefaultEndpoint, JrConnectionBuilder, JrConnectionCx, JrNotification, JrRequest,
     JrRequestCx, JrResponse, JrRole, MessageCx, UntypedMessage,
@@ -156,12 +159,12 @@ pub struct Conductor {
 
 impl Conductor {
     pub fn new(
-        name: String,
+        name: impl ToString,
         component_list: impl ComponentList + 'static,
         mcp_bridge_mode: crate::McpBridgeMode,
     ) -> Self {
         Conductor {
-            name,
+            name: name.to_string(),
             component_list: Box::new(component_list),
             mcp_bridge_mode,
             trace_writer: None,
@@ -193,8 +196,10 @@ impl Conductor {
 
     pub fn into_connection_builder(
         self,
-    ) -> JrConnectionBuilder<ConductorMessageHandler, ChainResponder<NullResponder, ConductorResponder>>
-    {
+    ) -> JrConnectionBuilder<
+        ConductorMessageHandler,
+        ChainResponder<NullResponder, ConductorResponder>,
+    > {
         let (conductor_tx, conductor_rx) = mpsc::channel(128 /* chosen arbitrarily */);
 
         let responder = ConductorResponder {
@@ -210,11 +215,9 @@ impl Conductor {
             pending_requests: Default::default(),
         };
 
-        JrConnectionBuilder::new_with(ConductorMessageHandler {
-            conductor_tx,
-        })
-        .name(self.name)
-        .with_responder(responder)
+        JrConnectionBuilder::new_with(ConductorMessageHandler { conductor_tx })
+            .name(self.name)
+            .with_responder(responder)
     }
 
     /// Convenience method to run the conductor with a transport.
@@ -243,7 +246,6 @@ impl sacp::Component for Conductor {
 pub struct ConductorMessageHandler {
     conductor_tx: mpsc::Sender<ConductorMessage>,
 }
-
 
 impl JrMessageHandler for ConductorMessageHandler {
     type Role = ConductorToClient;
@@ -341,8 +343,7 @@ impl JrResponder<ConductorToClient> for ConductorResponder {
         // This is the "central actor" of the conductor. Most other things forward messages
         // via `conductor_tx` into this loop. This lets us serialize the conductor's activity.
         while let Some(message) = self.conductor_rx.next().await {
-            self
-                .handle_conductor_message(&cx, message, &mut conductor_tx)
+            self.handle_conductor_message(&cx, message, &mut conductor_tx)
                 .await?;
         }
         Ok(())
