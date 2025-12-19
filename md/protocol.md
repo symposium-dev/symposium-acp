@@ -87,19 +87,37 @@ Send a notification to the successor component.
 
 **Example: Pass-through proxy**
 
-A minimal proxy that just forwards everything:
+A minimal proxy that just forwards everything doesn't need any handlers - the conductor automatically routes unhandled messages:
 
 ```rust
-use sacp_proxy::{JsonRpcCxExt, AcpProxyExt};
+use sacp::{Component, ProxyToConductor};
 
-// Forward request downstream
-cx.send_request_to_successor(request)
-  .await_when_result_received(|result| {
-    cx.respond_with_result(result)
-  })
+ProxyToConductor::builder()
+    .name("passthrough")
+    .connect_to(transport)?
+    .serve()
+    .await
+```
 
-// Forward notification downstream  
-cx.send_notification_to_successor(notification)
+To explicitly handle and forward messages:
+
+```rust
+use sacp::{Agent, Client, ProxyToConductor};
+use sacp::schema::PromptRequest;
+
+ProxyToConductor::builder()
+    .name("my-proxy")
+    .on_receive_request(
+        async |request: PromptRequest, _request_cx, cx| {
+            // Forward request to agent
+            cx.send_request_to(Agent, request)?;
+            Ok(())
+        },
+        sacp::on_receive_request!(),
+    )
+    .connect_to(transport)?
+    .serve()
+    .await
 ```
 
 ## Capability Handshake
@@ -346,10 +364,11 @@ The `conductor mcp PORT` process bridges between stdio and the conductor's ACP m
 
 ## Building on SACP
 
-When building proxies, you use the `sacp-proxy` crate which provides:
+When building proxies, you use `ProxyToConductor::builder()` from the `sacp` crate which provides:
 
-- `AcpProxyExt` trait for handling successor messages
-- `JsonRpcCxExt` trait for sending to successor
-- `ProxyHandler` for automatic proxy capability handshake
+- `.on_receive_request()` / `.on_receive_notification()` for handling messages from client
+- `.on_receive_request_from(Agent, ...)` / `.on_receive_notification_from(Agent, ...)` for handling messages from agent
+- `cx.send_request_to(Agent, ...)` / `cx.send_notification_to(Client, ...)` for forwarding messages
+- Automatic proxy capability handshake
 
 See [Building a Proxy](./building-proxy.md) for implementation guide.
