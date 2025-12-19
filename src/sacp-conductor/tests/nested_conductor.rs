@@ -16,12 +16,14 @@
 //! - arrow_proxy2 adds second '>' to that: ">>Hello..."
 //! - Inner conductor operates in proxy mode, forwarding to eliza
 //! - Outer conductor receives the ">>" prefixed response
+//!
+//! Run `just prep-tests` before running these tests.
 
 use sacp::Component;
 use sacp_conductor::Conductor;
 use sacp_test::arrow_proxy::run_arrow_proxy;
+use sacp_test::test_binaries::{arrow_proxy_example, conductor_binary, elizacp_binary};
 use sacp_tokio::AcpAgent;
-use std::str::FromStr;
 use tokio::io::duplex;
 use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
 
@@ -133,15 +135,20 @@ async fn test_nested_conductor_with_arrow_proxies() -> Result<(), sacp::Error> {
 }
 
 #[tokio::test]
-#[ignore = "flaky due to cargo run compilation races - see test_nested_conductor_with_arrow_proxies for in-process version"]
 async fn test_nested_conductor_with_external_arrow_proxies() -> Result<(), sacp::Error> {
     // Create the nested component chain using external processes
     // Inner conductor spawned as a separate process with two arrow proxies
     // Outer conductor manages: inner_conductor -> eliza (both as external processes)
-    let inner_conductor = AcpAgent::from_str(
-        "cargo run -p sacp-conductor -- agent 'cargo run -p sacp-test --example arrow_proxy' 'cargo run -p sacp-test --example arrow_proxy'",
-    )?;
-    let eliza = AcpAgent::from_str("cargo run -p elizacp")?;
+    // Uses pre-built binaries to avoid cargo run races during `cargo test --all`
+    let conductor_path = conductor_binary().to_string_lossy().to_string();
+    let arrow_proxy_path = arrow_proxy_example().to_string_lossy().to_string();
+    let inner_conductor = AcpAgent::from_args([
+        &conductor_path,
+        "agent",
+        &arrow_proxy_path,
+        &arrow_proxy_path,
+    ])?;
+    let eliza = AcpAgent::from_args([elizacp_binary().to_string_lossy().to_string()])?;
 
     // Create duplex streams for editor <-> conductor communication
     let (editor_write, conductor_read) = duplex(8192);
