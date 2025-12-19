@@ -109,11 +109,11 @@ use crate::{Agent, Client, Component};
 /// Role::builder()
 ///     .on_receive_request(async |req: InitializeRequest, request_cx, cx| {
 ///         request_cx.respond(InitializeResponse::make())
-///     })
+///     }, sacp::on_receive_request!())
 ///     .on_receive_notification(async |notif: SessionNotification, cx| {
 ///         // Process notification
 ///         Ok(())
-///     })
+///     }, sacp::on_receive_notification!())
 ///     .serve(transport)
 ///     .await?;
 /// ```
@@ -237,11 +237,11 @@ pub trait JrMessageHandler: Send {
 ///     .on_receive_request(async |req: InitializeRequest, request_cx, cx| {
 ///         // Handle only InitializeRequest messages
 ///         request_cx.respond(InitializeResponse::make())
-///     })
+///     }, sacp::on_receive_request!())
 ///     .on_receive_notification(async |notif: SessionNotification, cx| {
 ///         // Handle only SessionUpdate notifications
 ///         Ok(())
-///     })
+///     }, sacp::on_receive_notification!())
 /// # .serve(sacp_test::MockTransport).await?;
 /// # Ok(())
 /// # }
@@ -279,7 +279,7 @@ pub trait JrMessageHandler: Send {
 ///         MyRequests::Initialize(init) => { request_cx.respond(serde_json::json!({})) }
 ///         MyRequests::Prompt(prompt) => { request_cx.respond(serde_json::json!({})) }
 ///     }
-/// })
+/// }, sacp::on_receive_request!())
 /// # .serve(sacp_test::MockTransport).await?;
 /// # Ok(())
 /// # }
@@ -305,7 +305,7 @@ pub trait JrMessageHandler: Send {
 ///             Ok(())
 ///         }
 ///     }
-/// })
+/// }, sacp::on_receive_message!())
 /// # .serve(sacp_test::MockTransport).await?;
 /// # Ok(())
 /// # }
@@ -335,15 +335,15 @@ pub trait JrMessageHandler: Send {
 ///     .on_receive_request(async |req: InitializeRequest, request_cx, cx| {
 ///         // This runs first for InitializeRequest
 ///         request_cx.respond(InitializeResponse::make())
-///     })
+///     }, sacp::on_receive_request!())
 ///     .on_receive_request(async |req: PromptRequest, request_cx, cx| {
 ///         // This runs first for PromptRequest
 ///         request_cx.respond(PromptResponse::make())
-///     })
+///     }, sacp::on_receive_request!())
 ///     .on_receive_message(async |msg: MessageCx, cx| {
 ///         // This runs for any message not handled above
 ///         msg.respond_with_error(sacp::util::internal_error("unknown method"), cx)
-///     })
+///     }, sacp::on_receive_message!())
 /// # .serve(sacp_test::MockTransport).await?;
 /// # Ok(())
 /// # }
@@ -379,7 +379,7 @@ pub trait JrMessageHandler: Send {
 ///
 ///     // Respond immediately without blocking
 ///     request_cx.respond(AnalysisStarted { job_id: 42 })
-/// })
+/// }, sacp::on_receive_request!())
 /// # .serve(sacp_test::MockTransport).await?;
 /// # Ok(())
 /// # }
@@ -421,7 +421,7 @@ pub trait JrMessageHandler: Send {
 /// connection
 ///     .on_receive_request(async |req: MyRequest, request_cx, cx| {
 ///         request_cx.respond(MyResponse { status: "ok".into() })
-///     })
+///     }, sacp::on_receive_request!())
 ///     .serve(MockTransport)  // Runs until connection closes or error occurs
 ///     .await?;
 /// # Ok(())
@@ -444,7 +444,7 @@ pub trait JrMessageHandler: Send {
 /// connection
 ///     .on_receive_request(async |req: MyRequest, request_cx, cx| {
 ///         request_cx.respond(MyResponse { status: "ok".into() })
-///     })
+///     }, sacp::on_receive_request!())
 ///     .with_client(MockTransport, async |cx| {
 ///         // You can send requests to the other side
 ///         let response = cx.send_request(InitializeRequest::make())
@@ -483,7 +483,7 @@ pub trait JrMessageHandler: Send {
 ///     .on_receive_request(async |init: InitializeRequest, request_cx, cx| {
 ///         let response: InitializeResponse = todo!();
 ///         request_cx.respond(response)
-///     })
+///     }, sacp::on_receive_request!())
 ///     .on_receive_request(async |prompt: PromptRequest, request_cx, cx| {
 ///         // You can send notifications while processing a request
 ///         let notif: SessionNotification = todo!();
@@ -492,7 +492,7 @@ pub trait JrMessageHandler: Send {
 ///         // Then respond to the request
 ///         let response: PromptResponse = todo!();
 ///         request_cx.respond(response)
-///     })
+///     }, sacp::on_receive_request!())
 ///     .serve(transport)
 ///     .await?;
 /// # Ok(())
@@ -633,7 +633,7 @@ impl<H: JrMessageHandler, R: JrResponder<H::Role>> JrConnectionBuilder<H, R> {
     ///             Ok(())
     ///         }
     ///     }
-    /// })
+    /// }, sacp::on_receive_message!())
     /// # .serve(sacp_test::MockTransport).await?;
     /// # Ok(())
     /// # }
@@ -700,7 +700,7 @@ impl<H: JrMessageHandler, R: JrResponder<H::Role>> JrConnectionBuilder<H, R> {
     ///     // Send the response
     ///     let response: PromptResponse = todo!();
     ///     request_cx.respond(response)
-    /// });
+    /// }, sacp::on_receive_request!());
     /// # }
     /// ```
     ///
@@ -766,7 +766,7 @@ impl<H: JrMessageHandler, R: JrResponder<H::Role>> JrConnectionBuilder<H, R> {
     ///     })?;
     ///
     ///     Ok(())
-    /// })
+    /// }, sacp::on_receive_notification!())
     /// # .serve(sacp_test::MockTransport).await?;
     /// # Ok(())
     /// # }
@@ -1047,11 +1047,11 @@ impl<H: JrMessageHandler, R: JrResponder<H::Role>> JrConnectionBuilder<H, R> {
     ///     .on_receive_request(async |req: InitializeRequest, cx: JrRequestCx| {
     ///         state.push_str(" - initialized");  // First mutable borrow
     ///         cx.respond(InitializeResponse::make())
-    ///     })
+    ///     }, sacp::on_receive_request!())
     ///     .on_receive_request(async |req: PromptRequest, cx: JrRequestCx| {
     ///         state.push_str(" - prompted");  // Second mutable borrow - ERROR!
     ///         cx.respond(PromptResponse { content: vec![], stopReason: None })
-    ///     });
+    ///     }, sacp::on_receive_request!());
     /// # Ok(())
     /// # }
     /// ```
@@ -1168,7 +1168,7 @@ impl<H: JrMessageHandler, R: JrResponder<H::Role>> JrConnection<H, R> {
     /// UntypedRole::builder()
     ///     .on_receive_request(async |req: MyRequest, request_cx, cx| {
     ///         request_cx.respond(MyResponse { status: "ok".into() })
-    ///     })
+    ///     }, sacp::on_receive_request!())
     ///     .serve(transport)
     ///     .await?;
     /// # Ok(())
@@ -1211,7 +1211,7 @@ impl<H: JrMessageHandler, R: JrResponder<H::Role>> JrConnection<H, R> {
     ///     .on_receive_request(async |req: MyRequest, request_cx, cx| {
     ///         // Handle incoming requests in the background
     ///         request_cx.respond(MyResponse { status: "ok".into() })
-    ///     })
+    ///     }, sacp::on_receive_request!())
     ///     .connect_to(transport)?
     ///     .with_client(async |cx| {
     ///         // Initialize the protocol
@@ -1468,7 +1468,7 @@ impl<Role: JrRole> JrConnectionCx<Role> {
     ///
     ///     // Respond immediately
     ///     request_cx.respond(ProcessResponse { result: "started".into() })
-    /// })
+    /// }, sacp::on_receive_request!())
     /// # .serve(sacp_test::MockTransport).await?;
     /// # Ok(())
     /// # }
@@ -1512,7 +1512,7 @@ impl<Role: JrRole> JrConnectionCx<Role> {
     /// let backend = UntypedRole::builder()
     ///     .on_receive_request(async |req: MyRequest, request_cx, _cx| {
     ///         request_cx.respond(MyResponse { status: "ok".into() })
-    ///     })
+    ///     }, sacp::on_receive_request!())
     ///     .connect_to(MockTransport)?;
     ///
     /// // Spawn it and get a context to send requests to it
@@ -1829,7 +1829,7 @@ impl<Role: JrRole> Drop for DynamicHandlerRegistration<Role> {
 ///
 ///     // Respond to the request
 ///     request_cx.respond(ProcessResponse { result })
-/// })
+/// }, sacp::on_receive_request!())
 /// # .serve(sacp_test::MockTransport).await?;
 /// # Ok(())
 /// # }
@@ -2452,7 +2452,7 @@ impl JrNotification for UntypedMessage {}
 ///         .block_task()  // This will deadlock!
 ///         .await?;
 ///     request_cx.respond(response)
-/// })
+/// }, sacp::on_receive_request!())
 /// # .serve(sacp_test::MockTransport).await?;
 /// # Ok(())
 /// # }
@@ -2521,7 +2521,7 @@ impl<T: JrResponsePayload> JrResponse<T> {
     /// let backend = UntypedRole::builder()
     ///     .on_receive_request(async |req: MyRequest, request_cx, cx| {
     ///         request_cx.respond(MyResponse { status: "ok".into() })
-    ///     })
+    ///     }, sacp::on_receive_request!())
     ///     .connect_to(MockTransport)?;
     ///
     /// // Spawn backend and get a context to send to it
@@ -2537,7 +2537,7 @@ impl<T: JrResponsePayload> JrResponse<T> {
     ///                 .forward_to_request_cx(request_cx)?;
     ///             Ok(())
     ///         }
-    ///     });
+    ///     }, sacp::on_receive_request!());
     /// # Ok(())
     /// # }
     /// ```
@@ -2592,7 +2592,7 @@ impl<T: JrResponsePayload> JrResponse<T> {
     ///
     ///     // Respond immediately
     ///     request_cx.respond(MyResponse { status: "ok".into() })
-    /// })
+    /// }, sacp::on_receive_request!())
     /// # .serve(sacp_test::MockTransport).await?;
     /// # Ok(())
     /// # }
@@ -2611,7 +2611,7 @@ impl<T: JrResponsePayload> JrResponse<T> {
     ///         .await?;
     ///
     ///     request_cx.respond(MyResponse { status: response.value })
-    /// })
+    /// }, sacp::on_receive_request!())
     /// # .serve(sacp_test::MockTransport).await?;
     /// # Ok(())
     /// # }
@@ -2674,7 +2674,7 @@ impl<T: JrResponsePayload> JrResponse<T> {
     ///         })?;
     ///
     ///     Ok(())
-    /// })
+    /// }, sacp::on_receive_request!())
     /// # .serve(sacp_test::MockTransport).await?;
     /// # Ok(())
     /// # }
@@ -2738,7 +2738,7 @@ impl<T: JrResponsePayload> JrResponse<T> {
     ///
     ///     // Handler continues immediately without waiting
     ///     request_cx.respond(MyResponse { status: "processing".into() })
-    /// })
+    /// }, sacp::on_receive_request!())
     /// # .serve(sacp_test::MockTransport).await?;
     /// # Ok(())
     /// # }

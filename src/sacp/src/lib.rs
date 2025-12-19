@@ -31,11 +31,11 @@
 //!         agent_info: Default::default(),
 //!         meta: Default::default(),
 //!     })
-//! })
+//! }, sacp::on_receive_request!())
 //! .on_receive_message(async move |message: MessageCx, cx| {
 //!     // You can also handle any kind of message:
 //!     message.respond_with_error(sacp::util::internal_error("TODO"), cx)
-//! })
+//! }, sacp::on_receive_message!())
 //! .serve(sacp::ByteStreams::new(
 //!     tokio::io::stdout().compat_write(),
 //!     tokio::io::stdin().compat(),
