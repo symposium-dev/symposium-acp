@@ -643,13 +643,7 @@ impl<H: JrMessageHandler, R: JrResponder<H::Role>> JrConnectionBuilder<H, R> {
         self,
         op: F,
         to_future_hack: ToFut,
-    ) -> JrConnectionBuilder<
-        ChainedHandler<
-            H,
-            MessageHandler<H::Role, <H::Role as JrRole>::HandlerEndpoint, Req, Notif, F, ToFut>,
-        >,
-        R,
-    >
+    ) -> JrConnectionBuilder<impl JrMessageHandler<Role = H::Role>, R>
     where
         H::Role: HasDefaultEndpoint,
         H::Role: HasEndpoint<<H::Role as JrRole>::HandlerEndpoint>,
@@ -715,13 +709,7 @@ impl<H: JrMessageHandler, R: JrResponder<H::Role>> JrConnectionBuilder<H, R> {
         self,
         op: F,
         to_future_hack: ToFut,
-    ) -> JrConnectionBuilder<
-        ChainedHandler<
-            H,
-            RequestHandler<H::Role, <H::Role as JrRole>::HandlerEndpoint, Req, F, ToFut>,
-        >,
-        R,
-    >
+    ) -> JrConnectionBuilder<impl JrMessageHandler<Role = H::Role>, R>
     where
         H::Role: HasDefaultEndpoint,
         H::Role: HasEndpoint<<H::Role as JrRole>::HandlerEndpoint>,
@@ -789,13 +777,7 @@ impl<H: JrMessageHandler, R: JrResponder<H::Role>> JrConnectionBuilder<H, R> {
         self,
         op: F,
         to_future_hack: ToFut,
-    ) -> JrConnectionBuilder<
-        ChainedHandler<
-            H,
-            NotificationHandler<H::Role, <H::Role as JrRole>::HandlerEndpoint, Notif, F, ToFut>,
-        >,
-        R,
-    >
+    ) -> JrConnectionBuilder<impl JrMessageHandler<Role = H::Role>, R>
     where
         H::Role: HasDefaultEndpoint,
         H::Role: HasEndpoint<<H::Role as JrRole>::HandlerEndpoint>,
@@ -839,7 +821,7 @@ impl<H: JrMessageHandler, R: JrResponder<H::Role>> JrConnectionBuilder<H, R> {
         endpoint: End,
         op: F,
         to_future_hack: ToFut,
-    ) -> JrConnectionBuilder<ChainedHandler<H, MessageHandler<H::Role, End, Req, Notif, F, ToFut>>, R>
+    ) -> JrConnectionBuilder<impl JrMessageHandler<Role = H::Role>, R>
     where
         H::Role: HasEndpoint<End>,
         F: AsyncFnMut(MessageCx<Req, Notif>, JrConnectionCx<H::Role>) -> Result<T, crate::Error>
@@ -888,7 +870,7 @@ impl<H: JrMessageHandler, R: JrResponder<H::Role>> JrConnectionBuilder<H, R> {
         endpoint: End,
         op: F,
         to_future_hack: ToFut,
-    ) -> JrConnectionBuilder<ChainedHandler<H, RequestHandler<H::Role, End, Req, F, ToFut>>, R>
+    ) -> JrConnectionBuilder<impl JrMessageHandler<Role = H::Role>, R>
     where
         H::Role: HasEndpoint<End>,
         F: AsyncFnMut(
@@ -929,7 +911,7 @@ impl<H: JrMessageHandler, R: JrResponder<H::Role>> JrConnectionBuilder<H, R> {
         endpoint: End,
         op: F,
         to_future_hack: ToFut,
-    ) -> JrConnectionBuilder<ChainedHandler<H, NotificationHandler<H::Role, End, Notif, F, ToFut>>, R>
+    ) -> JrConnectionBuilder<impl JrMessageHandler<Role = H::Role>, R>
     where
         H::Role: HasEndpoint<End>,
         F: AsyncFnMut(Notif, JrConnectionCx<H::Role>) -> Result<T, crate::Error> + Send,
