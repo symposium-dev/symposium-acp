@@ -4,10 +4,12 @@
 //! 1. Conductor correctly generates trace events when trace_to() is enabled
 //! 2. Trace file contains valid JSON lines
 //! 3. Events capture the message flow through the conductor
+//!
+//! Run `just prep-tests` before running this test.
 
 use sacp_conductor::Conductor;
+use sacp_test::test_binaries::{arrow_proxy_example, elizacp_binary};
 use sacp_tokio::AcpAgent;
-use std::str::FromStr;
 use tokio::io::duplex;
 use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
 
@@ -17,8 +19,10 @@ async fn test_trace_generation() -> Result<(), sacp::Error> {
     let trace_path = std::env::temp_dir().join(format!("trace_test_{}.jsons", std::process::id()));
 
     // Create the component chain: arrow_proxy -> eliza
-    let arrow_proxy_agent = AcpAgent::from_str("cargo run -p sacp-test --example arrow_proxy")?;
-    let eliza_agent = AcpAgent::from_str("cargo run -p elizacp")?;
+    // Uses pre-built binaries to avoid cargo run races during `cargo test --all`
+    let arrow_proxy_agent =
+        AcpAgent::from_args([arrow_proxy_example().to_string_lossy().to_string()])?;
+    let eliza_agent = AcpAgent::from_args([elizacp_binary().to_string_lossy().to_string()])?;
 
     // Create duplex streams for editor <-> conductor communication
     let (editor_write, conductor_read) = duplex(8192);
