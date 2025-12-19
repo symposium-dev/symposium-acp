@@ -39,15 +39,18 @@ async fn test_elizacp_mcp_tool_call() -> Result<(), sacp::Error> {
 
     UntypedRole::builder()
         .name("test-client")
-        .on_receive_notification({
-            let mut notification_tx = notification_tx.clone();
-            async move |notification: SessionNotification, _cx| {
-                notification_tx
-                    .send(notification)
-                    .await
-                    .map_err(|_| sacp::Error::internal_error())
-            }
-        })
+        .on_receive_notification(
+            {
+                let mut notification_tx = notification_tx.clone();
+                async move |notification: SessionNotification, _cx| {
+                    notification_tx
+                        .send(notification)
+                        .await
+                        .map_err(|_| sacp::Error::internal_error())
+                }
+            },
+            sacp::on_receive_notification!(),
+        )
         .with_spawned(|_cx| async move {
             ElizaAgent::new()
                 .serve(sacp::ByteStreams::new(

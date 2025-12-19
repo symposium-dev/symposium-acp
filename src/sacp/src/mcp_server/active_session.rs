@@ -9,8 +9,8 @@ use crate::schema::{
 };
 use crate::util::MatchMessageFrom;
 use crate::{
-    Agent, Channel, Component, Handled, HasEndpoint, JrConnectionCx, JrMessageHandlerSend,
-    JrRequestCx, JrRole, MessageCx, UntypedMessage,
+    Agent, Channel, Component, Handled, HasEndpoint, JrConnectionCx, JrMessageHandler, JrRequestCx,
+    JrRole, MessageCx, UntypedMessage,
 };
 use std::sync::Arc;
 
@@ -80,27 +80,30 @@ where
             let outer_cx = outer_cx.clone();
 
             McpClientToServer::builder()
-                .on_receive_message(async move |message: MessageCx, _mcp_cx| {
-                    // Wrap the message in McpOverAcp{Request,Notification} and forward to successor
-                    let wrapped = message.map(
-                        |request, request_cx| {
-                            (
-                                McpOverAcpMessage {
-                                    connection_id: connection_id.clone(),
-                                    message: request,
-                                    meta: None,
-                                },
-                                request_cx,
-                            )
-                        },
-                        |notification| McpOverAcpMessage {
-                            connection_id: connection_id.clone(),
-                            message: notification,
-                            meta: None,
-                        },
-                    );
-                    outer_cx.send_proxied_message_to(Agent, wrapped)
-                })
+                .on_receive_message(
+                    async move |message: MessageCx, _mcp_cx| {
+                        // Wrap the message in McpOverAcp{Request,Notification} and forward to successor
+                        let wrapped = message.map(
+                            |request, request_cx| {
+                                (
+                                    McpOverAcpMessage {
+                                        connection_id: connection_id.clone(),
+                                        message: request,
+                                        meta: None,
+                                    },
+                                    request_cx,
+                                )
+                            },
+                            |notification| McpOverAcpMessage {
+                                connection_id: connection_id.clone(),
+                                message: notification,
+                                meta: None,
+                            },
+                        );
+                        outer_cx.send_proxied_message_to(Agent, wrapped)
+                    },
+                    crate::on_receive_message!(),
+                )
                 .with_spawned(move |mcp_cx| async move {
                     // Messages we pull off this channel were sent from the agent.
                     // Forward them back to the MCP server.
@@ -210,7 +213,7 @@ where
     }
 }
 
-impl<Role: JrRole> JrMessageHandlerSend for McpActiveSession<Role>
+impl<Role: JrRole> JrMessageHandler for McpActiveSession<Role>
 where
     Role: HasEndpoint<Agent>,
 {

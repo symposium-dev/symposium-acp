@@ -11,7 +11,7 @@ use std::{fmt::Debug, hash::Hash};
 use agent_client_protocol_schema::{NewSessionRequest, NewSessionResponse, SessionId};
 
 use crate::{
-    Handled, JrConnectionCx, JrMessage, JrMessageHandlerSend, MessageCx, UntypedMessage,
+    Handled, JrConnectionCx, JrMessage, JrMessageHandler, MessageCx, UntypedMessage,
     jsonrpc::{JrConnectionBuilder, handlers::NullHandler},
     schema::{
         InitializeProxyRequest, InitializeRequest, METHOD_INITIALIZE_PROXY,
@@ -459,7 +459,7 @@ struct ProxySessionMessages {
     session_id: SessionId,
 }
 
-impl JrMessageHandlerSend for ProxySessionMessages {
+impl JrMessageHandler for ProxySessionMessages {
     type Role = ProxyToConductor;
 
     async fn handle_message(

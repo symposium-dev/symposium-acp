@@ -277,6 +277,7 @@ async fn test_handler_returns_error() {
                         "This is an intentional error".to_string(),
                     )))
                 },
+                sacp::on_receive_request!(),
             );
 
             let client_transport = sacp::ByteStreams::new(client_writer, client_reader);
@@ -364,6 +365,7 @@ async fn test_missing_required_params() {
                     // accepts anything for "strict_method", so the error must come from somewhere else
                     request_cx.respond_with_error(sacp::Error::invalid_params())
                 },
+                sacp::on_receive_request!(),
             );
 
             let client_transport = sacp::ByteStreams::new(client_writer, client_reader);

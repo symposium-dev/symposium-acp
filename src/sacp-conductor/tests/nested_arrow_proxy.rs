@@ -11,20 +11,22 @@
 //! Expected behavior:
 //! - arrow_proxy2 adds first '>' to eliza's response: ">Hello..."
 //! - arrow_proxy1 adds second '>' to that: ">>Hello..."
+//!
+//! Run `just prep-tests` before running this test.
 
 use sacp_conductor::Conductor;
+use sacp_test::test_binaries::{arrow_proxy_example, elizacp_binary};
 use sacp_tokio::AcpAgent;
-use std::str::FromStr;
 use tokio::io::duplex;
 use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
 
 #[tokio::test]
-#[ignore = "flaky due to cargo run compilation races - see nested_conductor.rs for in-process version"]
 async fn test_conductor_with_two_external_arrow_proxies() -> Result<(), sacp::Error> {
     // Create the component chain: arrow_proxy1 -> arrow_proxy2 -> eliza
-    let arrow_proxy1 = AcpAgent::from_str("cargo run -p sacp-test --example arrow_proxy")?;
-    let arrow_proxy2 = AcpAgent::from_str("cargo run -p sacp-test --example arrow_proxy")?;
-    let eliza = AcpAgent::from_str("cargo run -p elizacp")?;
+    // Uses pre-built binaries to avoid cargo run races during `cargo test --all`
+    let arrow_proxy1 = AcpAgent::from_args([arrow_proxy_example().to_string_lossy().to_string()])?;
+    let arrow_proxy2 = AcpAgent::from_args([arrow_proxy_example().to_string_lossy().to_string()])?;
+    let eliza = AcpAgent::from_args([elizacp_binary().to_string_lossy().to_string()])?;
 
     // Create duplex streams for editor <-> conductor communication
     let (editor_write, conductor_read) = duplex(8192);

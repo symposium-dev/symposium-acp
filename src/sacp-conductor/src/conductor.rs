@@ -122,10 +122,6 @@ use sacp::schema::{
 };
 use sacp::{Agent, Client, Component, Error, JrMessage};
 use sacp::{
-    ChainResponder, JrResponder, NullResponder,
-    role::{ConductorToAgent, ConductorToClient, ConductorToProxy},
-};
-use sacp::{
     HasDefaultEndpoint, JrConnectionBuilder, JrConnectionCx, JrNotification, JrRequest,
     JrRequestCx, JrResponse, JrRole, MessageCx, UntypedMessage,
 };
@@ -136,6 +132,10 @@ use sacp::{
         NewSessionResponse,
     },
     util::MatchMessageFrom,
+};
+use sacp::{
+    JrResponder,
+    role::{ConductorToAgent, ConductorToClient, ConductorToProxy},
 };
 use tracing::{debug, info};
 
@@ -196,10 +196,7 @@ impl Conductor {
 
     pub fn into_connection_builder(
         self,
-    ) -> JrConnectionBuilder<
-        ConductorMessageHandler,
-        ChainResponder<NullResponder, ConductorResponder>,
-    > {
+    ) -> JrConnectionBuilder<ConductorMessageHandler, impl JrResponder<ConductorToClient>> {
         let (conductor_tx, conductor_rx) = mpsc::channel(128 /* chosen arbitrarily */);
 
         let responder = ConductorResponder {
@@ -256,33 +253,41 @@ impl JrMessageHandler for ConductorMessageHandler {
         cx: sacp::JrConnectionCx<ConductorToClient>,
     ) -> Result<sacp::Handled<MessageCx>, sacp::Error> {
         ConductorToClient::builder()
-            .on_receive_message_from(Agent, {
-                let mut conductor_tx = self.conductor_tx.clone();
-                // Messages from our successor arrive already unwrapped
-                // (RemoteRoleStyle::Successor strips the SuccessorMessage envelope).
-                async move |message: MessageCx, _cx| {
-                    conductor_tx
-                        .send(ConductorMessage::AgentToClient {
-                            source_component_index: SourceComponentIndex::ConductorSuccessor,
-                            message,
-                        })
-                        .await
-                        .map_err(sacp::util::internal_error)
-                }
-            })
+            .on_receive_message_from(
+                Agent,
+                {
+                    let mut conductor_tx = self.conductor_tx.clone();
+                    // Messages from our successor arrive already unwrapped
+                    // (RemoteRoleStyle::Successor strips the SuccessorMessage envelope).
+                    async move |message: MessageCx, _cx| {
+                        conductor_tx
+                            .send(ConductorMessage::AgentToClient {
+                                source_component_index: SourceComponentIndex::ConductorSuccessor,
+                                message,
+                            })
+                            .await
+                            .map_err(sacp::util::internal_error)
+                    }
+                },
+                sacp::on_receive_message!(),
+            )
             // Any incoming messages from the client are client-to-agent messages targeting the first component.
-            .on_receive_message_from(Client, {
-                let mut conductor_tx = self.conductor_tx.clone();
-                async move |message: MessageCx, _cx| {
-                    conductor_tx
-                        .send(ConductorMessage::ClientToAgent {
-                            target_component_index: 0,
-                            message,
-                        })
-                        .await
-                        .map_err(sacp::util::internal_error)
-                }
-            })
+            .on_receive_message_from(
+                Client,
+                {
+                    let mut conductor_tx = self.conductor_tx.clone();
+                    async move |message: MessageCx, _cx| {
+                        conductor_tx
+                            .send(ConductorMessage::ClientToAgent {
+                                target_component_index: 0,
+                                message,
+                            })
+                            .await
+                            .map_err(sacp::util::internal_error)
+                    }
+                },
+                sacp::on_receive_message!(),
+            )
             .apply(message, cx)
             .await
     }
@@ -1164,20 +1169,23 @@ impl ConductorResponder {
                 ConductorToAgent::builder()
                     .name("conductor-to-agent")
                     // Intercept agent-to-client messages from the agent.
-                    .on_receive_message({
-                        let mut conductor_tx = conductor_tx.clone();
-                        async move |message_cx: MessageCx, _cx| {
-                            conductor_tx
-                                .send(ConductorMessage::AgentToClient {
-                                    source_component_index: SourceComponentIndex::Component(
-                                        agent_index,
-                                    ),
-                                    message: message_cx,
-                                })
-                                .await
-                                .map_err(sacp::util::internal_error)
-                        }
-                    })
+                    .on_receive_message(
+                        {
+                            let mut conductor_tx = conductor_tx.clone();
+                            async move |message_cx: MessageCx, _cx| {
+                                conductor_tx
+                                    .send(ConductorMessage::AgentToClient {
+                                        source_component_index: SourceComponentIndex::Component(
+                                            agent_index,
+                                        ),
+                                        message: message_cx,
+                                    })
+                                    .await
+                                    .map_err(sacp::util::internal_error)
+                            }
+                        },
+                        sacp::on_receive_message!(),
+                    )
                     .connect_to(agent_component)?,
                 |c| Box::pin(c.serve()),
             )?;
@@ -1192,34 +1200,45 @@ impl ConductorResponder {
                 ConductorToProxy::builder()
                     .name(format!("conductor-to-component({})", component_index))
                     // Intercept messages sent by a proxy component to its successor.
-                    .on_receive_message({
-                        let mut conductor_tx = conductor_tx.clone();
-                        async move |message_cx: MessageCx<SuccessorMessage, SuccessorMessage>,
-                                    _cx| {
-                            conductor_tx
-                                .send(ConductorMessage::ClientToAgent {
-                                    target_component_index: component_index + 1,
-                                    message: message_cx.map(|r, cx| (r.message, cx), |n| n.message),
-                                })
-                                .await
-                                .map_err(sacp::util::internal_error)
-                        }
-                    })
+                    .on_receive_message(
+                        {
+                            let mut conductor_tx = conductor_tx.clone();
+                            async move |message_cx: MessageCx<
+                                SuccessorMessage,
+                                SuccessorMessage,
+                            >,
+                                        _cx| {
+                                conductor_tx
+                                    .send(ConductorMessage::ClientToAgent {
+                                        target_component_index: component_index + 1,
+                                        message: message_cx
+                                            .map(|r, cx| (r.message, cx), |n| n.message),
+                                    })
+                                    .await
+                                    .map_err(sacp::util::internal_error)
+                            }
+                        },
+                        sacp::on_receive_message!(),
+                    )
                     // Intercept agent-to-client messages from the proxy.
-                    .on_receive_message({
-                        let mut conductor_tx = conductor_tx.clone();
-                        async move |message_cx: MessageCx<UntypedMessage, UntypedMessage>, _cx| {
-                            conductor_tx
-                                .send(ConductorMessage::AgentToClient {
-                                    source_component_index: SourceComponentIndex::Component(
-                                        component_index,
-                                    ),
-                                    message: message_cx,
-                                })
-                                .await
-                                .map_err(sacp::util::internal_error)
-                        }
-                    })
+                    .on_receive_message(
+                        {
+                            let mut conductor_tx = conductor_tx.clone();
+                            async move |message_cx: MessageCx<UntypedMessage, UntypedMessage>,
+                                        _cx| {
+                                conductor_tx
+                                    .send(ConductorMessage::AgentToClient {
+                                        source_component_index: SourceComponentIndex::Component(
+                                            component_index,
+                                        ),
+                                        message: message_cx,
+                                    })
+                                    .await
+                                    .map_err(sacp::util::internal_error)
+                            }
+                        },
+                        sacp::on_receive_message!(),
+                    )
                     .connect_to(dyn_component)?,
                 |c| Box::pin(c.serve()),
             )?;

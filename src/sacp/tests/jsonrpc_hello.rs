@@ -108,6 +108,7 @@ async fn test_hello_world() {
                     };
                     request_cx.respond(pong)
                 },
+                sacp::on_receive_request!(),
             );
 
             let client_transport = sacp::ByteStreams::new(client_writer, client_reader);
@@ -186,13 +187,16 @@ async fn test_notification() {
             let (server_reader, server_writer, client_reader, client_writer) = setup_test_streams();
 
             let server_transport = sacp::ByteStreams::new(server_writer, server_reader);
-            let server = UntypedRole::builder().on_receive_notification({
-                let logs = logs_clone.clone();
-                async move |notification: LogNotification, _cx: JrConnectionCx<UntypedRole>| {
-                    logs.lock().unwrap().push(notification.message);
-                    Ok(())
-                }
-            });
+            let server = UntypedRole::builder().on_receive_notification(
+                {
+                    let logs = logs_clone.clone();
+                    async move |notification: LogNotification, _cx: JrConnectionCx<UntypedRole>| {
+                        logs.lock().unwrap().push(notification.message);
+                        Ok(())
+                    }
+                },
+                sacp::on_receive_notification!(),
+            );
 
             let client_transport = sacp::ByteStreams::new(client_writer, client_reader);
             let client = UntypedRole::builder();
@@ -266,6 +270,7 @@ async fn test_multiple_sequential_requests() {
                     };
                     request_cx.respond(pong)
                 },
+                sacp::on_receive_request!(),
             );
 
             let client_transport = sacp::ByteStreams::new(client_writer, client_reader);
@@ -324,6 +329,7 @@ async fn test_concurrent_requests() {
                     };
                     request_cx.respond(pong)
                 },
+                sacp::on_receive_request!(),
             );
 
             let client_transport = sacp::ByteStreams::new(client_writer, client_reader);

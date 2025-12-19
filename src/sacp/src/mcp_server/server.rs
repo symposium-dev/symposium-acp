@@ -6,7 +6,7 @@ use agent_client_protocol_schema::NewSessionRequest;
 use uuid::Uuid;
 
 use crate::{
-    Agent, Client, Handled, HasEndpoint, JrConnectionCx, JrMessageHandlerSend, JrRole,
+    Agent, Client, Handled, HasEndpoint, JrConnectionCx, JrMessageHandler, JrRole,
     jsonrpc::{
         DynamicHandlerRegistration,
         responder::{JrResponder, NullResponder},
@@ -38,8 +38,7 @@ use crate::{
 /// ```rust,ignore
 /// let server = McpServer::new(MyCustomServerConnect);
 /// ```
-pub struct McpServer<Role, Responder = NullResponder>
-{
+pub struct McpServer<Role, Responder = NullResponder> {
     /// The "message handler" handles incoming messages to the MCP server (speaks the MCP protocol).
     message_handler: McpMessageHandler<Role>,
 
@@ -88,8 +87,7 @@ where
 
 /// Message handler created from a [`McpServer`].
 #[derive(Clone)]
-pub struct McpMessageHandler<Role>
-{
+pub struct McpMessageHandler<Role> {
     connect: Arc<dyn McpServerConnect<Role>>,
 }
 
@@ -124,7 +122,7 @@ where
     }
 }
 
-impl<Role: JrRole> JrMessageHandlerSend for McpMessageHandler<Role>
+impl<Role: JrRole> JrMessageHandler for McpMessageHandler<Role>
 where
     Role: HasEndpoint<Client> + HasEndpoint<Agent>,
 {

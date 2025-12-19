@@ -1,121 +1,127 @@
 # Building a Proxy
 
-This chapter explains how to build a proxy component using the `sacp-proxy` crate.
+This chapter explains how to build a proxy component using the `sacp` crate.
 
 ## Overview
 
-A proxy component intercepts messages between editors and agents, transforming them or adding side effects. Proxies are built using the `sacp-proxy` framework.
+A proxy sits between clients and agents, intercepting and transforming messages. Proxies can:
 
-## Basic Structure
+- Modify prompts before they reach the agent
+- Transform responses before they reach the client
+- Provide additional MCP tools
+- Add logging, metrics, or other side effects
+
+Proxies are designed to work with the **conductor**, which chains multiple proxies together and routes messages between them.
+
+## Quick Start
+
+Here's a minimal proxy that adds a ">" prefix to all agent messages:
 
 ```rust
-use sacp_proxy::{AcpProxyExt, JsonRpcCxExt, ProxyHandler};
-use sacp::{JsonRpcConnection, JsonRpcHandler};
+use sacp::{Agent, Client, Component, ProxyToConductor};
+use sacp::schema::{ContentBlock, ContentChunk, SessionNotification, SessionUpdate};
 
-// Your proxy's main handler
-struct MyProxy {
-    // State fields
-}
-
-impl JsonRpcHandler for MyProxy {
-    async fn handle_message(&mut self, message: MessageAndCx) -> Result<Handled> {
-        match message {
-            // Handle messages from upstream (editor direction)
-            MessageAndCx::Request(req, cx) => {
-                match req {
-                    // Transform and forward
-                    AcpRequest::Prompt(mut prompt) => {
-                        // Modify the prompt
-                        prompt.messages.insert(0, my_context);
-                        
-                        // Forward to successor
-                        cx.send_request_to_successor(prompt)
-                          .await_when_result_received(|result| {
-                              cx.respond_with_result(result)
-                          })
+pub async fn run_arrow_proxy(transport: impl Component) -> Result<(), sacp::Error> {
+    ProxyToConductor::builder()
+        .name("arrow-proxy")
+        .on_receive_notification_from(
+            Agent,
+            async |mut notification: SessionNotification, cx| {
+                // Modify content from the agent
+                if let SessionUpdate::AgentMessageChunk(ContentChunk { content, .. }) = 
+                    &mut notification.update 
+                {
+                    if let ContentBlock::Text(text) = content {
+                        text.text = format!(">{}", text.text);
                     }
-                    // Other message types...
                 }
-            }
-            MessageAndCx::Notification(notif, cx) => {
-                // Handle notifications
-            }
-        }
-    }
+
+                // Forward to client
+                cx.send_notification_to(Client, notification)?;
+                Ok(())
+            },
+            sacp::on_receive_notification!(),
+        )
+        .connect_to(transport)?
+        .serve()
+        .await
 }
 ```
 
-## Key Traits
+## Core Concepts
 
-### `AcpProxyExt`
+### Endpoints: Agent and Client
 
-Provides methods for handling messages from the successor:
+Proxies communicate with two endpoints:
+
+- **`Agent`** - The downstream direction (toward the AI agent)
+- **`Client`** - The upstream direction (toward the editor)
+
+When you receive a message, you typically forward it (possibly modified) to the other endpoint:
 
 ```rust
-use sacp_proxy::AcpProxyExt;
+use sacp::{Agent, Client};
 
-connection
-    .on_receive_request_from_successor(|req, cx| async move {
-        // Handle request from downstream component
-    })
-    .on_receive_notification_from_successor(|notif, cx| async move {
-        // Handle notification from downstream
-    })
-    .proxy() // Enable automatic proxy capability handshake
+// Message from client -> forward to agent
+cx.send_request_to(Agent, modified_request)?;
+
+// Message from agent -> forward to client  
+cx.send_notification_to(Client, modified_notification)?;
 ```
 
-### `JsonRpcCxExt`
+### The Builder Pattern
 
-Provides methods for sending to successor:
+Proxies are built using `ProxyToConductor::builder()`:
 
 ```rust
-use sacp_proxy::JsonRpcCxExt;
-
-// Send request and handle response
-cx.send_request_to_successor(request)
-  .await_when_result_received(|result| {
-      cx.respond_with_result(result)
-  })
-
-// Send notification (fire and forget)
-cx.send_notification_to_successor(notification)
+ProxyToConductor::builder()
+    .name("my-proxy")
+    // Handle messages from client (default)
+    .on_receive_request(handler, sacp::on_receive_request!())
+    // Handle messages from agent
+    .on_receive_notification_from(Agent, handler, sacp::on_receive_notification!())
+    .connect_to(transport)?
+    .serve()
+    .await
 ```
 
-## Proxy Patterns
+### Message Direction
 
-### Pass-through Proxy
+By default, `.on_receive_request()` and `.on_receive_notification()` handle messages from the **client** direction.
 
-The simplest proxy forwards everything unchanged:
+To handle messages from the **agent**, use the `_from` variants:
 
 ```rust
-impl JsonRpcHandler for PassThrough {
-    async fn handle_message(&mut self, message: MessageAndCx) -> Result<Handled> {
-        match message {
-            MessageAndCx::Request(req, cx) => {
-                cx.send_request_to_successor(req)
-                  .await_when_result_received(|r| cx.respond_with_result(r))
-            }
-            MessageAndCx::Notification(notif, cx) => {
-                cx.send_notification_to_successor(notif)
-            }
-        }
-    }
-}
+// From client (default)
+.on_receive_request(handler, macro!())
+.on_receive_notification(handler, macro!())
+
+// From agent
+.on_receive_request_from(Agent, handler, macro!())
+.on_receive_notification_from(Agent, handler, macro!())
 ```
 
-### Initialization Injection
+### The Witness Macro
 
-Inject context or configuration during initialization:
+Like agents, every handler registration requires a witness macro:
+
+- `.on_receive_request(..., sacp::on_receive_request!())`
+- `.on_receive_notification(..., sacp::on_receive_notification!())`
+- `.on_receive_message(..., sacp::on_receive_message!())`
+
+## Common Patterns
+
+### Pass-Through Proxy
+
+A proxy that doesn't register any handlers passes all messages through unchanged:
 
 ```rust
-MessageAndCx::Request(AcpRequest::Initialize(mut init), cx) => {
-    // Add your capabilities
-    init.capabilities.my_feature = true;
-    
-    cx.send_request_to_successor(init)
-      .await_when_result_received(|result| {
-          cx.respond_with_result(result)
-      })
+pub async fn run_passthrough(transport: impl Component) -> Result<(), sacp::Error> {
+    ProxyToConductor::builder()
+        .name("passthrough")
+        .connect_to(transport)?
+        .serve()
+        .await
 }
 ```
 
@@ -124,41 +130,190 @@ MessageAndCx::Request(AcpRequest::Initialize(mut init), cx) => {
 Modify prompts before they reach the agent:
 
 ```rust
-MessageAndCx::Request(AcpRequest::Prompt(mut prompt), cx) => {
-    // Prepend system context
-    let context_message = Message {
-        role: Role::User,
-        content: vec![Content::Text { text: context }],
-    };
-    prompt.messages.insert(0, context_message);
-    
-    cx.send_request_to_successor(prompt)
-      .await_when_result_received(|result| {
-          cx.respond_with_result(result)
-      })
+use sacp::schema::{ContentBlock, PromptRequest, TextContent};
+
+ProxyToConductor::builder()
+    .name("context-injector")
+    .on_receive_request(
+        async |mut request: PromptRequest, _request_cx, cx| {
+            // Prepend context to the prompt
+            let context = ContentBlock::Text(TextContent {
+                text: "You are a helpful assistant.".to_string(),
+                meta: None,
+            });
+            request.prompt.insert(0, context);
+
+            // Forward modified request to agent
+            cx.send_request_to(Agent, request)?;
+            Ok(())
+        },
+        sacp::on_receive_request!(),
+    )
+    .connect_to(transport)?
+    .serve()
+    .await
+```
+
+### Response Filtering
+
+Modify or filter responses from the agent:
+
+```rust
+ProxyToConductor::builder()
+    .name("filter-proxy")
+    .on_receive_notification_from(
+        Agent,
+        async |notification: SessionNotification, cx| {
+            // Filter or modify the notification
+            if should_forward(&notification) {
+                cx.send_notification_to(Client, notification)?;
+            }
+            Ok(())
+        },
+        sacp::on_receive_notification!(),
+    )
+    .connect_to(transport)?
+    .serve()
+    .await
+```
+
+### Providing MCP Tools
+
+Proxies can provide MCP tools that agents can use:
+
+```rust
+use sacp::mcp_server::McpServer;
+use schemars::JsonSchema;
+use serde::{Deserialize, Serialize};
+
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
+struct EchoParams {
+    message: String,
+}
+
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
+struct EchoOutput {
+    result: String,
+}
+
+pub async fn run_mcp_proxy(transport: impl Component) -> Result<(), sacp::Error> {
+    let mcp_server = McpServer::builder("my-tools")
+        .instructions("Helpful tools for the agent")
+        .tool_fn_mut(
+            "echo",
+            "Echoes the input message",
+            async |params: EchoParams, _context| {
+                Ok(EchoOutput {
+                    result: format!("Echo: {}", params.message),
+                })
+            },
+            sacp::tool_fn_mut!(),
+        )
+        .build();
+
+    ProxyToConductor::builder()
+        .name("mcp-proxy")
+        .with_mcp_server(mcp_server)
+        .connect_to(transport)?
+        .serve()
+        .await
 }
 ```
 
-### MCP Server Provider
+The `tool_fn_mut!()` macro is required due to Rust language limitations (similar to the handler witness macros).
 
-Provide MCP servers to the agent:
+## Building a Reusable Proxy Component
+
+For proxies that can be composed into the conductor, implement `Component`:
 
 ```rust
-use sacp_proxy::AcpProxyExt;
+use sacp::{Agent, Client, Component, ProxyToConductor};
 
-connection
-    .provide_mcp(my_mcp_server_uuid, my_mcp_handler)
-    .proxy()
+pub struct MyProxy {
+    config: ProxyConfig,
+}
+
+impl Component for MyProxy {
+    async fn serve(self, client: impl Component) -> Result<(), sacp::Error> {
+        ProxyToConductor::builder()
+            .name("my-proxy")
+            .on_receive_notification_from(
+                Agent,
+                {
+                    let config = self.config.clone();
+                    async move |notification: SessionNotification, cx| {
+                        // Use config here...
+                        cx.send_notification_to(Client, notification)?;
+                        Ok(())
+                    }
+                },
+                sacp::on_receive_notification!(),
+            )
+            .connect_to(client)?
+            .serve()
+            .await
+    }
+}
 ```
 
-See the Protocol Reference for details on the MCP-over-ACP protocol.
+Then use it with the conductor:
 
-## Complete Example
+```rust
+use sacp_conductor::Conductor;
 
-For a complete example of a production proxy, see the [sparkle-acp-proxy](https://github.com/nikomatsakis/sparkle-acp-proxy) implementation.
+Conductor::new("my-conductor")
+    .proxy(MyProxy::new(config))
+    .agent(my_agent)
+    .serve(transport)
+    .await
+```
+
+## Handler Parameters
+
+### Request Handlers
+
+Request handlers receive three parameters:
+
+```rust
+.on_receive_request(
+    async |request: SomeRequest, request_cx, cx| {
+        // request: The typed request
+        // request_cx: JrRequestCx - for responding to this specific request
+        // cx: JrConnectionCx - for sending other messages, spawning tasks
+        
+        // Forward to agent (response routing is automatic)
+        cx.send_request_to(Agent, request)?;
+        Ok(())
+    },
+    sacp::on_receive_request!(),
+)
+```
+
+### Notification Handlers
+
+Notification handlers receive two parameters:
+
+```rust
+.on_receive_notification_from(
+    Agent,
+    async |notification: SomeNotification, cx| {
+        // notification: The typed notification
+        // cx: JrConnectionCx - for sending messages
+        
+        cx.send_notification_to(Client, notification)?;
+        Ok(())
+    },
+    sacp::on_receive_notification!(),
+)
+```
+
+## Complete Examples
+
+- **[arrow_proxy.rs](https://github.com/symposium-dev/symposium-acp/blob/main/src/sacp-test/src/arrow_proxy.rs)** - Simple message transformation
+- **[proxy.rs](https://github.com/symposium-dev/symposium-acp/blob/main/src/sacp-conductor/tests/mcp_integration/proxy.rs)** - MCP tool provider
 
 ## Next Steps
 
-- See [Protocol Reference](./protocol.md) for message format details
-- Read the `sacp-proxy` crate documentation for API details
-- Study the sparkle-acp-proxy implementation for patterns
+- See [Conductor Implementation](./conductor.md) for how proxies are composed
+- See [MCP Bridge](./mcp-bridge.md) for MCP-over-ACP details
+- Read the `sacp` crate rustdoc for full API documentation

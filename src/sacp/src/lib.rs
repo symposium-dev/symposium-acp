@@ -31,11 +31,11 @@
 //!         agent_info: Default::default(),
 //!         meta: Default::default(),
 //!     })
-//! })
+//! }, sacp::on_receive_request!())
 //! .on_receive_message(async move |message: MessageCx, cx| {
 //!     // You can also handle any kind of message:
 //!     message.respond_with_error(sacp::util::internal_error("TODO"), cx)
-//! })
+//! }, sacp::on_receive_message!())
 //! .serve(sacp::ByteStreams::new(
 //!     tokio::io::stdout().compat_write(),
 //!     tokio::io::stdin().compat(),
@@ -200,8 +200,8 @@ pub mod jsonrpcmsg {
 
 pub use jsonrpc::{
     ByteStreams, Channel, Handled, IntoHandled, JrConnection, JrConnectionBuilder, JrConnectionCx,
-    JrMessage, JrMessageHandler, JrMessageHandlerSend, JrNotification, JrRequest, JrRequestCx,
-    JrResponse, JrResponsePayload, Lines, MessageCx, NullHandler, UntypedMessage,
+    JrMessage, JrMessageHandler, JrNotification, JrRequest, JrRequestCx, JrResponse,
+    JrResponsePayload, Lines, MessageCx, NullHandler, UntypedMessage,
     responder::{ChainResponder, JrResponder, NullResponder},
 };
 
@@ -242,5 +242,47 @@ pub use session::*;
 macro_rules! tool_fn_mut {
     () => {
         |func, params, context| Box::pin(func(params, context))
+    };
+}
+
+/// This macro is used for the value of the `to_future_hack` parameter of
+/// [`JrConnectionBuilder::on_receive_request`] and [`JrConnectionBuilder::on_receive_request_from`].
+///
+/// It expands to `|f, req, req_cx, cx| Box::pin(f(req, req_cx, cx))`.
+///
+/// This is needed until [return-type notation](https://github.com/rust-lang/rust/issues/109417)
+/// is stabilized.
+#[macro_export]
+macro_rules! on_receive_request {
+    () => {
+        |f: &mut _, req, req_cx, cx| Box::pin(f(req, req_cx, cx))
+    };
+}
+
+/// This macro is used for the value of the `to_future_hack` parameter of
+/// [`JrConnectionBuilder::on_receive_notification`] and [`JrConnectionBuilder::on_receive_notification_from`].
+///
+/// It expands to `|f, notif, cx| Box::pin(f(notif, cx))`.
+///
+/// This is needed until [return-type notation](https://github.com/rust-lang/rust/issues/109417)
+/// is stabilized.
+#[macro_export]
+macro_rules! on_receive_notification {
+    () => {
+        |f: &mut _, notif, cx| Box::pin(f(notif, cx))
+    };
+}
+
+/// This macro is used for the value of the `to_future_hack` parameter of
+/// [`JrConnectionBuilder::on_receive_message`] and [`JrConnectionBuilder::on_receive_message_from`].
+///
+/// It expands to `|f, msg_cx, cx| Box::pin(f(msg_cx, cx))`.
+///
+/// This is needed until [return-type notation](https://github.com/rust-lang/rust/issues/109417)
+/// is stabilized.
+#[macro_export]
+macro_rules! on_receive_message {
+    () => {
+        |f: &mut _, msg_cx, cx| Box::pin(f(msg_cx, cx))
     };
 }
