@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [8.0.0](https://github.com/symposium-dev/symposium-acp/releases/tag/sacp-test-v8.0.0) - 2025-12-15
+## [9.0.0](https://github.com/symposium-dev/symposium-acp/releases/tag/sacp-test-v9.0.0) - 2025-12-15
 
 ### Added
 
