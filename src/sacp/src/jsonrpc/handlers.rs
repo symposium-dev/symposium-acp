@@ -43,17 +43,27 @@ impl<Role: JrRole> JrMessageHandler for NullHandler<Role> {
 }
 
 /// Handler for typed request messages
-pub struct RequestHandler<Role: JrRole, End: JrEndpoint, Req: JrRequest = UntypedMessage, F = ()> {
+pub struct RequestHandler<
+    Role: JrRole,
+    End: JrEndpoint,
+    Req: JrRequest = UntypedMessage,
+    F = (),
+    ToFut = (),
+> {
     handler: F,
+    to_future_hack: ToFut,
     role: Role,
     phantom: PhantomData<fn(End, Req)>,
 }
 
-impl<Role: JrRole, End: JrEndpoint, Req: JrRequest, F> RequestHandler<Role, End, Req, F> {
+impl<Role: JrRole, End: JrEndpoint, Req: JrRequest, F, ToFut>
+    RequestHandler<Role, End, Req, F, ToFut>
+{
     /// Creates a new request handler
-    pub fn new(_endpoint: End, role: Role, handler: F) -> Self {
+    pub fn new(_endpoint: End, role: Role, handler: F, to_future_hack: ToFut) -> Self {
         Self {
             handler,
+            to_future_hack,
             role,
             phantom: PhantomData,
         }
@@ -65,13 +75,22 @@ impl<Role: JrRole, End: JrEndpoint, Req: JrRequest, F> RequestHandler<Role, End,
     }
 }
 
-impl<Role: JrRole, End: JrEndpoint, Req, F, T> JrMessageHandler
-    for RequestHandler<Role, End, Req, F>
+impl<Role: JrRole, End: JrEndpoint, Req, F, T, ToFut> JrMessageHandler
+    for RequestHandler<Role, End, Req, F, ToFut>
 where
     Role: HasEndpoint<End>,
     Req: JrRequest,
-    F: AsyncFnMut(Req, JrRequestCx<Req::Response>, JrConnectionCx<Role>) -> Result<T, crate::Error>,
+    F: AsyncFnMut(Req, JrRequestCx<Req::Response>, JrConnectionCx<Role>) -> Result<T, crate::Error>
+        + Send,
     T: crate::IntoHandled<(Req, JrRequestCx<Req::Response>)>,
+    ToFut: Fn(
+            &mut F,
+            Req,
+            JrRequestCx<Req::Response>,
+            JrConnectionCx<Role>,
+        ) -> crate::BoxFuture<'_, Result<T, crate::Error>>
+        + Send
+        + Sync,
 {
     type Role = Role;
 
@@ -104,9 +123,13 @@ where
                                         "RequestHandler::handle_request: parse completed"
                                     );
                                     let typed_request_cx = request_cx.cast();
-                                    let result =
-                                        (self.handler)(req, typed_request_cx, connection_cx)
-                                            .await?;
+                                    let result = (self.to_future_hack)(
+                                        &mut self.handler,
+                                        req,
+                                        typed_request_cx,
+                                        connection_cx,
+                                    )
+                                    .await?;
                                     match result.into_handled() {
                                         Handled::Yes => Ok(Handled::Yes),
                                         Handled::No {
@@ -159,19 +182,22 @@ pub struct NotificationHandler<
     End: JrEndpoint,
     Notif: JrNotification = UntypedMessage,
     F = (),
+    ToFut = (),
 > {
     handler: F,
+    to_future_hack: ToFut,
     role: Role,
     phantom: PhantomData<fn(End, Notif)>,
 }
 
-impl<Role: JrRole, End: JrEndpoint, Notif: JrNotification, F>
-    NotificationHandler<Role, End, Notif, F>
+impl<Role: JrRole, End: JrEndpoint, Notif: JrNotification, F, ToFut>
+    NotificationHandler<Role, End, Notif, F, ToFut>
 {
     /// Creates a new notification handler
-    pub fn new(_endpoint: End, role: Role, handler: F) -> Self {
+    pub fn new(_endpoint: End, role: Role, handler: F, to_future_hack: ToFut) -> Self {
         Self {
             handler,
+            to_future_hack,
             role,
             phantom: PhantomData,
         }
@@ -183,13 +209,16 @@ impl<Role: JrRole, End: JrEndpoint, Notif: JrNotification, F>
     }
 }
 
-impl<Role: JrRole, End: JrEndpoint, Notif, F, T> JrMessageHandler
-    for NotificationHandler<Role, End, Notif, F>
+impl<Role: JrRole, End: JrEndpoint, Notif, F, T, ToFut> JrMessageHandler
+    for NotificationHandler<Role, End, Notif, F, ToFut>
 where
     Role: HasEndpoint<End>,
     Notif: JrNotification,
-    F: AsyncFnMut(Notif, JrConnectionCx<Role>) -> Result<T, crate::Error>,
+    F: AsyncFnMut(Notif, JrConnectionCx<Role>) -> Result<T, crate::Error> + Send,
     T: crate::IntoHandled<(Notif, JrConnectionCx<Role>)>,
+    ToFut: Fn(&mut F, Notif, JrConnectionCx<Role>) -> crate::BoxFuture<'_, Result<T, crate::Error>>
+        + Send
+        + Sync,
 {
     type Role = Role;
 
@@ -221,7 +250,12 @@ where
                                         ?notif,
                                         "NotificationHandler::handle_notification: parse completed"
                                     );
-                                    let result = (self.handler)(notif, connection_cx).await?;
+                                    let result = (self.to_future_hack)(
+                                        &mut self.handler,
+                                        notif,
+                                        connection_cx,
+                                    )
+                                    .await?;
                                     match result.into_handled() {
                                         Handled::Yes => Ok(Handled::Yes),
                                         Handled::No {
@@ -274,22 +308,22 @@ pub struct MessageHandler<
     Req: JrRequest = UntypedMessage,
     Notif: JrNotification = UntypedMessage,
     F = (),
+    ToFut = (),
 > {
     handler: F,
+    to_future_hack: ToFut,
     role: Role,
     phantom: PhantomData<fn(End, Req, Notif)>,
 }
 
-impl<Role: JrRole, End: JrEndpoint, Req: JrRequest, Notif: JrNotification, F, T>
-    MessageHandler<Role, End, Req, Notif, F>
-where
-    F: AsyncFnMut(MessageCx<Req, Notif>, JrConnectionCx<Role>) -> Result<T, crate::Error>,
-    T: IntoHandled<MessageCx<Req, Notif>>,
+impl<Role: JrRole, End: JrEndpoint, Req: JrRequest, Notif: JrNotification, F, ToFut>
+    MessageHandler<Role, End, Req, Notif, F, ToFut>
 {
     /// Creates a new message handler
-    pub fn new(_endpoint: End, role: Role, handler: F) -> Self {
+    pub fn new(_endpoint: End, role: Role, handler: F, to_future_hack: ToFut) -> Self {
         Self {
             handler,
+            to_future_hack,
             role,
             phantom: PhantomData,
         }
@@ -301,12 +335,19 @@ where
     }
 }
 
-impl<Role: JrRole, End: JrEndpoint, Req: JrRequest, Notif: JrNotification, F, T> JrMessageHandler
-    for MessageHandler<Role, End, Req, Notif, F>
+impl<Role: JrRole, End: JrEndpoint, Req: JrRequest, Notif: JrNotification, F, T, ToFut>
+    JrMessageHandler for MessageHandler<Role, End, Req, Notif, F, ToFut>
 where
     Role: HasEndpoint<End>,
-    F: AsyncFnMut(MessageCx<Req, Notif>, JrConnectionCx<Role>) -> Result<T, crate::Error>,
+    F: AsyncFnMut(MessageCx<Req, Notif>, JrConnectionCx<Role>) -> Result<T, crate::Error> + Send,
     T: IntoHandled<MessageCx<Req, Notif>>,
+    ToFut: Fn(
+            &mut F,
+            MessageCx<Req, Notif>,
+            JrConnectionCx<Role>,
+        ) -> crate::BoxFuture<'_, Result<T, crate::Error>>
+        + Send
+        + Sync,
 {
     type Role = Role;
 
@@ -332,7 +373,12 @@ where
                     .into_typed_message_cx::<Req, Notif>()?
                 {
                     Ok(typed_message_cx) => {
-                        let result = (self.handler)(typed_message_cx, connection_cx).await?;
+                        let result = (self.to_future_hack)(
+                            &mut self.handler,
+                            typed_message_cx,
+                            connection_cx,
+                        )
+                        .await?;
                         match result.into_handled() {
                             Handled::Yes => Ok(Handled::Yes),
                             Handled::No {

@@ -142,6 +142,7 @@ async fn test_multiple_handlers_different_methods() {
                             result: format!("foo: {}", request.value),
                         })
                     },
+                    sacp::on_receive_request!(),
                 )
                 .on_receive_request(
                     async |request: BarRequest,
@@ -151,6 +152,7 @@ async fn test_multiple_handlers_different_methods() {
                             result: format!("bar: {}", request.value),
                         })
                     },
+                    sacp::on_receive_request!(),
                 );
             let client_transport = sacp::ByteStreams::new(client_writer, client_reader);
             let client = UntypedRole::builder();
@@ -260,6 +262,7 @@ async fn test_handler_priority_ordering() {
                             result: format!("handler1: {}", request.value),
                         })
                     },
+                    sacp::on_receive_request!(),
                 )
                 .on_receive_request(
                     async move |request: TrackRequest,
@@ -270,6 +273,7 @@ async fn test_handler_priority_ordering() {
                             result: format!("handler2: {}", request.value),
                         })
                     },
+                    sacp::on_receive_request!(),
                 );
             let client_transport = sacp::ByteStreams::new(client_writer, client_reader);
             let client = UntypedRole::builder();
@@ -404,6 +408,7 @@ async fn test_fallthrough_behavior() {
                             result: format!("method1: {}", request.value),
                         })
                     },
+                    sacp::on_receive_request!(),
                 )
                 .on_receive_request(
                     async move |request: Method2Request,
@@ -414,6 +419,7 @@ async fn test_fallthrough_behavior() {
                             result: format!("method2: {}", request.value),
                         })
                     },
+                    sacp::on_receive_request!(),
                 );
             let client_transport = sacp::ByteStreams::new(client_writer, client_reader);
             let client = UntypedRole::builder();
@@ -484,6 +490,7 @@ async fn test_no_handler_claims() {
                         result: format!("foo: {}", request.value),
                     })
                 },
+                sacp::on_receive_request!(),
             );
             let client_transport = sacp::ByteStreams::new(client_writer, client_reader);
             let client = UntypedRole::builder();
@@ -575,6 +582,7 @@ async fn test_handler_claims_notification() {
                     events_clone.lock().unwrap().push(notification.event);
                     Ok(())
                 },
+                sacp::on_receive_notification!(),
             );
             let client_transport = sacp::ByteStreams::new(client_writer, client_reader);
             let client = UntypedRole::builder();

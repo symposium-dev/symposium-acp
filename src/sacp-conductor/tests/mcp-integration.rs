@@ -184,17 +184,20 @@ async fn test_agent_handles_prompt() -> Result<(), sacp::Error> {
 
     sacp::ClientToAgent::builder()
         .name("editor-to-connector")
-        .on_receive_notification({
-            let mut log_tx = log_tx.clone();
-            async move |notification: SessionNotification,
-                        _cx: sacp::JrConnectionCx<sacp::ClientToAgent>| {
-                // Log the notification in debug format
-                log_tx
-                    .send(format!("{notification:?}"))
-                    .await
-                    .map_err(|_| sacp::Error::internal_error())
-            }
-        })
+        .on_receive_notification(
+            {
+                let mut log_tx = log_tx.clone();
+                async move |notification: SessionNotification,
+                            _cx: sacp::JrConnectionCx<sacp::ClientToAgent>| {
+                    // Log the notification in debug format
+                    log_tx
+                        .send(format!("{notification:?}"))
+                        .await
+                        .map_err(|_| sacp::Error::internal_error())
+                }
+            },
+            sacp::on_receive_notification!(),
+        )
         .connect_to(Conductor::new(
             "mcp-integration-conductor".to_string(),
             vec![

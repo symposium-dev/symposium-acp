@@ -138,6 +138,7 @@ async fn test_empty_request() {
                         result: "Got empty request".to_string(),
                     })
                 },
+                sacp::on_receive_request!(),
             );
 
             let client_transport = sacp::ByteStreams::new(client_writer, client_reader);
@@ -190,6 +191,7 @@ async fn test_null_params() {
                         result: "Has params: true".to_string(),
                     })
                 },
+                sacp::on_receive_request!(),
             );
 
             let client_transport = sacp::ByteStreams::new(client_writer, client_reader);
@@ -239,6 +241,7 @@ async fn test_server_shutdown() {
                         result: "Got empty request".to_string(),
                     })
                 },
+                sacp::on_receive_request!(),
             );
 
             let client_transport = sacp::ByteStreams::new(client_writer, client_reader);
@@ -310,6 +313,7 @@ async fn test_client_disconnect() {
                         result: "Got empty request".to_string(),
                     })
                 },
+                sacp::on_receive_request!(),
             );
 
             tokio::task::spawn_local(async move {

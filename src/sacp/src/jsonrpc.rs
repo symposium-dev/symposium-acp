@@ -165,7 +165,12 @@ use crate::{Agent, Client, Component};
 /// })?;
 /// ```
 #[allow(async_fn_in_trait)]
-pub trait JrMessageHandler {
+/// A handler for incoming JSON-RPC messages.
+///
+/// This trait is implemented by types that can process incoming messages on a connection.
+/// Handlers are registered with a [`JrConnectionBuilder`] and are called in order until
+/// one claims the message.
+pub trait JrMessageHandler: Send {
     /// The role type for this handler's connection.
     type Role: JrRole;
 
@@ -179,38 +184,14 @@ pub trait JrMessageHandler {
     ///
     /// # Parameters
     ///
-    /// * `cx` - The context of the request. This gives access to the request ID and the method name and is used to send a reply; can also be used to send other messages to the other party.
-    /// * `params` - The parameters of the request.
+    /// * `message` - The incoming message to handle.
+    /// * `cx` - The connection context, used to send messages and access connection state.
     ///
     /// # Returns
     ///
     /// * `Ok(Handled::Yes)` if the message was claimed. It will not be propagated further.
     /// * `Ok(Handled::No(message))` if not; the (possibly changed) message will be passed to the remaining handlers.
     /// * `Err` if an internal error occurs (this will bring down the server).
-    async fn handle_message(
-        &mut self,
-        message: MessageCx,
-        cx: JrConnectionCx<Self::Role>,
-    ) -> Result<Handled<MessageCx>, crate::Error>;
-
-    /// Returns a debug description of the registered handlers for diagnostics.
-    fn describe_chain(&self) -> impl std::fmt::Debug;
-}
-
-/// A version of [`JrMessageHandler`] where the `handle_message` code is required to be `Send`;
-/// any type implementing this trait must also implement [`JrMessageHandler`].
-///
-/// If you are implementing [`JrMessageHandler`] explicitly, as opposed to using helper
-/// methods like [`JrConnectionBuilder::on_receive_message`], then it is better to implement this Send trait
-/// when possible.
-pub trait JrMessageHandlerSend: Send {
-    /// The role type for this handler's connection.
-    type Role: JrRole;
-
-    /// Returns a (sendable) future that will potentially handle the message.
-    /// The [`Handled`] return value indicates whether the message was handled or not.
-    /// If the message was not handled, it may have been modified, and the modified message
-    /// (and return cx) should be used from that point forward.
     fn handle_message(
         &mut self,
         message: MessageCx,
@@ -219,22 +200,6 @@ pub trait JrMessageHandlerSend: Send {
 
     /// Returns a debug description of the registered handlers for diagnostics.
     fn describe_chain(&self) -> impl std::fmt::Debug;
-}
-
-impl<H: JrMessageHandlerSend> JrMessageHandler for H {
-    type Role = <H as JrMessageHandlerSend>::Role;
-
-    async fn handle_message(
-        &mut self,
-        message: MessageCx,
-        cx: JrConnectionCx<Self::Role>,
-    ) -> Result<Handled<MessageCx>, crate::Error> {
-        JrMessageHandlerSend::handle_message(self, message, cx).await
-    }
-
-    fn describe_chain(&self) -> impl std::fmt::Debug {
-        JrMessageHandlerSend::describe_chain(self)
-    }
 }
 
 /// A JSON-RPC connection that can act as either a server, client, or both.
@@ -674,13 +639,14 @@ impl<H: JrMessageHandler, R: JrResponder<H::Role>> JrConnectionBuilder<H, R> {
     /// For most use cases, prefer [`on_receive_request`](Self::on_receive_request) or
     /// [`on_receive_notification`](Self::on_receive_notification) which provide cleaner APIs
     /// for handling requests or notifications separately.
-    pub fn on_receive_message<Req, Notif, F, T>(
+    pub fn on_receive_message<Req, Notif, F, T, ToFut>(
         self,
         op: F,
+        to_future_hack: ToFut,
     ) -> JrConnectionBuilder<
         ChainedHandler<
             H,
-            MessageHandler<H::Role, <H::Role as JrRole>::HandlerEndpoint, Req, Notif, F>,
+            MessageHandler<H::Role, <H::Role as JrRole>::HandlerEndpoint, Req, Notif, F, ToFut>,
         >,
         R,
     >
@@ -692,11 +658,19 @@ impl<H: JrMessageHandler, R: JrResponder<H::Role>> JrConnectionBuilder<H, R> {
         F: AsyncFnMut(MessageCx<Req, Notif>, JrConnectionCx<H::Role>) -> Result<T, crate::Error>
             + Send,
         T: IntoHandled<MessageCx<Req, Notif>>,
+        ToFut: Fn(
+                &mut F,
+                MessageCx<Req, Notif>,
+                JrConnectionCx<H::Role>,
+            ) -> crate::BoxFuture<'_, Result<T, crate::Error>>
+            + Send
+            + Sync,
     {
         self.with_handler(MessageHandler::new(
             <H::Role as JrRole>::HandlerEndpoint::default(),
             <H::Role>::default(),
             op,
+            to_future_hack,
         ))
     }
 
@@ -737,11 +711,15 @@ impl<H: JrMessageHandler, R: JrResponder<H::Role>> JrConnectionBuilder<H, R> {
     ///
     /// `Req` can be either a single request type or an enum of multiple request types.
     /// See the [type-driven dispatch](Self#type-driven-message-dispatch) section for details.
-    pub fn on_receive_request<Req: JrRequest, F, T>(
+    pub fn on_receive_request<Req: JrRequest, F, T, ToFut>(
         self,
         op: F,
+        to_future_hack: ToFut,
     ) -> JrConnectionBuilder<
-        ChainedHandler<H, RequestHandler<H::Role, <H::Role as JrRole>::HandlerEndpoint, Req, F>>,
+        ChainedHandler<
+            H,
+            RequestHandler<H::Role, <H::Role as JrRole>::HandlerEndpoint, Req, F, ToFut>,
+        >,
         R,
     >
     where
@@ -754,11 +732,20 @@ impl<H: JrMessageHandler, R: JrResponder<H::Role>> JrConnectionBuilder<H, R> {
             ) -> Result<T, crate::Error>
             + Send,
         T: IntoHandled<(Req, JrRequestCx<Req::Response>)>,
+        ToFut: Fn(
+                &mut F,
+                Req,
+                JrRequestCx<Req::Response>,
+                JrConnectionCx<H::Role>,
+            ) -> crate::BoxFuture<'_, Result<T, crate::Error>>
+            + Send
+            + Sync,
     {
         self.with_handler(RequestHandler::new(
             <H::Role as JrRole>::HandlerEndpoint::default(),
             <H::Role>::default(),
             op,
+            to_future_hack,
         ))
     }
 
@@ -798,13 +785,14 @@ impl<H: JrMessageHandler, R: JrResponder<H::Role>> JrConnectionBuilder<H, R> {
     ///
     /// `Notif` can be either a single notification type or an enum of multiple notification types.
     /// See the [type-driven dispatch](Self#type-driven-message-dispatch) section for details.
-    pub fn on_receive_notification<Notif, F, T>(
+    pub fn on_receive_notification<Notif, F, T, ToFut>(
         self,
         op: F,
+        to_future_hack: ToFut,
     ) -> JrConnectionBuilder<
         ChainedHandler<
             H,
-            NotificationHandler<H::Role, <H::Role as JrRole>::HandlerEndpoint, Notif, F>,
+            NotificationHandler<H::Role, <H::Role as JrRole>::HandlerEndpoint, Notif, F, ToFut>,
         >,
         R,
     >
@@ -814,11 +802,19 @@ impl<H: JrMessageHandler, R: JrResponder<H::Role>> JrConnectionBuilder<H, R> {
         Notif: JrNotification,
         F: AsyncFnMut(Notif, JrConnectionCx<H::Role>) -> Result<T, crate::Error> + Send,
         T: IntoHandled<(Notif, JrConnectionCx<H::Role>)>,
+        ToFut: Fn(
+                &mut F,
+                Notif,
+                JrConnectionCx<H::Role>,
+            ) -> crate::BoxFuture<'_, Result<T, crate::Error>>
+            + Send
+            + Sync,
     {
         self.with_handler(NotificationHandler::new(
             <H::Role as JrRole>::HandlerEndpoint::default(),
             <H::Role>::default(),
             op,
+            to_future_hack,
         ))
     }
 
@@ -831,18 +827,38 @@ impl<H: JrMessageHandler, R: JrResponder<H::Role>> JrConnectionBuilder<H, R> {
     ///
     /// For the common case of receiving from the default counterpart, use
     /// [`on_receive_message`](Self::on_receive_message) instead.
-    pub fn on_receive_message_from<Req: JrRequest, Notif: JrNotification, End: JrEndpoint, F, T>(
+    pub fn on_receive_message_from<
+        Req: JrRequest,
+        Notif: JrNotification,
+        End: JrEndpoint,
+        F,
+        T,
+        ToFut,
+    >(
         self,
         endpoint: End,
         op: F,
-    ) -> JrConnectionBuilder<ChainedHandler<H, MessageHandler<H::Role, End, Req, Notif, F>>, R>
+        to_future_hack: ToFut,
+    ) -> JrConnectionBuilder<ChainedHandler<H, MessageHandler<H::Role, End, Req, Notif, F, ToFut>>, R>
     where
         H::Role: HasEndpoint<End>,
         F: AsyncFnMut(MessageCx<Req, Notif>, JrConnectionCx<H::Role>) -> Result<T, crate::Error>
             + Send,
         T: IntoHandled<MessageCx<Req, Notif>>,
+        ToFut: Fn(
+                &mut F,
+                MessageCx<Req, Notif>,
+                JrConnectionCx<H::Role>,
+            ) -> crate::BoxFuture<'_, Result<T, crate::Error>>
+            + Send
+            + Sync,
     {
-        self.with_handler(MessageHandler::new(endpoint, <H::Role>::default(), op))
+        self.with_handler(MessageHandler::new(
+            endpoint,
+            <H::Role>::default(),
+            op,
+            to_future_hack,
+        ))
     }
 
     /// Register a handler for JSON-RPC requests from a specific endpoint.
@@ -867,11 +883,12 @@ impl<H: JrMessageHandler, R: JrResponder<H::Role>> JrConnectionBuilder<H, R> {
     ///     request_cx.respond(InitializeResponse::make())
     /// })
     /// ```
-    pub fn on_receive_request_from<Req: JrRequest, End: JrEndpoint, F, T>(
+    pub fn on_receive_request_from<Req: JrRequest, End: JrEndpoint, F, T, ToFut>(
         self,
         endpoint: End,
         op: F,
-    ) -> JrConnectionBuilder<ChainedHandler<H, RequestHandler<H::Role, End, Req, F>>, R>
+        to_future_hack: ToFut,
+    ) -> JrConnectionBuilder<ChainedHandler<H, RequestHandler<H::Role, End, Req, F, ToFut>>, R>
     where
         H::Role: HasEndpoint<End>,
         F: AsyncFnMut(
@@ -881,8 +898,21 @@ impl<H: JrMessageHandler, R: JrResponder<H::Role>> JrConnectionBuilder<H, R> {
             ) -> Result<T, crate::Error>
             + Send,
         T: IntoHandled<(Req, JrRequestCx<Req::Response>)>,
+        ToFut: Fn(
+                &mut F,
+                Req,
+                JrRequestCx<Req::Response>,
+                JrConnectionCx<H::Role>,
+            ) -> crate::BoxFuture<'_, Result<T, crate::Error>>
+            + Send
+            + Sync,
     {
-        self.with_handler(RequestHandler::new(endpoint, <H::Role>::default(), op))
+        self.with_handler(RequestHandler::new(
+            endpoint,
+            <H::Role>::default(),
+            op,
+            to_future_hack,
+        ))
     }
 
     /// Register a handler for JSON-RPC notifications from a specific endpoint.
@@ -894,17 +924,30 @@ impl<H: JrMessageHandler, R: JrResponder<H::Role>> JrConnectionBuilder<H, R> {
     ///
     /// For the common case of receiving from the default counterpart, use
     /// [`on_receive_notification`](Self::on_receive_notification) instead.
-    pub fn on_receive_notification_from<Notif: JrNotification, End: JrEndpoint, F, T>(
+    pub fn on_receive_notification_from<Notif: JrNotification, End: JrEndpoint, F, T, ToFut>(
         self,
         endpoint: End,
         op: F,
-    ) -> JrConnectionBuilder<ChainedHandler<H, NotificationHandler<H::Role, End, Notif, F>>, R>
+        to_future_hack: ToFut,
+    ) -> JrConnectionBuilder<ChainedHandler<H, NotificationHandler<H::Role, End, Notif, F, ToFut>>, R>
     where
         H::Role: HasEndpoint<End>,
         F: AsyncFnMut(Notif, JrConnectionCx<H::Role>) -> Result<T, crate::Error> + Send,
         T: IntoHandled<(Notif, JrConnectionCx<H::Role>)>,
+        ToFut: Fn(
+                &mut F,
+                Notif,
+                JrConnectionCx<H::Role>,
+            ) -> crate::BoxFuture<'_, Result<T, crate::Error>>
+            + Send
+            + Sync,
     {
-        self.with_handler(NotificationHandler::new(endpoint, <H::Role>::default(), op))
+        self.with_handler(NotificationHandler::new(
+            endpoint,
+            <H::Role>::default(),
+            op,
+            to_future_hack,
+        ))
     }
 
     /// In a proxy, add this MCP server to new sessions passing through the proxy.
@@ -1725,7 +1768,7 @@ impl<Role: JrRole> JrConnectionCx<Role> {
     /// The handler will stay registered until the [`DynamicHandlerRegistration`] is dropped.
     pub fn add_dynamic_handler(
         &self,
-        handler: impl JrMessageHandlerSend<Role = Role> + 'static,
+        handler: impl JrMessageHandler<Role = Role> + 'static,
     ) -> Result<DynamicHandlerRegistration<Role>, crate::Error> {
         let uuid = Uuid::new_v4();
         self.dynamic_handler_tx

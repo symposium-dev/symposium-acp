@@ -106,6 +106,7 @@ impl Component for ProxyWithMcpAndHandler {
                             request_cx.respond(response)
                         })
                 },
+                sacp::on_receive_request!(),
             )
             .serve(client)
             .await
@@ -119,22 +120,28 @@ impl Component for SimpleAgent {
     async fn serve(self, client: impl Component) -> Result<(), sacp::Error> {
         AgentToClient::builder()
             .name("simple-agent")
-            .on_receive_request(async |request: InitializeRequest, request_cx, _cx| {
-                request_cx.respond(InitializeResponse {
-                    protocol_version: request.protocol_version,
-                    agent_capabilities: AgentCapabilities::default(),
-                    auth_methods: vec![],
-                    meta: None,
-                    agent_info: None,
-                })
-            })
-            .on_receive_request(async |_request: NewSessionRequest, request_cx, _cx| {
-                request_cx.respond(NewSessionResponse {
-                    session_id: SessionId(Arc::from(uuid::Uuid::new_v4().to_string())),
-                    modes: None,
-                    meta: None,
-                })
-            })
+            .on_receive_request(
+                async |request: InitializeRequest, request_cx, _cx| {
+                    request_cx.respond(InitializeResponse {
+                        protocol_version: request.protocol_version,
+                        agent_capabilities: AgentCapabilities::default(),
+                        auth_methods: vec![],
+                        meta: None,
+                        agent_info: None,
+                    })
+                },
+                sacp::on_receive_request!(),
+            )
+            .on_receive_request(
+                async |_request: NewSessionRequest, request_cx, _cx| {
+                    request_cx.respond(NewSessionResponse {
+                        session_id: SessionId(Arc::from(uuid::Uuid::new_v4().to_string())),
+                        modes: None,
+                        meta: None,
+                    })
+                },
+                sacp::on_receive_request!(),
+            )
             .connect_to(client)?
             .serve()
             .await

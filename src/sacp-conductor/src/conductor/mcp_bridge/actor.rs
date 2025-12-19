@@ -46,19 +46,22 @@ impl McpBridgeConnectionActor {
         let result = McpClientToServer::builder()
             .name(format!("mpc-client-to-conductor({connection_id})"))
             // When we receive a message from the MCP client, forward it to the conductor
-            .on_receive_message({
-                let mut conductor_tx = conductor_tx.clone();
-                let connection_id = connection_id.clone();
-                async move |message: sacp::MessageCx, _cx| {
-                    conductor_tx
-                        .send(ConductorMessage::McpClientToMcpServer {
-                            connection_id: connection_id.clone(),
-                            message,
-                        })
-                        .await
-                        .map_err(|_| sacp::Error::internal_error())
-                }
-            })
+            .on_receive_message(
+                {
+                    let mut conductor_tx = conductor_tx.clone();
+                    let connection_id = connection_id.clone();
+                    async move |message: sacp::MessageCx, _cx| {
+                        conductor_tx
+                            .send(ConductorMessage::McpClientToMcpServer {
+                                connection_id: connection_id.clone(),
+                                message,
+                            })
+                            .await
+                            .map_err(|_| sacp::Error::internal_error())
+                    }
+                },
+                sacp::on_receive_message!(),
+            )
             // When we receive messages from the conductor, forward them to the MCP client
             .connect_to(transport)?
             .with_client(async move |mcp_client_cx| {

@@ -23,12 +23,14 @@ async fn main() -> Result<(), sacp::Error> {
                     meta: Default::default(),
                 })
             },
+            sacp::on_receive_request!(),
         )
         .on_receive_message(
             async move |message: MessageCx, cx: JrConnectionCx<AgentToClient>| {
                 // Respond to any other message with an error
                 message.respond_with_error(sacp::util::internal_error("TODO"), cx)
             },
+            sacp::on_receive_message!(),
         )
         .serve(sacp::ByteStreams::new(
             tokio::io::stdout().compat_write(),

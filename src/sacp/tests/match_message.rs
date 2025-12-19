@@ -162,6 +162,7 @@ async fn modify_message_en_route_inline() -> Result<(), sacp::Error> {
                             retry: false,
                         })
                     },
+                    sacp::on_receive_request!(),
                 )
                 .with_handler(EchoHandler)
                 .serve(client)
@@ -209,6 +210,7 @@ async fn modify_message_and_stop() -> Result<(), sacp::Error> {
                                 _connection_cx: JrConnectionCx<UntypedRole>| {
                         request_cx.respond(request)
                     },
+                    sacp::on_receive_request!(),
                 )
                 .on_receive_request(
                     async move |mut request: EchoRequestResponse,
@@ -220,6 +222,7 @@ async fn modify_message_and_stop() -> Result<(), sacp::Error> {
                             retry: false,
                         })
                     },
+                    sacp::on_receive_request!(),
                 )
                 .with_handler(EchoHandler)
                 .serve(client)
