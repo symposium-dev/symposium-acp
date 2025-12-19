@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [8.0.1](https://github.com/symposium-dev/symposium-acp/compare/sacp-tee-v8.0.0...sacp-tee-v8.0.1) - 2025-12-19
+
+### Other
+
+- updated the following local packages: sacp, sacp-tokio
+
 ## [8.0.0](https://github.com/symposium-dev/symposium-acp/compare/sacp-tee-v7.0.0...sacp-tee-v8.0.0) - 2025-12-17
 
 ### Other
