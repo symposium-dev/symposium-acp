@@ -38,9 +38,7 @@ use crate::{
 /// ```rust,ignore
 /// let server = McpServer::new(MyCustomServerConnect);
 /// ```
-pub struct McpServer<Role: JrRole, Responder: JrResponder<Role> = NullResponder>
-where
-    Role: HasEndpoint<Agent>,
+pub struct McpServer<Role, Responder = NullResponder>
 {
     /// The "message handler" handles incoming messages to the MCP server (speaks the MCP protocol).
     message_handler: McpMessageHandler<Role>,
@@ -90,9 +88,7 @@ where
 
 /// Message handler created from a [`McpServer`].
 #[derive(Clone)]
-pub struct McpMessageHandler<Role: JrRole>
-where
-    Role: HasEndpoint<Agent>,
+pub struct McpMessageHandler<Role>
 {
     connect: Arc<dyn McpServerConnect<Role>>,
 }

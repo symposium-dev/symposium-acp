@@ -145,10 +145,21 @@ where
         .await
     }
 
-    /// Send the request to create the session.
-    pub async fn send_request(self) -> Result<ActiveSession<Role>, crate::Error>
+    /// Send the request to create the session and return a handle.
+    /// This is an alternative to [`Self::run_session`] that avoids rightward
+    /// drift but at the cost of requiring MCP servers that are `Send` and
+    /// don't access data from the surrounding scope.
+    ///
+    /// # Parameters
+    ///
+    /// * `run_responder`: this is typically just `Responder::run`;
+    ///   the need for this parameter is a workaround for Rust limitations.
+    pub async fn send_request<F>(
+        self,
+        run_responder: impl FnOnce(Responder, JrConnectionCx<Role>) -> F,
+    ) -> Result<ActiveSession<Role>, crate::Error>
     where
-        Responder: 'static,
+        F: Future<Output = Result<(), crate::Error>> + Send + 'static,
     {
         let response = self
             .connection
@@ -157,7 +168,7 @@ where
             .await?;
 
         let cx = self.connection.clone();
-        self.connection.spawn(self.responder.run(cx))?;
+        self.connection.spawn(run_responder(self.responder, cx))?;
 
         self.connection
             .attach_session(response, self.dynamic_handler_registrations)

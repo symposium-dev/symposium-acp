@@ -5,7 +5,7 @@ use crate::role::JrRole;
 use crate::{Handled, JrConnectionCx, MessageCx, jsonrpc::JrMessageHandlerSend};
 
 /// Internal dyn-safe wrapper around `JrMessageHandlerSend`
-pub(crate) trait DynamicHandler<Role: JrRole>: Send {
+pub(crate) trait DynamicHandler<Role>: Send {
     fn dyn_handle_message(
         &mut self,
         message: MessageCx,
@@ -30,7 +30,7 @@ impl<H: JrMessageHandlerSend> DynamicHandler<H::Role> for H {
 }
 
 /// Messages used to add/remove dynamic handlers
-pub(crate) enum DynamicHandlerMessage<Role: JrRole> {
+pub(crate) enum DynamicHandlerMessage<Role> {
     AddDynamicHandler(Uuid, Box<dyn DynamicHandler<Role>>),
     RemoveDynamicHandler(Uuid),
 }

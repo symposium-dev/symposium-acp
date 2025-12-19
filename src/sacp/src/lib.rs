@@ -229,3 +229,18 @@ pub use sacp_derive::{JrNotification, JrRequest, JrResponsePayload};
 
 mod session;
 pub use session::*;
+
+/// This is a hack that must be given as the final argument of
+/// [`McpServerBuilder::tool_fn`] when defining tools.
+/// Look away, lest ye be blinded by its vileness!
+///
+/// Fine, if you MUST know, it's a horrific workaround for not having
+/// [return-type notation](https://github.com/rust-lang/rust/issues/109417)
+/// and for [this !@$#!%! bug](https://github.com/rust-lang/rust/issues/110338).
+/// Trust me, the need for it hurts me more than it hurts you. --nikomatsakis
+#[macro_export]
+macro_rules! tool_fn_mut {
+    () => {
+        |func, params, context| Box::pin(func(params, context))
+    };
+}
