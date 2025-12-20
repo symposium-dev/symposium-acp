@@ -100,7 +100,7 @@ where
         self,
         tool: impl McpTool<Role> + 'static,
         tool_responder: R,
-    ) -> McpServerBuilder<Role, ChainResponder<Responder, R>> {
+    ) -> McpServerBuilder<Role, impl JrResponder<Role>> {
         let this = self.tool(tool);
         McpServerBuilder {
             role: this.role,
@@ -144,7 +144,7 @@ where
         ) -> BoxFuture<'a, Result<R, crate::Error>>
         + Send
         + 'static,
-    ) -> McpServerBuilder<Role, ChainResponder<Responder, ToolFnResponder<F, P, R, Role>>>
+    ) -> McpServerBuilder<Role, impl JrResponder<Role>>
     where
         P: JsonSchema + DeserializeOwned + 'static + Send,
         R: JsonSchema + Serialize + 'static + Send,

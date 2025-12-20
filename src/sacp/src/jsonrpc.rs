@@ -25,9 +25,9 @@ pub(crate) mod responder;
 mod task_actor;
 mod transport_actor;
 
-use crate::handler::{ChainedHandler, NamedHandler};
 use crate::jsonrpc::dynamic_handler::DynamicHandlerMessage;
 pub use crate::jsonrpc::handlers::NullHandler;
+use crate::jsonrpc::handlers::{ChainedHandler, NamedHandler};
 use crate::jsonrpc::handlers::{MessageHandler, NotificationHandler, RequestHandler};
 use crate::jsonrpc::outgoing_actor::{OutgoingMessageTx, send_raw_message};
 use crate::jsonrpc::responder::SpawnedResponder;
