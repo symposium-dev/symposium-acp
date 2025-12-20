@@ -52,5 +52,10 @@ pub(super) async fn task_actor<Role: JrRole>(
     task_rx: mpsc::UnboundedReceiver<Task>,
     _cx: &JrConnectionCx<Role>,
 ) -> Result<(), crate::Error> {
-    process_stream_concurrently(task_rx, async |task| task.future.await).await
+    process_stream_concurrently(
+        task_rx,
+        async |task| task.future.await,
+        |a, b| Box::pin(a(b)),
+    )
+    .await
 }

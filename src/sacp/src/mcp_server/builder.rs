@@ -196,12 +196,13 @@ where
             McpContext<Role>,
         ) -> BoxFuture<'a, Result<R, crate::Error>>
         + Send
+        + Sync
         + 'static,
     ) -> McpServerBuilder<Role, impl JrResponder<Role>>
     where
         P: JsonSchema + DeserializeOwned + 'static + Send,
         R: JsonSchema + Serialize + 'static + Send,
-        F: AsyncFn(P, McpContext<Role>) -> Result<R, crate::Error> + Send + Sync,
+        F: AsyncFn(P, McpContext<Role>) -> Result<R, crate::Error> + Send + Sync + 'static,
     {
         let (call_tx, call_rx) = mpsc::channel(128);
         self.tool_with_responder(
@@ -211,7 +212,7 @@ where
                 call_tx,
             },
             ToolFnResponder {
-                func,
+                func: func,
                 call_rx,
                 tool_future_fn: Box::new(tool_future_hack),
             },
