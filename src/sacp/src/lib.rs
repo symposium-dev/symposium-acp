@@ -245,6 +245,16 @@ macro_rules! tool_fn_mut {
     };
 }
 
+/// This is a hack that must be given as the final argument of
+/// [`McpServerBuilder::tool_fn`] when defining stateless concurrent tools.
+/// See [`tool_fn_mut!`] for the gory details.
+#[macro_export]
+macro_rules! tool_fn {
+    () => {
+        |func, params, context| Box::pin(func(params, context))
+    };
+}
+
 /// This macro is used for the value of the `to_future_hack` parameter of
 /// [`JrConnectionBuilder::on_receive_request`] and [`JrConnectionBuilder::on_receive_request_from`].
 ///

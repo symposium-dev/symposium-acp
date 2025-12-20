@@ -23,7 +23,7 @@ use crate::{
     jsonrpc::responder::{ChainResponder, JrResponder, NullResponder},
     mcp_server::{
         McpServer, McpServerConnect,
-        responder::{ToolCall, ToolFnResponder},
+        responder::{ToolCall, ToolFnMutResponder, ToolFnResponder},
     },
 };
 
@@ -150,50 +150,59 @@ where
         R: JsonSchema + Serialize + 'static + Send,
         F: AsyncFnMut(P, McpContext<Role>) -> Result<R, crate::Error> + Send,
     {
-        struct ToolFnTool<P, R, Role: JrRole> {
-            name: String,
-            description: String,
-            call_tx: mpsc::Sender<ToolCall<P, R, Role>>,
-        }
+        let (call_tx, call_rx) = mpsc::channel(128);
+        self.tool_with_responder(
+            ToolFnTool {
+                name: name.to_string(),
+                description: description.to_string(),
+                call_tx,
+            },
+            ToolFnMutResponder {
+                func,
+                call_rx,
+                tool_future_fn: Box::new(tool_future_hack),
+            },
+        )
+    }
 
-        impl<P, R, Role> McpTool<Role> for ToolFnTool<P, R, Role>
-        where
-            Role: JrRole,
-            P: JsonSchema + DeserializeOwned + 'static + Send,
-            R: JsonSchema + Serialize + 'static + Send,
-        {
-            type Input = P;
-            type Output = R;
-
-            fn name(&self) -> String {
-                self.name.clone()
-            }
-
-            fn description(&self) -> String {
-                self.description.clone()
-            }
-
-            async fn call_tool(
-                &self,
-                params: P,
-                mcp_cx: McpContext<Role>,
-            ) -> Result<R, crate::Error> {
-                let (result_tx, result_rx) = oneshot::channel();
-
-                self.call_tx
-                    .clone()
-                    .send(ToolCall {
-                        params,
-                        mcp_cx,
-                        result_tx,
-                    })
-                    .await
-                    .map_err(crate::util::internal_error)?;
-
-                result_rx.await.map_err(crate::util::internal_error)?
-            }
-        }
-
+    /// Convenience wrapper for defining a stateless tool that can run concurrently.
+    /// Unlike [`tool_fn_mut`](Self::tool_fn_mut), multiple invocations of this tool can run
+    /// at the same time since the function is `Fn` rather than `FnMut`.
+    ///
+    /// # Parameters
+    ///
+    /// * `name`: The name of the tool.
+    /// * `description`: The description of the tool.
+    /// * `func`: The function that implements the tool. Use an async closure like `async |args, cx| { .. }`.
+    ///
+    /// # Examples
+    ///
+    /// ```rust,ignore
+    /// McpServer::builder("my-server")
+    ///     .tool_fn(
+    ///         "greet",
+    ///         "Greet someone by name",
+    ///         async |input: GreetInput, _cx| Ok(format!("Hello, {}!", input.name)),
+    ///     )
+    /// ```
+    pub fn tool_fn<P, R, F>(
+        self,
+        name: impl ToString,
+        description: impl ToString,
+        func: F,
+        tool_future_hack: impl for<'a> Fn(
+            &'a F,
+            P,
+            McpContext<Role>,
+        ) -> BoxFuture<'a, Result<R, crate::Error>>
+        + Send
+        + 'static,
+    ) -> McpServerBuilder<Role, impl JrResponder<Role>>
+    where
+        P: JsonSchema + DeserializeOwned + 'static + Send,
+        R: JsonSchema + Serialize + 'static + Send,
+        F: AsyncFn(P, McpContext<Role>) -> Result<R, crate::Error> + Send + Sync,
+    {
         let (call_tx, call_rx) = mpsc::channel(128);
         self.tool_with_responder(
             ToolFnTool {
@@ -415,5 +424,47 @@ fn to_rmcp_error(error: crate::Error) -> rmcp::ErrorData {
         code: rmcp::model::ErrorCode(error.code),
         message: error.message.into(),
         data: error.data,
+    }
+}
+
+/// MCP tool used for `tool_fn` and `tooL_fn_mut`.
+/// Each time it is invoked, it sends a `ToolCall`  message to `call_tx`.
+struct ToolFnTool<P, R, Role: JrRole> {
+    name: String,
+    description: String,
+    call_tx: mpsc::Sender<ToolCall<P, R, Role>>,
+}
+
+impl<P, R, Role> McpTool<Role> for ToolFnTool<P, R, Role>
+where
+    Role: JrRole,
+    P: JsonSchema + DeserializeOwned + 'static + Send,
+    R: JsonSchema + Serialize + 'static + Send,
+{
+    type Input = P;
+    type Output = R;
+
+    fn name(&self) -> String {
+        self.name.clone()
+    }
+
+    fn description(&self) -> String {
+        self.description.clone()
+    }
+
+    async fn call_tool(&self, params: P, mcp_cx: McpContext<Role>) -> Result<R, crate::Error> {
+        let (result_tx, result_rx) = oneshot::channel();
+
+        self.call_tx
+            .clone()
+            .send(ToolCall {
+                params,
+                mcp_cx,
+                result_tx,
+            })
+            .await
+            .map_err(crate::util::internal_error)?;
+
+        result_rx.await.map_err(crate::util::internal_error)?
     }
 }

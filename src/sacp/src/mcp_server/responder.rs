@@ -13,12 +13,50 @@ pub(super) struct ToolCall<P, R, Role> {
 
 /// Responder for a `tool_fn` closure that receives tool calls through a channel
 /// and invokes the user's async function.
-pub(super) struct ToolFnResponder<F, P, R, Role> {
+pub(super) struct ToolFnMutResponder<F, P, R, Role> {
     pub(crate) func: F,
     pub(crate) call_rx: mpsc::Receiver<ToolCall<P, R, Role>>,
     pub(crate) tool_future_fn: Box<
         dyn for<'a> Fn(&'a mut F, P, McpContext<Role>) -> BoxFuture<'a, Result<R, crate::Error>>
             + Send,
+    >,
+}
+
+impl<F, P, R, Role> JrResponder<Role> for ToolFnMutResponder<F, P, R, Role>
+where
+    Role: JrRole,
+    P: Send,
+    R: Send,
+    F: Send,
+{
+    async fn run(self, _cx: JrConnectionCx<Role>) -> Result<(), crate::Error> {
+        let ToolFnMutResponder {
+            mut func,
+            mut call_rx,
+            tool_future_fn,
+        } = self;
+        while let Some(ToolCall {
+            params,
+            mcp_cx,
+            result_tx,
+        }) = call_rx.next().await
+        {
+            let result = tool_future_fn(&mut func, params, mcp_cx).await;
+            result_tx
+                .send(result)
+                .map_err(|_| crate::util::internal_error("failed to send MCP result"))?;
+        }
+        Ok(())
+    }
+}
+
+/// Responder for a `tool_fn` closure that receives tool calls through a channel
+/// and invokes the user's async function.
+pub(super) struct ToolFnResponder<F, P, R, Role> {
+    pub(crate) func: F,
+    pub(crate) call_rx: mpsc::Receiver<ToolCall<P, R, Role>>,
+    pub(crate) tool_future_fn: Box<
+        dyn for<'a> Fn(&'a F, P, McpContext<Role>) -> BoxFuture<'a, Result<R, crate::Error>> + Send,
     >,
 }
 
@@ -31,7 +69,7 @@ where
 {
     async fn run(self, _cx: JrConnectionCx<Role>) -> Result<(), crate::Error> {
         let ToolFnResponder {
-            mut func,
+            func,
             mut call_rx,
             tool_future_fn,
         } = self;
@@ -41,7 +79,7 @@ where
             result_tx,
         }) = call_rx.next().await
         {
-            let result = tool_future_fn(&mut func, params, mcp_cx).await;
+            let result = tool_future_fn(&func, params, mcp_cx).await;
             result_tx
                 .send(result)
                 .map_err(|_| crate::util::internal_error("failed to send MCP result"))?;
