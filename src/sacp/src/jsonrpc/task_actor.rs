@@ -1,14 +1,10 @@
 use std::panic::Location;
 
-use futures::{
-    FutureExt, StreamExt,
-    channel::mpsc,
-    future::BoxFuture,
-    stream::{FusedStream, FuturesUnordered},
-};
+use futures::{FutureExt, channel::mpsc, future::BoxFuture};
 
 use crate::JrConnectionCx;
 use crate::role::JrRole;
+use crate::util::process_stream_concurrently;
 
 pub type TaskTx = mpsc::UnboundedSender<Task>;
 
@@ -37,8 +33,9 @@ impl Task {
                             }
                         }))
                     }
-                }
-            ).boxed()
+                },
+            )
+            .boxed()
         }
     }
 
@@ -52,40 +49,8 @@ impl Task {
 
 /// The "task actor" manages dynamically spawned tasks.
 pub(super) async fn task_actor<Role: JrRole>(
-    mut task_rx: mpsc::UnboundedReceiver<Task>,
+    task_rx: mpsc::UnboundedReceiver<Task>,
     _cx: &JrConnectionCx<Role>,
 ) -> Result<(), crate::Error> {
-    let mut futures = FuturesUnordered::new();
-
-    loop {
-        // If we have no futures to run, wait until we do.
-        if futures.is_empty() {
-            match task_rx.next().await {
-                Some(task) => futures.push(task.future),
-                None => return Ok(()),
-            }
-            continue;
-        }
-
-        // If there are no more tasks coming in, just drain our queue and return.
-        if task_rx.is_terminated() {
-            while let Some(result) = futures.next().await {
-                result?;
-            }
-            return Ok(());
-        }
-
-        // Otherwise, run futures until we get a request for a new task.
-        futures::select! {
-            result = futures.next() => if let Some(result) = result {
-                result?;
-            },
-
-            task = task_rx.next() => {
-                if let Some(task) = task {
-                    futures.push(task.future);
-                }
-            }
-        }
-    }
+    process_stream_concurrently(task_rx, async |task| task.future.await).await
 }
