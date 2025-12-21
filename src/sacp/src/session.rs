@@ -303,7 +303,7 @@ where
                     meta: None,
                 },
             )
-            .await_when_result_received(async move |result| {
+            .on_receiving_result(async move |result| {
                 let PromptResponse {
                     stop_reason,
                     meta: _,

@@ -398,19 +398,16 @@ impl JrRole for ProxyToConductor {
             // and add a dynamic handler for that
             // session-id.
             .if_request_from(Client, async |request: NewSessionRequest, request_cx| {
-                cx.send_request_to(Agent, request)
-                    .await_when_result_received({
-                        let cx = cx.clone();
-                        async move |result| {
-                            if let Ok(NewSessionResponse { session_id, .. }) = &result {
-                                cx.add_dynamic_handler(ProxySessionMessages::new(
-                                    session_id.clone(),
-                                ))?
+                cx.send_request_to(Agent, request).on_receiving_result({
+                    let cx = cx.clone();
+                    async move |result| {
+                        if let Ok(NewSessionResponse { session_id, .. }) = &result {
+                            cx.add_dynamic_handler(ProxySessionMessages::new(session_id.clone()))?
                                 .run_indefinitely();
-                            }
-                            request_cx.respond_with_result(result)
                         }
-                    })
+                        request_cx.respond_with_result(result)
+                    }
+                })
             })
             .await
             // Incoming notification from the agent -- forward to the client

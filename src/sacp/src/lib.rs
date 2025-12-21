@@ -64,7 +64,7 @@
 //!             .on_receive_request(async move |req: PromptRequest, cx| {
 //!                 // Don't block the message loop! Use await_when_* for async work
 //!                 cx.respond(self.process_prompt(req))
-//!                     .await_when_result_received(async move |response| {
+//!                     .on_receiving_result(async move |response| {
 //!                         // This runs after the response is received
 //!                         log_response(&response);
 //!                         cx.respond(response)

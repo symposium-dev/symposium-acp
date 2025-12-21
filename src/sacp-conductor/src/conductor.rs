@@ -612,7 +612,7 @@ impl ConductorResponder {
                         meta: None,
                     },
                 )
-                .await_when_result_received({
+                .on_receiving_result({
                     let mut conductor_tx = conductor_tx.clone();
                     async move |result| {
                         match result {
@@ -979,7 +979,7 @@ impl ConductorResponder {
                 .as_ref()
                 .expect("we have an agent component")
                 .send_request(initialize_req)
-                .await_when_result_received(async move |response| {
+                .on_receiving_result(async move |response| {
                     tracing::debug!(?response, "got initialize response from agent");
                     request_cx
                         .respond_with_result_via(conductor_tx, response)
@@ -999,7 +999,7 @@ impl ConductorResponder {
             // Forward initialize request to our successor
             connection_cx
                 .send_request_to(Agent, initialize_req)
-                .await_when_result_received(async move |result| {
+                .on_receiving_result(async move |result| {
                     tracing::trace!(
                         ?result,
                         "received response to initialize_proxy from empty conductor"
@@ -1016,7 +1016,7 @@ impl ConductorResponder {
             let proxy_req = InitializeProxyRequest::from(initialize_req);
             self.proxies[target_component_index]
                 .send_request(proxy_req)
-                .await_when_result_received(async move |result| {
+                .on_receiving_result(async move |result| {
                     tracing::debug!(?result, "got initialize_proxy response from proxy");
                     // Convert InitializeProxyResponse back to InitializeResponse
                     request_cx
@@ -1550,7 +1550,7 @@ impl<T: JrResponsePayload> JrResponseExt<T> for JrResponse<T> {
         request_cx: JrRequestCx<T>,
     ) -> Result<(), sacp::Error> {
         let conductor_tx = conductor_tx.clone();
-        self.await_when_result_received(async move |result| {
+        self.on_receiving_result(async move |result| {
             request_cx
                 .respond_with_result_via(conductor_tx, result)
                 .await

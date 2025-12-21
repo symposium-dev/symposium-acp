@@ -20,7 +20,7 @@ use crate::{
 /// `McpServer` wraps an [`McpServerConnect`] implementation and can be used either:
 /// - As a message handler via [`JrConnectionBuilder::with_handler`], automatically
 ///   attaching to new sessions
-/// - Manually via [`Self::add_to_new_session`] for more control
+/// - Manually via [`Self::into_dynamic_handler`] for more control
 ///
 /// # Creating an MCP Server
 ///
