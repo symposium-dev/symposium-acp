@@ -93,26 +93,35 @@ pub mod reusable_components {
     //!
     //! # Example
     //!
-    //! ```ignore
+    //! ```
     //! use sacp::{Component, AgentToClient};
-    //! use sacp::schema::{PromptRequest, PromptResponse};
+    //! use sacp::schema::{
+    //!     InitializeRequest, InitializeResponse, AgentCapabilities,
+    //! };
     //!
     //! struct MyAgent {
-    //!     config: AgentConfig,
+    //!     name: String,
     //! }
     //!
     //! impl Component for MyAgent {
     //!     async fn serve(self, client: impl Component) -> Result<(), sacp::Error> {
     //!         AgentToClient::builder()
-    //!             .name("my-agent")
-    //!             .on_receive_request(async move |req: PromptRequest, request_cx, cx| {
-    //!                 let response = self.process_prompt(&req).await?;
-    //!                 request_cx.respond(response)
+    //!             .name(&self.name)
+    //!             .on_receive_request(async move |req: InitializeRequest, request_cx, _cx| {
+    //!                 request_cx.respond(InitializeResponse {
+    //!                     protocol_version: req.protocol_version,
+    //!                     agent_capabilities: AgentCapabilities::default(),
+    //!                     auth_methods: vec![],
+    //!                     agent_info: None,
+    //!                     meta: None,
+    //!                 })
     //!             }, sacp::on_receive_request!())
     //!             .serve(client)
     //!             .await
     //!     }
     //! }
+    //!
+    //! let agent = MyAgent { name: "my-agent".into() };
     //! ```
     //!
     //! # Important: Don't block the event loop
@@ -136,15 +145,12 @@ pub mod custom_message_handlers {
     //!
     //! # Example
     //!
-    //! ```ignore
-    //! use std::sync::Arc;
-    //! use tokio::sync::Mutex;
+    //! ```
     //! use sacp::{JrMessageHandler, MessageCx, Handled, JrConnectionCx};
+    //! use sacp::schema::{InitializeRequest, InitializeResponse, AgentCapabilities};
     //! use sacp::util::MatchMessage;
     //!
-    //! struct MyHandler {
-    //!     state: Arc<Mutex<State>>,
-    //! }
+    //! struct MyHandler;
     //!
     //! impl JrMessageHandler for MyHandler {
     //!     type Role = sacp::role::UntypedRole;
@@ -152,14 +158,18 @@ pub mod custom_message_handlers {
     //!     async fn handle_message(
     //!         &mut self,
     //!         message: MessageCx,
-    //!         cx: JrConnectionCx<Self::Role>,
+    //!         _cx: JrConnectionCx<Self::Role>,
     //!     ) -> Result<Handled<MessageCx>, sacp::Error> {
     //!         MatchMessage::new(message)
-    //!             .if_request(async |req: MyRequest, request_cx| {
-    //!                 let mut state = self.state.lock().await;
-    //!                 state.count += 1;
-    //!                 request_cx.respond(MyResponse { count: state.count })
-    //!             }, sacp::if_request!())
+    //!             .if_request(async |req: InitializeRequest, request_cx| {
+    //!                 request_cx.respond(InitializeResponse {
+    //!                     protocol_version: req.protocol_version,
+    //!                     agent_capabilities: AgentCapabilities::default(),
+    //!                     auth_methods: vec![],
+    //!                     agent_info: None,
+    //!                     meta: None,
+    //!                 })
+    //!             })
     //!             .await
     //!             .done()
     //!     }
@@ -247,20 +257,42 @@ pub mod global_mcp_server {
     //!
     //! # Example
     //!
-    //! ```ignore
+    //! ```
     //! use sacp::mcp_server::McpServer;
-    //! use sacp::ProxyToConductor;
+    //! use sacp::{Component, JrResponder, ProxyToConductor};
+    //! use schemars::JsonSchema;
+    //! use serde::{Deserialize, Serialize};
     //!
+    //! #[derive(Debug, Deserialize, JsonSchema)]
+    //! struct EchoParams { message: String }
+    //!
+    //! #[derive(Debug, Serialize, JsonSchema)]
+    //! struct EchoOutput { echoed: String }
+    //!
+    //! // Build the MCP server with tools
     //! let mcp_server = McpServer::builder("my-tools")
-    //!     .tool_fn("echo", "Echoes the input", async |params: EchoParams, _cx| {
-    //!         Ok(EchoOutput { message: params.message })
-    //!     }, sacp::tool_fn!())
+    //!     .tool_fn("echo", "Echoes the input",
+    //!         async |params: EchoParams, _cx| {
+    //!             Ok(EchoOutput { echoed: params.message })
+    //!         },
+    //!         sacp::tool_fn!())
     //!     .build();
     //!
-    //! ProxyToConductor::builder()
-    //!     .with_mcp_server(mcp_server)
-    //!     .serve(transport)
-    //!     .await?;
+    //! // The proxy component is generic over the MCP server's responder type
+    //! struct MyProxy<R> {
+    //!     mcp_server: McpServer<ProxyToConductor, R>,
+    //! }
+    //!
+    //! impl<R: JrResponder<ProxyToConductor> + Send + 'static> Component for MyProxy<R> {
+    //!     async fn serve(self, client: impl Component) -> Result<(), sacp::Error> {
+    //!         ProxyToConductor::builder()
+    //!             .with_mcp_server(self.mcp_server)
+    //!             .serve(client)
+    //!             .await
+    //!     }
+    //! }
+    //!
+    //! let proxy = MyProxy { mcp_server };
     //! ```
     //!
     //! # How it works
