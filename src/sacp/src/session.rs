@@ -7,12 +7,14 @@ use agent_client_protocol_schema::{
 use futures::channel::mpsc;
 
 use crate::{
-    Agent, Handled, HasEndpoint, JrConnectionCx, JrMessageHandler, JrRole, MessageCx,
+    Agent, Client, Handled, HasEndpoint, JrConnectionCx, JrMessageHandler, JrRequestCx, JrRole,
+    MessageCx,
     jsonrpc::{
         DynamicHandlerRegistration,
         responder::{ChainResponder, JrResponder, NullResponder},
     },
     mcp_server::McpServer,
+    role::ProxySessionMessages,
     schema::SessionId,
     util::{MatchMessage, MatchMessageFrom, run_until},
 };
@@ -183,6 +185,54 @@ where
 
         self.connection
             .attach_session(response, self.dynamic_handler_registrations)
+    }
+
+    /// Forward the session request to the agent and proxy all messages.
+    ///
+    /// Use this when you want to inject MCP servers into a session but don't need
+    /// to actively interact with it. The session messages will be proxied between
+    /// client and agent automatically.
+    ///
+    /// # Parameters
+    ///
+    /// * `request_cx`: The request context from the intercepted `session.new` request,
+    ///   used to send the response back to the client.
+    /// * `run_responder`: this is typically just `Responder::run`;
+    ///   the need for this parameter is a workaround for Rust limitations.
+    pub async fn proxy_session<F>(
+        self,
+        request_cx: JrRequestCx<NewSessionResponse>,
+        run_responder: impl FnOnce(Responder, JrConnectionCx<Role>) -> F,
+    ) -> Result<(), crate::Error>
+    where
+        Role: HasEndpoint<Client>,
+        F: Future<Output = Result<(), crate::Error>> + Send + 'static,
+    {
+        let response = self
+            .connection
+            .send_request_to(Agent, self.request)
+            .block_task()
+            .await?;
+
+        // Add dynamic handler to proxy session messages
+        let session_id = response.session_id.clone();
+        self.connection
+            .add_dynamic_handler(ProxySessionMessages::new(session_id))?
+            .run_indefinitely();
+
+        // Keep MCP server handlers alive
+        for registration in self.dynamic_handler_registrations {
+            registration.run_indefinitely();
+        }
+
+        // Spawn the responder
+        let cx = self.connection.clone();
+        self.connection.spawn(run_responder(self.responder, cx))?;
+
+        // Send response back to client
+        request_cx.respond(response)?;
+
+        Ok(())
     }
 }
 
