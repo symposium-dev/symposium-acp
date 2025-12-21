@@ -72,9 +72,7 @@ where
     /// See [`Self::builder`] to construct MCP servers from Rust code.
     pub fn new(c: impl McpServerConnect<Role>, responder: Responder) -> Self {
         McpServer {
-            message_handler: McpNewSessionHandler {
-                connect: Arc::new(c),
-            },
+            message_handler: McpNewSessionHandler::new(c),
             responder,
         }
     }
@@ -86,15 +84,30 @@ where
 }
 
 /// Message handler created from a [`McpServer`].
-#[derive(Clone)]
 pub(crate) struct McpNewSessionHandler<Role> {
+    acp_url: String,
     connect: Arc<dyn McpServerConnect<Role>>,
+    active_session: McpActiveSession<Role>,
 }
 
 impl<Role: JrRole> McpNewSessionHandler<Role>
 where
     Role: HasEndpoint<Agent>,
 {
+    pub fn new(c: impl McpServerConnect<Role>) -> Self {
+        let acp_url = format!("acp:{}", Uuid::new_v4());
+        let connect = Arc::new(c);
+        Self {
+            active_session: McpActiveSession::new(
+                Role::default(),
+                acp_url.clone(),
+                connect.clone(),
+            ),
+            acp_url,
+            connect,
+        }
+    }
+
     /// Attach this server to the new session, spawning off a dynamic handler that will
     /// manage requests coming from this session.
     ///
@@ -105,20 +118,22 @@ where
     /// will no longer be received, so you need to keep this value alive as long as the session
     /// is in use. You can also invoke [`DynamicHandlerRegistration::run_indefinitely`]
     /// if you want to keep the handler running indefinitely.
-    pub fn add_to_new_session(
-        &self,
+    pub fn into_dynamic_handler(
+        self,
         request: &mut NewSessionRequest,
         cx: &JrConnectionCx<Role>,
     ) -> Result<DynamicHandlerRegistration<Role>, crate::Error> {
-        let acp_url = format!("acp:{}", Uuid::new_v4());
-        let connection =
-            McpActiveSession::new(Role::default(), acp_url.clone(), self.connect.clone());
+        self.modify_new_session_request(request);
+        cx.add_dynamic_handler(self.active_session)
+    }
+
+    /// Modify the new session request to include this MCP server.
+    fn modify_new_session_request(&self, request: &mut NewSessionRequest) {
         request.mcp_servers.push(crate::schema::McpServer::Http {
             name: self.connect.name(),
-            url: acp_url,
+            url: self.acp_url.clone(),
             headers: Default::default(),
         });
-        cx.add_dynamic_handler(connection)
     }
 }
 
@@ -137,8 +152,7 @@ where
             .if_request_from(
                 Client,
                 async |mut request: NewSessionRequest, request_cx| {
-                    self.add_to_new_session(&mut request, &cx)?
-                        .run_indefinitely();
+                    self.modify_new_session_request(&mut request);
                     Ok(Handled::No {
                         message: (request, request_cx),
                         retry: false,
@@ -146,7 +160,8 @@ where
                 },
             )
             .await
-            .done()
+            .otherwise_delegate(&mut self.active_session)
+            .await
     }
 
     fn describe_chain(&self) -> impl std::fmt::Debug {

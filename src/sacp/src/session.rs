@@ -127,7 +127,7 @@ where
     {
         let (handler, responder) = mcp_server.into_handler_and_responder();
         self.dynamic_handler_registrations
-            .push(handler.add_to_new_session(&mut self.request, &self.connection)?);
+            .push(handler.into_dynamic_handler(&mut self.request, &self.connection)?);
         Ok(SessionBuilder {
             connection: self.connection,
             request: self.request,

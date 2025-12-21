@@ -18,10 +18,7 @@ use std::sync::Arc;
 /// This is added as a 'dynamic' handler to the connection context
 /// (see [`JrConnectionCx::add_dynamic_handler`]) and handles MCP-over-ACP messages
 /// with the appropriate ACP url.
-pub(super) struct McpActiveSession<Role: JrRole>
-where
-    Role: HasEndpoint<Agent>,
-{
+pub(super) struct McpActiveSession<Role> {
     /// The role of the server
     #[expect(dead_code)]
     role: Role,

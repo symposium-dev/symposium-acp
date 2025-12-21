@@ -202,6 +202,22 @@ pub trait JrMessageHandler: Send {
     fn describe_chain(&self) -> impl std::fmt::Debug;
 }
 
+impl<H: JrMessageHandler> JrMessageHandler for &mut H {
+    type Role = H::Role;
+
+    fn handle_message(
+        &mut self,
+        message: MessageCx,
+        cx: JrConnectionCx<Self::Role>,
+    ) -> impl Future<Output = Result<Handled<MessageCx>, crate::Error>> + Send {
+        H::handle_message(self, message, cx)
+    }
+
+    fn describe_chain(&self) -> impl std::fmt::Debug {
+        H::describe_chain(self)
+    }
+}
+
 /// A JSON-RPC connection that can act as either a server, client, or both.
 ///
 /// `JrConnection` provides a builder-style API for creating JSON-RPC servers and clients.
