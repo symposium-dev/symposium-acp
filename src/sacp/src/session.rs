@@ -1,10 +1,11 @@
-use std::path::Path;
+use std::{marker::PhantomData, path::Path};
 
 use agent_client_protocol_schema::{
     ContentBlock, ContentChunk, NewSessionRequest, NewSessionResponse, PromptRequest,
     PromptResponse, SessionModeState, SessionNotification, SessionUpdate, StopReason,
 };
 use futures::channel::mpsc;
+use tokio::sync::oneshot;
 
 use crate::{
     Agent, Client, Handled, HasEndpoint, JrConnectionCx, JrMessageHandler, JrRequestCx, JrRole,
@@ -51,16 +52,16 @@ where
     /// and let you access them.
     ///
     /// Normally you would not use this method directly but would
-    /// instead use [`Self::build_session`] and then [`SessionBuilder::send_request`].
+    /// instead use [`Self::build_session`] and then [`SessionBuilder::spawn_session`].
     ///
     /// The vector `dynamic_handler_registrations` contains any dynamic
     /// handle registrations associated with this session (e.g., from MCP servers).
     /// You can simply pass `Default::default()` if not applicable.
-    pub fn attach_session(
+    pub fn attach_session<'responder>(
         &self,
         response: NewSessionResponse,
         mut dynamic_handler_registrations: Vec<DynamicHandlerRegistration<Role>>,
-    ) -> Result<ActiveSession<Role>, crate::Error> {
+    ) -> Result<ActiveSession<'responder, Role>, crate::Error> {
         let NewSessionResponse {
             session_id,
             modes,
@@ -81,6 +82,7 @@ where
             update_tx,
             connection: self.clone(),
             dynamic_handler_registrations,
+            _responder: PhantomData,
         })
     }
 }
@@ -136,10 +138,17 @@ where
         })
     }
 
-    /// Send the request to create the session.
+    /// Run this session synchronously. The current task will be blocked
+    /// and `op` will be executed with the active session information.
+    /// This is useful when you have MCP servers that are borrowed from your local
+    /// stack frame.
+    ///
+    /// The `ActiveSession` passed to `op` has a non-`'static` lifetime, which
+    /// prevents calling [`ActiveSession::proxy_remaining_messages`] (since the
+    /// responders would terminate when `op` returns).
     pub async fn run_session<R>(
         self,
-        op: impl AsyncFnOnce(ActiveSession<Role>) -> Result<R, crate::Error>,
+        op: impl for<'responder> AsyncFnOnce(ActiveSession<'responder, Role>) -> Result<R, crate::Error>,
     ) -> Result<R, crate::Error> {
         let response = self
             .connection
@@ -163,81 +172,74 @@ where
     /// drift but at the cost of requiring MCP servers that are `Send` and
     /// don't access data from the surrounding scope.
     ///
-    /// # Parameters
-    ///
-    /// * `run_responder`: this is typically just `Responder::run`;
-    ///   the need for this parameter is a workaround for Rust limitations.
-    pub async fn send_request<F>(
-        self,
-        run_responder: impl FnOnce(Responder, JrConnectionCx<Role>) -> F,
-    ) -> Result<ActiveSession<Role>, crate::Error>
+    /// Returns an `ActiveSession<'static, _>` because responders are spawned
+    /// into background tasks that live for the connection lifetime.
+    pub async fn spawn_session(self) -> Result<ActiveSession<'static, Role>, crate::Error>
     where
-        F: Future<Output = Result<(), crate::Error>> + Send + 'static,
+        Responder: 'static,
     {
-        let response = self
-            .connection
-            .send_request_to(Agent, self.request)
-            .block_task()
-            .await?;
+        let (active_session_tx, active_session_rx) = oneshot::channel();
 
-        let cx = self.connection.clone();
-        self.connection.spawn(run_responder(self.responder, cx))?;
+        let connection = self.connection.clone();
+        connection.spawn(async move {
+            let response = self
+                .connection
+                .send_request_to(Agent, self.request)
+                .block_task()
+                .await?;
 
-        self.connection
-            .attach_session(response, self.dynamic_handler_registrations)
+            let cx = self.connection.clone();
+            self.connection.spawn(self.responder.run(cx))?;
+
+            let active_session = self
+                .connection
+                .attach_session(response, self.dynamic_handler_registrations)?;
+
+            active_session_tx
+                .send(active_session)
+                .map_err(|_| crate::Error::internal_error())?;
+
+            Ok(())
+        })?;
+
+        active_session_rx
+            .await
+            .map_err(|_| crate::Error::internal_error())
     }
 
-    /// Forward the session request to the agent and proxy all messages.
+    /// Spawn a session and proxy all messages between client and agent.
     ///
+    /// This is a convenience method that combines [`spawn_session`](Self::spawn_session),
+    /// responding to the client, and [`ActiveSession::proxy_remaining_messages`].
     /// Use this when you want to inject MCP servers into a session but don't need
-    /// to actively interact with it. The session messages will be proxied between
-    /// client and agent automatically.
+    /// to actively interact with it.
     ///
-    /// # Parameters
-    ///
-    /// * `request_cx`: The request context from the intercepted `session.new` request,
-    ///   used to send the response back to the client.
-    /// * `run_responder`: this is typically just `Responder::run`;
-    ///   the need for this parameter is a workaround for Rust limitations.
-    pub async fn proxy_session<F>(
+    /// For more control (e.g., to send some messages before proxying), use
+    /// [`spawn_session`](Self::spawn_session) instead and call
+    /// [`proxy_remaining_messages`](ActiveSession::proxy_remaining_messages) manually.
+    pub async fn spawn_session_proxy(
         self,
         request_cx: JrRequestCx<NewSessionResponse>,
-        run_responder: impl FnOnce(Responder, JrConnectionCx<Role>) -> F,
     ) -> Result<(), crate::Error>
     where
         Role: HasEndpoint<Client>,
-        F: Future<Output = Result<(), crate::Error>> + Send + 'static,
+        Responder: 'static,
     {
-        let response = self
-            .connection
-            .send_request_to(Agent, self.request)
-            .block_task()
-            .await?;
-
-        // Add dynamic handler to proxy session messages
-        let session_id = response.session_id.clone();
-        self.connection
-            .add_dynamic_handler(ProxySessionMessages::new(session_id))?
-            .run_indefinitely();
-
-        // Keep MCP server handlers alive
-        for registration in self.dynamic_handler_registrations {
-            registration.run_indefinitely();
-        }
-
-        // Spawn the responder
-        let cx = self.connection.clone();
-        self.connection.spawn(run_responder(self.responder, cx))?;
-
-        // Send response back to client
-        request_cx.respond(response)?;
-
-        Ok(())
+        let active_session = self.spawn_session().await?;
+        request_cx.respond(active_session.response())?;
+        active_session.proxy_remaining_messages()
     }
 }
 
 /// Active session struct that lets you send prompts and receive updates.
-pub struct ActiveSession<Role>
+///
+/// The `'responder` lifetime represents the span during which responders
+/// (e.g., MCP server handlers) are active. When created via [`SessionBuilder::spawn_session`],
+/// this is `'static` because responders are spawned into background tasks.
+/// When created via [`SessionBuilder::run_session`], this is tied to the
+/// closure scope, preventing [`Self::proxy_remaining_messages`] from being called
+/// (since the responders would die when the closure returns).
+pub struct ActiveSession<'responder, Role>
 where
     Role: HasEndpoint<Agent>,
 {
@@ -251,8 +253,10 @@ where
     /// Collect registrations from dynamic handlers for MCP servers etc.
     /// These will be dropped once the active-session struct is dropped
     /// which will cause them to be deregistered.
-    #[expect(dead_code)]
     dynamic_handler_registrations: Vec<DynamicHandlerRegistration<Role>>,
+
+    /// Phantom lifetime representing the responder lifetime.
+    _responder: PhantomData<&'responder ()>,
 }
 
 /// Incoming message from the agent
@@ -267,7 +271,7 @@ pub enum SessionMessage {
     StopReason(StopReason),
 }
 
-impl<R> ActiveSession<R>
+impl<'responder, R> ActiveSession<'responder, R>
 where
     R: HasEndpoint<Agent>,
 {
@@ -284,6 +288,18 @@ where
     /// Access meta data from session response.
     pub fn meta(&self) -> &Option<serde_json::Value> {
         &self.meta
+    }
+
+    /// Build a `NewSessionResponse` from the session information.
+    ///
+    /// Useful when you need to forward the session response to a client
+    /// after doing some processing.
+    pub fn response(&self) -> NewSessionResponse {
+        NewSessionResponse {
+            session_id: self.session_id.clone(),
+            modes: self.modes.clone(),
+            meta: self.meta.clone(),
+        }
     }
 
     /// Access the underlying connection context used to communicate with the agent.
@@ -353,6 +369,39 @@ where
             }
         }
         Ok(output)
+    }
+}
+
+impl<R> ActiveSession<'static, R>
+where
+    R: HasEndpoint<Agent>,
+{
+    /// Proxy all remaining messages for this session between client and agent.
+    ///
+    /// Use this when you want to inject MCP servers into a session but don't need
+    /// to actively interact with it after setup. The session messages will be proxied
+    /// between client and agent automatically.
+    ///
+    /// This consumes the `ActiveSession` since you're giving up active control.
+    ///
+    /// This method is only available on `ActiveSession<'static, _>` (from
+    /// [`SessionBuilder::spawn_session`]) because it requires responders to
+    /// outlive the method call.
+    pub fn proxy_remaining_messages(self) -> Result<(), crate::Error>
+    where
+        R: HasEndpoint<Client>,
+    {
+        // Add dynamic handler to proxy session messages
+        self.connection
+            .add_dynamic_handler(ProxySessionMessages::new(self.session_id))?
+            .run_indefinitely();
+
+        // Keep MCP server handlers alive
+        for registration in self.dynamic_handler_registrations {
+            registration.run_indefinitely();
+        }
+
+        Ok(())
     }
 }
 

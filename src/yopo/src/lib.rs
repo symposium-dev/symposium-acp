@@ -2,13 +2,13 @@
 //!
 //! Provides a convenient API for running one-shot prompts against SACP components.
 
+use sacp::ClientToAgent;
 use sacp::schema::{
     AudioContent, ContentBlock, EmbeddedResourceResource, ImageContent, InitializeRequest,
     RequestPermissionOutcome, RequestPermissionRequest, RequestPermissionResponse,
     SessionNotification, TextContent, VERSION as PROTOCOL_VERSION,
 };
 use sacp::util::MatchMessage;
-use sacp::{ClientToAgent, JrResponder};
 use sacp::{Component, Handled, MessageCx, UntypedMessage};
 use std::path::PathBuf;
 
@@ -113,10 +113,7 @@ pub async fn prompt_with_callback(
                 .block_task()
                 .await?;
 
-            let mut session = cx
-                .build_session(PathBuf::from("."))
-                .send_request(JrResponder::run)
-                .await?;
+            let mut session = cx.build_session(PathBuf::from(".")).spawn_session().await?;
 
             session.send_prompt(prompt_text)?;
 

@@ -327,17 +327,19 @@ pub mod per_session_mcp_server {
     //! - You want to customize the MCP server based on session parameters
     //! - Tools need to send notifications back to a specific session
     //!
-    //! # Example
+    //! # Simple example: proxy everything
+    //!
+    //! Use [`spawn_session_proxy`] when you just want to inject an MCP server
+    //! and proxy all messages without any additional processing:
     //!
     //! ```
     //! use sacp::mcp_server::McpServer;
     //! use sacp::schema::NewSessionRequest;
-    //! use sacp::{Agent, Client, Component, JrResponder, ProxyToConductor};
+    //! use sacp::{Agent, Client, Component, ProxyToConductor};
     //!
     //! async fn run_proxy(transport: impl Component) -> Result<(), sacp::Error> {
     //!     ProxyToConductor::builder()
     //!         .on_receive_request_from(Client, async |request: NewSessionRequest, request_cx, cx| {
-    //!             // Create an MCP server for this session
     //!             let cwd = request.cwd.clone();
     //!             let mcp_server = McpServer::builder("session-tools")
     //!                 .tool_fn("get_cwd", "Returns session working directory",
@@ -346,11 +348,48 @@ pub mod per_session_mcp_server {
     //!                     }, sacp::tool_fn!())
     //!                 .build();
     //!
-    //!             // Build the session with the MCP server attached and proxy it
     //!             cx.build_session_from(request)
     //!                 .with_mcp_server(mcp_server)?
-    //!                 .proxy_session(request_cx, JrResponder::run)
+    //!                 .spawn_session_proxy(request_cx)
     //!                 .await
+    //!         }, sacp::on_receive_request!())
+    //!         .serve(transport)
+    //!         .await
+    //! }
+    //! ```
+    //!
+    //! # Advanced example: intercept before proxying
+    //!
+    //! Use [`spawn_session`] + [`proxy_remaining_messages`] when you need to
+    //! do something with the session before handing off to proxy mode:
+    //!
+    //! ```
+    //! use sacp::mcp_server::McpServer;
+    //! use sacp::schema::NewSessionRequest;
+    //! use sacp::{Agent, Client, Component, ProxyToConductor};
+    //!
+    //! async fn run_proxy(transport: impl Component) -> Result<(), sacp::Error> {
+    //!     ProxyToConductor::builder()
+    //!         .on_receive_request_from(Client, async |request: NewSessionRequest, request_cx, cx| {
+    //!             let cwd = request.cwd.clone();
+    //!             let mcp_server = McpServer::builder("session-tools")
+    //!                 .tool_fn("get_cwd", "Returns session working directory",
+    //!                     async move |_params: (), _cx| {
+    //!                         Ok(cwd.display().to_string())
+    //!                     }, sacp::tool_fn!())
+    //!                 .build();
+    //!
+    //!             let active_session = cx.build_session_from(request)
+    //!                 .with_mcp_server(mcp_server)?
+    //!                 .spawn_session()
+    //!                 .await?;
+    //!
+    //!             // Do something with the session before proxying...
+    //!             tracing::info!(session_id = %active_session.session_id(), "Session created");
+    //!
+    //!             // Respond to the client and proxy remaining messages
+    //!             request_cx.respond(active_session.response())?;
+    //!             active_session.proxy_remaining_messages()
     //!         }, sacp::on_receive_request!())
     //!         .serve(transport)
     //!         .await
@@ -366,5 +405,8 @@ pub mod per_session_mcp_server {
     //! 3. The MCP server's URL is added to the `NewSessionRequest`
     //! 4. The handler lives as long as the session (dropped when `run_session` completes)
     //!
+    //! [`spawn_session_proxy`]: crate::SessionBuilder::spawn_session_proxy
+    //! [`spawn_session`]: crate::SessionBuilder::spawn_session
+    //! [`proxy_remaining_messages`]: crate::ActiveSession::proxy_remaining_messages
     //! [`SessionBuilder::with_mcp_server`]: crate::SessionBuilder::with_mcp_server
 }
