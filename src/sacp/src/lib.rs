@@ -44,94 +44,16 @@
 //! # }
 //! ```
 //!
-//! ## Common Patterns
+//! ## Cookbook
 //!
-//! ### Pattern 1: Defining Reusable Components
+//! The [`cookbook`] module contains documented patterns for common tasks:
 //!
-//! When building agents or proxies, define a struct that implements [`Component`]. Internally, use the role's `builder()` method to set up handlers:
-//!
-//! ```rust,ignore
-//! use sacp::Component;
-//!
-//! struct MyAgent {
-//!     config: AgentConfig,
-//! }
-//!
-//! impl Component for MyAgent {
-//!     async fn serve(self, client: impl Component) -> Result<(), sacp::Error> {
-//!         UntypedRole::builder()
-//!             .name("my-agent")
-//!             .on_receive_request(async move |req: PromptRequest, cx| {
-//!                 // Don't block the message loop! Use await_when_* for async work
-//!                 cx.respond(self.process_prompt(req))
-//!                     .on_receiving_result(async move |response| {
-//!                         // This runs after the response is received
-//!                         log_response(&response);
-//!                         cx.respond(response)
-//!                     })
-//!             })
-//!             .serve(client)
-//!             .await
-//!     }
-//! }
-//! ```
-//!
-//! **Important:** Message handlers run on the event loop. Blocking in a handler will prevent the connection from processing new messages.
-//! Use [`JrConnectionCx::spawn`] to offload expensive work, or use the `await_when_*` methods to avoid blocking.
-//!
-//! ### Pattern 2: Custom Message Handlers
-//!
-//! For reusable message handling logic, implement [`JrMessageHandler`] and use [`MatchMessage`](crate::util::MatchMessage) for dispatching:
-//!
-//! ```rust,ignore
-//! use sacp::{JrMessageHandler, MessageAndCx, Handled};
-//! use sacp::util::MatchMessage;
-//!
-//! struct MyHandler {
-//!     state: Arc<Mutex<State>>,
-//! }
-//!
-//! impl JrMessageHandler for MyHandler {
-//!     async fn handle_message(&mut self, message: MessageAndCx)
-//!         -> Result<Handled<MessageAndCx>, sacp::Error>
-//!     {
-//!         MatchMessage::new(message)
-//!             .if_request(async |req: MyRequest, cx| {
-//!                 // Handle using self.state
-//!                 cx.respond(MyResponse { /* ... */ })
-//!             })
-//!             .await
-//!             .done()
-//!     }
-//!
-//!     fn describe_chain(&self) -> impl std::fmt::Debug { "MyHandler" }
-//! }
-//! ```
-//!
-//! ### Pattern 3: Connecting as a Client
-//!
-//! To connect to a JSON-RPC server and send requests, use `with_client`. Note the use of `async` (not `async move`)
-//! to share access to local variables:
-//!
-//! ```rust,ignore
-//! UntypedRole::builder()
-//!     .on_receive_notification(async |notif: SessionUpdate, cx| {
-//!         // Handle notifications from the server
-//!         Ok(())
-//!     })
-//!     .with_client(sacp::ByteStreams::new(stdout, stdin), async |cx| {
-//!         // Send requests using the connection context
-//!         let response = cx.send_request(MyRequest { /* ... */ })
-//!             .block_task()
-//!             .await?;
-//!
-//!         // Can access local variables here
-//!         process_response(response);
-//!
-//!         Ok(())
-//!     })
-//!     .await
-//! ```
+//! - [Roles and endpoints](cookbook#roles-and-endpoints) - Understanding `JrRole`, `JrEndpoint`, and how proxies work
+//! - [Reusable components](cookbook::reusable_components) - Defining agents/proxies with [`Component`]
+//! - [Custom message handlers](cookbook::custom_message_handlers) - Implementing [`JrMessageHandler`]
+//! - [Connecting as a client](cookbook::connecting_as_client) - Using `with_client` to send requests
+//! - [Global MCP server](cookbook::global_mcp_server) - Adding MCP servers to a handler chain
+//! - [Per-session MCP server](cookbook::per_session_mcp_server) - Creating MCP servers per session
 //!
 //! ## Using the Request Context
 //!
@@ -169,6 +91,8 @@
 mod capabilities;
 /// Component abstraction for agents and proxies
 pub mod component;
+/// Cookbook of common patterns for building ACP components
+pub mod cookbook;
 /// JSON-RPC handler types for building custom message handlers
 pub mod handler;
 /// JSON-RPC connection and handler infrastructure
