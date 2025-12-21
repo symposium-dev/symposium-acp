@@ -200,36 +200,43 @@ pub mod connecting_as_client {
     //!
     //! # Example
     //!
-    //! ```ignore
-    //! use sacp::ClientToAgent;
-    //! use sacp::schema::{InitializeRequest, NewSessionRequest};
+    //! ```
+    //! use sacp::{ClientToAgent, Component};
+    //! use sacp::schema::{InitializeRequest, NewSessionRequest, SessionNotification};
     //!
-    //! ClientToAgent::builder()
-    //!     .name("my-client")
-    //!     .on_receive_notification(async |notif: SessionUpdate, cx| {
-    //!         // Handle notifications from the agent
-    //!         println!("Session updated: {:?}", notif);
-    //!         Ok(())
-    //!     }, sacp::on_receive_notification!())
-    //!     .with_client(transport, async |cx| {
-    //!         // Initialize the connection
-    //!         let init_response = cx.send_request(InitializeRequest::make())
-    //!             .block_task()
-    //!             .await?;
+    //! async fn connect_to_agent(transport: impl Component) -> Result<(), sacp::Error> {
+    //!     ClientToAgent::builder()
+    //!         .name("my-client")
+    //!         .on_receive_notification(async |notif: SessionNotification, _cx| {
+    //!             // Handle notifications from the agent
+    //!             println!("Session updated: {:?}", notif);
+    //!             Ok(())
+    //!         }, sacp::on_receive_notification!())
+    //!         .with_client(transport, async |cx| {
+    //!             // Initialize the connection
+    //!             let _init_response = cx.send_request(InitializeRequest {
+    //!                 protocol_version: Default::default(),
+    //!                 client_capabilities: Default::default(),
+    //!                 client_info: None,
+    //!                 meta: None,
+    //!             })
+    //!                 .block_task()
+    //!                 .await?;
     //!
-    //!         // Create a session
-    //!         let session = cx.send_request(NewSessionRequest {
-    //!             cwd: std::env::current_dir()?,
-    //!             mcp_servers: vec![],
-    //!             meta: None,
+    //!             // Create a session
+    //!             let session = cx.send_request(NewSessionRequest {
+    //!                 cwd: ".".into(),
+    //!                 mcp_servers: vec![],
+    //!                 meta: None,
+    //!             })
+    //!                 .block_task()
+    //!                 .await?;
+    //!
+    //!             println!("Session created: {:?}", session.session_id);
+    //!             Ok(())
     //!         })
-    //!             .block_task()
-    //!             .await?;
-    //!
-    //!         println!("Session created: {:?}", session.session_id);
-    //!         Ok(())
-    //!     })
-    //!     .await?;
+    //!         .await
+    //! }
     //! ```
     //!
     //! # Note on `block_task`
@@ -322,32 +329,32 @@ pub mod per_session_mcp_server {
     //!
     //! # Example
     //!
-    //! ```ignore
+    //! ```
     //! use sacp::mcp_server::McpServer;
     //! use sacp::schema::NewSessionRequest;
-    //! use sacp::{Agent, Client, ProxyToConductor};
+    //! use sacp::{Agent, Client, Component, JrResponder, ProxyToConductor};
     //!
-    //! ProxyToConductor::builder()
-    //!     .on_receive_request_from(Client, async |request: NewSessionRequest, request_cx, cx| {
-    //!         // Create an MCP server for this session
-    //!         let cwd = request.cwd.clone();
-    //!         let mcp_server = McpServer::builder("session-tools")
-    //!             .tool_fn("get_cwd", "Returns session working directory",
-    //!                 async move |_params: (), _cx| {
-    //!                     Ok(cwd.display().to_string())
-    //!                 }, sacp::tool_fn!())
-    //!             .build();
+    //! async fn run_proxy(transport: impl Component) -> Result<(), sacp::Error> {
+    //!     ProxyToConductor::builder()
+    //!         .on_receive_request_from(Client, async |request: NewSessionRequest, request_cx, cx| {
+    //!             // Create an MCP server for this session
+    //!             let cwd = request.cwd.clone();
+    //!             let mcp_server = McpServer::builder("session-tools")
+    //!                 .tool_fn("get_cwd", "Returns session working directory",
+    //!                     async move |_params: (), _cx| {
+    //!                         Ok(cwd.display().to_string())
+    //!                     }, sacp::tool_fn!())
+    //!                 .build();
     //!
-    //!         // Build the session with the MCP server attached
-    //!         cx.build_session(request)
-    //!             .with_mcp_server(mcp_server)?
-    //!             .run_session(async |session| {
-    //!                 request_cx.respond(session.response().clone())
-    //!             })
-    //!             .await
-    //!     }, sacp::on_receive_request!())
-    //!     .serve(transport)
-    //!     .await?;
+    //!             // Build the session with the MCP server attached and proxy it
+    //!             cx.build_session_from(request)
+    //!                 .with_mcp_server(mcp_server)?
+    //!                 .proxy_session(request_cx, JrResponder::run)
+    //!                 .await
+    //!         }, sacp::on_receive_request!())
+    //!         .serve(transport)
+    //!         .await
+    //! }
     //! ```
     //!
     //! # How it works
