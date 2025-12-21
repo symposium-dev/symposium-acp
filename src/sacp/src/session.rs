@@ -33,6 +33,17 @@ where
         )
     }
 
+    /// Session builder starting from an existing request.
+    ///
+    /// Use this when you've intercepted a `session.new` request and want to
+    /// modify it (e.g., inject MCP servers) before forwarding.
+    pub fn build_session_from(
+        &self,
+        request: NewSessionRequest,
+    ) -> SessionBuilder<Role, NullResponder> {
+        SessionBuilder::new(self, request)
+    }
+
     /// Given a session response received from the agent,
     /// attach a handler to process messages related to this session
     /// and let you access them.
