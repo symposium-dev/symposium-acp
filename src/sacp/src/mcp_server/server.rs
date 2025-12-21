@@ -40,7 +40,7 @@ use crate::{
 /// ```
 pub struct McpServer<Role, Responder = NullResponder> {
     /// The "message handler" handles incoming messages to the MCP server (speaks the MCP protocol).
-    message_handler: McpMessageHandler<Role>,
+    message_handler: McpNewSessionHandler<Role>,
 
     /// The "responder" is a task that should be run alongside the message handler.
     /// Some futures direct messages back through channels to this future which actually
@@ -72,7 +72,7 @@ where
     /// See [`Self::builder`] to construct MCP servers from Rust code.
     pub fn new(c: impl McpServerConnect<Role>, responder: Responder) -> Self {
         McpServer {
-            message_handler: McpMessageHandler {
+            message_handler: McpNewSessionHandler {
                 connect: Arc::new(c),
             },
             responder,
@@ -80,18 +80,18 @@ where
     }
 
     /// Split this MCP server into the message handler and a future that must be run while the handler is active.
-    pub(crate) fn into_handler_and_responder(self) -> (McpMessageHandler<Role>, Responder) {
+    pub(crate) fn into_handler_and_responder(self) -> (McpNewSessionHandler<Role>, Responder) {
         (self.message_handler, self.responder)
     }
 }
 
 /// Message handler created from a [`McpServer`].
 #[derive(Clone)]
-pub struct McpMessageHandler<Role> {
+pub(crate) struct McpNewSessionHandler<Role> {
     connect: Arc<dyn McpServerConnect<Role>>,
 }
 
-impl<Role: JrRole> McpMessageHandler<Role>
+impl<Role: JrRole> McpNewSessionHandler<Role>
 where
     Role: HasEndpoint<Agent>,
 {
@@ -122,7 +122,7 @@ where
     }
 }
 
-impl<Role: JrRole> JrMessageHandler for McpMessageHandler<Role>
+impl<Role: JrRole> JrMessageHandler for McpNewSessionHandler<Role>
 where
     Role: HasEndpoint<Client> + HasEndpoint<Agent>,
 {

@@ -228,17 +228,6 @@ where
         message: MessageCx,
         connection_cx: JrConnectionCx<Role>,
     ) -> Result<Handled<MessageCx>, crate::Error> {
-        // Hmm, this is a bit wacky:
-        //
-        // * In a proxy, we expect to receive MCP over ACP notifications wrapped as a "FromSuccessorNotification"
-        //   and we don't expect to receive them unwrapped (that would be the client sending it to us, not our agent,
-        //   and that's weird);
-        // * But in a *client*, we expect to receive incoming messages unwrapped (i.e., from our successor),
-        //   and not wrapped (we don't expect *anything* wrapped).
-        //
-        // So we just accept them in either direction for now. The whole thing feels a bit inelegant,
-        // but I guess it works.
-
         MatchMessageFrom::new(message, &connection_cx)
             // MCP connect requests come from the Agent direction (wrapped in SuccessorMessage)
             .if_request_from(Agent, async |request, request_cx| {
