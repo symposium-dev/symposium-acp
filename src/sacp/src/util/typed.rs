@@ -20,8 +20,8 @@
 use jsonrpcmsg::Params;
 
 use crate::{
-    Handled, HasDefaultEndpoint, JrConnectionCx, JrNotification, JrRequest, JrRequestCx, MessageCx,
-    UntypedMessage,
+    Handled, HasDefaultEndpoint, JrConnectionCx, JrMessageHandler, JrNotification, JrRequest,
+    JrRequestCx, MessageCx, UntypedMessage,
     role::{HasEndpoint, JrEndpoint, JrRole},
     util::json_cast,
 };
@@ -517,6 +517,33 @@ impl<Role: JrRole> MatchMessageFrom<Role> {
             Ok(Handled::Yes) => Ok(()),
             Ok(Handled::No { message, retry: _ }) => op(message).await,
             Err(err) => Err(err),
+        }
+    }
+
+    /// Handle messages that didn't match any previous `handle_if` call.
+    ///
+    /// This is the fallback handler that receives the original untyped message if none
+    /// of the typed handlers matched. You must call this method to complete the pattern
+    /// matching chain and get the final result.
+    pub async fn otherwise_delegate(
+        self,
+        mut handler: impl JrMessageHandler<Role = Role>,
+    ) -> Result<Handled<MessageCx>, crate::Error> {
+        match self.state? {
+            Handled::Yes => Ok(Handled::Yes),
+            Handled::No {
+                message,
+                retry: outer_retry,
+            } => match handler.handle_message(message, self.cx).await? {
+                Handled::Yes => Ok(Handled::Yes),
+                Handled::No {
+                    message,
+                    retry: inner_retry,
+                } => Ok(Handled::No {
+                    message,
+                    retry: inner_retry | outer_retry,
+                }),
+            },
         }
     }
 }

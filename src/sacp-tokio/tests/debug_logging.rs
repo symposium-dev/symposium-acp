@@ -12,7 +12,7 @@ async fn recv<T: sacp::JrResponsePayload + Send>(
     response: sacp::JrResponse<T>,
 ) -> Result<T, sacp::Error> {
     let (tx, rx) = tokio::sync::oneshot::channel();
-    response.await_when_result_received(async move |result| {
+    response.on_receiving_result(async move |result| {
         tx.send(result).map_err(|_| sacp::Error::internal_error())
     })?;
     rx.await.map_err(|_| sacp::Error::internal_error())?

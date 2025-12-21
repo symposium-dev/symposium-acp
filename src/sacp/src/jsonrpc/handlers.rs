@@ -52,26 +52,19 @@ pub struct RequestHandler<
 > {
     handler: F,
     to_future_hack: ToFut,
-    role: Role,
-    phantom: PhantomData<fn(End, Req)>,
+    phantom: PhantomData<fn(Role, End, Req)>,
 }
 
 impl<Role: JrRole, End: JrEndpoint, Req: JrRequest, F, ToFut>
     RequestHandler<Role, End, Req, F, ToFut>
 {
     /// Creates a new request handler
-    pub fn new(_endpoint: End, role: Role, handler: F, to_future_hack: ToFut) -> Self {
+    pub fn new(_endpoint: End, _role: Role, handler: F, to_future_hack: ToFut) -> Self {
         Self {
             handler,
             to_future_hack,
-            role,
             phantom: PhantomData,
         }
-    }
-
-    /// Returns the role.
-    pub fn role(&self) -> Role {
-        self.role
     }
 }
 
@@ -186,26 +179,19 @@ pub struct NotificationHandler<
 > {
     handler: F,
     to_future_hack: ToFut,
-    role: Role,
-    phantom: PhantomData<fn(End, Notif)>,
+    phantom: PhantomData<fn(Role, End, Notif)>,
 }
 
 impl<Role: JrRole, End: JrEndpoint, Notif: JrNotification, F, ToFut>
     NotificationHandler<Role, End, Notif, F, ToFut>
 {
     /// Creates a new notification handler
-    pub fn new(_endpoint: End, role: Role, handler: F, to_future_hack: ToFut) -> Self {
+    pub fn new(_endpoint: End, _role: Role, handler: F, to_future_hack: ToFut) -> Self {
         Self {
             handler,
             to_future_hack,
-            role,
             phantom: PhantomData,
         }
-    }
-
-    /// Returns the role.
-    pub fn role(&self) -> Role {
-        self.role
     }
 }
 
@@ -312,26 +298,19 @@ pub struct MessageHandler<
 > {
     handler: F,
     to_future_hack: ToFut,
-    role: Role,
-    phantom: PhantomData<fn(End, Req, Notif)>,
+    phantom: PhantomData<fn(Role, End, Req, Notif)>,
 }
 
 impl<Role: JrRole, End: JrEndpoint, Req: JrRequest, Notif: JrNotification, F, ToFut>
     MessageHandler<Role, End, Req, Notif, F, ToFut>
 {
     /// Creates a new message handler
-    pub fn new(_endpoint: End, role: Role, handler: F, to_future_hack: ToFut) -> Self {
+    pub fn new(_endpoint: End, _role: Role, handler: F, to_future_hack: ToFut) -> Self {
         Self {
             handler,
             to_future_hack,
-            role,
             phantom: PhantomData,
         }
-    }
-
-    /// Returns the role.
-    pub fn role(&self) -> Role {
-        self.role
     }
 }
 

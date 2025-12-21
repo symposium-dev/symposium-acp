@@ -25,9 +25,9 @@ pub(crate) mod responder;
 mod task_actor;
 mod transport_actor;
 
-use crate::handler::{ChainedHandler, NamedHandler};
 use crate::jsonrpc::dynamic_handler::DynamicHandlerMessage;
 pub use crate::jsonrpc::handlers::NullHandler;
+use crate::jsonrpc::handlers::{ChainedHandler, NamedHandler};
 use crate::jsonrpc::handlers::{MessageHandler, NotificationHandler, RequestHandler};
 use crate::jsonrpc::outgoing_actor::{OutgoingMessageTx, send_raw_message};
 use crate::jsonrpc::responder::SpawnedResponder;
@@ -200,6 +200,22 @@ pub trait JrMessageHandler: Send {
 
     /// Returns a debug description of the registered handlers for diagnostics.
     fn describe_chain(&self) -> impl std::fmt::Debug;
+}
+
+impl<H: JrMessageHandler> JrMessageHandler for &mut H {
+    type Role = H::Role;
+
+    fn handle_message(
+        &mut self,
+        message: MessageCx,
+        cx: JrConnectionCx<Self::Role>,
+    ) -> impl Future<Output = Result<Handled<MessageCx>, crate::Error>> + Send {
+        H::handle_message(self, message, cx)
+    }
+
+    fn describe_chain(&self) -> impl std::fmt::Debug {
+        H::describe_chain(self)
+    }
 }
 
 /// A JSON-RPC connection that can act as either a server, client, or both.
@@ -403,7 +419,7 @@ pub trait JrMessageHandler: Send {
 /// * [`spawn`](JrConnectionCx::spawn) - Run tasks concurrently without blocking the event loop
 ///
 /// The [`JrResponse`] returned by `send_request` provides methods like
-/// [`await_when_result_received`](JrResponse::await_when_result_received) that help you
+/// [`on_receiving_result`](JrResponse::on_receiving_result) that help you
 /// avoid accidentally blocking the event loop while waiting for responses.
 ///
 /// # Driving the Connection
@@ -1564,7 +1580,7 @@ impl<Role: JrRole> JrConnectionCx<Role> {
     /// The returned [`JrResponse`] provides methods for receiving the response without
     /// blocking the event loop:
     ///
-    /// * [`await_when_result_received`](JrResponse::await_when_result_received) - Schedule
+    /// * [`on_receiving_result`](JrResponse::on_receiving_result) - Schedule
     ///   a callback to run when the response arrives (doesn't block the event loop)
     /// * [`block_task`](JrResponse::block_task) - Block the current task until the response
     ///   arrives (only safe in spawned tasks, not in handlers)
@@ -1588,7 +1604,7 @@ impl<Role: JrRole> JrConnectionCx<Role> {
     /// # async fn example(cx: sacp::JrConnectionCx<sacp::role::UntypedRole>) -> Result<(), sacp::Error> {
     /// // ✅ Option 1: Schedule callback (safe in handlers)
     /// cx.send_request(MyRequest {})
-    ///     .await_when_result_received(async |result| {
+    ///     .on_receiving_result(async |result| {
     ///         // Handle the response
     ///         Ok(())
     ///     })?;
@@ -2396,14 +2412,14 @@ impl JrNotification for UntypedMessage {}
 ///
 /// ## Option 1: Schedule a Callback (Safe in Handlers)
 ///
-/// Use [`await_when_result_received`](Self::await_when_result_received) to schedule a task
+/// Use [`on_receiving_result`](Self::on_receiving_result) to schedule a task
 /// that runs when the response arrives. This doesn't block the event loop:
 ///
 /// ```no_run
 /// # use sacp_test::*;
 /// # async fn example(cx: sacp::JrConnectionCx<sacp::role::UntypedRole>) -> Result<(), sacp::Error> {
 /// cx.send_request(MyRequest {})
-///     .await_when_result_received(async |result| {
+///     .on_receiving_result(async |result| {
 ///         match result {
 ///             Ok(response) => {
 ///                 // Handle successful response
@@ -2554,13 +2570,13 @@ impl<T: JrResponsePayload> JrResponse<T> {
     /// - You want to forward responses without processing them
     /// - The response types match between the outgoing request and incoming request
     ///
-    /// This is equivalent to calling `await_when_result_received` and manually forwarding
+    /// This is equivalent to calling `on_receiving_result` and manually forwarding
     /// the result, but more concise.
     pub fn forward_to_request_cx(self, request_cx: JrRequestCx<T>) -> Result<(), crate::Error>
     where
         T: Send,
     {
-        self.await_when_result_received(async move |result| request_cx.respond_with_result(result))
+        self.on_receiving_result(async move |result| request_cx.respond_with_result(result))
     }
 
     /// Block the current task until the response is received.
@@ -2624,7 +2640,7 @@ impl<T: JrResponsePayload> JrResponse<T> {
     /// - You need the response value to proceed with your logic
     /// - Linear control flow is more natural than callbacks
     ///
-    /// For handler callbacks, use [`await_when_result_received`](Self::await_when_result_received) instead.
+    /// For handler callbacks, use [`on_receiving_result`](Self::on_receiving_result) instead.
     pub async fn block_task(self) -> Result<T, crate::Error>
     where
         T: Send,
@@ -2644,7 +2660,7 @@ impl<T: JrResponsePayload> JrResponse<T> {
 
     /// Schedule an async task to run when a successful response is received.
     ///
-    /// This is a convenience wrapper around [`await_when_result_received`](Self::await_when_result_received)
+    /// This is a convenience wrapper around [`on_receiving_result`](Self::on_receiving_result)
     /// for the common pattern of forwarding errors to a request context while only processing
     /// successful responses.
     ///
@@ -2663,7 +2679,7 @@ impl<T: JrResponsePayload> JrResponse<T> {
     /// connection.on_receive_request(async |req: ValidateRequest, request_cx, cx| {
     ///     // Send initial request
     ///     cx.send_request(ValidateRequest { data: req.data.clone() })
-    ///         .await_when_ok_response_received(request_cx, async |validation, request_cx| {
+    ///         .on_receiving_ok_result(request_cx, async |validation, request_cx| {
     ///             // Only runs if validation succeeded
     ///             if validation.is_valid {
     ///                 // Respond to original request
@@ -2687,9 +2703,9 @@ impl<T: JrResponsePayload> JrResponse<T> {
     /// - You want errors to automatically propagate to the request context
     /// - You only care about the success case
     ///
-    /// For more control over error handling, use [`await_when_result_received`](Self::await_when_result_received).
+    /// For more control over error handling, use [`on_receiving_result`](Self::on_receiving_result).
     #[track_caller]
-    pub fn await_when_ok_response_received<F>(
+    pub fn on_receiving_ok_result<F>(
         self,
         request_cx: JrRequestCx<T>,
         task: impl FnOnce(T, JrRequestCx<T>) -> F + 'static + Send,
@@ -2698,7 +2714,7 @@ impl<T: JrResponsePayload> JrResponse<T> {
         F: Future<Output = Result<(), crate::Error>> + 'static + Send,
         T: Send,
     {
-        self.await_when_result_received(async move |result| match result {
+        self.on_receiving_result(async move |result| match result {
             Ok(value) => task(value, request_cx).await,
             Err(err) => request_cx.respond_with_error(err),
         })
@@ -2718,7 +2734,7 @@ impl<T: JrResponsePayload> JrResponse<T> {
     /// connection.on_receive_request(async |req: MyRequest, request_cx, cx| {
     ///     // Send a request and schedule a callback for the response
     ///     cx.send_request(QueryRequest { id: 22 })
-    ///         .await_when_result_received({
+    ///         .on_receiving_result({
     ///             let connection_cx = cx.clone();
     ///             async move |result| {
     ///                 match result {
@@ -2764,7 +2780,7 @@ impl<T: JrResponsePayload> JrResponse<T> {
     ///
     /// For spawned tasks where you need linear control flow, consider [`block_task`](Self::block_task).
     #[track_caller]
-    pub fn await_when_result_received<F>(
+    pub fn on_receiving_result<F>(
         self,
         task: impl FnOnce(Result<T, crate::Error>) -> F + 'static + Send,
     ) -> Result<(), crate::Error>

@@ -17,7 +17,7 @@ use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
 /// Test helper to block and wait for a JSON-RPC response.
 async fn recv<T: JrResponsePayload + Send>(response: JrResponse<T>) -> Result<T, sacp::Error> {
     let (tx, rx) = tokio::sync::oneshot::channel();
-    response.await_when_result_received(async move |result| {
+    response.on_receiving_result(async move |result| {
         tx.send(result).map_err(|_| sacp::Error::internal_error())
     })?;
     rx.await.map_err(|_| sacp::Error::internal_error())?
