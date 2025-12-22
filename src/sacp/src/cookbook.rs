@@ -329,7 +329,7 @@ pub mod per_session_mcp_server {
     //!
     //! # Simple example: proxy everything
     //!
-    //! Use [`spawn_session_proxy`] when you just want to inject an MCP server
+    //! Use [`start_session_proxy`] when you just want to inject an MCP server
     //! and proxy all messages without any additional processing:
     //!
     //! ```
@@ -350,7 +350,7 @@ pub mod per_session_mcp_server {
     //!
     //!             cx.build_session_from(request)
     //!                 .with_mcp_server(mcp_server)?
-    //!                 .spawn_session_proxy(request_cx)
+    //!                 .start_session_proxy(request_cx)
     //!                 .await
     //!         }, sacp::on_receive_request!())
     //!         .serve(transport)
@@ -360,7 +360,7 @@ pub mod per_session_mcp_server {
     //!
     //! # Advanced example: intercept before proxying
     //!
-    //! Use [`spawn_session`] + [`proxy_remaining_messages`] when you need to
+    //! Use [`start_session`] + [`proxy_remaining_messages`] when you need to
     //! do something with the session before handing off to proxy mode:
     //!
     //! ```
@@ -381,7 +381,7 @@ pub mod per_session_mcp_server {
     //!
     //!             let active_session = cx.build_session_from(request)
     //!                 .with_mcp_server(mcp_server)?
-    //!                 .spawn_session()
+    //!                 .start_session()
     //!                 .await?;
     //!
     //!             // Do something with the session before proxying...
@@ -405,8 +405,8 @@ pub mod per_session_mcp_server {
     //! 3. The MCP server's URL is added to the `NewSessionRequest`
     //! 4. The handler lives as long as the session (dropped when `run_session` completes)
     //!
-    //! [`spawn_session_proxy`]: crate::SessionBuilder::spawn_session_proxy
-    //! [`spawn_session`]: crate::SessionBuilder::spawn_session
+    //! [`start_session_proxy`]: crate::SessionBuilder::start_session_proxy
+    //! [`start_session`]: crate::SessionBuilder::start_session
     //! [`proxy_remaining_messages`]: crate::ActiveSession::proxy_remaining_messages
     //! [`SessionBuilder::with_mcp_server`]: crate::SessionBuilder::with_mcp_server
 }

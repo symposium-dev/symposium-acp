@@ -52,7 +52,7 @@ where
     /// and let you access them.
     ///
     /// Normally you would not use this method directly but would
-    /// instead use [`Self::build_session`] and then [`SessionBuilder::spawn_session`].
+    /// instead use [`Self::build_session`] and then [`SessionBuilder::start_session`].
     ///
     /// The vector `dynamic_handler_registrations` contains any dynamic
     /// handle registrations associated with this session (e.g., from MCP servers).
@@ -174,7 +174,7 @@ where
     ///
     /// Returns an `ActiveSession<'static, _>` because responders are spawned
     /// into background tasks that live for the connection lifetime.
-    pub async fn spawn_session(self) -> Result<ActiveSession<'static, Role>, crate::Error>
+    pub async fn start_session(self) -> Result<ActiveSession<'static, Role>, crate::Error>
     where
         Responder: 'static,
     {
@@ -207,17 +207,17 @@ where
             .map_err(|_| crate::Error::internal_error())
     }
 
-    /// Spawn a session and proxy all messages between client and agent.
+    /// Start a session and proxy all messages between client and agent.
     ///
-    /// This is a convenience method that combines [`spawn_session`](Self::spawn_session),
+    /// This is a convenience method that combines [`start_session`](Self::start_session),
     /// responding to the client, and [`ActiveSession::proxy_remaining_messages`].
     /// Use this when you want to inject MCP servers into a session but don't need
     /// to actively interact with it.
     ///
     /// For more control (e.g., to send some messages before proxying), use
-    /// [`spawn_session`](Self::spawn_session) instead and call
+    /// [`start_session`](Self::start_session) instead and call
     /// [`proxy_remaining_messages`](ActiveSession::proxy_remaining_messages) manually.
-    pub async fn spawn_session_proxy(
+    pub async fn start_session_proxy(
         self,
         request_cx: JrRequestCx<NewSessionResponse>,
     ) -> Result<(), crate::Error>
@@ -225,7 +225,7 @@ where
         Role: HasEndpoint<Client>,
         Responder: 'static,
     {
-        let active_session = self.spawn_session().await?;
+        let active_session = self.start_session().await?;
         request_cx.respond(active_session.response())?;
         active_session.proxy_remaining_messages()
     }
@@ -234,7 +234,7 @@ where
 /// Active session struct that lets you send prompts and receive updates.
 ///
 /// The `'responder` lifetime represents the span during which responders
-/// (e.g., MCP server handlers) are active. When created via [`SessionBuilder::spawn_session`],
+/// (e.g., MCP server handlers) are active. When created via [`SessionBuilder::start_session`],
 /// this is `'static` because responders are spawned into background tasks.
 /// When created via [`SessionBuilder::run_session`], this is tied to the
 /// closure scope, preventing [`Self::proxy_remaining_messages`] from being called
@@ -385,7 +385,7 @@ where
     /// This consumes the `ActiveSession` since you're giving up active control.
     ///
     /// This method is only available on `ActiveSession<'static, _>` (from
-    /// [`SessionBuilder::spawn_session`]) because it requires responders to
+    /// [`SessionBuilder::start_session`]) because it requires responders to
     /// outlive the method call.
     pub fn proxy_remaining_messages(self) -> Result<(), crate::Error>
     where
