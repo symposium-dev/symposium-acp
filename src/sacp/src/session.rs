@@ -312,17 +312,79 @@ where
     /// For more control (e.g., to send some messages before proxying), use
     /// [`start_session`](Self::start_session) instead and call
     /// [`proxy_remaining_messages`](ActiveSession::proxy_remaining_messages) manually.
+    ///
+    /// Requires calling [`block_task`](Self::block_task) first.
     pub async fn start_session_proxy(
         self,
         request_cx: JrRequestCx<NewSessionResponse>,
-    ) -> Result<(), crate::Error>
+    ) -> Result<SessionId, crate::Error>
     where
         Role: HasEndpoint<Client>,
         Responder: 'static,
     {
         let active_session = self.start_session().await?;
+        let session_id = active_session.session_id().clone();
         request_cx.respond(active_session.response())?;
-        active_session.proxy_remaining_messages()
+        active_session.proxy_remaining_messages()?;
+        Ok(session_id)
+    }
+}
+
+impl<Role, Responder, BlockState> SessionBuilder<Role, Responder, BlockState>
+where
+    Role: HasEndpoint<Agent> + HasEndpoint<Client>,
+    Responder: JrResponder<Role> + 'static,
+{
+    /// Spawn a session proxy and run a closure with the session ID.
+    ///
+    /// Unlike [`start_session_proxy`](Self::start_session_proxy), this method returns
+    /// immediately without blocking the current task. The session handshake, client
+    /// response, and proxy setup all happen in a spawned background task.
+    ///
+    /// The closure receives the `SessionId` once the session is established, allowing
+    /// you to perform any custom work with that ID (e.g., tracking, logging).
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// cx.build_session_from(request)
+    ///     .with_mcp_server(mcp)?
+    ///     .on_proxy_session_start(request_cx, async |session_id| {
+    ///         tracing::info!(%session_id, "Session started");
+    ///         Ok(())
+    ///     })?;
+    /// // Returns immediately, session runs in background
+    /// ```
+    pub fn on_proxy_session_start<F, Fut>(
+        self,
+        request_cx: JrRequestCx<NewSessionResponse>,
+        op: F,
+    ) -> Result<(), crate::Error>
+    where
+        F: FnOnce(SessionId) -> Fut + Send + 'static,
+        Fut: Future<Output = Result<(), crate::Error>> + Send,
+    {
+        let connection = self.connection.clone();
+        connection.spawn(async move {
+            let response = self
+                .connection
+                .send_request_to(Agent, self.request)
+                .block_task()
+                .await?;
+
+            let cx = self.connection.clone();
+            self.connection.spawn(self.responder.run(cx))?;
+
+            let active_session: ActiveSession<'static, Role> = self
+                .connection
+                .attach_session(response, self.dynamic_handler_registrations)?;
+
+            let session_id = active_session.session_id().clone();
+            request_cx.respond(active_session.response())?;
+            active_session.proxy_remaining_messages()?;
+
+            op(session_id).await
+        })
     }
 }
 
