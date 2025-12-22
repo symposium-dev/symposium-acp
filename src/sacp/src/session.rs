@@ -66,7 +66,7 @@ where
     pub fn attach_session<'responder>(
         &self,
         response: NewSessionResponse,
-        mut dynamic_handler_registrations: Vec<DynamicHandlerRegistration<Role>>,
+        mcp_handler_registrations: Vec<DynamicHandlerRegistration<Role>>,
     ) -> Result<ActiveSession<'responder, Role>, crate::Error> {
         let NewSessionResponse {
             session_id,
@@ -77,8 +77,7 @@ where
         let (update_tx, update_rx) = mpsc::unbounded();
         let handler =
             ActiveSessionHandler::new(Role::default(), session_id.clone(), update_tx.clone());
-        let registration = self.add_dynamic_handler(handler)?;
-        dynamic_handler_registrations.push(registration);
+        let session_handler_registration = self.add_dynamic_handler(handler)?;
 
         Ok(ActiveSession {
             session_id,
@@ -87,7 +86,8 @@ where
             update_rx,
             update_tx,
             connection: self.clone(),
-            dynamic_handler_registrations,
+            session_handler_registration,
+            mcp_handler_registrations,
             _responder: PhantomData,
         })
     }
@@ -407,10 +407,15 @@ where
     meta: Option<serde_json::Value>,
     connection: JrConnectionCx<Role>,
 
-    /// Collect registrations from dynamic handlers for MCP servers etc.
+    /// Registration for the handler that routes session messages to `update_rx`.
+    /// This is separate from MCP handlers so it can be dropped independently
+    /// when switching to proxy mode.
+    session_handler_registration: DynamicHandlerRegistration<Role>,
+
+    /// Registrations for MCP server handlers.
     /// These will be dropped once the active-session struct is dropped
     /// which will cause them to be deregistered.
-    dynamic_handler_registrations: Vec<DynamicHandlerRegistration<Role>>,
+    mcp_handler_registrations: Vec<DynamicHandlerRegistration<Role>>,
 
     /// Phantom lifetime representing the responder lifetime.
     _responder: PhantomData<&'responder ()>,
@@ -544,17 +549,75 @@ where
     /// This method is only available on `ActiveSession<'static, _>` (from
     /// [`SessionBuilder::start_session`]) because it requires responders to
     /// outlive the method call.
+    ///
+    /// # Message Ordering Guarantees
+    ///
+    /// This method ensures proper handoff from active session mode to proxy mode
+    /// without losing or reordering messages:
+    ///
+    /// 1. **Stop the session handler** - Drop the registration that routes messages
+    ///    to `update_rx`. After this, no new messages will be queued.
+    /// 2. **Close the channel** - Drop `update_tx` so we can detect when the channel
+    ///    is fully drained.
+    /// 3. **Drain queued messages** - Forward any messages that were already queued
+    ///    in `update_rx` to the client, preserving order.
+    /// 4. **Install proxy handler** - Now that all queued messages are forwarded,
+    ///    install the proxy handler to handle future messages.
+    ///
+    /// This sequence prevents the race condition where messages could be delivered
+    /// out of order or lost during the transition.
     pub fn proxy_remaining_messages(self) -> Result<(), crate::Error>
     where
         R: HasEndpoint<Client>,
     {
-        // Add dynamic handler to proxy session messages
-        self.connection
-            .add_dynamic_handler(ProxySessionMessages::new(self.session_id))?
+        // Destructure self to get ownership of all fields
+        let ActiveSession {
+            session_id,
+            mut update_rx,
+            update_tx,
+            connection,
+            session_handler_registration,
+            mcp_handler_registrations,
+            // These fields are not needed for proxying
+            modes: _,
+            meta: _,
+            _responder,
+        } = self;
+
+        // Step 1: Drop the session handler registration.
+        // This unregisters the handler that was routing messages to update_rx.
+        // After this point, no new messages will be added to the channel.
+        drop(session_handler_registration);
+
+        // Step 2: Drop the sender side of the channel.
+        // This allows us to detect when the channel is fully drained
+        // (recv will return None when empty and sender is dropped).
+        drop(update_tx);
+
+        // Step 3: Drain any messages that were already queued and forward to client.
+        // These messages arrived before we dropped the handler but haven't been
+        // consumed yet. We must forward them to maintain message ordering.
+        while let Some(message) = update_rx.try_next().ok().flatten() {
+            match message {
+                SessionMessage::SessionMessage(message_cx) => {
+                    // Forward the message to the client
+                    connection.send_proxied_message_to(Client, message_cx)?;
+                }
+                SessionMessage::StopReason(_) => {
+                    // StopReason is internal bookkeeping, not forwarded
+                }
+            }
+        }
+
+        // Step 4: Install the proxy handler for future messages.
+        // Now that all queued messages have been forwarded, the proxy handler
+        // can take over. Any new messages will go directly through the proxy.
+        connection
+            .add_dynamic_handler(ProxySessionMessages::new(session_id))?
             .run_indefinitely();
 
-        // Keep MCP server handlers alive
-        for registration in self.dynamic_handler_registrations {
+        // Keep MCP server handlers alive for the lifetime of the proxy
+        for registration in mcp_handler_registrations {
             registration.run_indefinitely();
         }
 
