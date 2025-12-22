@@ -29,7 +29,7 @@ JrConnection::new(
     // You can also handle any kind of message:
     message.respond_with_error(sacp::util::internal_error("TODO"))
 })
-.serve() // Finally, start the server (or use `with_client`)
+.serve() // Finally, start the server (or use `run_until`)
 .await
 ```
 

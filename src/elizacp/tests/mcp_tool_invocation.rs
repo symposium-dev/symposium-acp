@@ -59,7 +59,7 @@ async fn test_elizacp_mcp_tool_call() -> Result<(), sacp::Error> {
                 ))
                 .await
         })
-        .with_client(transport, async |client_cx| {
+        .run_until(transport, async |client_cx| {
             // Initialize
             let _init_response = recv(client_cx.send_request(InitializeRequest {
                 protocol_version: Default::default(),

@@ -201,7 +201,7 @@ async fn test_unknown_method() {
 
             // Send request from client
             let result = client
-                .with_client(client_transport, async |cx| -> Result<(), sacp::Error> {
+                .run_until(client_transport, async |cx| -> Result<(), sacp::Error> {
                     let request = SimpleRequest {
                         message: "test".to_string(),
                     };
@@ -288,7 +288,7 @@ async fn test_handler_returns_error() {
             });
 
             let result = client
-                .with_client(client_transport, async |cx| -> Result<(), sacp::Error> {
+                .run_until(client_transport, async |cx| -> Result<(), sacp::Error> {
                     let request = ErrorRequest {
                         value: "trigger error".to_string(),
                     };
@@ -376,7 +376,7 @@ async fn test_missing_required_params() {
             });
 
             let result = client
-                .with_client(client_transport, async |cx| -> Result<(), sacp::Error> {
+                .run_until(client_transport, async |cx| -> Result<(), sacp::Error> {
                     // Send request with no params (EmptyRequest has no fields)
                     let request = EmptyRequest;
 

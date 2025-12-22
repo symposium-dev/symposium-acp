@@ -24,7 +24,7 @@ JrConnection::to_agent(agent)?
         println!("Agent update: {:?}", notif);
         Ok(())
     })
-    .with_client(|cx| async move {
+    .run_until(|cx| async move {
         // Initialize and interact with the agent
         let response = cx.send_request(InitializeRequest { ... })
             .block_task()

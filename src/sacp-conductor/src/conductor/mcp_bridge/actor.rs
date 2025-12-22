@@ -64,7 +64,7 @@ impl McpBridgeConnectionActor {
             )
             // When we receive messages from the conductor, forward them to the MCP client
             .connect_to(transport)?
-            .with_client(async move |mcp_client_cx| {
+            .run_until(async move |mcp_client_cx| {
                 let mut to_mcp_client_rx = to_mcp_client_rx;
                 while let Some(message) = to_mcp_client_rx.next().await {
                     mcp_client_cx.send_proxied_message_to(McpServerEnd, message)?;

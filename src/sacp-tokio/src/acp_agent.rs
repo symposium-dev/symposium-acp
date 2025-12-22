@@ -66,7 +66,7 @@ pub enum LineDirection {
 /// // The agent process will be spawned automatically when served
 /// UntypedRole::builder()
 ///     .connect_to(agent)?
-///     .with_client(|cx| async move {
+///     .run_until(|cx| async move {
 ///         // Use the connection to communicate with the agent process
 ///         Ok(())
 ///     })

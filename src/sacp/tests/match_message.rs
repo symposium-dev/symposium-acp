@@ -121,7 +121,7 @@ async fn modify_message_en_route() -> Result<(), sacp::Error> {
 
     UntypedRole::builder()
         .connect_to(TestComponent)?
-        .with_client(async |cx| {
+        .run_until(async |cx| {
             let result = cx
                 .send_request(EchoRequestResponse {
                     text: vec!["a".to_string()],
@@ -172,7 +172,7 @@ async fn modify_message_en_route_inline() -> Result<(), sacp::Error> {
 
     UntypedRole::builder()
         .connect_to(TestComponent)?
-        .with_client(async |cx| {
+        .run_until(async |cx| {
             let result = cx
                 .send_request(EchoRequestResponse {
                     text: vec!["a".to_string()],
@@ -232,7 +232,7 @@ async fn modify_message_and_stop() -> Result<(), sacp::Error> {
 
     UntypedRole::builder()
         .connect_to(TestComponent)?
-        .with_client(async |cx| {
+        .run_until(async |cx| {
             let result = cx
                 .send_request(EchoRequestResponse {
                     text: vec!["a".to_string()],
