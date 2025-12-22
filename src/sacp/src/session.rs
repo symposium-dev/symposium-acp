@@ -1,4 +1,4 @@
-use std::{marker::PhantomData, path::Path};
+use std::{future::Future, marker::PhantomData, path::Path};
 
 use agent_client_protocol_schema::{
     ContentBlock, ContentChunk, NewSessionRequest, NewSessionResponse, PromptRequest,
@@ -205,6 +205,54 @@ where
         active_session_rx
             .await
             .map_err(|_| crate::Error::internal_error())
+    }
+
+    /// Spawn a task that runs the provided closure once the session starts.
+    ///
+    /// Unlike [`start_session`](Self::start_session), this method returns immediately
+    /// without blocking the current task. The session handshake and closure execution
+    /// happen in a spawned background task.
+    ///
+    /// The closure receives an `ActiveSession<'static, _>` and should return
+    /// `Result<(), Error>`. If the closure returns an error, it will propagate
+    /// to the connection's error handling.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// cx.build_session(cwd)
+    ///     .with_mcp_server(mcp)?
+    ///     .on_session_start(async |session| {
+    ///         // Do something with the session
+    ///         session.send_prompt("Hello")?;
+    ///         let response = session.read_to_string().await?;
+    ///         Ok(())
+    ///     })?;
+    /// // Returns immediately, session runs in background
+    /// ```
+    pub fn on_session_start<F, Fut>(self, op: F) -> Result<(), crate::Error>
+    where
+        Responder: 'static,
+        F: FnOnce(ActiveSession<'static, Role>) -> Fut + Send + 'static,
+        Fut: Future<Output = Result<(), crate::Error>> + Send,
+    {
+        let connection = self.connection.clone();
+        connection.spawn(async move {
+            let response = self
+                .connection
+                .send_request_to(Agent, self.request)
+                .block_task()
+                .await?;
+
+            let cx = self.connection.clone();
+            self.connection.spawn(self.responder.run(cx))?;
+
+            let active_session = self
+                .connection
+                .attach_session(response, self.dynamic_handler_registrations)?;
+
+            op(active_session).await
+        })
     }
 
     /// Start a session and proxy all messages between client and agent.
