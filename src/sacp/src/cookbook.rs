@@ -348,11 +348,12 @@ pub mod per_session_mcp_server {
     //!                     }, sacp::tool_fn!())
     //!                 .build();
     //!
-    //!             cx.build_session_from(request)
+    //!             let _session_id = cx.build_session_from(request)
     //!                 .with_mcp_server(mcp_server)?
     //!                 .block_task()
     //!                 .start_session_proxy(request_cx)
-    //!                 .await
+    //!                 .await?;
+    //!             Ok(())
     //!         }, sacp::on_receive_request!())
     //!         .serve(transport)
     //!         .await
