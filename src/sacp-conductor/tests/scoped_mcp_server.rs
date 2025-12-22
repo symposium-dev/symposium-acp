@@ -67,7 +67,8 @@ async fn test_scoped_mcp_server_through_session() -> Result<(), sacp::Error> {
             let result = cx
                 .build_session(".")
                 .with_mcp_server(make_mcp_server(&collected_values))?
-                .run_session(async |mut active_session| {
+                .block_task()
+                .run_until(async |mut active_session| {
                     active_session
                         .send_prompt(r#"Use tool test::push with {"elements": ["Hello", "world"]}"#)?;
                     active_session.read_to_string().await

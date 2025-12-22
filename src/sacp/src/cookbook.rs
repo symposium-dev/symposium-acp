@@ -350,6 +350,7 @@ pub mod per_session_mcp_server {
     //!
     //!             cx.build_session_from(request)
     //!                 .with_mcp_server(mcp_server)?
+    //!                 .block_task()
     //!                 .start_session_proxy(request_cx)
     //!                 .await
     //!         }, sacp::on_receive_request!())
@@ -381,6 +382,7 @@ pub mod per_session_mcp_server {
     //!
     //!             let active_session = cx.build_session_from(request)
     //!                 .with_mcp_server(mcp_server)?
+    //!                 .block_task()
     //!                 .start_session()
     //!                 .await?;
     //!
@@ -403,7 +405,7 @@ pub mod per_session_mcp_server {
     //! 1. The MCP server is converted into a dynamic handler via `into_dynamic_handler()`
     //! 2. The handler is registered for the session's message routing
     //! 3. The MCP server's URL is added to the `NewSessionRequest`
-    //! 4. The handler lives as long as the session (dropped when `run_session` completes)
+    //! 4. The handler lives as long as the session (dropped when `run_until` completes)
     //!
     //! [`start_session_proxy`]: crate::SessionBuilder::start_session_proxy
     //! [`start_session`]: crate::SessionBuilder::start_session

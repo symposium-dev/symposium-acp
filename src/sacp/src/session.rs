@@ -20,6 +20,12 @@ use crate::{
     util::{MatchMessage, MatchMessageFrom, run_until},
 };
 
+/// Marker type indicating the session builder will block the current task.
+pub struct Blocking;
+
+/// Marker type indicating the session builder will not block the current task.
+pub struct NonBlocking;
+
 impl<Role: JrRole> JrConnectionCx<Role>
 where
     Role: HasEndpoint<Agent>,
@@ -89,18 +95,27 @@ where
 
 /// Session builder for a new session request.
 /// Allows you to add MCP servers or set other details for this session.
-#[must_use = "use `send_request` to send the request"]
-pub struct SessionBuilder<Role, Responder: JrResponder<Role> = NullResponder>
-where
+///
+/// The `BlockState` type parameter tracks whether blocking methods are available:
+/// - `NonBlocking` (default): Only [`on_session_start`](Self::on_session_start) is available
+/// - `Blocking` (after calling [`block_task`](Self::block_task)):
+///   [`run_until`](Self::run_until) and [`start_session`](Self::start_session) become available
+#[must_use = "use `start_session`, `run_until`, or `on_session_start` to start the session"]
+pub struct SessionBuilder<
+    Role,
+    Responder: JrResponder<Role> = NullResponder,
+    BlockState = NonBlocking,
+> where
     Role: HasEndpoint<Agent>,
 {
     connection: JrConnectionCx<Role>,
     request: NewSessionRequest,
     dynamic_handler_registrations: Vec<DynamicHandlerRegistration<Role>>,
     responder: Responder,
+    _block_state: PhantomData<BlockState>,
 }
 
-impl<Role> SessionBuilder<Role, NullResponder>
+impl<Role> SessionBuilder<Role, NullResponder, NonBlocking>
 where
     Role: HasEndpoint<Agent>,
 {
@@ -110,11 +125,12 @@ where
             request,
             dynamic_handler_registrations: Default::default(),
             responder: NullResponder,
+            _block_state: PhantomData,
         }
     }
 }
 
-impl<Role, Responder> SessionBuilder<Role, Responder>
+impl<Role, Responder, BlockState> SessionBuilder<Role, Responder, BlockState>
 where
     Role: HasEndpoint<Agent>,
     Responder: JrResponder<Role>,
@@ -123,7 +139,7 @@ where
     pub fn with_mcp_server<R>(
         mut self,
         mcp_server: McpServer<Role, R>,
-    ) -> Result<SessionBuilder<Role, ChainResponder<Responder, R>>, crate::Error>
+    ) -> Result<SessionBuilder<Role, ChainResponder<Responder, R>, BlockState>, crate::Error>
     where
         R: JrResponder<Role>,
     {
@@ -135,76 +151,8 @@ where
             request: self.request,
             dynamic_handler_registrations: self.dynamic_handler_registrations,
             responder: ChainResponder::new(self.responder, responder),
+            _block_state: PhantomData,
         })
-    }
-
-    /// Run this session synchronously. The current task will be blocked
-    /// and `op` will be executed with the active session information.
-    /// This is useful when you have MCP servers that are borrowed from your local
-    /// stack frame.
-    ///
-    /// The `ActiveSession` passed to `op` has a non-`'static` lifetime, which
-    /// prevents calling [`ActiveSession::proxy_remaining_messages`] (since the
-    /// responders would terminate when `op` returns).
-    pub async fn run_session<R>(
-        self,
-        op: impl for<'responder> AsyncFnOnce(ActiveSession<'responder, Role>) -> Result<R, crate::Error>,
-    ) -> Result<R, crate::Error> {
-        let response = self
-            .connection
-            .send_request_to(Agent, self.request)
-            .block_task()
-            .await?;
-
-        let active_session = self
-            .connection
-            .attach_session(response, self.dynamic_handler_registrations)?;
-
-        run_until(
-            self.responder.run(self.connection.clone()),
-            op(active_session),
-        )
-        .await
-    }
-
-    /// Send the request to create the session and return a handle.
-    /// This is an alternative to [`Self::run_session`] that avoids rightward
-    /// drift but at the cost of requiring MCP servers that are `Send` and
-    /// don't access data from the surrounding scope.
-    ///
-    /// Returns an `ActiveSession<'static, _>` because responders are spawned
-    /// into background tasks that live for the connection lifetime.
-    pub async fn start_session(self) -> Result<ActiveSession<'static, Role>, crate::Error>
-    where
-        Responder: 'static,
-    {
-        let (active_session_tx, active_session_rx) = oneshot::channel();
-
-        let connection = self.connection.clone();
-        connection.spawn(async move {
-            let response = self
-                .connection
-                .send_request_to(Agent, self.request)
-                .block_task()
-                .await?;
-
-            let cx = self.connection.clone();
-            self.connection.spawn(self.responder.run(cx))?;
-
-            let active_session = self
-                .connection
-                .attach_session(response, self.dynamic_handler_registrations)?;
-
-            active_session_tx
-                .send(active_session)
-                .map_err(|_| crate::Error::internal_error())?;
-
-            Ok(())
-        })?;
-
-        active_session_rx
-            .await
-            .map_err(|_| crate::Error::internal_error())
     }
 
     /// Spawn a task that runs the provided closure once the session starts.
@@ -254,6 +202,105 @@ where
             op(active_session).await
         })
     }
+}
+
+impl<Role, Responder> SessionBuilder<Role, Responder, NonBlocking>
+where
+    Role: HasEndpoint<Agent>,
+    Responder: JrResponder<Role>,
+{
+    /// Mark this session builder as blocking.
+    ///
+    /// After calling this, you can use [`run_until`](Self::run_until) or
+    /// [`start_session`](Self::start_session) which block the current task.
+    pub fn block_task(self) -> SessionBuilder<Role, Responder, Blocking> {
+        SessionBuilder {
+            connection: self.connection,
+            request: self.request,
+            dynamic_handler_registrations: self.dynamic_handler_registrations,
+            responder: self.responder,
+            _block_state: PhantomData,
+        }
+    }
+}
+
+impl<Role, Responder> SessionBuilder<Role, Responder, Blocking>
+where
+    Role: HasEndpoint<Agent>,
+    Responder: JrResponder<Role>,
+{
+    /// Run this session synchronously. The current task will be blocked
+    /// and `op` will be executed with the active session information.
+    /// This is useful when you have MCP servers that are borrowed from your local
+    /// stack frame.
+    ///
+    /// The `ActiveSession` passed to `op` has a non-`'static` lifetime, which
+    /// prevents calling [`ActiveSession::proxy_remaining_messages`] (since the
+    /// responders would terminate when `op` returns).
+    ///
+    /// Requires calling [`block_task`](Self::block_task) first.
+    pub async fn run_until<R>(
+        self,
+        op: impl for<'responder> AsyncFnOnce(ActiveSession<'responder, Role>) -> Result<R, crate::Error>,
+    ) -> Result<R, crate::Error> {
+        let response = self
+            .connection
+            .send_request_to(Agent, self.request)
+            .block_task()
+            .await?;
+
+        let active_session = self
+            .connection
+            .attach_session(response, self.dynamic_handler_registrations)?;
+
+        run_until(
+            self.responder.run(self.connection.clone()),
+            op(active_session),
+        )
+        .await
+    }
+
+    /// Send the request to create the session and return a handle.
+    /// This is an alternative to [`Self::run_until`] that avoids rightward
+    /// drift but at the cost of requiring MCP servers that are `Send` and
+    /// don't access data from the surrounding scope.
+    ///
+    /// Returns an `ActiveSession<'static, _>` because responders are spawned
+    /// into background tasks that live for the connection lifetime.
+    ///
+    /// Requires calling [`block_task`](Self::block_task) first.
+    pub async fn start_session(self) -> Result<ActiveSession<'static, Role>, crate::Error>
+    where
+        Responder: 'static,
+    {
+        let (active_session_tx, active_session_rx) = oneshot::channel();
+
+        let connection = self.connection.clone();
+        connection.spawn(async move {
+            let response = self
+                .connection
+                .send_request_to(Agent, self.request)
+                .block_task()
+                .await?;
+
+            let cx = self.connection.clone();
+            self.connection.spawn(self.responder.run(cx))?;
+
+            let active_session = self
+                .connection
+                .attach_session(response, self.dynamic_handler_registrations)?;
+
+            active_session_tx
+                .send(active_session)
+                .map_err(|_| crate::Error::internal_error())?;
+
+            Ok(())
+        })?;
+
+        active_session_rx
+            .await
+            .map_err(|_| crate::Error::internal_error())
+    }
 
     /// Start a session and proxy all messages between client and agent.
     ///
@@ -284,7 +331,7 @@ where
 /// The `'responder` lifetime represents the span during which responders
 /// (e.g., MCP server handlers) are active. When created via [`SessionBuilder::start_session`],
 /// this is `'static` because responders are spawned into background tasks.
-/// When created via [`SessionBuilder::run_session`], this is tied to the
+/// When created via [`SessionBuilder::run_until`], this is tied to the
 /// closure scope, preventing [`Self::proxy_remaining_messages`] from being called
 /// (since the responders would die when the closure returns).
 pub struct ActiveSession<'responder, Role>
