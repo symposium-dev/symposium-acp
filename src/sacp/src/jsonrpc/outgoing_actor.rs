@@ -12,13 +12,7 @@ pub(crate) fn send_raw_message(
     tx: &OutgoingMessageTx,
     message: OutgoingMessage,
 ) -> Result<(), crate::Error> {
-    match &message {
-        OutgoingMessage::Response { id, response } => match response {
-            Ok(_) => tracing::debug!(?id, "send_raw_message: queuing success response"),
-            Err(e) => tracing::warn!(?id, ?e, "send_raw_message: queuing error response"),
-        },
-        _ => {}
-    }
+    tracing::debug!(?message, ?tx, "send_raw_message");
     tx.unbounded_send(message)
         .map_err(crate::util::internal_error)
 }
