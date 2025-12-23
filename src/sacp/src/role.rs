@@ -36,7 +36,7 @@ pub trait JrLink: Debug + Copy + Send + Sync + 'static + Eq + Ord + Hash + Defau
     /// typically that counterpart's endpoint. For roles that can receive from
     /// multiple endpoints (like proxies), this should be set to an explicit
     /// endpoint to avoid ambiguity.
-    type HandlerEndpoint: JrEndpoint;
+    type HandlerEndpoint: JrRole;
 
     /// State maintained for connections this role.
     type State: Default;
@@ -61,10 +61,10 @@ pub trait JrLink: Debug + Copy + Send + Sync + 'static + Eq + Ord + Hash + Defau
 pub trait HasDefaultEndpoint: JrLink {}
 
 /// A logical destination for messages (e.g., Client, Agent, McpServer).
-pub trait JrEndpoint: Debug + Copy + Send + Sync + 'static + Eq + Ord + Hash + Default {}
+pub trait JrRole: Debug + Copy + Send + Sync + 'static + Eq + Ord + Hash + Default {}
 
 /// Declares that a role can send messages to a specific endpoint.
-pub trait HasEndpoint<End: JrEndpoint>: JrLink {
+pub trait HasPeer<End: JrRole>: JrLink {
     /// Returns the remote role style for sending to this endpoint.
     fn remote_style(end: End) -> RemoteRoleStyle;
 }
@@ -172,25 +172,25 @@ impl RemoteRoleStyle {
 #[derive(Debug, Default, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct UntypedEndpoint;
 
-impl JrEndpoint for UntypedEndpoint {}
+impl JrRole for UntypedEndpoint {}
 
 /// Endpoint representing the client direction.
 #[derive(Debug, Default, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Client;
 
-impl JrEndpoint for Client {}
+impl JrRole for Client {}
 
 /// Endpoint representing the agent direction.
 #[derive(Debug, Default, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Agent;
 
-impl JrEndpoint for Agent {}
+impl JrRole for Agent {}
 
 /// Endpoint representing the conductor direction.
 #[derive(Debug, Default, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Conductor;
 
-impl JrEndpoint for Conductor {}
+impl JrRole for Conductor {}
 
 // ============================================================================
 // Roles - directional connection types
@@ -212,7 +212,7 @@ impl JrLink for UntypedRole {
 
 impl HasDefaultEndpoint for UntypedRole {}
 
-impl HasEndpoint<UntypedEndpoint> for UntypedRole {
+impl HasPeer<UntypedEndpoint> for UntypedRole {
     fn remote_style(_end: UntypedEndpoint) -> RemoteRoleStyle {
         RemoteRoleStyle::Counterpart
     }
@@ -258,7 +258,7 @@ impl JrLink for ClientToAgent {
 
 impl HasDefaultEndpoint for ClientToAgent {}
 
-impl HasEndpoint<Agent> for ClientToAgent {
+impl HasPeer<Agent> for ClientToAgent {
     fn remote_style(_end: Agent) -> RemoteRoleStyle {
         RemoteRoleStyle::Counterpart
     }
@@ -275,7 +275,7 @@ impl JrLink for AgentToClient {
 
 impl HasDefaultEndpoint for AgentToClient {}
 
-impl HasEndpoint<Client> for AgentToClient {
+impl HasPeer<Client> for AgentToClient {
     fn remote_style(_end: Client) -> RemoteRoleStyle {
         RemoteRoleStyle::Counterpart
     }
@@ -290,7 +290,7 @@ impl JrLink for ConductorToClient {
     type State = ();
 }
 
-impl HasEndpoint<Client> for ConductorToClient {
+impl HasPeer<Client> for ConductorToClient {
     fn remote_style(_end: Client) -> RemoteRoleStyle {
         RemoteRoleStyle::Counterpart
     }
@@ -298,7 +298,7 @@ impl HasEndpoint<Client> for ConductorToClient {
 
 // When the conductor is acting as a proxy, it can also receive messages
 // from the agent direction (wrapped in SuccessorMessage envelopes).
-impl HasEndpoint<Agent> for ConductorToClient {
+impl HasPeer<Agent> for ConductorToClient {
     fn remote_style(_end: Agent) -> RemoteRoleStyle {
         RemoteRoleStyle::Successor
     }
@@ -315,7 +315,7 @@ impl JrLink for ConductorToProxy {
 
 impl HasDefaultEndpoint for ConductorToProxy {}
 
-impl HasEndpoint<Agent> for ConductorToProxy {
+impl HasPeer<Agent> for ConductorToProxy {
     fn remote_style(_end: Agent) -> RemoteRoleStyle {
         RemoteRoleStyle::Counterpart
     }
@@ -332,7 +332,7 @@ impl JrLink for ConductorToAgent {
 
 impl HasDefaultEndpoint for ConductorToAgent {}
 
-impl HasEndpoint<Agent> for ConductorToAgent {
+impl HasPeer<Agent> for ConductorToAgent {
     fn remote_style(_end: Agent) -> RemoteRoleStyle {
         RemoteRoleStyle::Counterpart
     }
@@ -471,7 +471,7 @@ impl<Link> ProxySessionMessages<Link> {
 
 impl<Link: JrLink> JrMessageHandler for ProxySessionMessages<Link>
 where
-    Link: HasEndpoint<Agent> + HasEndpoint<Client>,
+    Link: HasPeer<Agent> + HasPeer<Client>,
 {
     type Link = Link;
 
@@ -505,19 +505,19 @@ where
     }
 }
 
-impl HasEndpoint<Conductor> for ProxyToConductor {
+impl HasPeer<Conductor> for ProxyToConductor {
     fn remote_style(_end: Conductor) -> RemoteRoleStyle {
         RemoteRoleStyle::Counterpart
     }
 }
 
-impl HasEndpoint<Client> for ProxyToConductor {
+impl HasPeer<Client> for ProxyToConductor {
     fn remote_style(_end: Client) -> RemoteRoleStyle {
         RemoteRoleStyle::Counterpart
     }
 }
 
-impl HasEndpoint<Agent> for ProxyToConductor {
+impl HasPeer<Agent> for ProxyToConductor {
     fn remote_style(_end: Agent) -> RemoteRoleStyle {
         RemoteRoleStyle::Successor
     }

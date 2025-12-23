@@ -9,7 +9,7 @@ use crate::schema::{
 };
 use crate::util::MatchMessageFrom;
 use crate::{
-    Agent, Channel, Component, Handled, HasEndpoint, JrConnectionCx, JrLink, JrMessageHandler,
+    Agent, Channel, Component, Handled, HasPeer, JrConnectionCx, JrLink, JrMessageHandler,
     JrRequestCx, MessageCx, UntypedMessage,
 };
 use std::sync::Arc;
@@ -35,7 +35,7 @@ pub(super) struct McpActiveSession<Link> {
 
 impl<Link: JrLink> McpActiveSession<Link>
 where
-    Link: HasEndpoint<Agent>,
+    Link: HasPeer<Agent>,
 {
     pub fn new(role: Link, acp_url: String, mcp_connect: Arc<dyn McpServerConnect<Link>>) -> Self {
         Self {
@@ -212,7 +212,7 @@ where
 
 impl<Link: JrLink> JrMessageHandler for McpActiveSession<Link>
 where
-    Link: HasEndpoint<Agent>,
+    Link: HasPeer<Agent>,
 {
     type Link = Link;
 

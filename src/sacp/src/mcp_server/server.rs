@@ -6,7 +6,7 @@ use agent_client_protocol_schema::NewSessionRequest;
 use uuid::Uuid;
 
 use crate::{
-    Agent, Client, Handled, HasEndpoint, JrConnectionCx, JrLink, JrMessageHandler,
+    Agent, Client, Handled, HasPeer, JrConnectionCx, JrLink, JrMessageHandler,
     jsonrpc::{
         DynamicHandlerRegistration,
         responder::{JrResponder, NullResponder},
@@ -53,7 +53,7 @@ pub struct McpServer<Link, Responder = NullResponder> {
 
 impl<Link: JrLink> McpServer<Link, NullResponder>
 where
-    Link: HasEndpoint<Agent>,
+    Link: HasPeer<Agent>,
 {
     /// Create an empty server with no content.
     pub fn builder(name: impl ToString) -> McpServerBuilder<Link, NullResponder> {
@@ -63,7 +63,7 @@ where
 
 impl<Link: JrLink, Responder: JrResponder<Link>> McpServer<Link, Responder>
 where
-    Link: HasEndpoint<Agent>,
+    Link: HasPeer<Agent>,
 {
     /// Create an MCP server from something that implements the [`McpServerConnect`] trait.
     ///
@@ -92,7 +92,7 @@ pub(crate) struct McpNewSessionHandler<Link> {
 
 impl<Link: JrLink> McpNewSessionHandler<Link>
 where
-    Link: HasEndpoint<Agent>,
+    Link: HasPeer<Agent>,
 {
     pub fn new(c: impl McpServerConnect<Link>) -> Self {
         let acp_url = format!("acp:{}", Uuid::new_v4());
@@ -139,7 +139,7 @@ where
 
 impl<Link: JrLink> JrMessageHandler for McpNewSessionHandler<Link>
 where
-    Link: HasEndpoint<Client> + HasEndpoint<Agent>,
+    Link: HasPeer<Client> + HasPeer<Agent>,
 {
     type Link = Link;
 

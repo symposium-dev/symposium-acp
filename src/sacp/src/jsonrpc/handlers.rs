@@ -1,5 +1,5 @@
 use crate::jsonrpc::{Handled, IntoHandled, JrMessageHandler};
-use crate::role::{HasEndpoint, JrEndpoint, JrLink};
+use crate::role::{HasPeer, JrLink, JrRole};
 use crate::{JrConnectionCx, JrNotification, JrRequest, MessageCx, UntypedMessage};
 // Types re-exported from crate root
 use super::JrRequestCx;
@@ -45,7 +45,7 @@ impl<Link: JrLink> JrMessageHandler for NullHandler<Link> {
 /// Handler for typed request messages
 pub struct RequestHandler<
     Link: JrLink,
-    End: JrEndpoint,
+    End: JrRole,
     Req: JrRequest = UntypedMessage,
     F = (),
     ToFut = (),
@@ -55,9 +55,7 @@ pub struct RequestHandler<
     phantom: PhantomData<fn(Link, End, Req)>,
 }
 
-impl<Link: JrLink, End: JrEndpoint, Req: JrRequest, F, ToFut>
-    RequestHandler<Link, End, Req, F, ToFut>
-{
+impl<Link: JrLink, End: JrRole, Req: JrRequest, F, ToFut> RequestHandler<Link, End, Req, F, ToFut> {
     /// Creates a new request handler
     pub fn new(_endpoint: End, _role: Link, handler: F, to_future_hack: ToFut) -> Self {
         Self {
@@ -68,10 +66,10 @@ impl<Link: JrLink, End: JrEndpoint, Req: JrRequest, F, ToFut>
     }
 }
 
-impl<Link: JrLink, End: JrEndpoint, Req, F, T, ToFut> JrMessageHandler
+impl<Link: JrLink, End: JrRole, Req, F, T, ToFut> JrMessageHandler
     for RequestHandler<Link, End, Req, F, ToFut>
 where
-    Link: HasEndpoint<End>,
+    Link: HasPeer<End>,
     Req: JrRequest,
     F: AsyncFnMut(Req, JrRequestCx<Req::Response>, JrConnectionCx<Link>) -> Result<T, crate::Error>
         + Send,
@@ -172,7 +170,7 @@ where
 /// Handler for typed notification messages
 pub struct NotificationHandler<
     Link: JrLink,
-    End: JrEndpoint,
+    End: JrRole,
     Notif: JrNotification = UntypedMessage,
     F = (),
     ToFut = (),
@@ -182,7 +180,7 @@ pub struct NotificationHandler<
     phantom: PhantomData<fn(Link, End, Notif)>,
 }
 
-impl<Link: JrLink, End: JrEndpoint, Notif: JrNotification, F, ToFut>
+impl<Link: JrLink, End: JrRole, Notif: JrNotification, F, ToFut>
     NotificationHandler<Link, End, Notif, F, ToFut>
 {
     /// Creates a new notification handler
@@ -195,10 +193,10 @@ impl<Link: JrLink, End: JrEndpoint, Notif: JrNotification, F, ToFut>
     }
 }
 
-impl<Link: JrLink, End: JrEndpoint, Notif, F, T, ToFut> JrMessageHandler
+impl<Link: JrLink, End: JrRole, Notif, F, T, ToFut> JrMessageHandler
     for NotificationHandler<Link, End, Notif, F, ToFut>
 where
-    Link: HasEndpoint<End>,
+    Link: HasPeer<End>,
     Notif: JrNotification,
     F: AsyncFnMut(Notif, JrConnectionCx<Link>) -> Result<T, crate::Error> + Send,
     T: crate::IntoHandled<(Notif, JrConnectionCx<Link>)>,
@@ -290,7 +288,7 @@ where
 /// Handler that handles both requests and notifications of specific types.
 pub struct MessageHandler<
     Link: JrLink,
-    End: JrEndpoint,
+    End: JrRole,
     Req: JrRequest = UntypedMessage,
     Notif: JrNotification = UntypedMessage,
     F = (),
@@ -301,7 +299,7 @@ pub struct MessageHandler<
     phantom: PhantomData<fn(Link, End, Req, Notif)>,
 }
 
-impl<Link: JrLink, End: JrEndpoint, Req: JrRequest, Notif: JrNotification, F, ToFut>
+impl<Link: JrLink, End: JrRole, Req: JrRequest, Notif: JrNotification, F, ToFut>
     MessageHandler<Link, End, Req, Notif, F, ToFut>
 {
     /// Creates a new message handler
@@ -314,10 +312,10 @@ impl<Link: JrLink, End: JrEndpoint, Req: JrRequest, Notif: JrNotification, F, To
     }
 }
 
-impl<Link: JrLink, End: JrEndpoint, Req: JrRequest, Notif: JrNotification, F, T, ToFut>
-    JrMessageHandler for MessageHandler<Link, End, Req, Notif, F, ToFut>
+impl<Link: JrLink, End: JrRole, Req: JrRequest, Notif: JrNotification, F, T, ToFut> JrMessageHandler
+    for MessageHandler<Link, End, Req, Notif, F, ToFut>
 where
-    Link: HasEndpoint<End>,
+    Link: HasPeer<End>,
     F: AsyncFnMut(MessageCx<Req, Notif>, JrConnectionCx<Link>) -> Result<T, crate::Error> + Send,
     T: IntoHandled<MessageCx<Req, Notif>>,
     ToFut: Fn(

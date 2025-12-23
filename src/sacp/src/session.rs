@@ -8,7 +8,7 @@ use futures::channel::mpsc;
 use tokio::sync::oneshot;
 
 use crate::{
-    Agent, Client, Handled, HasEndpoint, JrConnectionCx, JrLink, JrMessageHandler, JrRequestCx,
+    Agent, Client, Handled, HasPeer, JrConnectionCx, JrLink, JrMessageHandler, JrRequestCx,
     MessageCx,
     jsonrpc::{
         DynamicHandlerRegistration,
@@ -36,7 +36,7 @@ pub trait SessionBlockState: Send + 'static + Sync + std::fmt::Debug {}
 
 impl<Link: JrLink> JrConnectionCx<Link>
 where
-    Link: HasEndpoint<Agent>,
+    Link: HasPeer<Agent>,
 {
     /// Session builder for a new session request.
     pub fn build_session(&self, cwd: impl AsRef<Path>) -> SessionBuilder<Link, NullResponder> {
@@ -114,7 +114,7 @@ pub struct SessionBuilder<
     Responder: JrResponder<Link> = NullResponder,
     BlockState: SessionBlockState = NonBlocking,
 > where
-    Link: HasEndpoint<Agent>,
+    Link: HasPeer<Agent>,
 {
     connection: JrConnectionCx<Link>,
     request: NewSessionRequest,
@@ -125,7 +125,7 @@ pub struct SessionBuilder<
 
 impl<Link> SessionBuilder<Link, NullResponder, NonBlocking>
 where
-    Link: HasEndpoint<Agent>,
+    Link: HasPeer<Agent>,
 {
     fn new(connection: &JrConnectionCx<Link>, request: NewSessionRequest) -> Self {
         SessionBuilder {
@@ -140,7 +140,7 @@ where
 
 impl<Link, Responder, BlockState> SessionBuilder<Link, Responder, BlockState>
 where
-    Link: HasEndpoint<Agent>,
+    Link: HasPeer<Agent>,
     Responder: JrResponder<Link>,
     BlockState: SessionBlockState,
 {
@@ -245,7 +245,7 @@ where
     where
         F: FnOnce(SessionId) -> Fut + Send + 'static,
         Fut: Future<Output = Result<(), crate::Error>> + Send,
-        Link: HasEndpoint<Client>,
+        Link: HasPeer<Client>,
         Responder: 'static,
     {
         let connection = self.connection.clone();
@@ -287,7 +287,7 @@ where
 
 impl<Link, Responder> SessionBuilder<Link, Responder, NonBlocking>
 where
-    Link: HasEndpoint<Agent>,
+    Link: HasPeer<Agent>,
     Responder: JrResponder<Link>,
 {
     /// Mark this session builder as being able to block the current task.
@@ -311,7 +311,7 @@ where
 
 impl<Link, Responder> SessionBuilder<Link, Responder, Blocking>
 where
-    Link: HasEndpoint<Agent>,
+    Link: HasPeer<Agent>,
     Responder: JrResponder<Link>,
 {
     /// Run this session synchronously. The current task will be blocked
@@ -409,7 +409,7 @@ where
         request_cx: JrRequestCx<NewSessionResponse>,
     ) -> Result<SessionId, crate::Error>
     where
-        Link: HasEndpoint<Client>,
+        Link: HasPeer<Client>,
         Responder: 'static,
     {
         let active_session = self.start_session().await?;
@@ -430,7 +430,7 @@ where
 /// (since the responders would die when the closure returns).
 pub struct ActiveSession<'responder, Link>
 where
-    Link: HasEndpoint<Agent>,
+    Link: HasPeer<Agent>,
 {
     session_id: SessionId,
     update_rx: mpsc::UnboundedReceiver<SessionMessage>,
@@ -467,7 +467,7 @@ pub enum SessionMessage {
 
 impl<'responder, Link> ActiveSession<'responder, Link>
 where
-    Link: HasEndpoint<Agent>,
+    Link: HasPeer<Agent>,
 {
     /// Access the session ID.
     pub fn session_id(&self) -> &SessionId {
@@ -568,7 +568,7 @@ where
 
 impl<Link> ActiveSession<'static, Link>
 where
-    Link: HasEndpoint<Agent>,
+    Link: HasPeer<Agent>,
 {
     /// Proxy all remaining messages for this session between client and agent.
     ///
@@ -600,7 +600,7 @@ where
     /// out of order or lost during the transition.
     pub fn proxy_remaining_messages(self) -> Result<(), crate::Error>
     where
-        Link: HasEndpoint<Client>,
+        Link: HasPeer<Client>,
     {
         // Destructure self to get ownership of all fields
         let ActiveSession {
@@ -659,7 +659,7 @@ where
 
 struct ActiveSessionHandler<Link>
 where
-    Link: HasEndpoint<Agent>,
+    Link: HasPeer<Agent>,
 {
     #[expect(dead_code)]
     role: Link,
@@ -669,7 +669,7 @@ where
 
 impl<Link> ActiveSessionHandler<Link>
 where
-    Link: HasEndpoint<Agent>,
+    Link: HasPeer<Agent>,
 {
     pub fn new(
         role: Link,
@@ -686,7 +686,7 @@ where
 
 impl<Link> JrMessageHandler for ActiveSessionHandler<Link>
 where
-    Link: HasEndpoint<Agent>,
+    Link: HasPeer<Agent>,
 {
     type Link = Link;
 

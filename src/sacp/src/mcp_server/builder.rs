@@ -19,7 +19,7 @@ use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
 
 use super::{McpContext, McpTool};
 use crate::{
-    Agent, ByteStreams, Component, DynComponent, HasEndpoint, JrLink,
+    Agent, ByteStreams, Component, DynComponent, HasPeer, JrLink,
     jsonrpc::responder::{ChainResponder, JrResponder, NullResponder},
     mcp_server::{
         McpServer, McpServerConnect,
@@ -78,7 +78,7 @@ impl<Link: JrLink> Default for McpServerData<Link> {
 
 impl<Link: JrLink> McpServerBuilder<Link, NullResponder>
 where
-    Link: HasEndpoint<Agent>,
+    Link: HasPeer<Agent>,
 {
     pub(super) fn new(name: String) -> Self {
         Self {
@@ -92,7 +92,7 @@ where
 
 impl<Link: JrLink, Responder: JrResponder<Link>> McpServerBuilder<Link, Responder>
 where
-    Link: HasEndpoint<Agent>,
+    Link: HasPeer<Agent>,
 {
     /// Set the server instructions that are provided to the client.
     pub fn instructions(mut self, instructions: impl ToString) -> Self {
@@ -258,7 +258,7 @@ where
 
 struct McpServerBuilt<Link: JrLink>
 where
-    Link: HasEndpoint<Agent>,
+    Link: HasPeer<Agent>,
 {
     #[expect(dead_code)]
     role: Link,
@@ -268,7 +268,7 @@ where
 
 impl<'scope, Link: JrLink> McpServerConnect<Link> for McpServerBuilt<Link>
 where
-    Link: HasEndpoint<Agent>,
+    Link: HasPeer<Agent>,
 {
     fn name(&self) -> String {
         self.name.clone()
@@ -285,7 +285,7 @@ where
 /// An MCP server instance connected to the ACP framework.
 pub(crate) struct McpServerConnection<Link: JrLink>
 where
-    Link: HasEndpoint<Agent>,
+    Link: HasPeer<Agent>,
 {
     data: Arc<McpServerData<Link>>,
     mcp_cx: McpContext<Link>,
@@ -293,7 +293,7 @@ where
 
 impl<Link: JrLink> Component for McpServerConnection<Link>
 where
-    Link: HasEndpoint<Agent>,
+    Link: HasPeer<Agent>,
 {
     async fn serve(self, client: impl Component) -> Result<(), crate::Error> {
         // Create tokio byte streams that rmcp expects
@@ -326,7 +326,7 @@ where
 
 impl<Link: JrLink> ServerHandler for McpServerConnection<Link>
 where
-    Link: HasEndpoint<Agent>,
+    Link: HasPeer<Agent>,
 {
     async fn call_tool(
         &self,

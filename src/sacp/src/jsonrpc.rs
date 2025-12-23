@@ -34,7 +34,7 @@ use crate::jsonrpc::responder::SpawnedResponder;
 use crate::jsonrpc::responder::{ChainResponder, JrResponder, NullResponder};
 use crate::jsonrpc::task_actor::{Task, TaskTx};
 use crate::mcp_server::McpServer;
-use crate::role::{HasDefaultEndpoint, HasEndpoint, JrEndpoint, JrLink};
+use crate::role::{HasDefaultEndpoint, HasPeer, JrLink, JrRole};
 use crate::{Agent, Client, Component};
 
 /// Handlers process incoming JSON-RPC messages on a [`JrConnection`].
@@ -665,7 +665,7 @@ impl<H: JrMessageHandler, R: JrResponder<H::Link>> JrConnectionBuilder<H, R> {
     ) -> JrConnectionBuilder<impl JrMessageHandler<Link = H::Link>, R>
     where
         H::Link: HasDefaultEndpoint,
-        H::Link: HasEndpoint<<H::Link as JrLink>::HandlerEndpoint>,
+        H::Link: HasPeer<<H::Link as JrLink>::HandlerEndpoint>,
         Req: JrRequest,
         Notif: JrNotification,
         F: AsyncFnMut(MessageCx<Req, Notif>, JrConnectionCx<H::Link>) -> Result<T, crate::Error>
@@ -731,7 +731,7 @@ impl<H: JrMessageHandler, R: JrResponder<H::Link>> JrConnectionBuilder<H, R> {
     ) -> JrConnectionBuilder<impl JrMessageHandler<Link = H::Link>, R>
     where
         H::Link: HasDefaultEndpoint,
-        H::Link: HasEndpoint<<H::Link as JrLink>::HandlerEndpoint>,
+        H::Link: HasPeer<<H::Link as JrLink>::HandlerEndpoint>,
         F: AsyncFnMut(
                 Req,
                 JrRequestCx<Req::Response>,
@@ -799,7 +799,7 @@ impl<H: JrMessageHandler, R: JrResponder<H::Link>> JrConnectionBuilder<H, R> {
     ) -> JrConnectionBuilder<impl JrMessageHandler<Link = H::Link>, R>
     where
         H::Link: HasDefaultEndpoint,
-        H::Link: HasEndpoint<<H::Link as JrLink>::HandlerEndpoint>,
+        H::Link: HasPeer<<H::Link as JrLink>::HandlerEndpoint>,
         Notif: JrNotification,
         F: AsyncFnMut(Notif, JrConnectionCx<H::Link>) -> Result<T, crate::Error> + Send,
         T: IntoHandled<(Notif, JrConnectionCx<H::Link>)>,
@@ -831,7 +831,7 @@ impl<H: JrMessageHandler, R: JrResponder<H::Link>> JrConnectionBuilder<H, R> {
     pub fn on_receive_message_from<
         Req: JrRequest,
         Notif: JrNotification,
-        End: JrEndpoint,
+        End: JrRole,
         F,
         T,
         ToFut,
@@ -842,7 +842,7 @@ impl<H: JrMessageHandler, R: JrResponder<H::Link>> JrConnectionBuilder<H, R> {
         to_future_hack: ToFut,
     ) -> JrConnectionBuilder<impl JrMessageHandler<Link = H::Link>, R>
     where
-        H::Link: HasEndpoint<End>,
+        H::Link: HasPeer<End>,
         F: AsyncFnMut(MessageCx<Req, Notif>, JrConnectionCx<H::Link>) -> Result<T, crate::Error>
             + Send,
         T: IntoHandled<MessageCx<Req, Notif>>,
@@ -884,14 +884,14 @@ impl<H: JrMessageHandler, R: JrResponder<H::Link>> JrConnectionBuilder<H, R> {
     ///     request_cx.respond(InitializeResponse::make())
     /// })
     /// ```
-    pub fn on_receive_request_from<Req: JrRequest, End: JrEndpoint, F, T, ToFut>(
+    pub fn on_receive_request_from<Req: JrRequest, End: JrRole, F, T, ToFut>(
         self,
         endpoint: End,
         op: F,
         to_future_hack: ToFut,
     ) -> JrConnectionBuilder<impl JrMessageHandler<Link = H::Link>, R>
     where
-        H::Link: HasEndpoint<End>,
+        H::Link: HasPeer<End>,
         F: AsyncFnMut(
                 Req,
                 JrRequestCx<Req::Response>,
@@ -925,14 +925,14 @@ impl<H: JrMessageHandler, R: JrResponder<H::Link>> JrConnectionBuilder<H, R> {
     ///
     /// For the common case of receiving from the default counterpart, use
     /// [`on_receive_notification`](Self::on_receive_notification) instead.
-    pub fn on_receive_notification_from<Notif: JrNotification, End: JrEndpoint, F, T, ToFut>(
+    pub fn on_receive_notification_from<Notif: JrNotification, End: JrRole, F, T, ToFut>(
         self,
         endpoint: End,
         op: F,
         to_future_hack: ToFut,
     ) -> JrConnectionBuilder<impl JrMessageHandler<Link = H::Link>, R>
     where
-        H::Link: HasEndpoint<End>,
+        H::Link: HasPeer<End>,
         F: AsyncFnMut(Notif, JrConnectionCx<H::Link>) -> Result<T, crate::Error> + Send,
         T: IntoHandled<(Notif, JrConnectionCx<H::Link>)>,
         ToFut: Fn(
@@ -974,7 +974,7 @@ impl<H: JrMessageHandler, R: JrResponder<H::Link>> JrConnectionBuilder<H, R> {
     ) -> JrConnectionBuilder<impl JrMessageHandler<Link = Link>, impl JrResponder<Link>>
     where
         H: JrMessageHandler<Link = Link>,
-        Link: HasEndpoint<Client> + HasEndpoint<Agent>,
+        Link: HasPeer<Client> + HasPeer<Agent>,
     {
         let (message_handler, mcp_responder) = server.into_handler_and_responder();
         self.with_handler(message_handler)
@@ -1555,7 +1555,7 @@ impl<Link: JrLink> JrConnectionCx<Link> {
     /// The request context's response type matches the request's response type,
     /// enabling type-safe message forwarding.
     pub fn send_proxied_message_to<
-        End: JrEndpoint,
+        End: JrRole,
         Req: JrRequest<Response: Send>,
         Notif: JrNotification,
     >(
@@ -1564,7 +1564,7 @@ impl<Link: JrLink> JrConnectionCx<Link> {
         message: MessageCx<Req, Notif>,
     ) -> Result<(), crate::Error>
     where
-        Link: HasEndpoint<End>,
+        Link: HasPeer<End>,
     {
         match message {
             MessageCx::Request(request, request_cx) => self
@@ -1629,7 +1629,7 @@ impl<Link: JrLink> JrConnectionCx<Link> {
     pub fn send_request<Req: JrRequest>(&self, request: Req) -> JrResponse<Req::Response>
     where
         Link: HasDefaultEndpoint,
-        Link: HasEndpoint<<Link as JrLink>::HandlerEndpoint>,
+        Link: HasPeer<<Link as JrLink>::HandlerEndpoint>,
     {
         self.send_request_to(Link::HandlerEndpoint::default(), request)
     }
@@ -1638,13 +1638,13 @@ impl<Link: JrLink> JrConnectionCx<Link> {
     ///
     /// The message will be transformed according to the role's [`SendsToRole`](crate::SendsToRole)
     /// implementation before being sent.
-    pub fn send_request_to<End: JrEndpoint, Req: JrRequest>(
+    pub fn send_request_to<End: JrRole, Req: JrRequest>(
         &self,
         end: End,
         request: Req,
     ) -> JrResponse<Req::Response>
     where
-        Link: HasEndpoint<End>,
+        Link: HasPeer<End>,
     {
         let method = request.method().to_string();
         let (response_tx, response_rx) = oneshot::channel();
@@ -1712,7 +1712,7 @@ impl<Link: JrLink> JrConnectionCx<Link> {
     pub fn send_notification<N: JrNotification>(&self, notification: N) -> Result<(), crate::Error>
     where
         Link: HasDefaultEndpoint,
-        Link: HasEndpoint<<Link as JrLink>::HandlerEndpoint>,
+        Link: HasPeer<<Link as JrLink>::HandlerEndpoint>,
     {
         self.send_notification_to(Link::HandlerEndpoint::default(), notification)
     }
@@ -1721,13 +1721,13 @@ impl<Link: JrLink> JrConnectionCx<Link> {
     ///
     /// The message will be transformed according to the role's [`SendsToRole`](crate::SendsToRole)
     /// implementation before being sent.
-    pub fn send_notification_to<End: JrEndpoint, N: JrNotification>(
+    pub fn send_notification_to<End: JrRole, N: JrNotification>(
         &self,
         end: End,
         notification: N,
     ) -> Result<(), crate::Error>
     where
-        Link: HasEndpoint<End>,
+        Link: HasPeer<End>,
     {
         let remote_style = Link::remote_style(end);
         tracing::debug!(

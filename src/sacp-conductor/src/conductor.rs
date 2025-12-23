@@ -122,8 +122,8 @@ use sacp::schema::{
 };
 use sacp::{Agent, Client, Component, Error, JrMessage};
 use sacp::{
-    JrConnectionBuilder, JrConnectionCx, JrEndpoint, JrLink, JrNotification, JrRequest,
-    JrRequestCx, JrResponse, MessageCx, UntypedMessage,
+    JrConnectionBuilder, JrConnectionCx, JrLink, JrNotification, JrRequest, JrRequestCx,
+    JrResponse, JrRole, MessageCx, UntypedMessage,
 };
 use sacp::{
     JrMessageHandler, JrResponsePayload,
@@ -1480,25 +1480,25 @@ pub enum ConductorMessage {
 }
 
 trait JrConnectionCxExt<Link: JrLink> {
-    fn send_proxied_message_to_via<End: JrEndpoint>(
+    fn send_proxied_message_to_via<End: JrRole>(
         &self,
         end: End,
         conductor_tx: &mpsc::Sender<ConductorMessage>,
         message: MessageCx,
     ) -> Result<(), sacp::Error>
     where
-        Link: sacp::HasEndpoint<End>;
+        Link: sacp::HasPeer<End>;
 }
 
 impl<Link: JrLink> JrConnectionCxExt<Link> for JrConnectionCx<Link> {
-    fn send_proxied_message_to_via<End: JrEndpoint>(
+    fn send_proxied_message_to_via<End: JrRole>(
         &self,
         end: End,
         conductor_tx: &mpsc::Sender<ConductorMessage>,
         message: MessageCx,
     ) -> Result<(), sacp::Error>
     where
-        Link: sacp::HasEndpoint<End>,
+        Link: sacp::HasPeer<End>,
     {
         match message {
             MessageCx::Request(request, request_cx) => self

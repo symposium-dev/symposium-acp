@@ -22,7 +22,7 @@ use jsonrpcmsg::Params;
 use crate::{
     Handled, HasDefaultEndpoint, JrConnectionCx, JrMessageHandler, JrNotification, JrRequest,
     JrRequestCx, MessageCx, UntypedMessage,
-    role::{HasEndpoint, JrEndpoint, JrLink},
+    role::{HasPeer, JrLink, JrRole},
     util::json_cast,
 };
 
@@ -358,7 +358,7 @@ impl<Link: JrLink> MatchMessageFrom<Link> {
     ) -> Self
     where
         Link: HasDefaultEndpoint,
-        Link: HasEndpoint<<Link as JrLink>::HandlerEndpoint>,
+        Link: HasPeer<<Link as JrLink>::HandlerEndpoint>,
         H: crate::IntoHandled<(Req, JrRequestCx<Req::Response>)>,
     {
         self.if_request_from(<Link::HandlerEndpoint>::default(), op)
@@ -375,13 +375,13 @@ impl<Link: JrLink> MatchMessageFrom<Link> {
     ///
     /// * `endpoint` - The endpoint the message is expected to come from
     /// * `op` - The handler to call if the message matches
-    pub async fn if_request_from<End: JrEndpoint, Req: JrRequest, H>(
+    pub async fn if_request_from<End: JrRole, Req: JrRequest, H>(
         mut self,
         endpoint: End,
         op: impl AsyncFnOnce(Req, JrRequestCx<Req::Response>) -> Result<H, crate::Error>,
     ) -> Self
     where
-        Link: HasEndpoint<End>,
+        Link: HasPeer<End>,
         H: crate::IntoHandled<(Req, JrRequestCx<Req::Response>)>,
     {
         if let Ok(Handled::No { message, retry: _ }) = self.state {
@@ -416,7 +416,7 @@ impl<Link: JrLink> MatchMessageFrom<Link> {
     ) -> Self
     where
         Link: HasDefaultEndpoint,
-        Link: HasEndpoint<<Link as JrLink>::HandlerEndpoint>,
+        Link: HasPeer<<Link as JrLink>::HandlerEndpoint>,
         H: crate::IntoHandled<N>,
     {
         self.if_notification_from(<Link as JrLink>::HandlerEndpoint::default(), op)
@@ -433,13 +433,13 @@ impl<Link: JrLink> MatchMessageFrom<Link> {
     ///
     /// * `endpoint` - The endpoint the message is expected to come from
     /// * `op` - The handler to call if the message matches
-    pub async fn if_notification_from<End: JrEndpoint, N: JrNotification, H>(
+    pub async fn if_notification_from<End: JrRole, N: JrNotification, H>(
         mut self,
         endpoint: End,
         op: impl AsyncFnOnce(N) -> Result<H, crate::Error>,
     ) -> Self
     where
-        Link: HasEndpoint<End>,
+        Link: HasPeer<End>,
         H: crate::IntoHandled<N>,
     {
         if let Ok(Handled::No { message, retry: _ }) = self.state {
@@ -470,13 +470,13 @@ impl<Link: JrLink> MatchMessageFrom<Link> {
     ///
     /// * `endpoint` - The endpoint the message is expected to come from
     /// * `op` - The handler to call if the message matches
-    pub async fn if_message_from<End: JrEndpoint, R: JrRequest, N: JrNotification, H>(
+    pub async fn if_message_from<End: JrRole, R: JrRequest, N: JrNotification, H>(
         mut self,
         endpoint: End,
         op: impl AsyncFnOnce(MessageCx<R, N>) -> Result<H, crate::Error>,
     ) -> Self
     where
-        Link: HasEndpoint<End>,
+        Link: HasPeer<End>,
         H: crate::IntoHandled<MessageCx<R, N>>,
     {
         if let Ok(Handled::No { message, retry: _ }) = self.state {
