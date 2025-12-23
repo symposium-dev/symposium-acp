@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [9.1.0](https://github.com/symposium-dev/symposium-acp/compare/sacp-conductor-v9.0.0...sacp-conductor-v9.1.0) - 2025-12-23
+
+### Added
+
+- *(sacp)* add tool_fn for concurrent stateless tools
+
+### Fixed
+
+- *(sacp)* use unstructured output for non-object MCP tool results
+- *(sacp-conductor)* route proxied responses through conductor message loop
+- *(sacp-conductor)* use Agent endpoint for proxy mode successor forwarding
+
+### Other
+
+- *(sacp-conductor)* use explicit endpoints for ConductorToClient
+- *(sacp)* add block_task() builder pattern for SessionBuilder
+- *(sacp)* rename with_client to run_until
+- update references for renamed methods
+
 ## [9.0.0](https://github.com/symposium-dev/symposium-acp/compare/sacp-conductor-v8.0.0...sacp-conductor-v9.0.0) - 2025-12-19
 
 ### Added
