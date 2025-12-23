@@ -7,24 +7,24 @@ use std::marker::PhantomData;
 use std::ops::AsyncFnMut;
 
 /// Null handler that accepts no messages.
-pub struct NullHandler<Role: JrLink> {
-    role: Role,
+pub struct NullHandler<Link: JrLink> {
+    role: Link,
 }
 
-impl<Role: JrLink> NullHandler<Role> {
+impl<Link: JrLink> NullHandler<Link> {
     /// Creates a new null handler.
-    pub fn new(role: Role) -> Self {
+    pub fn new(role: Link) -> Self {
         Self { role }
     }
 
     /// Returns the role.
-    pub fn role(&self) -> Role {
+    pub fn role(&self) -> Link {
         self.role
     }
 }
 
-impl<Role: JrLink> JrMessageHandler for NullHandler<Role> {
-    type Link = Role;
+impl<Link: JrLink> JrMessageHandler for NullHandler<Link> {
+    type Link = Link;
 
     fn describe_chain(&self) -> impl std::fmt::Debug {
         "(null)"
@@ -33,7 +33,7 @@ impl<Role: JrLink> JrMessageHandler for NullHandler<Role> {
     async fn handle_message(
         &mut self,
         message: MessageCx,
-        _cx: JrConnectionCx<Role>,
+        _cx: JrConnectionCx<Link>,
     ) -> Result<Handled<MessageCx>, crate::Error> {
         Ok(Handled::No {
             message,
@@ -44,7 +44,7 @@ impl<Role: JrLink> JrMessageHandler for NullHandler<Role> {
 
 /// Handler for typed request messages
 pub struct RequestHandler<
-    Role: JrLink,
+    Link: JrLink,
     End: JrEndpoint,
     Req: JrRequest = UntypedMessage,
     F = (),
@@ -52,14 +52,14 @@ pub struct RequestHandler<
 > {
     handler: F,
     to_future_hack: ToFut,
-    phantom: PhantomData<fn(Role, End, Req)>,
+    phantom: PhantomData<fn(Link, End, Req)>,
 }
 
-impl<Role: JrLink, End: JrEndpoint, Req: JrRequest, F, ToFut>
-    RequestHandler<Role, End, Req, F, ToFut>
+impl<Link: JrLink, End: JrEndpoint, Req: JrRequest, F, ToFut>
+    RequestHandler<Link, End, Req, F, ToFut>
 {
     /// Creates a new request handler
-    pub fn new(_endpoint: End, _role: Role, handler: F, to_future_hack: ToFut) -> Self {
+    pub fn new(_endpoint: End, _role: Link, handler: F, to_future_hack: ToFut) -> Self {
         Self {
             handler,
             to_future_hack,
@@ -68,24 +68,24 @@ impl<Role: JrLink, End: JrEndpoint, Req: JrRequest, F, ToFut>
     }
 }
 
-impl<Role: JrLink, End: JrEndpoint, Req, F, T, ToFut> JrMessageHandler
-    for RequestHandler<Role, End, Req, F, ToFut>
+impl<Link: JrLink, End: JrEndpoint, Req, F, T, ToFut> JrMessageHandler
+    for RequestHandler<Link, End, Req, F, ToFut>
 where
-    Role: HasEndpoint<End>,
+    Link: HasEndpoint<End>,
     Req: JrRequest,
-    F: AsyncFnMut(Req, JrRequestCx<Req::Response>, JrConnectionCx<Role>) -> Result<T, crate::Error>
+    F: AsyncFnMut(Req, JrRequestCx<Req::Response>, JrConnectionCx<Link>) -> Result<T, crate::Error>
         + Send,
     T: crate::IntoHandled<(Req, JrRequestCx<Req::Response>)>,
     ToFut: Fn(
             &mut F,
             Req,
             JrRequestCx<Req::Response>,
-            JrConnectionCx<Role>,
+            JrConnectionCx<Link>,
         ) -> crate::BoxFuture<'_, Result<T, crate::Error>>
         + Send
         + Sync,
 {
-    type Link = Role;
+    type Link = Link;
 
     fn describe_chain(&self) -> impl std::fmt::Debug {
         std::any::type_name::<Req>()
@@ -94,9 +94,9 @@ where
     async fn handle_message(
         &mut self,
         message_cx: MessageCx,
-        connection_cx: JrConnectionCx<Role>,
+        connection_cx: JrConnectionCx<Link>,
     ) -> Result<Handled<MessageCx>, crate::Error> {
-        let remote_style = Role::remote_style(End::default());
+        let remote_style = Link::remote_style(End::default());
         remote_style
             .handle_incoming_message(
                 message_cx,
@@ -171,7 +171,7 @@ where
 
 /// Handler for typed notification messages
 pub struct NotificationHandler<
-    Role: JrLink,
+    Link: JrLink,
     End: JrEndpoint,
     Notif: JrNotification = UntypedMessage,
     F = (),
@@ -179,14 +179,14 @@ pub struct NotificationHandler<
 > {
     handler: F,
     to_future_hack: ToFut,
-    phantom: PhantomData<fn(Role, End, Notif)>,
+    phantom: PhantomData<fn(Link, End, Notif)>,
 }
 
-impl<Role: JrLink, End: JrEndpoint, Notif: JrNotification, F, ToFut>
-    NotificationHandler<Role, End, Notif, F, ToFut>
+impl<Link: JrLink, End: JrEndpoint, Notif: JrNotification, F, ToFut>
+    NotificationHandler<Link, End, Notif, F, ToFut>
 {
     /// Creates a new notification handler
-    pub fn new(_endpoint: End, _role: Role, handler: F, to_future_hack: ToFut) -> Self {
+    pub fn new(_endpoint: End, _role: Link, handler: F, to_future_hack: ToFut) -> Self {
         Self {
             handler,
             to_future_hack,
@@ -195,18 +195,18 @@ impl<Role: JrLink, End: JrEndpoint, Notif: JrNotification, F, ToFut>
     }
 }
 
-impl<Role: JrLink, End: JrEndpoint, Notif, F, T, ToFut> JrMessageHandler
-    for NotificationHandler<Role, End, Notif, F, ToFut>
+impl<Link: JrLink, End: JrEndpoint, Notif, F, T, ToFut> JrMessageHandler
+    for NotificationHandler<Link, End, Notif, F, ToFut>
 where
-    Role: HasEndpoint<End>,
+    Link: HasEndpoint<End>,
     Notif: JrNotification,
-    F: AsyncFnMut(Notif, JrConnectionCx<Role>) -> Result<T, crate::Error> + Send,
-    T: crate::IntoHandled<(Notif, JrConnectionCx<Role>)>,
-    ToFut: Fn(&mut F, Notif, JrConnectionCx<Role>) -> crate::BoxFuture<'_, Result<T, crate::Error>>
+    F: AsyncFnMut(Notif, JrConnectionCx<Link>) -> Result<T, crate::Error> + Send,
+    T: crate::IntoHandled<(Notif, JrConnectionCx<Link>)>,
+    ToFut: Fn(&mut F, Notif, JrConnectionCx<Link>) -> crate::BoxFuture<'_, Result<T, crate::Error>>
         + Send
         + Sync,
 {
-    type Link = Role;
+    type Link = Link;
 
     fn describe_chain(&self) -> impl std::fmt::Debug {
         std::any::type_name::<Notif>()
@@ -215,9 +215,9 @@ where
     async fn handle_message(
         &mut self,
         message_cx: MessageCx,
-        connection_cx: JrConnectionCx<Role>,
+        connection_cx: JrConnectionCx<Link>,
     ) -> Result<Handled<MessageCx>, crate::Error> {
-        let remote_style = Role::remote_style(End::default());
+        let remote_style = Link::remote_style(End::default());
         remote_style
             .handle_incoming_message(
                 message_cx,
@@ -289,7 +289,7 @@ where
 
 /// Handler that handles both requests and notifications of specific types.
 pub struct MessageHandler<
-    Role: JrLink,
+    Link: JrLink,
     End: JrEndpoint,
     Req: JrRequest = UntypedMessage,
     Notif: JrNotification = UntypedMessage,
@@ -298,14 +298,14 @@ pub struct MessageHandler<
 > {
     handler: F,
     to_future_hack: ToFut,
-    phantom: PhantomData<fn(Role, End, Req, Notif)>,
+    phantom: PhantomData<fn(Link, End, Req, Notif)>,
 }
 
-impl<Role: JrLink, End: JrEndpoint, Req: JrRequest, Notif: JrNotification, F, ToFut>
-    MessageHandler<Role, End, Req, Notif, F, ToFut>
+impl<Link: JrLink, End: JrEndpoint, Req: JrRequest, Notif: JrNotification, F, ToFut>
+    MessageHandler<Link, End, Req, Notif, F, ToFut>
 {
     /// Creates a new message handler
-    pub fn new(_endpoint: End, _role: Role, handler: F, to_future_hack: ToFut) -> Self {
+    pub fn new(_endpoint: End, _role: Link, handler: F, to_future_hack: ToFut) -> Self {
         Self {
             handler,
             to_future_hack,
@@ -314,21 +314,21 @@ impl<Role: JrLink, End: JrEndpoint, Req: JrRequest, Notif: JrNotification, F, To
     }
 }
 
-impl<Role: JrLink, End: JrEndpoint, Req: JrRequest, Notif: JrNotification, F, T, ToFut>
-    JrMessageHandler for MessageHandler<Role, End, Req, Notif, F, ToFut>
+impl<Link: JrLink, End: JrEndpoint, Req: JrRequest, Notif: JrNotification, F, T, ToFut>
+    JrMessageHandler for MessageHandler<Link, End, Req, Notif, F, ToFut>
 where
-    Role: HasEndpoint<End>,
-    F: AsyncFnMut(MessageCx<Req, Notif>, JrConnectionCx<Role>) -> Result<T, crate::Error> + Send,
+    Link: HasEndpoint<End>,
+    F: AsyncFnMut(MessageCx<Req, Notif>, JrConnectionCx<Link>) -> Result<T, crate::Error> + Send,
     T: IntoHandled<MessageCx<Req, Notif>>,
     ToFut: Fn(
             &mut F,
             MessageCx<Req, Notif>,
-            JrConnectionCx<Role>,
+            JrConnectionCx<Link>,
         ) -> crate::BoxFuture<'_, Result<T, crate::Error>>
         + Send
         + Sync,
 {
-    type Link = Role;
+    type Link = Link;
 
     fn describe_chain(&self) -> impl std::fmt::Debug {
         format!(
@@ -341,9 +341,9 @@ where
     async fn handle_message(
         &mut self,
         message_cx: MessageCx,
-        connection_cx: JrConnectionCx<Role>,
+        connection_cx: JrConnectionCx<Link>,
     ) -> Result<Handled<MessageCx>, crate::Error> {
-        let remote_style = Role::remote_style(End::default());
+        let remote_style = Link::remote_style(End::default());
         remote_style
             .handle_incoming_message(
                 message_cx,

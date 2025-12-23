@@ -46,27 +46,27 @@ use crate::{
 ///     )
 ///     .build();
 /// ```
-pub struct McpServerBuilder<Role: JrLink, Responder> {
-    role: Role,
+pub struct McpServerBuilder<Link: JrLink, Responder> {
+    role: Link,
     name: String,
-    data: McpServerData<Role>,
+    data: McpServerData<Link>,
     responder: Responder,
 }
 
-struct McpServerData<Role: JrLink> {
+struct McpServerData<Link: JrLink> {
     instructions: Option<String>,
     tool_models: Vec<rmcp::model::Tool>,
-    tools: FxHashMap<String, RegisteredTool<Role>>,
+    tools: FxHashMap<String, RegisteredTool<Link>>,
 }
 
 /// A registered tool with its metadata.
-struct RegisteredTool<Role: JrLink> {
-    tool: Arc<dyn ErasedMcpTool<Role>>,
+struct RegisteredTool<Link: JrLink> {
+    tool: Arc<dyn ErasedMcpTool<Link>>,
     /// Whether this tool returns structured output (i.e., has an output_schema).
     has_structured_output: bool,
 }
 
-impl<Role: JrLink> Default for McpServerData<Role> {
+impl<Link: JrLink> Default for McpServerData<Link> {
     fn default() -> Self {
         Self {
             instructions: None,
@@ -76,23 +76,23 @@ impl<Role: JrLink> Default for McpServerData<Role> {
     }
 }
 
-impl<Role: JrLink> McpServerBuilder<Role, NullResponder>
+impl<Link: JrLink> McpServerBuilder<Link, NullResponder>
 where
-    Role: HasEndpoint<Agent>,
+    Link: HasEndpoint<Agent>,
 {
     pub(super) fn new(name: String) -> Self {
         Self {
             name: name,
-            role: Role::default(),
+            role: Link::default(),
             data: McpServerData::default(),
             responder: NullResponder::default(),
         }
     }
 }
 
-impl<Role: JrLink, Responder: JrResponder<Role>> McpServerBuilder<Role, Responder>
+impl<Link: JrLink, Responder: JrResponder<Link>> McpServerBuilder<Link, Responder>
 where
-    Role: HasEndpoint<Agent>,
+    Link: HasEndpoint<Agent>,
 {
     /// Set the server instructions that are provided to the client.
     pub fn instructions(mut self, instructions: impl ToString) -> Self {
@@ -101,7 +101,7 @@ where
     }
 
     /// Add a tool to the server.
-    pub fn tool(mut self, tool: impl McpTool<Role> + 'static) -> Self {
+    pub fn tool(mut self, tool: impl McpTool<Link> + 'static) -> Self {
         let tool_model = make_tool_model(&tool);
         let has_structured_output = tool_model.output_schema.is_some();
         self.data.tool_models.push(tool_model);
@@ -117,11 +117,11 @@ where
 
     /// Private fn: adds the tool but also adds a responder that will be
     /// run while the MCP server is active.
-    fn tool_with_responder<R: JrResponder<Role>>(
+    fn tool_with_responder<R: JrResponder<Link>>(
         self,
-        tool: impl McpTool<Role> + 'static,
+        tool: impl McpTool<Link> + 'static,
         tool_responder: R,
-    ) -> McpServerBuilder<Role, impl JrResponder<Role>> {
+    ) -> McpServerBuilder<Link, impl JrResponder<Link>> {
         let this = self.tool(tool);
         McpServerBuilder {
             role: this.role,
@@ -161,15 +161,15 @@ where
         tool_future_hack: impl for<'a> Fn(
             &'a mut F,
             P,
-            McpContext<Role>,
+            McpContext<Link>,
         ) -> BoxFuture<'a, Result<R, crate::Error>>
         + Send
         + 'static,
-    ) -> McpServerBuilder<Role, impl JrResponder<Role>>
+    ) -> McpServerBuilder<Link, impl JrResponder<Link>>
     where
         P: JsonSchema + DeserializeOwned + 'static + Send,
         R: JsonSchema + Serialize + 'static + Send,
-        F: AsyncFnMut(P, McpContext<Role>) -> Result<R, crate::Error> + Send,
+        F: AsyncFnMut(P, McpContext<Link>) -> Result<R, crate::Error> + Send,
     {
         let (call_tx, call_rx) = mpsc::channel(128);
         self.tool_with_responder(
@@ -214,16 +214,16 @@ where
         tool_future_hack: impl for<'a> Fn(
             &'a F,
             P,
-            McpContext<Role>,
+            McpContext<Link>,
         ) -> BoxFuture<'a, Result<R, crate::Error>>
         + Send
         + Sync
         + 'static,
-    ) -> McpServerBuilder<Role, impl JrResponder<Role>>
+    ) -> McpServerBuilder<Link, impl JrResponder<Link>>
     where
         P: JsonSchema + DeserializeOwned + 'static + Send,
         R: JsonSchema + Serialize + 'static + Send,
-        F: AsyncFn(P, McpContext<Role>) -> Result<R, crate::Error> + Send + Sync + 'static,
+        F: AsyncFn(P, McpContext<Link>) -> Result<R, crate::Error> + Send + Sync + 'static,
     {
         let (call_tx, call_rx) = mpsc::channel(128);
         self.tool_with_responder(
@@ -244,7 +244,7 @@ where
     ///
     /// This builder can be attached to new sessions (see [`SessionBuilder::with_mcp_server`])
     /// or served up as part of a proxy (see [`JrConnectionBuilder::with_mcp_server`]).
-    pub fn build(self) -> McpServer<Role, Responder> {
+    pub fn build(self) -> McpServer<Link, Responder> {
         McpServer::new(
             McpServerBuilt {
                 role: self.role,
@@ -256,25 +256,25 @@ where
     }
 }
 
-struct McpServerBuilt<Role: JrLink>
+struct McpServerBuilt<Link: JrLink>
 where
-    Role: HasEndpoint<Agent>,
+    Link: HasEndpoint<Agent>,
 {
     #[expect(dead_code)]
-    role: Role,
+    role: Link,
     name: String,
-    data: Arc<McpServerData<Role>>,
+    data: Arc<McpServerData<Link>>,
 }
 
-impl<'scope, Role: JrLink> McpServerConnect<Role> for McpServerBuilt<Role>
+impl<'scope, Link: JrLink> McpServerConnect<Link> for McpServerBuilt<Link>
 where
-    Role: HasEndpoint<Agent>,
+    Link: HasEndpoint<Agent>,
 {
     fn name(&self) -> String {
         self.name.clone()
     }
 
-    fn connect(&self, mcp_cx: McpContext<Role>) -> DynComponent {
+    fn connect(&self, mcp_cx: McpContext<Link>) -> DynComponent {
         DynComponent::new(McpServerConnection {
             data: self.data.clone(),
             mcp_cx,
@@ -283,17 +283,17 @@ where
 }
 
 /// An MCP server instance connected to the ACP framework.
-pub(crate) struct McpServerConnection<Role: JrLink>
+pub(crate) struct McpServerConnection<Link: JrLink>
 where
-    Role: HasEndpoint<Agent>,
+    Link: HasEndpoint<Agent>,
 {
-    data: Arc<McpServerData<Role>>,
-    mcp_cx: McpContext<Role>,
+    data: Arc<McpServerData<Link>>,
+    mcp_cx: McpContext<Link>,
 }
 
-impl<Role: JrLink> Component for McpServerConnection<Role>
+impl<Link: JrLink> Component for McpServerConnection<Link>
 where
-    Role: HasEndpoint<Agent>,
+    Link: HasEndpoint<Agent>,
 {
     async fn serve(self, client: impl Component) -> Result<(), crate::Error> {
         // Create tokio byte streams that rmcp expects
@@ -324,9 +324,9 @@ where
     }
 }
 
-impl<Role: JrLink> ServerHandler for McpServerConnection<Role>
+impl<Link: JrLink> ServerHandler for McpServerConnection<Link>
 where
-    Role: HasEndpoint<Agent>,
+    Link: HasEndpoint<Agent>,
 {
     async fn call_tool(
         &self,
@@ -399,16 +399,16 @@ where
 }
 
 /// Erased version of the MCP tool trait that is dyn-compatible.
-trait ErasedMcpTool<Role: JrLink>: Send + Sync {
+trait ErasedMcpTool<Link: JrLink>: Send + Sync {
     fn call_tool(
         &self,
         input: serde_json::Value,
-        context: McpContext<Role>,
+        context: McpContext<Link>,
     ) -> BoxFuture<'_, Result<serde_json::Value, crate::Error>>;
 }
 
 /// Create an `rmcp` tool model from our [`McpTool`] trait.
-fn make_tool_model<Role: JrLink, M: McpTool<Role>>(tool: &M) -> Tool {
+fn make_tool_model<Link: JrLink, M: McpTool<Link>>(tool: &M) -> Tool {
     rmcp::model::Tool {
         name: tool.name().into(),
         title: tool.title(),
@@ -425,22 +425,22 @@ fn make_tool_model<Role: JrLink, M: McpTool<Role>>(tool: &M) -> Tool {
 }
 
 /// Create a [`ErasedMcpTool`] from a [`McpTool`], erasing the type details.
-fn make_erased_mcp_tool<'s, Role: JrLink, M: McpTool<Role> + 's>(
+fn make_erased_mcp_tool<'s, Link: JrLink, M: McpTool<Link> + 's>(
     tool: M,
-) -> Arc<dyn ErasedMcpTool<Role> + 's> {
+) -> Arc<dyn ErasedMcpTool<Link> + 's> {
     struct ErasedMcpToolImpl<M> {
         tool: M,
     }
 
-    impl<Role, M> ErasedMcpTool<Role> for ErasedMcpToolImpl<M>
+    impl<Link, M> ErasedMcpTool<Link> for ErasedMcpToolImpl<M>
     where
-        Role: JrLink,
-        M: McpTool<Role>,
+        Link: JrLink,
+        M: McpTool<Link>,
     {
         fn call_tool(
             &self,
             input: serde_json::Value,
-            context: McpContext<Role>,
+            context: McpContext<Link>,
         ) -> BoxFuture<'_, Result<serde_json::Value, crate::Error>> {
             Box::pin(async move {
                 let input = serde_json::from_value(input).map_err(crate::util::internal_error)?;
@@ -464,15 +464,15 @@ fn to_rmcp_error(error: crate::Error) -> rmcp::ErrorData {
 
 /// MCP tool used for `tool_fn` and `tooL_fn_mut`.
 /// Each time it is invoked, it sends a `ToolCall`  message to `call_tx`.
-struct ToolFnTool<P, R, Role: JrLink> {
+struct ToolFnTool<P, R, Link: JrLink> {
     name: String,
     description: String,
-    call_tx: mpsc::Sender<ToolCall<P, R, Role>>,
+    call_tx: mpsc::Sender<ToolCall<P, R, Link>>,
 }
 
-impl<P, R, Role> McpTool<Role> for ToolFnTool<P, R, Role>
+impl<P, R, Link> McpTool<Link> for ToolFnTool<P, R, Link>
 where
-    Role: JrLink,
+    Link: JrLink,
     P: JsonSchema + DeserializeOwned + 'static + Send,
     R: JsonSchema + Serialize + 'static + Send,
 {
@@ -487,7 +487,7 @@ where
         self.description.clone()
     }
 
-    async fn call_tool(&self, params: P, mcp_cx: McpContext<Role>) -> Result<R, crate::Error> {
+    async fn call_tool(&self, params: P, mcp_cx: McpContext<Link>) -> Result<R, crate::Error> {
         let (result_tx, result_rx) = oneshot::channel();
 
         self.call_tx

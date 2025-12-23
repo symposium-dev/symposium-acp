@@ -57,7 +57,7 @@ pub trait JrLink: Debug + Copy + Send + Sync + 'static + Eq + Ord + Hash + Defau
     }
 }
 
-/// A role that has a default endpoint for sending messages (the default is `JrRole::HandlerEndpoint`)
+/// A role that has a default endpoint for sending messages (the default is `JrLink::HandlerEndpoint`)
 pub trait HasDefaultEndpoint: JrLink {}
 
 /// A logical destination for messages (e.g., Client, Agent, McpServer).
@@ -454,12 +454,12 @@ impl JrLink for ProxyToConductor {
 ///
 /// This is used internally to handle session message routing after a
 /// `session.new` request has been forwarded.
-pub(crate) struct ProxySessionMessages<Role> {
+pub(crate) struct ProxySessionMessages<Link> {
     session_id: SessionId,
-    _marker: std::marker::PhantomData<Role>,
+    _marker: std::marker::PhantomData<Link>,
 }
 
-impl<Role> ProxySessionMessages<Role> {
+impl<Link> ProxySessionMessages<Link> {
     /// Create a new proxy handler for the given session.
     pub fn new(session_id: SessionId) -> Self {
         Self {
@@ -469,11 +469,11 @@ impl<Role> ProxySessionMessages<Role> {
     }
 }
 
-impl<Role: JrLink> JrMessageHandler for ProxySessionMessages<Role>
+impl<Link: JrLink> JrMessageHandler for ProxySessionMessages<Link>
 where
-    Role: HasEndpoint<Agent> + HasEndpoint<Client>,
+    Link: HasEndpoint<Agent> + HasEndpoint<Client>,
 {
-    type Link = Role;
+    type Link = Link;
 
     async fn handle_message(
         &mut self,

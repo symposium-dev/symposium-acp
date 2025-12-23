@@ -18,26 +18,26 @@ use std::sync::Arc;
 /// This is added as a 'dynamic' handler to the connection context
 /// (see [`JrConnectionCx::add_dynamic_handler`]) and handles MCP-over-ACP messages
 /// with the appropriate ACP url.
-pub(super) struct McpActiveSession<Role> {
+pub(super) struct McpActiveSession<Link> {
     /// The role of the server
     #[expect(dead_code)]
-    role: Role,
+    role: Link,
 
     /// The ACP URL created for this session
     acp_url: String,
 
     /// The MCP server we are managing
-    mcp_connect: Arc<dyn McpServerConnect<Role>>,
+    mcp_connect: Arc<dyn McpServerConnect<Link>>,
 
     /// Active connections to MCP server tasks
     connections: FxHashMap<String, mpsc::Sender<MessageCx>>,
 }
 
-impl<Role: JrLink> McpActiveSession<Role>
+impl<Link: JrLink> McpActiveSession<Link>
 where
-    Role: HasEndpoint<Agent>,
+    Link: HasEndpoint<Agent>,
 {
-    pub fn new(role: Role, acp_url: String, mcp_connect: Arc<dyn McpServerConnect<Role>>) -> Self {
+    pub fn new(role: Link, acp_url: String, mcp_connect: Arc<dyn McpServerConnect<Link>>) -> Self {
         Self {
             role,
             acp_url,
@@ -52,7 +52,7 @@ where
         &mut self,
         request: McpConnectRequest,
         request_cx: JrRequestCx<McpConnectResponse>,
-        outer_cx: &JrConnectionCx<Role>,
+        outer_cx: &JrConnectionCx<Link>,
     ) -> Result<Handled<(McpConnectRequest, JrRequestCx<McpConnectResponse>)>, crate::Error> {
         // Check that this is for our MCP server
         if request.acp_url != self.acp_url {
@@ -210,11 +210,11 @@ where
     }
 }
 
-impl<Role: JrLink> JrMessageHandler for McpActiveSession<Role>
+impl<Link: JrLink> JrMessageHandler for McpActiveSession<Link>
 where
-    Role: HasEndpoint<Agent>,
+    Link: HasEndpoint<Agent>,
 {
-    type Link = Role;
+    type Link = Link;
 
     fn describe_chain(&self) -> impl std::fmt::Debug {
         "McpServerSession"
@@ -223,7 +223,7 @@ where
     async fn handle_message(
         &mut self,
         message: MessageCx,
-        connection_cx: JrConnectionCx<Role>,
+        connection_cx: JrConnectionCx<Link>,
     ) -> Result<Handled<MessageCx>, crate::Error> {
         MatchMessageFrom::new(message, &connection_cx)
             // MCP connect requests come from the Agent direction (wrapped in SuccessorMessage)

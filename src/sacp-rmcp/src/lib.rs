@@ -25,9 +25,9 @@ use sacp::mcp_server::{McpContext, McpServer, McpServerConnect};
 use sacp::{Agent, ByteStreams, Component, DynComponent, HasEndpoint, JrLink, NullResponder};
 use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
 
-pub trait McpServerExt<Role: JrLink>
+pub trait McpServerExt<Link: JrLink>
 where
-    Role: HasEndpoint<Agent>,
+    Link: HasEndpoint<Agent>,
 {
     /// Create an MCP server from something that implements the [`McpServerConnect`] trait.
     ///
@@ -37,7 +37,7 @@ where
     fn from_rmcp<S>(
         name: impl ToString,
         new_fn: impl Fn() -> S + Send + Sync + 'static,
-    ) -> McpServer<Role, NullResponder>
+    ) -> McpServer<Link, NullResponder>
     where
         S: rmcp::Service<rmcp::RoleServer>,
     {
@@ -46,9 +46,9 @@ where
             new_fn: F,
         }
 
-        impl<Role, F, S> McpServerConnect<Role> for RmcpServer<F>
+        impl<Link, F, S> McpServerConnect<Link> for RmcpServer<F>
         where
-            Role: JrLink,
+            Link: JrLink,
             F: Fn() -> S + Send + Sync + 'static,
             S: rmcp::Service<rmcp::RoleServer>,
         {
@@ -56,7 +56,7 @@ where
                 self.name.clone()
             }
 
-            fn connect(&self, _cx: McpContext<Role>) -> DynComponent {
+            fn connect(&self, _cx: McpContext<Link>) -> DynComponent {
                 let service = (self.new_fn)();
                 DynComponent::new(RmcpServerComponent { service })
             }
@@ -72,7 +72,7 @@ where
     }
 }
 
-impl<Role: JrLink> McpServerExt<Role> for McpServer<Role> where Role: HasEndpoint<Agent> {}
+impl<Link: JrLink> McpServerExt<Link> for McpServer<Link> where Link: HasEndpoint<Agent> {}
 
 /// Component wrapper for rmcp services.
 struct RmcpServerComponent<S> {

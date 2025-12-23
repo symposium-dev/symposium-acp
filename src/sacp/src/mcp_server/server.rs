@@ -38,9 +38,9 @@ use crate::{
 /// ```rust,ignore
 /// let server = McpServer::new(MyCustomServerConnect);
 /// ```
-pub struct McpServer<Role, Responder = NullResponder> {
+pub struct McpServer<Link, Responder = NullResponder> {
     /// The "message handler" handles incoming messages to the MCP server (speaks the MCP protocol).
-    message_handler: McpNewSessionHandler<Role>,
+    message_handler: McpNewSessionHandler<Link>,
 
     /// The "responder" is a task that should be run alongside the message handler.
     /// Some futures direct messages back through channels to this future which actually
@@ -51,26 +51,26 @@ pub struct McpServer<Role, Responder = NullResponder> {
     responder: Responder,
 }
 
-impl<Role: JrLink> McpServer<Role, NullResponder>
+impl<Link: JrLink> McpServer<Link, NullResponder>
 where
-    Role: HasEndpoint<Agent>,
+    Link: HasEndpoint<Agent>,
 {
     /// Create an empty server with no content.
-    pub fn builder(name: impl ToString) -> McpServerBuilder<Role, NullResponder> {
+    pub fn builder(name: impl ToString) -> McpServerBuilder<Link, NullResponder> {
         McpServerBuilder::new(name.to_string())
     }
 }
 
-impl<Role: JrLink, Responder: JrResponder<Role>> McpServer<Role, Responder>
+impl<Link: JrLink, Responder: JrResponder<Link>> McpServer<Link, Responder>
 where
-    Role: HasEndpoint<Agent>,
+    Link: HasEndpoint<Agent>,
 {
     /// Create an MCP server from something that implements the [`McpServerConnect`] trait.
     ///
     /// # See also
     ///
     /// See [`Self::builder`] to construct MCP servers from Rust code.
-    pub fn new(c: impl McpServerConnect<Role>, responder: Responder) -> Self {
+    pub fn new(c: impl McpServerConnect<Link>, responder: Responder) -> Self {
         McpServer {
             message_handler: McpNewSessionHandler::new(c),
             responder,
@@ -78,28 +78,28 @@ where
     }
 
     /// Split this MCP server into the message handler and a future that must be run while the handler is active.
-    pub(crate) fn into_handler_and_responder(self) -> (McpNewSessionHandler<Role>, Responder) {
+    pub(crate) fn into_handler_and_responder(self) -> (McpNewSessionHandler<Link>, Responder) {
         (self.message_handler, self.responder)
     }
 }
 
 /// Message handler created from a [`McpServer`].
-pub(crate) struct McpNewSessionHandler<Role> {
+pub(crate) struct McpNewSessionHandler<Link> {
     acp_url: String,
-    connect: Arc<dyn McpServerConnect<Role>>,
-    active_session: McpActiveSession<Role>,
+    connect: Arc<dyn McpServerConnect<Link>>,
+    active_session: McpActiveSession<Link>,
 }
 
-impl<Role: JrLink> McpNewSessionHandler<Role>
+impl<Link: JrLink> McpNewSessionHandler<Link>
 where
-    Role: HasEndpoint<Agent>,
+    Link: HasEndpoint<Agent>,
 {
-    pub fn new(c: impl McpServerConnect<Role>) -> Self {
+    pub fn new(c: impl McpServerConnect<Link>) -> Self {
         let acp_url = format!("acp:{}", Uuid::new_v4());
         let connect = Arc::new(c);
         Self {
             active_session: McpActiveSession::new(
-                Role::default(),
+                Link::default(),
                 acp_url.clone(),
                 connect.clone(),
             ),
@@ -121,8 +121,8 @@ where
     pub fn into_dynamic_handler(
         self,
         request: &mut NewSessionRequest,
-        cx: &JrConnectionCx<Role>,
-    ) -> Result<DynamicHandlerRegistration<Role>, crate::Error> {
+        cx: &JrConnectionCx<Link>,
+    ) -> Result<DynamicHandlerRegistration<Link>, crate::Error> {
         self.modify_new_session_request(request);
         cx.add_dynamic_handler(self.active_session)
     }
@@ -137,11 +137,11 @@ where
     }
 }
 
-impl<Role: JrLink> JrMessageHandler for McpNewSessionHandler<Role>
+impl<Link: JrLink> JrMessageHandler for McpNewSessionHandler<Link>
 where
-    Role: HasEndpoint<Client> + HasEndpoint<Agent>,
+    Link: HasEndpoint<Client> + HasEndpoint<Agent>,
 {
-    type Link = Role;
+    type Link = Link;
 
     async fn handle_message(
         &mut self,

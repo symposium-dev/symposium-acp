@@ -34,12 +34,12 @@ impl SessionBlockState for NonBlocking {}
 /// See [`SessionBuilder::block_task`].
 pub trait SessionBlockState: Send + 'static + Sync + std::fmt::Debug {}
 
-impl<Role: JrLink> JrConnectionCx<Role>
+impl<Link: JrLink> JrConnectionCx<Link>
 where
-    Role: HasEndpoint<Agent>,
+    Link: HasEndpoint<Agent>,
 {
     /// Session builder for a new session request.
-    pub fn build_session(&self, cwd: impl AsRef<Path>) -> SessionBuilder<Role, NullResponder> {
+    pub fn build_session(&self, cwd: impl AsRef<Path>) -> SessionBuilder<Link, NullResponder> {
         SessionBuilder::new(
             self,
             NewSessionRequest {
@@ -57,7 +57,7 @@ where
     pub fn build_session_from(
         &self,
         request: NewSessionRequest,
-    ) -> SessionBuilder<Role, NullResponder> {
+    ) -> SessionBuilder<Link, NullResponder> {
         SessionBuilder::new(self, request)
     }
 
@@ -74,8 +74,8 @@ where
     pub fn attach_session<'responder>(
         &self,
         response: NewSessionResponse,
-        mcp_handler_registrations: Vec<DynamicHandlerRegistration<Role>>,
-    ) -> Result<ActiveSession<'responder, Role>, crate::Error> {
+        mcp_handler_registrations: Vec<DynamicHandlerRegistration<Link>>,
+    ) -> Result<ActiveSession<'responder, Link>, crate::Error> {
         let NewSessionResponse {
             session_id,
             modes,
@@ -84,7 +84,7 @@ where
 
         let (update_tx, update_rx) = mpsc::unbounded();
         let handler =
-            ActiveSessionHandler::new(Role::default(), session_id.clone(), update_tx.clone());
+            ActiveSessionHandler::new(Link::default(), session_id.clone(), update_tx.clone());
         let session_handler_registration = self.add_dynamic_handler(handler)?;
 
         Ok(ActiveSession {
@@ -110,24 +110,24 @@ where
 ///   [`run_until`](Self::run_until) and [`start_session`](Self::start_session) become available
 #[must_use = "use `start_session`, `run_until`, or `on_session_start` to start the session"]
 pub struct SessionBuilder<
-    Role,
-    Responder: JrResponder<Role> = NullResponder,
+    Link,
+    Responder: JrResponder<Link> = NullResponder,
     BlockState: SessionBlockState = NonBlocking,
 > where
-    Role: HasEndpoint<Agent>,
+    Link: HasEndpoint<Agent>,
 {
-    connection: JrConnectionCx<Role>,
+    connection: JrConnectionCx<Link>,
     request: NewSessionRequest,
-    dynamic_handler_registrations: Vec<DynamicHandlerRegistration<Role>>,
+    dynamic_handler_registrations: Vec<DynamicHandlerRegistration<Link>>,
     responder: Responder,
     block_state: PhantomData<BlockState>,
 }
 
-impl<Role> SessionBuilder<Role, NullResponder, NonBlocking>
+impl<Link> SessionBuilder<Link, NullResponder, NonBlocking>
 where
-    Role: HasEndpoint<Agent>,
+    Link: HasEndpoint<Agent>,
 {
-    fn new(connection: &JrConnectionCx<Role>, request: NewSessionRequest) -> Self {
+    fn new(connection: &JrConnectionCx<Link>, request: NewSessionRequest) -> Self {
         SessionBuilder {
             connection: connection.clone(),
             request,
@@ -138,19 +138,19 @@ where
     }
 }
 
-impl<Role, Responder, BlockState> SessionBuilder<Role, Responder, BlockState>
+impl<Link, Responder, BlockState> SessionBuilder<Link, Responder, BlockState>
 where
-    Role: HasEndpoint<Agent>,
-    Responder: JrResponder<Role>,
+    Link: HasEndpoint<Agent>,
+    Responder: JrResponder<Link>,
     BlockState: SessionBlockState,
 {
     /// Add the MCP servers from the given registry to this session.
     pub fn with_mcp_server<R>(
         mut self,
-        mcp_server: McpServer<Role, R>,
-    ) -> Result<SessionBuilder<Role, ChainResponder<Responder, R>, BlockState>, crate::Error>
+        mcp_server: McpServer<Link, R>,
+    ) -> Result<SessionBuilder<Link, ChainResponder<Responder, R>, BlockState>, crate::Error>
     where
-        R: JrResponder<Role>,
+        R: JrResponder<Link>,
     {
         let (handler, responder) = mcp_server.into_handler_and_responder();
         self.dynamic_handler_registrations
@@ -190,7 +190,7 @@ where
     pub fn on_session_start<F, Fut>(self, op: F) -> Result<(), crate::Error>
     where
         Responder: 'static,
-        F: FnOnce(ActiveSession<'static, Role>) -> Fut + Send + 'static,
+        F: FnOnce(ActiveSession<'static, Link>) -> Fut + Send + 'static,
         Fut: Future<Output = Result<(), crate::Error>> + Send,
     {
         let connection = self.connection.clone();
@@ -245,7 +245,7 @@ where
     where
         F: FnOnce(SessionId) -> Fut + Send + 'static,
         Fut: Future<Output = Result<(), crate::Error>> + Send,
-        Role: HasEndpoint<Client>,
+        Link: HasEndpoint<Client>,
         Responder: 'static,
     {
         let connection = self.connection.clone();
@@ -285,10 +285,10 @@ where
     }
 }
 
-impl<Role, Responder> SessionBuilder<Role, Responder, NonBlocking>
+impl<Link, Responder> SessionBuilder<Link, Responder, NonBlocking>
 where
-    Role: HasEndpoint<Agent>,
-    Responder: JrResponder<Role>,
+    Link: HasEndpoint<Agent>,
+    Responder: JrResponder<Link>,
 {
     /// Mark this session builder as being able to block the current task.
     ///
@@ -298,7 +298,7 @@ where
     /// This should not be used from inside a message handler like
     /// [`JrConnectionBuilder::on_receive_request`] or [`JrMessageHandler`]
     /// implementations.
-    pub fn block_task(self) -> SessionBuilder<Role, Responder, Blocking> {
+    pub fn block_task(self) -> SessionBuilder<Link, Responder, Blocking> {
         SessionBuilder {
             connection: self.connection,
             request: self.request,
@@ -309,10 +309,10 @@ where
     }
 }
 
-impl<Role, Responder> SessionBuilder<Role, Responder, Blocking>
+impl<Link, Responder> SessionBuilder<Link, Responder, Blocking>
 where
-    Role: HasEndpoint<Agent>,
-    Responder: JrResponder<Role>,
+    Link: HasEndpoint<Agent>,
+    Responder: JrResponder<Link>,
 {
     /// Run this session synchronously. The current task will be blocked
     /// and `op` will be executed with the active session information.
@@ -326,7 +326,7 @@ where
     /// Requires calling [`block_task`](Self::block_task) first.
     pub async fn run_until<R>(
         self,
-        op: impl for<'responder> AsyncFnOnce(ActiveSession<'responder, Role>) -> Result<R, crate::Error>,
+        op: impl for<'responder> AsyncFnOnce(ActiveSession<'responder, Link>) -> Result<R, crate::Error>,
     ) -> Result<R, crate::Error> {
         let Self {
             connection,
@@ -355,7 +355,7 @@ where
     /// into background tasks that live for the connection lifetime.
     ///
     /// Requires calling [`block_task`](Self::block_task) first.
-    pub async fn start_session(self) -> Result<ActiveSession<'static, Role>, crate::Error>
+    pub async fn start_session(self) -> Result<ActiveSession<'static, Link>, crate::Error>
     where
         Responder: 'static,
     {
@@ -409,7 +409,7 @@ where
         request_cx: JrRequestCx<NewSessionResponse>,
     ) -> Result<SessionId, crate::Error>
     where
-        Role: HasEndpoint<Client>,
+        Link: HasEndpoint<Client>,
         Responder: 'static,
     {
         let active_session = self.start_session().await?;
@@ -428,26 +428,26 @@ where
 /// When created via [`SessionBuilder::run_until`], this is tied to the
 /// closure scope, preventing [`Self::proxy_remaining_messages`] from being called
 /// (since the responders would die when the closure returns).
-pub struct ActiveSession<'responder, Role>
+pub struct ActiveSession<'responder, Link>
 where
-    Role: HasEndpoint<Agent>,
+    Link: HasEndpoint<Agent>,
 {
     session_id: SessionId,
     update_rx: mpsc::UnboundedReceiver<SessionMessage>,
     update_tx: mpsc::UnboundedSender<SessionMessage>,
     modes: Option<SessionModeState>,
     meta: Option<serde_json::Value>,
-    connection: JrConnectionCx<Role>,
+    connection: JrConnectionCx<Link>,
 
     /// Registration for the handler that routes session messages to `update_rx`.
     /// This is separate from MCP handlers so it can be dropped independently
     /// when switching to proxy mode.
-    session_handler_registration: DynamicHandlerRegistration<Role>,
+    session_handler_registration: DynamicHandlerRegistration<Link>,
 
     /// Registrations for MCP server handlers.
     /// These will be dropped once the active-session struct is dropped
     /// which will cause them to be deregistered.
-    mcp_handler_registrations: Vec<DynamicHandlerRegistration<Role>>,
+    mcp_handler_registrations: Vec<DynamicHandlerRegistration<Link>>,
 
     /// Phantom lifetime representing the responder lifetime.
     _responder: PhantomData<&'responder ()>,
@@ -465,9 +465,9 @@ pub enum SessionMessage {
     StopReason(StopReason),
 }
 
-impl<'responder, Role> ActiveSession<'responder, Role>
+impl<'responder, Link> ActiveSession<'responder, Link>
 where
-    Role: HasEndpoint<Agent>,
+    Link: HasEndpoint<Agent>,
 {
     /// Access the session ID.
     pub fn session_id(&self) -> &SessionId {
@@ -497,7 +497,7 @@ where
     }
 
     /// Access the underlying connection context used to communicate with the agent.
-    pub fn connection_cx(&self) -> JrConnectionCx<Role> {
+    pub fn connection_cx(&self) -> JrConnectionCx<Link> {
         self.connection.clone()
     }
 
@@ -566,9 +566,9 @@ where
     }
 }
 
-impl<Role> ActiveSession<'static, Role>
+impl<Link> ActiveSession<'static, Link>
 where
-    Role: HasEndpoint<Agent>,
+    Link: HasEndpoint<Agent>,
 {
     /// Proxy all remaining messages for this session between client and agent.
     ///
@@ -600,7 +600,7 @@ where
     /// out of order or lost during the transition.
     pub fn proxy_remaining_messages(self) -> Result<(), crate::Error>
     where
-        Role: HasEndpoint<Client>,
+        Link: HasEndpoint<Client>,
     {
         // Destructure self to get ownership of all fields
         let ActiveSession {
@@ -657,22 +657,22 @@ where
     }
 }
 
-struct ActiveSessionHandler<Role>
+struct ActiveSessionHandler<Link>
 where
-    Role: HasEndpoint<Agent>,
+    Link: HasEndpoint<Agent>,
 {
     #[expect(dead_code)]
-    role: Role,
+    role: Link,
     session_id: SessionId,
     update_tx: mpsc::UnboundedSender<SessionMessage>,
 }
 
-impl<Role> ActiveSessionHandler<Role>
+impl<Link> ActiveSessionHandler<Link>
 where
-    Role: HasEndpoint<Agent>,
+    Link: HasEndpoint<Agent>,
 {
     pub fn new(
-        role: Role,
+        role: Link,
         session_id: SessionId,
         update_tx: mpsc::UnboundedSender<SessionMessage>,
     ) -> Self {
@@ -684,11 +684,11 @@ where
     }
 }
 
-impl<Role> JrMessageHandler for ActiveSessionHandler<Role>
+impl<Link> JrMessageHandler for ActiveSessionHandler<Link>
 where
-    Role: HasEndpoint<Agent>,
+    Link: HasEndpoint<Agent>,
 {
-    type Link = Role;
+    type Link = Link;
 
     async fn handle_message(
         &mut self,

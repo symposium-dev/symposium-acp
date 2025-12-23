@@ -48,9 +48,9 @@ impl Task {
 }
 
 /// The "task actor" manages dynamically spawned tasks.
-pub(super) async fn task_actor<Role: JrLink>(
+pub(super) async fn task_actor<Link: JrLink>(
     task_rx: mpsc::UnboundedReceiver<Task>,
-    _cx: &JrConnectionCx<Role>,
+    _cx: &JrConnectionCx<Link>,
 ) -> Result<(), crate::Error> {
     process_stream_concurrently(
         task_rx,

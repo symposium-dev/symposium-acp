@@ -87,9 +87,9 @@ async fn test_scoped_mcp_server_through_session() -> Result<(), sacp::Error> {
 
 struct ScopedProxy;
 
-fn make_mcp_server<'a, Role: JrLink>(
+fn make_mcp_server<'a, Link: JrLink>(
     values: &'a Mutex<Vec<String>>,
-) -> McpServer<Role, impl JrResponder<Role>>
+) -> McpServer<Role, impl JrResponder<Link>>
 where
     Role: HasEndpoint<Agent>,
 {

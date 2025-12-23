@@ -6,7 +6,7 @@
 //! # Roles and Endpoints
 //!
 //! ACP connections are typed by their *role*, which captures both "who I am"
-//! and "who I'm talking to". Roles implement [`JrRole`] and determine what
+//! and "who I'm talking to". Roles implement [`JrLink`] and determine what
 //! operations are valid on a connection.
 //!
 //! ## Endpoints
@@ -53,7 +53,7 @@
 //! in [`SuccessorMessage`] envelopes. When receiving from `Agent`, they're
 //! automatically unwrapped.
 //!
-//! [`JrRole`]: crate::role::JrRole
+//! [`JrLink`]: crate::role::JrLink
 //! [`JrEndpoint`]: crate::role::JrEndpoint
 //! [`Client`]: crate::Client
 //! [`Agent`]: crate::Agent

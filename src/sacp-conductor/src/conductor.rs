@@ -1479,7 +1479,7 @@ pub enum ConductorMessage {
     },
 }
 
-trait JrConnectionCxExt<Role: JrLink> {
+trait JrConnectionCxExt<Link: JrLink> {
     fn send_proxied_message_to_via<End: JrEndpoint>(
         &self,
         end: End,
@@ -1487,10 +1487,10 @@ trait JrConnectionCxExt<Role: JrLink> {
         message: MessageCx,
     ) -> Result<(), sacp::Error>
     where
-        Role: sacp::HasEndpoint<End>;
+        Link: sacp::HasEndpoint<End>;
 }
 
-impl<Role: JrLink> JrConnectionCxExt<Role> for JrConnectionCx<Role> {
+impl<Link: JrLink> JrConnectionCxExt<Link> for JrConnectionCx<Link> {
     fn send_proxied_message_to_via<End: JrEndpoint>(
         &self,
         end: End,
@@ -1498,7 +1498,7 @@ impl<Role: JrLink> JrConnectionCxExt<Role> for JrConnectionCx<Role> {
         message: MessageCx,
     ) -> Result<(), sacp::Error>
     where
-        Role: sacp::HasEndpoint<End>,
+        Link: sacp::HasEndpoint<End>,
     {
         match message {
             MessageCx::Request(request, request_cx) => self
