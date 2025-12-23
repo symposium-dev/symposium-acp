@@ -10,7 +10,7 @@ use futures::{
 use fxhash::FxHashMap;
 use rmcp::{
     ErrorData, ServerHandler,
-    handler::server::tool::cached_schema_for_type,
+    handler::server::tool::{schema_for_output, schema_for_type},
     model::{CallToolResult, ListToolsResult, Tool},
 };
 use schemars::JsonSchema;
@@ -46,18 +46,34 @@ use crate::{
 ///     )
 ///     .build();
 /// ```
-pub struct McpServerBuilder<Role, Responder> {
+pub struct McpServerBuilder<Role: JrRole, Responder> {
     role: Role,
     name: String,
     data: McpServerData<Role>,
     responder: Responder,
 }
 
-#[derive(Default)]
-struct McpServerData<Role> {
+struct McpServerData<Role: JrRole> {
     instructions: Option<String>,
     tool_models: Vec<rmcp::model::Tool>,
-    tools: FxHashMap<String, Arc<dyn ErasedMcpTool<Role>>>,
+    tools: FxHashMap<String, RegisteredTool<Role>>,
+}
+
+/// A registered tool with its metadata.
+struct RegisteredTool<Role: JrRole> {
+    tool: Arc<dyn ErasedMcpTool<Role>>,
+    /// Whether this tool returns structured output (i.e., has an output_schema).
+    has_structured_output: bool,
+}
+
+impl<Role: JrRole> Default for McpServerData<Role> {
+    fn default() -> Self {
+        Self {
+            instructions: None,
+            tool_models: Vec::new(),
+            tools: FxHashMap::default(),
+        }
+    }
 }
 
 impl<Role: JrRole> McpServerBuilder<Role, NullResponder>
@@ -87,10 +103,15 @@ where
     /// Add a tool to the server.
     pub fn tool(mut self, tool: impl McpTool<Role> + 'static) -> Self {
         let tool_model = make_tool_model(&tool);
+        let has_structured_output = tool_model.output_schema.is_some();
         self.data.tool_models.push(tool_model);
-        self.data
-            .tools
-            .insert(tool.name(), make_erased_mcp_tool(tool));
+        self.data.tools.insert(
+            tool.name(),
+            RegisteredTool {
+                tool: make_erased_mcp_tool(tool),
+                has_structured_output,
+            },
+        );
         self
     }
 
@@ -313,7 +334,7 @@ where
         context: rmcp::service::RequestContext<rmcp::RoleServer>,
     ) -> Result<CallToolResult, ErrorData> {
         // Lookup the tool definition, erroring if not found
-        let Some(tool) = self.data.tools.get(&request.name[..]) else {
+        let Some(registered) = self.data.tools.get(&request.name[..]) else {
             return Err(rmcp::model::ErrorData::invalid_params(
                 format!("tool `{}` not found", request.name),
                 None,
@@ -324,15 +345,25 @@ where
         let serde_value = serde_json::to_value(request.arguments).expect("valid json");
 
         // Execute the user's tool, unless cancellation occurs
+        let has_structured_output = registered.has_structured_output;
         match futures::future::select(
-            tool.call_tool(serde_value, self.mcp_cx.clone()),
+            registered.tool.call_tool(serde_value, self.mcp_cx.clone()),
             pin!(context.ct.cancelled()),
         )
         .await
         {
             // If completed successfully
             Either::Left((m, _)) => match m {
-                Ok(result) => Ok(CallToolResult::structured(result)),
+                Ok(result) => {
+                    // Use structured output only if the tool declared an output_schema
+                    if has_structured_output {
+                        Ok(CallToolResult::structured(result))
+                    } else {
+                        Ok(CallToolResult::success(vec![rmcp::model::Content::text(
+                            result.to_string(),
+                        )]))
+                    }
+                }
                 Err(error) => Err(to_rmcp_error(error)),
             },
 
@@ -382,8 +413,11 @@ fn make_tool_model<Role: JrRole, M: McpTool<Role>>(tool: &M) -> Tool {
         name: tool.name().into(),
         title: tool.title(),
         description: Some(tool.description().into()),
-        input_schema: cached_schema_for_type::<M::Input>(),
-        output_schema: Some(cached_schema_for_type::<M::Output>()),
+        input_schema: schema_for_type::<M::Input>(),
+        // schema_for_output returns Err for non-object types (strings, integers, etc.)
+        // since MCP structured output requires JSON objects. We use .ok() to set
+        // output_schema to None for these tools, signaling unstructured output.
+        output_schema: schema_for_output::<M::Output>().ok(),
         annotations: None,
         icons: None,
         meta: None,

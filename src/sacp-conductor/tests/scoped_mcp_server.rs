@@ -37,7 +37,7 @@ async fn test_scoped_mcp_server_through_proxy() -> Result<(), sacp::Error> {
     .await?;
 
     expect_test::expect![[r#"
-        "OK: CallToolResult { content: [Annotated { raw: Text(RawTextContent { text: \"2\", meta: None }), annotations: None }], structured_content: Some(Number(2)), is_error: Some(false), meta: None }"
+        "OK: CallToolResult { content: [Annotated { raw: Text(RawTextContent { text: \"2\", meta: None }), annotations: None }], structured_content: None, is_error: Some(false), meta: None }"
     "#]].assert_debug_eq(&result);
 
     Ok(())
@@ -76,7 +76,7 @@ async fn test_scoped_mcp_server_through_session() -> Result<(), sacp::Error> {
                 .await?;
 
             expect_test::expect![[r#"
-                "OK: CallToolResult { content: [Annotated { raw: Text(RawTextContent { text: \"2\", meta: None }), annotations: None }], structured_content: Some(Number(2)), is_error: Some(false), meta: None }"
+                "OK: CallToolResult { content: [Annotated { raw: Text(RawTextContent { text: \"2\", meta: None }), annotations: None }], structured_content: None, is_error: Some(false), meta: None }"
             "#]].assert_debug_eq(&result);
 
             Ok(())
