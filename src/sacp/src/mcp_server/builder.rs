@@ -10,7 +10,7 @@ use futures::{
 use fxhash::FxHashMap;
 use rmcp::{
     ErrorData, ServerHandler,
-    handler::server::tool::cached_schema_for_type,
+    handler::server::tool::{schema_for_output, schema_for_type},
     model::{CallToolResult, ListToolsResult, Tool},
 };
 use schemars::JsonSchema;
@@ -382,8 +382,8 @@ fn make_tool_model<Role: JrRole, M: McpTool<Role>>(tool: &M) -> Tool {
         name: tool.name().into(),
         title: tool.title(),
         description: Some(tool.description().into()),
-        input_schema: cached_schema_for_type::<M::Input>(),
-        output_schema: Some(cached_schema_for_type::<M::Output>()),
+        input_schema: schema_for_type::<M::Input>(),
+        output_schema: schema_for_output::<M::Output>().ok(),
         annotations: None,
         icons: None,
         meta: None,
