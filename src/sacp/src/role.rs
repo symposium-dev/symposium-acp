@@ -290,8 +290,6 @@ impl JrRole for ConductorToClient {
     type State = ();
 }
 
-impl HasDefaultEndpoint for ConductorToClient {}
-
 impl HasEndpoint<Client> for ConductorToClient {
     fn remote_style(_end: Client) -> RemoteRoleStyle {
         RemoteRoleStyle::Counterpart

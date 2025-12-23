@@ -751,7 +751,7 @@ impl ConductorResponder {
         request: Req,
     ) -> JrResponse<Req::Response> {
         if source_component_index == 0 {
-            client.send_request(request)
+            client.send_request_to(Client, request)
         } else {
             self.proxies[source_component_index - 1].send_request(SuccessorMessage {
                 message: request,
@@ -783,7 +783,7 @@ impl ConductorResponder {
         );
         if source_component_index == 0 {
             tracing::debug!("Sending notification directly to client");
-            client.send_notification(notification)
+            client.send_notification_to(Client, notification)
         } else {
             tracing::debug!(
                 target_proxy = source_component_index - 1,
@@ -835,21 +835,24 @@ impl ConductorResponder {
         tracing::debug!(?message, "forward_client_to_agent_message");
 
         MatchMessageFrom::new(message, connection_cx)
-            .if_request(async |request: InitializeProxyRequest, request_cx| {
-                // Proxy forwarding InitializeProxyRequest to its successor
-                tracing::debug!("forward_client_to_agent_message: InitializeProxyRequest");
-                // Wrap the request_cx to convert InitializeResponse back to InitializeProxyResponse
-                self.forward_initialize_request(
-                    target_component_index,
-                    conductor_tx,
-                    connection_cx,
-                    request.initialize,
-                    request_cx,
-                )
-                .await
-            })
+            .if_request_from(
+                Client,
+                async |request: InitializeProxyRequest, request_cx| {
+                    // Proxy forwarding InitializeProxyRequest to its successor
+                    tracing::debug!("forward_client_to_agent_message: InitializeProxyRequest");
+                    // Wrap the request_cx to convert InitializeResponse back to InitializeProxyResponse
+                    self.forward_initialize_request(
+                        target_component_index,
+                        conductor_tx,
+                        connection_cx,
+                        request.initialize,
+                        request_cx,
+                    )
+                    .await
+                },
+            )
             .await
-            .if_request(async |request: InitializeRequest, request_cx| {
+            .if_request_from(Client, async |request: InitializeRequest, request_cx| {
                 // Direct InitializeRequest (shouldn't happen after initialization, but handle it)
                 tracing::debug!("forward_client_to_agent_message: InitializeRequest");
                 self.forward_initialize_request(
@@ -862,7 +865,7 @@ impl ConductorResponder {
                 .await
             })
             .await
-            .if_request(async |request: NewSessionRequest, request_cx| {
+            .if_request_from(Client, async |request: NewSessionRequest, request_cx| {
                 // When forwarding "session/new", we adjust MCP servers to manage "acp:" URLs.
                 self.forward_session_new_request(
                     target_component_index,
@@ -874,7 +877,8 @@ impl ConductorResponder {
                 .await
             })
             .await
-            .if_request(
+            .if_request_from(
+                Client,
                 async |request: McpOverAcpMessage<UntypedMessage>, request_cx| {
                     let McpOverAcpMessage {
                         connection_id,
@@ -894,23 +898,26 @@ impl ConductorResponder {
                 },
             )
             .await
-            .if_notification(async |notification: McpOverAcpMessage<UntypedMessage>| {
-                let McpOverAcpMessage {
-                    connection_id,
-                    message: mcp_notification,
-                    ..
-                } = notification;
-                self.bridge_connections
-                    .get_mut(&connection_id)
-                    .ok_or_else(|| {
-                        sacp::util::internal_error(format!(
-                            "unknown connection id: {}",
-                            connection_id
-                        ))
-                    })?
-                    .send(MessageCx::Notification(mcp_notification))
-                    .await
-            })
+            .if_notification_from(
+                Client,
+                async |notification: McpOverAcpMessage<UntypedMessage>| {
+                    let McpOverAcpMessage {
+                        connection_id,
+                        message: mcp_notification,
+                        ..
+                    } = notification;
+                    self.bridge_connections
+                        .get_mut(&connection_id)
+                        .ok_or_else(|| {
+                            sacp::util::internal_error(format!(
+                                "unknown connection id: {}",
+                                connection_id
+                            ))
+                        })?
+                        .send(MessageCx::Notification(mcp_notification))
+                        .await
+                },
+            )
             .await
             .otherwise(async |message| {
                 // Otherwise, just send the message along "as is".
