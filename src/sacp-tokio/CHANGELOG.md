@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [9.0.1](https://github.com/symposium-dev/symposium-acp/compare/sacp-tokio-v9.0.0...sacp-tokio-v9.0.1) - 2025-12-23
+
+### Other
+
+- *(sacp)* rename with_client to run_until
+- update references for renamed methods
+
 ## [9.0.0](https://github.com/symposium-dev/symposium-acp/compare/sacp-tokio-v8.0.0...sacp-tokio-v9.0.0) - 2025-12-19
 
 ### Added

@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [9.0.1](https://github.com/symposium-dev/symposium-acp/compare/yopo-v9.0.0...yopo-v9.0.1) - 2025-12-23
+
+### Other
+
+- *(sacp)* add block_task() builder pattern for SessionBuilder
+- *(sacp)* rename spawn_session to start_session
+- *(sacp)* rename with_client to run_until
+- *(sacp)* add lifetime-safe session proxying API
+
 ## [9.0.0](https://github.com/symposium-dev/symposium-acp/compare/yopo-v8.0.0...yopo-v9.0.0) - 2025-12-19
 
 ### Added
