@@ -193,35 +193,35 @@ pub struct Conductor;
 impl JrRole for Conductor {}
 
 // ============================================================================
-// Roles - directional connection types
+// Links - directional connection types
 // ============================================================================
 
-/// A generic role for testing and dynamic dispatch scenarios.
+/// A generic link for testing scenarios.
 ///
-/// `UntypedRole` can send to and receive from any endpoint without transformation.
+/// `UntypedLink` can send to and receive from any endpoint without transformation.
 /// This is useful for tests and scenarios where the exact role is not known
 /// at compile time.
 #[derive(Debug, Default, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct UntypedRole;
+pub struct UntypedLink;
 
-impl JrLink for UntypedRole {
+impl JrLink for UntypedLink {
     type HandlerEndpoint = UntypedEndpoint;
 
     type State = ();
 }
 
-impl HasDefaultEndpoint for UntypedRole {}
+impl HasDefaultEndpoint for UntypedLink {}
 
-impl HasPeer<UntypedEndpoint> for UntypedRole {
+impl HasPeer<UntypedEndpoint> for UntypedLink {
     fn remote_style(_end: UntypedEndpoint) -> RemoteRoleStyle {
         RemoteRoleStyle::Counterpart
     }
 }
 
-impl UntypedRole {
+impl UntypedLink {
     /// Create a connection builder with an untyped role.
-    pub fn builder() -> JrConnectionBuilder<NullHandler<UntypedRole>> {
-        JrConnectionBuilder::new(UntypedRole)
+    pub fn builder() -> JrConnectionBuilder<NullHandler<UntypedLink>> {
+        JrConnectionBuilder::new(UntypedLink)
     }
 }
 

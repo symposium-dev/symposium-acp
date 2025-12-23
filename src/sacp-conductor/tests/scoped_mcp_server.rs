@@ -88,9 +88,9 @@ struct ScopedProxy;
 
 fn make_mcp_server<'a, Link: JrLink>(
     values: &'a Mutex<Vec<String>>,
-) -> McpServer<Role, impl JrResponder<Link>>
+) -> McpServer<Link, impl JrResponder<Link>>
 where
-    Role: HasPeer<Agent>,
+    Link: HasPeer<Agent>,
 {
     #[derive(Serialize, Deserialize, JsonSchema)]
     struct PushInput {

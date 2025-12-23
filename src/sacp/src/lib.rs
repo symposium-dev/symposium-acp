@@ -10,7 +10,7 @@
 //! Building an ACP agent is straightforward with sacp's type-safe API:
 //!
 //! ```no_run
-//! use sacp::role::UntypedRole;
+//! use sacp::role::UntypedLink;
 //! use sacp::{MessageCx, UntypedMessage};
 //! use sacp::schema::{InitializeRequest, InitializeResponse, AgentCapabilities};
 //! use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
@@ -18,7 +18,7 @@
 //! # #[tokio::main]
 //! # async fn main() -> Result<(), sacp::Error> {
 //! // Start by creating an agent connection
-//! UntypedRole::builder()
+//! UntypedLink::builder()
 //! .name("my-agent") // Give it a name for logging purposes
 //! .on_receive_request(async move |initialize: InitializeRequest, request_cx, _cx| {
 //!     // Create one or more request handlers -- these are attempted in order.

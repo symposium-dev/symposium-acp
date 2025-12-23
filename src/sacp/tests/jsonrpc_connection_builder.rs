@@ -4,7 +4,7 @@
 //! and that requests/notifications are routed correctly based on which
 //! handler claims them.
 
-use sacp::role::UntypedRole;
+use sacp::role::UntypedLink;
 use sacp::{
     JrConnectionCx, JrMessage, JrNotification, JrRequest, JrRequestCx, JrResponse,
     JrResponsePayload,
@@ -133,11 +133,11 @@ async fn test_multiple_handlers_different_methods() {
 
             // Chain both handlers
             let server_transport = sacp::ByteStreams::new(server_writer, server_reader);
-            let server = UntypedRole::builder()
+            let server = UntypedLink::builder()
                 .on_receive_request(
                     async |request: FooRequest,
                            request_cx: JrRequestCx<FooResponse>,
-                           _connection_cx: JrConnectionCx<UntypedRole>| {
+                           _connection_cx: JrConnectionCx<UntypedLink>| {
                         request_cx.respond(FooResponse {
                             result: format!("foo: {}", request.value),
                         })
@@ -147,7 +147,7 @@ async fn test_multiple_handlers_different_methods() {
                 .on_receive_request(
                     async |request: BarRequest,
                            request_cx: JrRequestCx<BarResponse>,
-                           _connection_cx: JrConnectionCx<UntypedRole>| {
+                           _connection_cx: JrConnectionCx<UntypedLink>| {
                         request_cx.respond(BarResponse {
                             result: format!("bar: {}", request.value),
                         })
@@ -155,7 +155,7 @@ async fn test_multiple_handlers_different_methods() {
                     sacp::on_receive_request!(),
                 );
             let client_transport = sacp::ByteStreams::new(client_writer, client_reader);
-            let client = UntypedRole::builder();
+            let client = UntypedLink::builder();
 
             tokio::task::spawn_local(async move {
                 if let Err(e) = server.serve(server_transport).await {
@@ -252,11 +252,11 @@ async fn test_handler_priority_ordering() {
             let handled_clone1 = handled.clone();
             let handled_clone2 = handled.clone();
             let server_transport = sacp::ByteStreams::new(server_writer, server_reader);
-            let server = UntypedRole::builder()
+            let server = UntypedLink::builder()
                 .on_receive_request(
                     async move |request: TrackRequest,
                                 request_cx: JrRequestCx<FooResponse>,
-                                _connection_cx: JrConnectionCx<UntypedRole>| {
+                                _connection_cx: JrConnectionCx<UntypedLink>| {
                         handled_clone1.lock().unwrap().push("handler1".to_string());
                         request_cx.respond(FooResponse {
                             result: format!("handler1: {}", request.value),
@@ -267,7 +267,7 @@ async fn test_handler_priority_ordering() {
                 .on_receive_request(
                     async move |request: TrackRequest,
                                 request_cx: JrRequestCx<FooResponse>,
-                                _connection_cx: JrConnectionCx<UntypedRole>| {
+                                _connection_cx: JrConnectionCx<UntypedLink>| {
                         handled_clone2.lock().unwrap().push("handler2".to_string());
                         request_cx.respond(FooResponse {
                             result: format!("handler2: {}", request.value),
@@ -276,7 +276,7 @@ async fn test_handler_priority_ordering() {
                     sacp::on_receive_request!(),
                 );
             let client_transport = sacp::ByteStreams::new(client_writer, client_reader);
-            let client = UntypedRole::builder();
+            let client = UntypedLink::builder();
 
             tokio::task::spawn_local(async move {
                 if let Err(e) = server.serve(server_transport).await {
@@ -398,11 +398,11 @@ async fn test_fallthrough_behavior() {
             let handled_clone1 = handled.clone();
             let handled_clone2 = handled.clone();
             let server_transport = sacp::ByteStreams::new(server_writer, server_reader);
-            let server = UntypedRole::builder()
+            let server = UntypedLink::builder()
                 .on_receive_request(
                     async move |request: Method1Request,
                                 request_cx: JrRequestCx<FooResponse>,
-                                _connection_cx: JrConnectionCx<UntypedRole>| {
+                                _connection_cx: JrConnectionCx<UntypedLink>| {
                         handled_clone1.lock().unwrap().push("method1".to_string());
                         request_cx.respond(FooResponse {
                             result: format!("method1: {}", request.value),
@@ -413,7 +413,7 @@ async fn test_fallthrough_behavior() {
                 .on_receive_request(
                     async move |request: Method2Request,
                                 request_cx: JrRequestCx<FooResponse>,
-                                _connection_cx: JrConnectionCx<UntypedRole>| {
+                                _connection_cx: JrConnectionCx<UntypedLink>| {
                         handled_clone2.lock().unwrap().push("method2".to_string());
                         request_cx.respond(FooResponse {
                             result: format!("method2: {}", request.value),
@@ -422,7 +422,7 @@ async fn test_fallthrough_behavior() {
                     sacp::on_receive_request!(),
                 );
             let client_transport = sacp::ByteStreams::new(client_writer, client_reader);
-            let client = UntypedRole::builder();
+            let client = UntypedLink::builder();
 
             tokio::task::spawn_local(async move {
                 if let Err(e) = server.serve(server_transport).await {
@@ -482,10 +482,10 @@ async fn test_no_handler_claims() {
 
             // Handler that only handles "foo"
             let server_transport = sacp::ByteStreams::new(server_writer, server_reader);
-            let server = UntypedRole::builder().on_receive_request(
+            let server = UntypedLink::builder().on_receive_request(
                 async |request: FooRequest,
                        request_cx: JrRequestCx<FooResponse>,
-                       _connection_cx: JrConnectionCx<UntypedRole>| {
+                       _connection_cx: JrConnectionCx<UntypedLink>| {
                     request_cx.respond(FooResponse {
                         result: format!("foo: {}", request.value),
                     })
@@ -493,7 +493,7 @@ async fn test_no_handler_claims() {
                 sacp::on_receive_request!(),
             );
             let client_transport = sacp::ByteStreams::new(client_writer, client_reader);
-            let client = UntypedRole::builder();
+            let client = UntypedLink::builder();
 
             tokio::task::spawn_local(async move {
                 if let Err(e) = server.serve(server_transport).await {
@@ -576,16 +576,16 @@ async fn test_handler_claims_notification() {
             // EventHandler claims notifications
             let events_clone = events.clone();
             let server_transport = sacp::ByteStreams::new(server_writer, server_reader);
-            let server = UntypedRole::builder().on_receive_notification(
+            let server = UntypedLink::builder().on_receive_notification(
                 async move |notification: EventNotification,
-                            _notification_cx: JrConnectionCx<UntypedRole>| {
+                            _notification_cx: JrConnectionCx<UntypedLink>| {
                     events_clone.lock().unwrap().push(notification.event);
                     Ok(())
                 },
                 sacp::on_receive_notification!(),
             );
             let client_transport = sacp::ByteStreams::new(client_writer, client_reader);
-            let client = UntypedRole::builder();
+            let client = UntypedLink::builder();
 
             tokio::task::spawn_local(async move {
                 if let Err(e) = server.serve(server_transport).await {

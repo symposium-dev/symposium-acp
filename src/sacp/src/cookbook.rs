@@ -33,7 +33,7 @@
 //! | [`ConductorToClient`] | Conductor's connection to a client | `Client`, `Agent` |
 //! | [`ConductorToProxy`] | Conductor's connection to a proxy | `Agent` |
 //! | [`ConductorToAgent`] | Conductor's connection to the final agent | `Agent` |
-//! | [`UntypedRole`] | Generic role for testing/dynamic scenarios | any |
+//! | [`UntypedLink`] | Generic role for testing/dynamic scenarios | any |
 //!
 //! ## Proxies and Multiple Endpoints
 //!
@@ -64,7 +64,7 @@
 //! [`ConductorToClient`]: crate::role::ConductorToClient
 //! [`ConductorToProxy`]: crate::role::ConductorToProxy
 //! [`ConductorToAgent`]: crate::role::ConductorToAgent
-//! [`UntypedRole`]: crate::role::UntypedRole
+//! [`UntypedLink`]: crate::role::UntypedLink
 //! [`SuccessorMessage`]: crate::schema::SuccessorMessage
 //! [`send_request_to`]: crate::JrConnectionCx::send_request_to
 //! [`send_notification_to`]: crate::JrConnectionCx::send_notification_to
@@ -153,7 +153,7 @@ pub mod custom_message_handlers {
     //! struct MyHandler;
     //!
     //! impl JrMessageHandler for MyHandler {
-    //!     type Link = sacp::role::UntypedRole;
+    //!     type Link = sacp::role::UntypedLink;
     //!
     //!     async fn handle_message(
     //!         &mut self,

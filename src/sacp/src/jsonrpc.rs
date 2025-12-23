@@ -483,7 +483,7 @@ impl<H: JrMessageHandler> JrMessageHandler for &mut H {
 /// # Example: Complete Agent
 ///
 /// ```no_run
-/// # use sacp::role::UntypedRole;
+/// # use sacp::role::UntypedLink;
 /// # use sacp::{JrConnectionBuilder};
 /// # use sacp::ByteStreams;
 /// # use sacp::schema::{InitializeRequest, InitializeResponse, PromptRequest, PromptResponse, SessionNotification};
@@ -701,10 +701,10 @@ impl<H: JrMessageHandler, R: JrResponder<H::Link>> JrConnectionBuilder<H, R> {
     /// # Example
     ///
     /// ```ignore
-    /// # use sacp::role::UntypedRole;
+    /// # use sacp::role::UntypedLink;
     /// # use sacp::{JrConnectionBuilder};
     /// # use sacp::schema::{PromptRequest, PromptResponse, SessionNotification};
-    /// # fn example(connection: JrConnectionBuilder<impl sacp::JrMessageHandler<Link = UntypedRole>>) {
+    /// # fn example(connection: JrConnectionBuilder<impl sacp::JrMessageHandler<Link = UntypedLink>>) {
     /// connection.on_receive_request(async |request: PromptRequest, request_cx, cx| {
     ///     // Send a notification while processing
     ///     let notif: SessionNotification = todo!();
@@ -1170,7 +1170,7 @@ impl<H: JrMessageHandler, R: JrResponder<H::Link>> JrConnection<H, R> {
     /// # Example: Byte Stream Transport
     ///
     /// ```no_run
-    /// # use sacp::role::UntypedRole;
+    /// # use sacp::role::UntypedLink;
     /// # use sacp::{JrConnectionBuilder};
     /// # use sacp::ByteStreams;
     /// # use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
@@ -1211,7 +1211,7 @@ impl<H: JrMessageHandler, R: JrResponder<H::Link>> JrConnection<H, R> {
     /// # Example
     ///
     /// ```no_run
-    /// # use sacp::role::UntypedRole;
+    /// # use sacp::role::UntypedLink;
     /// # use sacp::{JrConnectionBuilder};
     /// # use sacp::ByteStreams;
     /// # use sacp::schema::InitializeRequest;
@@ -1519,10 +1519,10 @@ impl<Link: JrLink> JrConnectionCx<Link> {
     /// # Example: Proxying to a backend connection
     ///
     /// ```
-    /// # use sacp::role::UntypedRole;
+    /// # use sacp::role::UntypedLink;
     /// # use sacp::{JrConnectionBuilder, JrConnectionCx};
     /// # use sacp_test::*;
-    /// # async fn example(cx: JrConnectionCx<UntypedRole>) -> Result<(), sacp::Error> {
+    /// # async fn example(cx: JrConnectionCx<UntypedLink>) -> Result<(), sacp::Error> {
     /// // Set up a backend connection
     /// let backend = UntypedLink::builder()
     ///     .on_receive_request(async |req: MyRequest, request_cx, _cx| {
@@ -1591,7 +1591,7 @@ impl<Link: JrLink> JrConnectionCx<Link> {
     ///
     /// ```compile_fail
     /// # use sacp_test::*;
-    /// # async fn example(cx: sacp::JrConnectionCx<sacp::role::UntypedRole>) -> Result<(), sacp::Error> {
+    /// # async fn example(cx: sacp::JrConnectionCx<sacp::role::UntypedLink>) -> Result<(), sacp::Error> {
     /// // ❌ This doesn't compile - prevents blocking the event loop
     /// let response = cx.send_request(MyRequest {}).await?;
     /// # Ok(())
@@ -1600,7 +1600,7 @@ impl<Link: JrLink> JrConnectionCx<Link> {
     ///
     /// ```no_run
     /// # use sacp_test::*;
-    /// # async fn example(cx: sacp::JrConnectionCx<sacp::role::UntypedRole>) -> Result<(), sacp::Error> {
+    /// # async fn example(cx: sacp::JrConnectionCx<sacp::role::UntypedLink>) -> Result<(), sacp::Error> {
     /// // ✅ Option 1: Schedule callback (safe in handlers)
     /// cx.send_request(MyRequest {})
     ///     .on_receiving_result(async |result| {
@@ -1702,7 +1702,7 @@ impl<Link: JrLink> JrConnectionCx<Link> {
     ///
     /// ```no_run
     /// # use sacp_test::*;
-    /// # async fn example(cx: sacp::JrConnectionCx<sacp::role::UntypedRole>) -> Result<(), sacp::Error> {
+    /// # async fn example(cx: sacp::JrConnectionCx<sacp::role::UntypedLink>) -> Result<(), sacp::Error> {
     /// cx.send_notification(StatusUpdate {
     ///     message: "Processing...".into(),
     /// })?;
@@ -2416,7 +2416,7 @@ impl JrNotification for UntypedMessage {}
 ///
 /// ```no_run
 /// # use sacp_test::*;
-/// # async fn example(cx: sacp::JrConnectionCx<sacp::role::UntypedRole>) -> Result<(), sacp::Error> {
+/// # async fn example(cx: sacp::JrConnectionCx<sacp::role::UntypedLink>) -> Result<(), sacp::Error> {
 /// cx.send_request(MyRequest {})
 ///     .on_receiving_result(async |result| {
 ///         match result {
@@ -2441,7 +2441,7 @@ impl JrNotification for UntypedMessage {}
 ///
 /// ```no_run
 /// # use sacp_test::*;
-/// # async fn example(cx: sacp::JrConnectionCx<sacp::role::UntypedRole>) -> Result<(), sacp::Error> {
+/// # async fn example(cx: sacp::JrConnectionCx<sacp::role::UntypedLink>) -> Result<(), sacp::Error> {
 /// // ✅ Safe: Spawned task runs concurrently
 /// cx.spawn({
 ///     let cx = cx.clone();
@@ -2528,10 +2528,10 @@ impl<T: JrResponsePayload> JrResponse<T> {
     /// # Example: Proxying requests
     ///
     /// ```
-    /// # use sacp::role::UntypedRole;
+    /// # use sacp::role::UntypedLink;
     /// # use sacp::{JrConnectionBuilder, JrConnectionCx};
     /// # use sacp_test::*;
-    /// # async fn example(cx: JrConnectionCx<UntypedRole>) -> Result<(), sacp::Error> {
+    /// # async fn example(cx: JrConnectionCx<UntypedLink>) -> Result<(), sacp::Error> {
     /// // Set up backend connection
     /// let backend = UntypedLink::builder()
     ///     .on_receive_request(async |req: MyRequest, request_cx, cx| {
@@ -2893,7 +2893,7 @@ where
 /// Connecting to an agent via stdio:
 ///
 /// ```no_run
-/// use sacp::role::UntypedRole;
+/// use sacp::role::UntypedLink;
 /// # use sacp::{ByteStreams};
 /// use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
 ///
@@ -2979,7 +2979,7 @@ where
 /// # Example
 ///
 /// ```no_run
-/// # use sacp::role::UntypedRole;
+/// # use sacp::role::UntypedLink;
 /// # use sacp::{Channel, JrConnectionBuilder};
 /// # async fn example() -> Result<(), sacp::Error> {
 /// // Create a pair of connected channels

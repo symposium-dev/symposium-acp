@@ -1,7 +1,7 @@
 //! Integration test for AcpAgent debug logging
 
 use sacp::Component;
-use sacp::role::UntypedRole;
+use sacp::role::UntypedLink;
 use sacp::schema::InitializeRequest;
 use sacp_tokio::{AcpAgent, LineDirection};
 use std::str::FromStr;
@@ -58,7 +58,7 @@ async fn test_acp_agent_debug_callback() -> Result<(), Box<dyn std::error::Error
 
     let transport = sacp::ByteStreams::new(client_out.compat_write(), client_in.compat());
 
-    UntypedRole::builder()
+    UntypedLink::builder()
         .name("test-client")
         .with_spawned(|_cx| async move {
             agent
