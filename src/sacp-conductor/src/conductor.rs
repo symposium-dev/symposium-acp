@@ -829,23 +829,7 @@ impl ConductorResponder {
                 proxies_count = self.proxies.len(),
                 "Proxy mode: forwarding successor message to conductor's successor"
             );
-            // Wrap the message as a successor message before sending
-            let to_successor_message = message.map(
-                |request, request_cx| {
-                    (
-                        SuccessorMessage {
-                            message: request,
-                            meta: None,
-                        },
-                        request_cx,
-                    )
-                },
-                |notification| SuccessorMessage {
-                    message: notification,
-                    meta: None,
-                },
-            );
-            return connection_cx.send_proxied_message_to(Client, to_successor_message);
+            return connection_cx.send_proxied_message_to(Agent, message);
         }
 
         tracing::debug!(?message, "forward_client_to_agent_message");
