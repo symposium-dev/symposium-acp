@@ -50,14 +50,14 @@ pub async fn run_arrow_proxy(transport: impl Component) -> Result<(), sacp::Erro
 
 ## Core Concepts
 
-### Endpoints: Agent and Client
+### Peers: Agent and Client
 
-Proxies communicate with two endpoints:
+Proxies communicate with two peers:
 
 - **`Agent`** - The downstream direction (toward the AI agent)
 - **`Client`** - The upstream direction (toward the editor)
 
-When you receive a message, you typically forward it (possibly modified) to the other endpoint:
+When you receive a message, you typically forward it (possibly modified) to the other peer:
 
 ```rust
 use sacp::{Agent, Client};

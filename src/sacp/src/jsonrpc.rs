@@ -819,11 +819,11 @@ impl<H: JrMessageHandler, R: JrResponder<H::Link>> JrConnectionBuilder<H, R> {
         ))
     }
 
-    /// Register a handler for messages from a specific endpoint.
+    /// Register a handler for messages from a specific peer.
     ///
     /// This is similar to [`on_receive_message`](Self::on_receive_message), but allows
-    /// specifying the source endpoint explicitly. This is useful when receiving messages
-    /// from an endpoint that requires message transformation (e.g., unwrapping `SuccessorMessage`
+    /// specifying the source peer explicitly. This is useful when receiving messages
+    /// from a peer that requires message transformation (e.g., unwrapping `SuccessorMessage`
     /// envelopes when receiving from an agent via a proxy).
     ///
     /// For the common case of receiving from the default counterpart, use
@@ -831,18 +831,18 @@ impl<H: JrMessageHandler, R: JrResponder<H::Link>> JrConnectionBuilder<H, R> {
     pub fn on_receive_message_from<
         Req: JrRequest,
         Notif: JrNotification,
-        End: JrRole,
+        Peer: JrRole,
         F,
         T,
         ToFut,
     >(
         self,
-        endpoint: End,
+        peer: Peer,
         op: F,
         to_future_hack: ToFut,
     ) -> JrConnectionBuilder<impl JrMessageHandler<Link = H::Link>, R>
     where
-        H::Link: HasPeer<End>,
+        H::Link: HasPeer<Peer>,
         F: AsyncFnMut(MessageCx<Req, Notif>, JrConnectionCx<H::Link>) -> Result<T, crate::Error>
             + Send,
         T: IntoHandled<MessageCx<Req, Notif>>,
@@ -855,18 +855,18 @@ impl<H: JrMessageHandler, R: JrResponder<H::Link>> JrConnectionBuilder<H, R> {
             + Sync,
     {
         self.with_handler(MessageHandler::new(
-            endpoint,
+            peer,
             <H::Link>::default(),
             op,
             to_future_hack,
         ))
     }
 
-    /// Register a handler for JSON-RPC requests from a specific endpoint.
+    /// Register a handler for JSON-RPC requests from a specific peer.
     ///
     /// This is similar to [`on_receive_request`](Self::on_receive_request), but allows
-    /// specifying the source endpoint explicitly. This is useful when receiving messages
-    /// from an endpoint that requires message transformation (e.g., unwrapping `SuccessorRequest`
+    /// specifying the source peer explicitly. This is useful when receiving messages
+    /// from a peer that requires message transformation (e.g., unwrapping `SuccessorRequest`
     /// envelopes when receiving from an agent via a proxy).
     ///
     /// For the common case of receiving from the default counterpart, use
@@ -884,14 +884,14 @@ impl<H: JrMessageHandler, R: JrResponder<H::Link>> JrConnectionBuilder<H, R> {
     ///     request_cx.respond(InitializeResponse::make())
     /// })
     /// ```
-    pub fn on_receive_request_from<Req: JrRequest, End: JrRole, F, T, ToFut>(
+    pub fn on_receive_request_from<Req: JrRequest, Peer: JrRole, F, T, ToFut>(
         self,
-        endpoint: End,
+        peer: Peer,
         op: F,
         to_future_hack: ToFut,
     ) -> JrConnectionBuilder<impl JrMessageHandler<Link = H::Link>, R>
     where
-        H::Link: HasPeer<End>,
+        H::Link: HasPeer<Peer>,
         F: AsyncFnMut(
                 Req,
                 JrRequestCx<Req::Response>,
@@ -909,30 +909,30 @@ impl<H: JrMessageHandler, R: JrResponder<H::Link>> JrConnectionBuilder<H, R> {
             + Sync,
     {
         self.with_handler(RequestHandler::new(
-            endpoint,
+            peer,
             <H::Link>::default(),
             op,
             to_future_hack,
         ))
     }
 
-    /// Register a handler for JSON-RPC notifications from a specific endpoint.
+    /// Register a handler for JSON-RPC notifications from a specific peer.
     ///
     /// This is similar to [`on_receive_notification`](Self::on_receive_notification), but allows
-    /// specifying the source endpoint explicitly. This is useful when receiving messages
-    /// from an endpoint that requires message transformation (e.g., unwrapping `SuccessorNotification`
+    /// specifying the source peer explicitly. This is useful when receiving messages
+    /// from a peer that requires message transformation (e.g., unwrapping `SuccessorNotification`
     /// envelopes when receiving from an agent via a proxy).
     ///
     /// For the common case of receiving from the default counterpart, use
     /// [`on_receive_notification`](Self::on_receive_notification) instead.
-    pub fn on_receive_notification_from<Notif: JrNotification, End: JrRole, F, T, ToFut>(
+    pub fn on_receive_notification_from<Notif: JrNotification, Peer: JrRole, F, T, ToFut>(
         self,
-        endpoint: End,
+        peer: Peer,
         op: F,
         to_future_hack: ToFut,
     ) -> JrConnectionBuilder<impl JrMessageHandler<Link = H::Link>, R>
     where
-        H::Link: HasPeer<End>,
+        H::Link: HasPeer<Peer>,
         F: AsyncFnMut(Notif, JrConnectionCx<H::Link>) -> Result<T, crate::Error> + Send,
         T: IntoHandled<(Notif, JrConnectionCx<H::Link>)>,
         ToFut: Fn(
@@ -944,7 +944,7 @@ impl<H: JrMessageHandler, R: JrResponder<H::Link>> JrConnectionBuilder<H, R> {
             + Sync,
     {
         self.with_handler(NotificationHandler::new(
-            endpoint,
+            peer,
             <H::Link>::default(),
             op,
             to_future_hack,
@@ -1555,22 +1555,22 @@ impl<Link: JrLink> JrConnectionCx<Link> {
     /// The request context's response type matches the request's response type,
     /// enabling type-safe message forwarding.
     pub fn send_proxied_message_to<
-        End: JrRole,
+        Peer: JrRole,
         Req: JrRequest<Response: Send>,
         Notif: JrNotification,
     >(
         &self,
-        end: End,
+        peer: Peer,
         message: MessageCx<Req, Notif>,
     ) -> Result<(), crate::Error>
     where
-        Link: HasPeer<End>,
+        Link: HasPeer<Peer>,
     {
         match message {
             MessageCx::Request(request, request_cx) => self
-                .send_request_to(end, request)
+                .send_request_to(peer, request)
                 .forward_to_request_cx(request_cx),
-            MessageCx::Notification(notification) => self.send_notification_to(end, notification),
+            MessageCx::Notification(notification) => self.send_notification_to(peer, notification),
         }
     }
 
@@ -1638,17 +1638,17 @@ impl<Link: JrLink> JrConnectionCx<Link> {
     ///
     /// The message will be transformed according to the role's [`SendsToRole`](crate::SendsToRole)
     /// implementation before being sent.
-    pub fn send_request_to<End: JrRole, Req: JrRequest>(
+    pub fn send_request_to<Peer: JrRole, Req: JrRequest>(
         &self,
-        end: End,
+        peer: Peer,
         request: Req,
     ) -> JrResponse<Req::Response>
     where
-        Link: HasPeer<End>,
+        Link: HasPeer<Peer>,
     {
         let method = request.method().to_string();
         let (response_tx, response_rx) = oneshot::channel();
-        match Link::remote_style(end).transform_outgoing_message(request) {
+        match Link::remote_style(peer).transform_outgoing_message(request) {
             Ok(untyped) => {
                 // Transform the message for the target role
                 let params = crate::util::json_cast(untyped.params).ok();
@@ -1721,18 +1721,18 @@ impl<Link: JrLink> JrConnectionCx<Link> {
     ///
     /// The message will be transformed according to the role's [`SendsToRole`](crate::SendsToRole)
     /// implementation before being sent.
-    pub fn send_notification_to<End: JrRole, N: JrNotification>(
+    pub fn send_notification_to<Peer: JrRole, N: JrNotification>(
         &self,
-        end: End,
+        peer: Peer,
         notification: N,
     ) -> Result<(), crate::Error>
     where
-        Link: HasPeer<End>,
+        Link: HasPeer<Peer>,
     {
-        let remote_style = Link::remote_style(end);
+        let remote_style = Link::remote_style(peer);
         tracing::debug!(
             role = std::any::type_name::<Link>(),
-            endpoint = std::any::type_name::<End>(),
+            peer = std::any::type_name::<Peer>(),
             notification_type = std::any::type_name::<N>(),
             ?remote_style,
             original_method = notification.method(),

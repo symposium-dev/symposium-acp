@@ -3,29 +3,29 @@
 //! This module contains documented examples of patterns that come up
 //! frequently when building agents, proxies, and other ACP components.
 //!
-//! # Roles and Endpoints
+//! # Roles and Peers
 //!
-//! ACP connections are typed by their *role*, which captures both "who I am"
-//! and "who I'm talking to". Roles implement [`JrLink`] and determine what
+//! ACP connections are typed by their *link*, which captures both "who I am"
+//! and "who I'm talking to". Links implement [`JrLink`] and determine what
 //! operations are valid on a connection.
 //!
-//! ## Endpoints
+//! ## Peers
 //!
-//! *Endpoints* ([`JrEndpoint`]) are logical destinations for messages:
+//! *Peers* ([`JrRole`]) are logical destinations for messages:
 //!
-//! - [`Client`] - The client endpoint (IDE, CLI, etc.)
-//! - [`Agent`] - The agent endpoint (AI-powered component)
-//! - [`Conductor`] - The conductor endpoint (orchestrates proxy chains)
+//! - [`Client`] - The client role (IDE, CLI, etc.)
+//! - [`Agent`] - The agent role (AI-powered component)
+//! - [`Conductor`] - The conductor role (orchestrates proxy chains)
 //!
-//! Most roles have a single implicit endpoint, but proxies can send to
-//! multiple endpoints. Use [`send_request_to`] and [`send_notification_to`]
+//! Most links have a single implicit peer, but proxies can send to
+//! multiple peers. Use [`send_request_to`] and [`send_notification_to`]
 //! to specify the destination explicitly.
 //!
-//! ## Role Types
+//! ## Link Types
 //!
-//! The built-in role types are:
+//! The built-in link types are:
 //!
-//! | Role | Description | Can send to |
+//! | Link | Description | Can send to |
 //! |------|-------------|-------------|
 //! | [`ClientToAgent`] | Client's connection to an agent | `Agent` |
 //! | [`AgentToClient`] | Agent's connection to a client | `Client` |
@@ -33,13 +33,13 @@
 //! | [`ConductorToClient`] | Conductor's connection to a client | `Client`, `Agent` |
 //! | [`ConductorToProxy`] | Conductor's connection to a proxy | `Agent` |
 //! | [`ConductorToAgent`] | Conductor's connection to the final agent | `Agent` |
-//! | [`UntypedLink`] | Generic role for testing/dynamic scenarios | any |
+//! | [`UntypedLink`] | Generic link for testing/dynamic scenarios | any |
 //!
-//! ## Proxies and Multiple Endpoints
+//! ## Proxies and Multiple Peers
 //!
 //! A proxy sits between client and agent, so it needs to send messages in
-//! both directions. [`ProxyToConductor`] implements `HasEndpoint<Client>` and
-//! `HasEndpoint<Agent>`, allowing it to forward messages appropriately:
+//! both directions. [`ProxyToConductor`] implements `HasPeer<Client>` and
+//! `HasPeer<Agent>`, allowing it to forward messages appropriately:
 //!
 //! ```ignore
 //! // Forward a request toward the agent
@@ -54,7 +54,7 @@
 //! automatically unwrapped.
 //!
 //! [`JrLink`]: crate::role::JrLink
-//! [`JrEndpoint`]: crate::role::JrEndpoint
+//! [`JrRole`]: crate::role::JrRole
 //! [`Client`]: crate::Client
 //! [`Agent`]: crate::Agent
 //! [`Conductor`]: crate::Conductor
@@ -182,9 +182,9 @@ pub mod custom_message_handlers {
     //!
     //! # When to use `MatchMessage` vs `MatchMessageFrom`
     //!
-    //! - [`MatchMessage`] - Use when you don't need endpoint-aware handling
+    //! - [`MatchMessage`] - Use when you don't need peer-aware handling
     //! - [`MatchMessageFrom`] - Use in proxies where messages come from different
-    //!   endpoints (`Client` vs `Agent`) and may need different handling
+    //!   peers (`Client` vs `Agent`) and may need different handling
     //!
     //! [`JrMessageHandler`]: crate::JrMessageHandler
     //! [`MatchMessage`]: crate::util::MatchMessage

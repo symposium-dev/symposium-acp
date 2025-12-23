@@ -1480,31 +1480,31 @@ pub enum ConductorMessage {
 }
 
 trait JrConnectionCxExt<Link: JrLink> {
-    fn send_proxied_message_to_via<End: JrRole>(
+    fn send_proxied_message_to_via<Peer: JrRole>(
         &self,
-        end: End,
+        peer: Peer,
         conductor_tx: &mpsc::Sender<ConductorMessage>,
         message: MessageCx,
     ) -> Result<(), sacp::Error>
     where
-        Link: sacp::HasPeer<End>;
+        Link: sacp::HasPeer<Peer>;
 }
 
 impl<Link: JrLink> JrConnectionCxExt<Link> for JrConnectionCx<Link> {
-    fn send_proxied_message_to_via<End: JrRole>(
+    fn send_proxied_message_to_via<Peer: JrRole>(
         &self,
-        end: End,
+        peer: Peer,
         conductor_tx: &mpsc::Sender<ConductorMessage>,
         message: MessageCx,
     ) -> Result<(), sacp::Error>
     where
-        Link: sacp::HasPeer<End>,
+        Link: sacp::HasPeer<Peer>,
     {
         match message {
             MessageCx::Request(request, request_cx) => self
-                .send_request_to(end, request)
+                .send_request_to(peer, request)
                 .forward_response_via(conductor_tx, request_cx),
-            MessageCx::Notification(notification) => self.send_notification_to(end, notification),
+            MessageCx::Notification(notification) => self.send_notification_to(peer, notification),
         }
     }
 }

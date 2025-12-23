@@ -3,8 +3,8 @@
 //! Roles are directional - they capture both "who I am" and "who I'm talking to".
 //! For example, `ClientToAgent` is a client's connection to an agent.
 //!
-//! Endpoints are logical destinations for messages. Most roles have a single
-//! implicit endpoint, but proxies can send to multiple endpoints (`Client` or `Agent`).
+//! Peers are logical destinations for messages. Most links have a single
+//! implicit peer, but proxies can send to multiple peers (`Client` or `Agent`).
 
 use std::{fmt::Debug, hash::Hash};
 
@@ -32,10 +32,10 @@ pub trait JrLink: Debug + Copy + Send + Sync + 'static + Eq + Ord + Hash + Defau
     /// this is the default peer that you are communicating with.
     ///
     /// But that default convenience is only permitted for links that
-    /// implement [`HasDefaultEndpoint`]. More complex links like [`ProxyToConductor`]
+    /// implement [`HasDefaultPeer`]. More complex links like [`ProxyToConductor`]
     /// multiplex multiple "logical peers" over a single link. In that case, the
     /// `RemotePeer` is the [`Conductor`] that arranges messages.
-    /// Because those links do not implement [`HasDefaultEndpoint`], users are required
+    /// Because those links do not implement [`HasDefaultPeer`], users are required
     /// to explicitly specify the peer role they wish to use by
     /// calling [`JrConnectionCx::send_request_to`].
     type RemotePeer: JrRole;
@@ -59,19 +59,19 @@ pub trait JrLink: Debug + Copy + Send + Sync + 'static + Eq + Ord + Hash + Defau
     }
 }
 
-/// A role that has a default endpoint for sending messages (the default is `JrLink::HandlerEndpoint`)
+/// A link that has a default peer for sending messages.
 pub trait HasDefaultPeer: JrLink {}
 
 /// A logical destination for messages (e.g., Client, Agent, McpServer).
 pub trait JrRole: Debug + Copy + Send + Sync + 'static + Eq + Ord + Hash + Default {}
 
-/// Declares that a role can send messages to a specific endpoint.
-pub trait HasPeer<End: JrRole>: JrLink {
-    /// Returns the remote role style for sending to this endpoint.
-    fn remote_style(end: End) -> RemoteRoleStyle;
+/// Declares that a link can send messages to a specific peer role.
+pub trait HasPeer<Peer: JrRole>: JrLink {
+    /// Returns the remote role style for sending to this peer.
+    fn remote_style(peer: Peer) -> RemoteRoleStyle;
 }
 
-/// Describes how messages are transformed when sent to a remote endpoint.
+/// Describes how messages are transformed when sent to a remote peer.
 #[derive(Debug)]
 #[non_exhaustive]
 pub enum RemoteRoleStyle {
@@ -167,28 +167,28 @@ impl RemoteRoleStyle {
 }
 
 // ============================================================================
-// Endpoints - logical destinations for messages
+// Roles - logical destinations for messages
 // ============================================================================
 
-/// A generic endpoint for untyped connections.
+/// A generic role for untyped connections.
 #[derive(Debug, Default, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct UntypedRole;
 
 impl JrRole for UntypedRole {}
 
-/// Endpoint representing the client direction.
+/// Role representing the client direction.
 #[derive(Debug, Default, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Client;
 
 impl JrRole for Client {}
 
-/// Endpoint representing the agent direction.
+/// Role representing the agent direction.
 #[derive(Debug, Default, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Agent;
 
 impl JrRole for Agent {}
 
-/// Endpoint representing the conductor direction.
+/// Role representing the conductor direction.
 #[derive(Debug, Default, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Conductor;
 
@@ -200,7 +200,7 @@ impl JrRole for Conductor {}
 
 /// A generic link for testing scenarios.
 ///
-/// `UntypedLink` can send to and receive from any endpoint without transformation.
+/// `UntypedLink` can send to and receive from any peer without transformation.
 /// This is useful for tests and scenarios where the exact role is not known
 /// at compile time.
 #[derive(Debug, Default, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -342,7 +342,7 @@ impl HasPeer<Agent> for ConductorToAgent {
 
 /// A proxy's connection to a conductor.
 ///
-/// Proxies can send to two endpoints:
+/// Proxies can send to two peers:
 /// - `Client`: messages pass through unchanged
 /// - `Agent`: messages are wrapped in a `SuccessorMessage` envelope
 #[derive(Debug, Default, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]

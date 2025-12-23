@@ -1,18 +1,18 @@
 //! Utilities for pattern matching on untyped JSON-RPC messages.
 //!
 //! When handling [`UntypedMessage`]s, you can use [`MatchMessage`] for simple parsing
-//! or [`MatchMessageFrom`] when you need role-aware endpoint transforms (e.g., unwrapping
+//! or [`MatchMessageFrom`] when you need role-aware peer transforms (e.g., unwrapping
 //! proxy envelopes).
 //!
 //! # When to use which
 //!
 //! - **[`MatchMessageFrom`]**: Preferred over implementing [`JrMessageHandler`] directly.
 //!   Use this in connection handlers when you need to match on message types with
-//!   proper endpoint-aware transforms (e.g., unwrapping `SuccessorMessage` envelopes).
+//!   proper peer-aware transforms (e.g., unwrapping `SuccessorMessage` envelopes).
 //!
 //! - **[`MatchMessage`]**: Use this when you already have an unwrapped message and
 //!   just need to parse it, such as inside a [`MatchMessageFrom`] callback or when
-//!   processing messages that don't need endpoint transforms.
+//!   processing messages that don't need peer transforms.
 //!
 //! [`JrMessageHandler`]: crate::JrMessageHandler
 
@@ -30,9 +30,9 @@ use crate::{
 ///
 /// Use this when you already have an unwrapped message and just need to parse it,
 /// such as inside a [`MatchMessageFrom`] callback or when processing messages
-/// that don't need endpoint transforms.
+/// that don't need peer transforms.
 ///
-/// For connection handlers where you need proper endpoint-aware transforms,
+/// For connection handlers where you need proper peer-aware transforms,
 /// use [`MatchMessageFrom`] instead.
 ///
 /// # Example
@@ -84,7 +84,7 @@ impl MatchMessage {
     /// Create a pattern matcher from an existing `Handled` state.
     ///
     /// This is useful when composing with [`MatchMessageFrom`] which applies
-    /// endpoint transforms before delegating to `MatchMessage` for parsing.
+    /// peer transforms before delegating to `MatchMessage` for parsing.
     pub fn from_handled(state: Result<Handled<MessageCx>, crate::Error>) -> Self {
         Self { state }
     }
@@ -275,11 +275,11 @@ impl MatchMessage {
 /// **Prefer this over implementing [`JrMessageHandler`] directly.** This provides
 /// a more ergonomic API for matching on message types in connection handlers.
 ///
-/// Use this when you need endpoint-aware transforms (e.g., unwrapping proxy envelopes)
+/// Use this when you need peer-aware transforms (e.g., unwrapping proxy envelopes)
 /// before parsing messages. For simple parsing without role awareness (e.g., inside
 /// a callback), use [`MatchMessage`] instead.
 ///
-/// This wraps [`MatchMessage`] and applies endpoint-specific message transformations
+/// This wraps [`MatchMessage`] and applies peer-specific message transformations
 /// via `remote_style().handle_incoming_message()` before delegating to `MatchMessage`
 /// for the actual parsing.
 ///
@@ -365,27 +365,27 @@ impl<Link: JrLink> MatchMessageFrom<Link> {
             .await
     }
 
-    /// Try to handle the message as a request of type `Req` from a specific endpoint.
+    /// Try to handle the message as a request of type `Req` from a specific peer.
     ///
-    /// This is similar to [`if_request`](Self::if_request), but first applies endpoint-specific
+    /// This is similar to [`if_request`](Self::if_request), but first applies peer-specific
     /// message transformation (e.g., unwrapping `SuccessorMessage` envelopes when receiving
     /// from an agent via a proxy).
     ///
     /// # Parameters
     ///
-    /// * `endpoint` - The endpoint the message is expected to come from
+    /// * `peer` - The peer the message is expected to come from
     /// * `op` - The handler to call if the message matches
-    pub async fn if_request_from<End: JrRole, Req: JrRequest, H>(
+    pub async fn if_request_from<Peer: JrRole, Req: JrRequest, H>(
         mut self,
-        endpoint: End,
+        peer: Peer,
         op: impl AsyncFnOnce(Req, JrRequestCx<Req::Response>) -> Result<H, crate::Error>,
     ) -> Self
     where
-        Link: HasPeer<End>,
+        Link: HasPeer<Peer>,
         H: crate::IntoHandled<(Req, JrRequestCx<Req::Response>)>,
     {
         if let Ok(Handled::No { message, retry: _ }) = self.state {
-            let remote_style = Link::remote_style(endpoint);
+            let remote_style = Link::remote_style(peer);
             self.state = remote_style
                 .handle_incoming_message(
                     message,
@@ -423,27 +423,27 @@ impl<Link: JrLink> MatchMessageFrom<Link> {
             .await
     }
 
-    /// Try to handle the message as a notification of type `N` from a specific endpoint.
+    /// Try to handle the message as a notification of type `N` from a specific peer.
     ///
-    /// This is similar to [`if_notification`](Self::if_notification), but first applies endpoint-specific
+    /// This is similar to [`if_notification`](Self::if_notification), but first applies peer-specific
     /// message transformation (e.g., unwrapping `SuccessorMessage` envelopes when receiving
     /// from an agent via a proxy).
     ///
     /// # Parameters
     ///
-    /// * `endpoint` - The endpoint the message is expected to come from
+    /// * `peer` - The peer the message is expected to come from
     /// * `op` - The handler to call if the message matches
-    pub async fn if_notification_from<End: JrRole, N: JrNotification, H>(
+    pub async fn if_notification_from<Peer: JrRole, N: JrNotification, H>(
         mut self,
-        endpoint: End,
+        peer: Peer,
         op: impl AsyncFnOnce(N) -> Result<H, crate::Error>,
     ) -> Self
     where
-        Link: HasPeer<End>,
+        Link: HasPeer<Peer>,
         H: crate::IntoHandled<N>,
     {
         if let Ok(Handled::No { message, retry: _ }) = self.state {
-            let remote_style = Link::remote_style(endpoint);
+            let remote_style = Link::remote_style(peer);
             self.state = remote_style
                 .handle_incoming_message(
                     message,
@@ -461,26 +461,26 @@ impl<Link: JrLink> MatchMessageFrom<Link> {
         self
     }
 
-    /// Try to handle the message as a typed `MessageCx<R, N>` from a specific endpoint.
+    /// Try to handle the message as a typed `MessageCx<R, N>` from a specific peer.
     ///
-    /// This is similar to [`MatchMessage::if_message`], but first applies endpoint-specific
+    /// This is similar to [`MatchMessage::if_message`], but first applies peer-specific
     /// message transformation (e.g., unwrapping `SuccessorMessage` envelopes).
     ///
     /// # Parameters
     ///
-    /// * `endpoint` - The endpoint the message is expected to come from
+    /// * `peer` - The peer the message is expected to come from
     /// * `op` - The handler to call if the message matches
-    pub async fn if_message_from<End: JrRole, R: JrRequest, N: JrNotification, H>(
+    pub async fn if_message_from<Peer: JrRole, R: JrRequest, N: JrNotification, H>(
         mut self,
-        endpoint: End,
+        peer: Peer,
         op: impl AsyncFnOnce(MessageCx<R, N>) -> Result<H, crate::Error>,
     ) -> Self
     where
-        Link: HasPeer<End>,
+        Link: HasPeer<Peer>,
         H: crate::IntoHandled<MessageCx<R, N>>,
     {
         if let Ok(Handled::No { message, retry: _ }) = self.state {
-            let remote_style = Link::remote_style(endpoint);
+            let remote_style = Link::remote_style(peer);
             self.state = remote_style
                 .handle_incoming_message(
                     message,
