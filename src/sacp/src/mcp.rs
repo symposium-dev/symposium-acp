@@ -1,5 +1,5 @@
 use crate::{
-    HasDefaultEndpoint, HasEndpoint, JrEndpoint, JrRole, jsonrpc::JrConnectionBuilder,
+    HasDefaultEndpoint, HasEndpoint, JrEndpoint, JrLink, jsonrpc::JrConnectionBuilder,
     jsonrpc::handlers::NullHandler, role::RemoteRoleStyle,
 };
 
@@ -19,7 +19,7 @@ impl JrEndpoint for McpServerEnd {}
 #[derive(Debug, Default, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct McpClientToServer;
 
-impl JrRole for McpClientToServer {
+impl JrLink for McpClientToServer {
     type HandlerEndpoint = McpServerEnd;
     type State = ();
 }
@@ -43,7 +43,7 @@ impl McpClientToServer {
 #[derive(Debug, Default, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct McpServerToClient;
 
-impl JrRole for McpServerToClient {
+impl JrLink for McpServerToClient {
     type HandlerEndpoint = McpClient;
     type State = ();
 }

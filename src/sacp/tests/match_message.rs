@@ -51,12 +51,12 @@ impl JrRequest for EchoRequestResponse {
 struct EchoHandler;
 
 impl JrMessageHandler for EchoHandler {
-    type Role = UntypedRole;
+    type Link = UntypedRole;
 
     async fn handle_message(
         &mut self,
         message: MessageCx,
-        cx: JrConnectionCx<Self::Role>,
+        cx: JrConnectionCx<Self::Link>,
     ) -> Result<Handled<MessageCx>, sacp::Error> {
         MatchMessageFrom::new(message, &cx)
             .if_request(async move |request: EchoRequestResponse, request_cx| {
@@ -95,12 +95,12 @@ async fn modify_message_en_route() -> Result<(), sacp::Error> {
     }
 
     impl JrMessageHandler for PushHandler {
-        type Role = UntypedRole;
+        type Link = UntypedRole;
 
         async fn handle_message(
             &mut self,
             message: MessageCx,
-            cx: JrConnectionCx<Self::Role>,
+            cx: JrConnectionCx<Self::Link>,
         ) -> Result<Handled<MessageCx>, sacp::Error> {
             MatchMessageFrom::new(message, &cx)
                 .if_request(async move |mut request: EchoRequestResponse, request_cx| {

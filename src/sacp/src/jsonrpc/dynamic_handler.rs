@@ -1,7 +1,7 @@
 use futures::future::BoxFuture;
 use uuid::Uuid;
 
-use crate::role::JrRole;
+use crate::role::JrLink;
 use crate::{Handled, JrConnectionCx, JrMessageHandler, MessageCx};
 
 /// Internal dyn-safe wrapper around `JrMessageHandler`
@@ -15,11 +15,11 @@ pub(crate) trait DynamicHandler<Role>: Send {
     fn dyn_describe_chain(&self) -> String;
 }
 
-impl<H: JrMessageHandler> DynamicHandler<H::Role> for H {
+impl<H: JrMessageHandler> DynamicHandler<H::Link> for H {
     fn dyn_handle_message(
         &mut self,
         message: MessageCx,
-        cx: JrConnectionCx<H::Role>,
+        cx: JrConnectionCx<H::Link>,
     ) -> BoxFuture<'_, Result<Handled<MessageCx>, crate::Error>> {
         Box::pin(JrMessageHandler::handle_message(self, message, cx))
     }
@@ -35,7 +35,7 @@ pub(crate) enum DynamicHandlerMessage<Role> {
     RemoveDynamicHandler(Uuid),
 }
 
-impl<Role: JrRole> std::fmt::Debug for DynamicHandlerMessage<Role> {
+impl<Role: JrLink> std::fmt::Debug for DynamicHandlerMessage<Role> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::AddDynamicHandler(arg0, arg1) => f

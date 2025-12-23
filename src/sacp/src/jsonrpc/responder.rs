@@ -6,22 +6,23 @@
 
 use std::future::Future;
 
-use crate::{JrConnectionCx, role::JrRole};
+use crate::{JrConnectionCx, role::JrLink};
 
 /// A responder runs background tasks alongside a connection.
 ///
 /// Responders are composed using [`ChainResponder`] and run in parallel
 /// when the connection is active.
-pub trait JrResponder<Role: JrRole>: Send {
+pub trait JrResponder<Role: JrLink>: Send {
     /// Run this responder to completion.
-    fn run(self, cx: JrConnectionCx<Role>) -> impl Future<Output = Result<(), crate::Error>> + Send;
+    fn run(self, cx: JrConnectionCx<Role>)
+    -> impl Future<Output = Result<(), crate::Error>> + Send;
 }
 
 /// A no-op responder that completes immediately.
 #[derive(Default)]
 pub struct NullResponder;
 
-impl<Role: JrRole> JrResponder<Role> for NullResponder {
+impl<Role: JrLink> JrResponder<Role> for NullResponder {
     async fn run(self, _cx: JrConnectionCx<Role>) -> Result<(), crate::Error> {
         Ok(())
     }
@@ -40,7 +41,7 @@ impl<A, B> ChainResponder<A, B> {
     }
 }
 
-impl<Role: JrRole, A: JrResponder<Role>, B: JrResponder<Role>> JrResponder<Role>
+impl<Role: JrLink, A: JrResponder<Role>, B: JrResponder<Role>> JrResponder<Role>
     for ChainResponder<A, B>
 {
     async fn run(self, cx: JrConnectionCx<Role>) -> Result<(), crate::Error> {
@@ -67,7 +68,7 @@ impl<F> SpawnedResponder<F> {
 
 impl<Role, F, Fut> JrResponder<Role> for SpawnedResponder<F>
 where
-    Role: JrRole,
+    Role: JrLink,
     F: FnOnce(JrConnectionCx<Role>) -> Fut + Send,
     Fut: Future<Output = Result<(), crate::Error>> + Send,
 {

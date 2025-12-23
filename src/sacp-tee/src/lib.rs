@@ -112,7 +112,7 @@ impl TeeHandler {
 }
 
 impl JrMessageHandler for TeeHandler {
-    type Role = ProxyToConductor;
+    type Link = ProxyToConductor;
 
     fn describe_chain(&self) -> impl std::fmt::Debug {
         "tee"

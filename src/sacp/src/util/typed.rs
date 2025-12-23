@@ -22,7 +22,7 @@ use jsonrpcmsg::Params;
 use crate::{
     Handled, HasDefaultEndpoint, JrConnectionCx, JrMessageHandler, JrNotification, JrRequest,
     JrRequestCx, MessageCx, UntypedMessage,
-    role::{HasEndpoint, JrEndpoint, JrRole},
+    role::{HasEndpoint, JrEndpoint, JrLink},
     util::json_cast,
 };
 
@@ -325,12 +325,12 @@ impl MatchMessage {
 /// # }
 /// ```
 #[must_use]
-pub struct MatchMessageFrom<Role: JrRole> {
+pub struct MatchMessageFrom<Role: JrLink> {
     state: Result<Handled<MessageCx>, crate::Error>,
     cx: JrConnectionCx<Role>,
 }
 
-impl<Role: JrRole> MatchMessageFrom<Role> {
+impl<Role: JrLink> MatchMessageFrom<Role> {
     /// Create a new pattern matcher for the given untyped request message.
     pub fn new(message: MessageCx, cx: &JrConnectionCx<Role>) -> Self {
         Self {
@@ -358,7 +358,7 @@ impl<Role: JrRole> MatchMessageFrom<Role> {
     ) -> Self
     where
         Role: HasDefaultEndpoint,
-        Role: HasEndpoint<<Role as JrRole>::HandlerEndpoint>,
+        Role: HasEndpoint<<Role as JrLink>::HandlerEndpoint>,
         H: crate::IntoHandled<(Req, JrRequestCx<Req::Response>)>,
     {
         self.if_request_from(<Role::HandlerEndpoint>::default(), op)
@@ -416,10 +416,10 @@ impl<Role: JrRole> MatchMessageFrom<Role> {
     ) -> Self
     where
         Role: HasDefaultEndpoint,
-        Role: HasEndpoint<<Role as JrRole>::HandlerEndpoint>,
+        Role: HasEndpoint<<Role as JrLink>::HandlerEndpoint>,
         H: crate::IntoHandled<N>,
     {
-        self.if_notification_from(<Role as JrRole>::HandlerEndpoint::default(), op)
+        self.if_notification_from(<Role as JrLink>::HandlerEndpoint::default(), op)
             .await
     }
 
@@ -527,7 +527,7 @@ impl<Role: JrRole> MatchMessageFrom<Role> {
     /// matching chain and get the final result.
     pub async fn otherwise_delegate(
         self,
-        mut handler: impl JrMessageHandler<Role = Role>,
+        mut handler: impl JrMessageHandler<Link = Role>,
     ) -> Result<Handled<MessageCx>, crate::Error> {
         match self.state? {
             Handled::Yes => Ok(Handled::Yes),
@@ -586,7 +586,7 @@ impl<Role: JrRole> MatchMessageFrom<Role> {
 /// Since notifications don't expect responses, handlers only receive the parsed
 /// notification (not a request context).
 #[must_use]
-pub struct TypeNotification<Role: JrRole> {
+pub struct TypeNotification<Role: JrLink> {
     cx: JrConnectionCx<Role>,
     state: Option<TypeNotificationState>,
 }
@@ -596,7 +596,7 @@ enum TypeNotificationState {
     Handled(Result<(), crate::Error>),
 }
 
-impl<Role: JrRole> TypeNotification<Role> {
+impl<Role: JrLink> TypeNotification<Role> {
     /// Create a new pattern matcher for the given untyped notification message.
     pub fn new(request: UntypedMessage, cx: &JrConnectionCx<Role>) -> Self {
         let UntypedMessage { method, params } = request;

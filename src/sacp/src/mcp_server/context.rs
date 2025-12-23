@@ -1,4 +1,4 @@
-use crate::{JrConnectionCx, JrRole};
+use crate::{JrConnectionCx, JrLink};
 
 /// Context about the ACP and MCP connection available to an MCP server.
 #[derive(Clone)]
@@ -7,7 +7,7 @@ pub struct McpContext<Role> {
     pub(super) connection_cx: JrConnectionCx<Role>,
 }
 
-impl<Role: JrRole> McpContext<Role> {
+impl<Role: JrLink> McpContext<Role> {
     /// The `acp:UUID` that was given.
     pub fn acp_url(&self) -> String {
         self.acp_url.clone()

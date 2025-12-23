@@ -1,5 +1,5 @@
 use crate::jsonrpc::{Handled, IntoHandled, JrMessageHandler};
-use crate::role::{HasEndpoint, JrEndpoint, JrRole};
+use crate::role::{HasEndpoint, JrEndpoint, JrLink};
 use crate::{JrConnectionCx, JrNotification, JrRequest, MessageCx, UntypedMessage};
 // Types re-exported from crate root
 use super::JrRequestCx;
@@ -7,11 +7,11 @@ use std::marker::PhantomData;
 use std::ops::AsyncFnMut;
 
 /// Null handler that accepts no messages.
-pub struct NullHandler<Role: JrRole> {
+pub struct NullHandler<Role: JrLink> {
     role: Role,
 }
 
-impl<Role: JrRole> NullHandler<Role> {
+impl<Role: JrLink> NullHandler<Role> {
     /// Creates a new null handler.
     pub fn new(role: Role) -> Self {
         Self { role }
@@ -23,8 +23,8 @@ impl<Role: JrRole> NullHandler<Role> {
     }
 }
 
-impl<Role: JrRole> JrMessageHandler for NullHandler<Role> {
-    type Role = Role;
+impl<Role: JrLink> JrMessageHandler for NullHandler<Role> {
+    type Link = Role;
 
     fn describe_chain(&self) -> impl std::fmt::Debug {
         "(null)"
@@ -44,7 +44,7 @@ impl<Role: JrRole> JrMessageHandler for NullHandler<Role> {
 
 /// Handler for typed request messages
 pub struct RequestHandler<
-    Role: JrRole,
+    Role: JrLink,
     End: JrEndpoint,
     Req: JrRequest = UntypedMessage,
     F = (),
@@ -55,7 +55,7 @@ pub struct RequestHandler<
     phantom: PhantomData<fn(Role, End, Req)>,
 }
 
-impl<Role: JrRole, End: JrEndpoint, Req: JrRequest, F, ToFut>
+impl<Role: JrLink, End: JrEndpoint, Req: JrRequest, F, ToFut>
     RequestHandler<Role, End, Req, F, ToFut>
 {
     /// Creates a new request handler
@@ -68,7 +68,7 @@ impl<Role: JrRole, End: JrEndpoint, Req: JrRequest, F, ToFut>
     }
 }
 
-impl<Role: JrRole, End: JrEndpoint, Req, F, T, ToFut> JrMessageHandler
+impl<Role: JrLink, End: JrEndpoint, Req, F, T, ToFut> JrMessageHandler
     for RequestHandler<Role, End, Req, F, ToFut>
 where
     Role: HasEndpoint<End>,
@@ -85,7 +85,7 @@ where
         + Send
         + Sync,
 {
-    type Role = Role;
+    type Link = Role;
 
     fn describe_chain(&self) -> impl std::fmt::Debug {
         std::any::type_name::<Req>()
@@ -171,7 +171,7 @@ where
 
 /// Handler for typed notification messages
 pub struct NotificationHandler<
-    Role: JrRole,
+    Role: JrLink,
     End: JrEndpoint,
     Notif: JrNotification = UntypedMessage,
     F = (),
@@ -182,7 +182,7 @@ pub struct NotificationHandler<
     phantom: PhantomData<fn(Role, End, Notif)>,
 }
 
-impl<Role: JrRole, End: JrEndpoint, Notif: JrNotification, F, ToFut>
+impl<Role: JrLink, End: JrEndpoint, Notif: JrNotification, F, ToFut>
     NotificationHandler<Role, End, Notif, F, ToFut>
 {
     /// Creates a new notification handler
@@ -195,7 +195,7 @@ impl<Role: JrRole, End: JrEndpoint, Notif: JrNotification, F, ToFut>
     }
 }
 
-impl<Role: JrRole, End: JrEndpoint, Notif, F, T, ToFut> JrMessageHandler
+impl<Role: JrLink, End: JrEndpoint, Notif, F, T, ToFut> JrMessageHandler
     for NotificationHandler<Role, End, Notif, F, ToFut>
 where
     Role: HasEndpoint<End>,
@@ -206,7 +206,7 @@ where
         + Send
         + Sync,
 {
-    type Role = Role;
+    type Link = Role;
 
     fn describe_chain(&self) -> impl std::fmt::Debug {
         std::any::type_name::<Notif>()
@@ -289,7 +289,7 @@ where
 
 /// Handler that handles both requests and notifications of specific types.
 pub struct MessageHandler<
-    Role: JrRole,
+    Role: JrLink,
     End: JrEndpoint,
     Req: JrRequest = UntypedMessage,
     Notif: JrNotification = UntypedMessage,
@@ -301,7 +301,7 @@ pub struct MessageHandler<
     phantom: PhantomData<fn(Role, End, Req, Notif)>,
 }
 
-impl<Role: JrRole, End: JrEndpoint, Req: JrRequest, Notif: JrNotification, F, ToFut>
+impl<Role: JrLink, End: JrEndpoint, Req: JrRequest, Notif: JrNotification, F, ToFut>
     MessageHandler<Role, End, Req, Notif, F, ToFut>
 {
     /// Creates a new message handler
@@ -314,7 +314,7 @@ impl<Role: JrRole, End: JrEndpoint, Req: JrRequest, Notif: JrNotification, F, To
     }
 }
 
-impl<Role: JrRole, End: JrEndpoint, Req: JrRequest, Notif: JrNotification, F, T, ToFut>
+impl<Role: JrLink, End: JrEndpoint, Req: JrRequest, Notif: JrNotification, F, T, ToFut>
     JrMessageHandler for MessageHandler<Role, End, Req, Notif, F, ToFut>
 where
     Role: HasEndpoint<End>,
@@ -328,7 +328,7 @@ where
         + Send
         + Sync,
 {
-    type Role = Role;
+    type Link = Role;
 
     fn describe_chain(&self) -> impl std::fmt::Debug {
         format!(
@@ -410,7 +410,7 @@ impl<H: JrMessageHandler> NamedHandler<H> {
 }
 
 impl<H: JrMessageHandler> JrMessageHandler for NamedHandler<H> {
-    type Role = H::Role;
+    type Link = H::Link;
 
     fn describe_chain(&self) -> impl std::fmt::Debug {
         format!(
@@ -423,7 +423,7 @@ impl<H: JrMessageHandler> JrMessageHandler for NamedHandler<H> {
     async fn handle_message(
         &mut self,
         message: MessageCx,
-        connection_cx: JrConnectionCx<H::Role>,
+        connection_cx: JrConnectionCx<H::Link>,
     ) -> Result<Handled<MessageCx>, crate::Error> {
         if let Some(name) = &self.name {
             crate::util::instrumented_with_connection_name(
@@ -446,7 +446,7 @@ pub struct ChainedHandler<H1, H2> {
 impl<H1, H2> ChainedHandler<H1, H2>
 where
     H1: JrMessageHandler,
-    H2: JrMessageHandler<Role = H1::Role>,
+    H2: JrMessageHandler<Link = H1::Link>,
 {
     /// Creates a new chain handler
     pub fn new(handler1: H1, handler2: H2) -> Self {
@@ -457,9 +457,9 @@ where
 impl<H1, H2> JrMessageHandler for ChainedHandler<H1, H2>
 where
     H1: JrMessageHandler,
-    H2: JrMessageHandler<Role = H1::Role>,
+    H2: JrMessageHandler<Link = H1::Link>,
 {
-    type Role = H1::Role;
+    type Link = H1::Link;
 
     fn describe_chain(&self) -> impl std::fmt::Debug {
         format!(
@@ -472,7 +472,7 @@ where
     async fn handle_message(
         &mut self,
         message: MessageCx,
-        connection_cx: JrConnectionCx<H1::Role>,
+        connection_cx: JrConnectionCx<H1::Link>,
     ) -> Result<Handled<MessageCx>, crate::Error> {
         match self
             .handler1

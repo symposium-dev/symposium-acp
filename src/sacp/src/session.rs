@@ -8,7 +8,7 @@ use futures::channel::mpsc;
 use tokio::sync::oneshot;
 
 use crate::{
-    Agent, Client, Handled, HasEndpoint, JrConnectionCx, JrMessageHandler, JrRequestCx, JrRole,
+    Agent, Client, Handled, HasEndpoint, JrConnectionCx, JrLink, JrMessageHandler, JrRequestCx,
     MessageCx,
     jsonrpc::{
         DynamicHandlerRegistration,
@@ -34,7 +34,7 @@ impl SessionBlockState for NonBlocking {}
 /// See [`SessionBuilder::block_task`].
 pub trait SessionBlockState: Send + 'static + Sync + std::fmt::Debug {}
 
-impl<Role: JrRole> JrConnectionCx<Role>
+impl<Role: JrLink> JrConnectionCx<Role>
 where
     Role: HasEndpoint<Agent>,
 {
@@ -688,12 +688,12 @@ impl<Role> JrMessageHandler for ActiveSessionHandler<Role>
 where
     Role: HasEndpoint<Agent>,
 {
-    type Role = Role;
+    type Link = Role;
 
     async fn handle_message(
         &mut self,
         message: MessageCx,
-        cx: JrConnectionCx<Self::Role>,
+        cx: JrConnectionCx<Self::Link>,
     ) -> Result<Handled<MessageCx>, crate::Error> {
         // If this is a message for our session, grab it.
         tracing::trace!(

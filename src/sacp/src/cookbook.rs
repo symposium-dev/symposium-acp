@@ -153,12 +153,12 @@ pub mod custom_message_handlers {
     //! struct MyHandler;
     //!
     //! impl JrMessageHandler for MyHandler {
-    //!     type Role = sacp::role::UntypedRole;
+    //!     type Link = sacp::role::UntypedRole;
     //!
     //!     async fn handle_message(
     //!         &mut self,
     //!         message: MessageCx,
-    //!         _cx: JrConnectionCx<Self::Role>,
+    //!         _cx: JrConnectionCx<Self::Link>,
     //!     ) -> Result<Handled<MessageCx>, sacp::Error> {
     //!         MatchMessage::new(message)
     //!             .if_request(async |req: InitializeRequest, request_cx| {

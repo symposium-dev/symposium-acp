@@ -25,7 +25,7 @@ use crate::{
 /// The role determines what operations are valid on a connection and
 /// provides role-specific behavior like handling unhandled messages.
 #[expect(async_fn_in_trait)]
-pub trait JrRole: Debug + Copy + Send + Sync + 'static + Eq + Ord + Hash + Default {
+pub trait JrLink: Debug + Copy + Send + Sync + 'static + Eq + Ord + Hash + Default {
     /// The default endpoint type for handlers registered on this role.
     ///
     /// This determines which endpoint messages are assumed to come from when
@@ -58,13 +58,13 @@ pub trait JrRole: Debug + Copy + Send + Sync + 'static + Eq + Ord + Hash + Defau
 }
 
 /// A role that has a default endpoint for sending messages (the default is `JrRole::HandlerEndpoint`)
-pub trait HasDefaultEndpoint: JrRole {}
+pub trait HasDefaultEndpoint: JrLink {}
 
 /// A logical destination for messages (e.g., Client, Agent, McpServer).
 pub trait JrEndpoint: Debug + Copy + Send + Sync + 'static + Eq + Ord + Hash + Default {}
 
 /// Declares that a role can send messages to a specific endpoint.
-pub trait HasEndpoint<End: JrEndpoint>: JrRole {
+pub trait HasEndpoint<End: JrEndpoint>: JrLink {
     /// Returns the remote role style for sending to this endpoint.
     fn remote_style(end: End) -> RemoteRoleStyle;
 }
@@ -95,7 +95,7 @@ impl RemoteRoleStyle {
         }
     }
 
-    pub(crate) async fn handle_incoming_message<R: JrRole>(
+    pub(crate) async fn handle_incoming_message<R: JrLink>(
         &self,
         message_cx: MessageCx,
         connection_cx: JrConnectionCx<R>,
@@ -204,7 +204,7 @@ impl JrEndpoint for Conductor {}
 #[derive(Debug, Default, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct UntypedRole;
 
-impl JrRole for UntypedRole {
+impl JrLink for UntypedRole {
     type HandlerEndpoint = UntypedEndpoint;
 
     type State = ();
@@ -229,7 +229,7 @@ impl UntypedRole {
 #[derive(Debug, Default, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct ClientToAgent;
 
-impl JrRole for ClientToAgent {
+impl JrLink for ClientToAgent {
     type HandlerEndpoint = Agent;
 
     type State = ();
@@ -268,7 +268,7 @@ impl HasEndpoint<Agent> for ClientToAgent {
 #[derive(Debug, Default, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct AgentToClient;
 
-impl JrRole for AgentToClient {
+impl JrLink for AgentToClient {
     type HandlerEndpoint = Client;
     type State = ();
 }
@@ -285,7 +285,7 @@ impl HasEndpoint<Client> for AgentToClient {
 #[derive(Debug, Default, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct ConductorToClient;
 
-impl JrRole for ConductorToClient {
+impl JrLink for ConductorToClient {
     type HandlerEndpoint = Client;
     type State = ();
 }
@@ -308,7 +308,7 @@ impl HasEndpoint<Agent> for ConductorToClient {
 #[derive(Debug, Default, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct ConductorToProxy;
 
-impl JrRole for ConductorToProxy {
+impl JrLink for ConductorToProxy {
     type HandlerEndpoint = Agent;
     type State = ();
 }
@@ -325,7 +325,7 @@ impl HasEndpoint<Agent> for ConductorToProxy {
 #[derive(Debug, Default, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct ConductorToAgent;
 
-impl JrRole for ConductorToAgent {
+impl JrLink for ConductorToAgent {
     type HandlerEndpoint = Agent;
     type State = ();
 }
@@ -350,7 +350,7 @@ pub struct ProxyToConductor;
 #[derive(Default)]
 pub struct ProxyToConductorState {}
 
-impl JrRole for ProxyToConductor {
+impl JrLink for ProxyToConductor {
     type HandlerEndpoint = Conductor;
     type State = ProxyToConductorState;
 
@@ -469,16 +469,16 @@ impl<Role> ProxySessionMessages<Role> {
     }
 }
 
-impl<Role: JrRole> JrMessageHandler for ProxySessionMessages<Role>
+impl<Role: JrLink> JrMessageHandler for ProxySessionMessages<Role>
 where
     Role: HasEndpoint<Agent> + HasEndpoint<Client>,
 {
-    type Role = Role;
+    type Link = Role;
 
     async fn handle_message(
         &mut self,
         message: MessageCx,
-        cx: JrConnectionCx<Self::Role>,
+        cx: JrConnectionCx<Self::Link>,
     ) -> Result<Handled<MessageCx>, crate::Error> {
         MatchMessageFrom::new(message, &cx)
             .if_message_from(Agent, async |message| {

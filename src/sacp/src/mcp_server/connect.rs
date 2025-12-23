@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use crate::{DynComponent, JrRole, mcp_server::McpContext};
+use crate::{DynComponent, JrLink, mcp_server::McpContext};
 
 /// Trait for types that can create MCP server connections.
 ///
@@ -29,7 +29,7 @@ use crate::{DynComponent, JrRole, mcp_server::McpContext};
 ///     }
 /// }
 /// ```
-pub trait McpServerConnect<Role: JrRole>: Send + Sync + 'static {
+pub trait McpServerConnect<Role: JrLink>: Send + Sync + 'static {
     /// The name of the MCP server, used to identify it in session responses.
     fn name(&self) -> String;
 
@@ -43,7 +43,7 @@ pub trait McpServerConnect<Role: JrRole>: Send + Sync + 'static {
     fn connect(&self, cx: McpContext<Role>) -> DynComponent;
 }
 
-impl<Role: JrRole, S: ?Sized + McpServerConnect<Role>> McpServerConnect<Role> for Box<S> {
+impl<Role: JrLink, S: ?Sized + McpServerConnect<Role>> McpServerConnect<Role> for Box<S> {
     fn name(&self) -> String {
         S::name(self)
     }
@@ -53,7 +53,7 @@ impl<Role: JrRole, S: ?Sized + McpServerConnect<Role>> McpServerConnect<Role> fo
     }
 }
 
-impl<Role: JrRole, S: ?Sized + McpServerConnect<Role>> McpServerConnect<Role> for Arc<S> {
+impl<Role: JrLink, S: ?Sized + McpServerConnect<Role>> McpServerConnect<Role> for Arc<S> {
     fn name(&self) -> String {
         S::name(self)
     }

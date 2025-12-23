@@ -9,8 +9,8 @@ use crate::schema::{
 };
 use crate::util::MatchMessageFrom;
 use crate::{
-    Agent, Channel, Component, Handled, HasEndpoint, JrConnectionCx, JrMessageHandler, JrRequestCx,
-    JrRole, MessageCx, UntypedMessage,
+    Agent, Channel, Component, Handled, HasEndpoint, JrConnectionCx, JrLink, JrMessageHandler,
+    JrRequestCx, MessageCx, UntypedMessage,
 };
 use std::sync::Arc;
 
@@ -33,7 +33,7 @@ pub(super) struct McpActiveSession<Role> {
     connections: FxHashMap<String, mpsc::Sender<MessageCx>>,
 }
 
-impl<Role: JrRole> McpActiveSession<Role>
+impl<Role: JrLink> McpActiveSession<Role>
 where
     Role: HasEndpoint<Agent>,
 {
@@ -210,11 +210,11 @@ where
     }
 }
 
-impl<Role: JrRole> JrMessageHandler for McpActiveSession<Role>
+impl<Role: JrLink> JrMessageHandler for McpActiveSession<Role>
 where
     Role: HasEndpoint<Agent>,
 {
-    type Role = Role;
+    type Link = Role;
 
     fn describe_chain(&self) -> impl std::fmt::Debug {
         "McpServerSession"

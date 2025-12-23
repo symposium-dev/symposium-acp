@@ -7,7 +7,7 @@
 use elizacp::ElizaAgent;
 use sacp::mcp_server::McpServer;
 use sacp::{
-    Agent, ClientToAgent, Component, DynComponent, HasEndpoint, JrResponder, JrRole,
+    Agent, ClientToAgent, Component, DynComponent, HasEndpoint, JrLink, JrResponder,
     ProxyToConductor,
 };
 use sacp_conductor::{Conductor, McpBridgeMode};
@@ -87,7 +87,7 @@ async fn test_scoped_mcp_server_through_session() -> Result<(), sacp::Error> {
 
 struct ScopedProxy;
 
-fn make_mcp_server<'a, Role: JrRole>(
+fn make_mcp_server<'a, Role: JrLink>(
     values: &'a Mutex<Vec<String>>,
 ) -> McpServer<Role, impl JrResponder<Role>>
 where

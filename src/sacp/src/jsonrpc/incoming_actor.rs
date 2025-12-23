@@ -13,7 +13,7 @@ use crate::jsonrpc::JrRequestCx;
 use crate::jsonrpc::ReplyMessage;
 use crate::jsonrpc::dynamic_handler::DynamicHandler;
 use crate::jsonrpc::dynamic_handler::DynamicHandlerMessage;
-use crate::role::JrRole;
+use crate::role::JrLink;
 
 use super::Handled;
 
@@ -25,12 +25,12 @@ use super::Handled;
 /// - Converts jsonrpcmsg::Request to UntypedMessage for handlers
 ///
 /// This is the protocol layer - it has no knowledge of how messages arrived.
-pub(super) async fn incoming_protocol_actor<Role: JrRole>(
+pub(super) async fn incoming_protocol_actor<Role: JrLink>(
     json_rpc_cx: &JrConnectionCx<Role>,
     transport_rx: mpsc::UnboundedReceiver<Result<jsonrpcmsg::Message, crate::Error>>,
     dynamic_handler_rx: mpsc::UnboundedReceiver<DynamicHandlerMessage<Role>>,
     reply_tx: mpsc::UnboundedSender<ReplyMessage>,
-    mut handler: impl JrMessageHandler<Role = Role>,
+    mut handler: impl JrMessageHandler<Link = Role>,
 ) -> Result<(), crate::Error> {
     let mut my_rx = transport_rx
         .map(IncomingProtocolMsg::Transport)
@@ -123,18 +123,18 @@ pub(super) async fn incoming_protocol_actor<Role: JrRole>(
 }
 
 #[derive(Debug)]
-enum IncomingProtocolMsg<Role: JrRole> {
+enum IncomingProtocolMsg<Role: JrLink> {
     Transport(Result<jsonrpcmsg::Message, crate::Error>),
     DynamicHandler(DynamicHandlerMessage<Role>),
 }
 
 /// Dispatches a JSON-RPC request to the handler.
 /// Report an error back to the server if it does not get handled.
-async fn dispatch_request<Role: JrRole>(
+async fn dispatch_request<Role: JrLink>(
     json_rpc_cx: &JrConnectionCx<Role>,
     request: jsonrpcmsg::Request,
     dynamic_handlers: &mut FxHashMap<Uuid, Box<dyn DynamicHandler<Role>>>,
-    handler: &mut impl JrMessageHandler<Role = Role>,
+    handler: &mut impl JrMessageHandler<Link = Role>,
     pending_messages: &mut Vec<MessageCx>,
     state: &mut Role::State,
 ) -> Result<(), crate::Error> {

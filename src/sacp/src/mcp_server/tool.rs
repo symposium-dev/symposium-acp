@@ -3,7 +3,7 @@
 use schemars::JsonSchema;
 use serde::{Serialize, de::DeserializeOwned};
 
-use crate::JrRole;
+use crate::JrLink;
 
 use super::McpContext;
 
@@ -55,7 +55,7 @@ use super::McpContext;
 ///     }
 /// }
 /// ```
-pub trait McpTool<Role: JrRole>: Send + Sync {
+pub trait McpTool<Role: JrLink>: Send + Sync {
     /// The type of input the tool accepts.
     type Input: JsonSchema + DeserializeOwned + Send + 'static;
 

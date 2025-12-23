@@ -131,7 +131,7 @@ pub use jsonrpc::{
 
 pub use role::{
     Agent, AgentToClient, Client, ClientToAgent, Conductor, HasDefaultEndpoint, HasEndpoint,
-    JrEndpoint, JrRole, ProxyToConductor,
+    JrEndpoint, JrLink, ProxyToConductor,
 };
 
 pub use component::{Component, DynComponent};

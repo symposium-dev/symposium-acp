@@ -6,7 +6,7 @@ use agent_client_protocol_schema::NewSessionRequest;
 use uuid::Uuid;
 
 use crate::{
-    Agent, Client, Handled, HasEndpoint, JrConnectionCx, JrMessageHandler, JrRole,
+    Agent, Client, Handled, HasEndpoint, JrConnectionCx, JrLink, JrMessageHandler,
     jsonrpc::{
         DynamicHandlerRegistration,
         responder::{JrResponder, NullResponder},
@@ -51,7 +51,7 @@ pub struct McpServer<Role, Responder = NullResponder> {
     responder: Responder,
 }
 
-impl<Role: JrRole> McpServer<Role, NullResponder>
+impl<Role: JrLink> McpServer<Role, NullResponder>
 where
     Role: HasEndpoint<Agent>,
 {
@@ -61,7 +61,7 @@ where
     }
 }
 
-impl<Role: JrRole, Responder: JrResponder<Role>> McpServer<Role, Responder>
+impl<Role: JrLink, Responder: JrResponder<Role>> McpServer<Role, Responder>
 where
     Role: HasEndpoint<Agent>,
 {
@@ -90,7 +90,7 @@ pub(crate) struct McpNewSessionHandler<Role> {
     active_session: McpActiveSession<Role>,
 }
 
-impl<Role: JrRole> McpNewSessionHandler<Role>
+impl<Role: JrLink> McpNewSessionHandler<Role>
 where
     Role: HasEndpoint<Agent>,
 {
@@ -137,16 +137,16 @@ where
     }
 }
 
-impl<Role: JrRole> JrMessageHandler for McpNewSessionHandler<Role>
+impl<Role: JrLink> JrMessageHandler for McpNewSessionHandler<Role>
 where
     Role: HasEndpoint<Client> + HasEndpoint<Agent>,
 {
-    type Role = Role;
+    type Link = Role;
 
     async fn handle_message(
         &mut self,
         message: crate::MessageCx,
-        cx: crate::JrConnectionCx<Self::Role>,
+        cx: crate::JrConnectionCx<Self::Link>,
     ) -> Result<crate::Handled<crate::MessageCx>, crate::Error> {
         MatchMessageFrom::new(message, &cx)
             .if_request_from(
