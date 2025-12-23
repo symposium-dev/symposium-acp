@@ -1,5 +1,5 @@
 use crate::{
-    HasDefaultEndpoint, HasPeer, JrLink, JrRole, jsonrpc::JrConnectionBuilder,
+    HasDefaultPeer, HasPeer, JrLink, JrRole, jsonrpc::JrConnectionBuilder,
     jsonrpc::handlers::NullHandler, role::RemoteRoleStyle,
 };
 
@@ -20,11 +20,11 @@ impl JrRole for McpServerEnd {}
 pub struct McpClientToServer;
 
 impl JrLink for McpClientToServer {
-    type HandlerEndpoint = McpServerEnd;
+    type RemotePeer = McpServerEnd;
     type State = ();
 }
 
-impl HasDefaultEndpoint for McpClientToServer {}
+impl HasDefaultPeer for McpClientToServer {}
 
 impl HasPeer<McpServerEnd> for McpClientToServer {
     fn remote_style(_: McpServerEnd) -> RemoteRoleStyle {
@@ -44,11 +44,11 @@ impl McpClientToServer {
 pub struct McpServerToClient;
 
 impl JrLink for McpServerToClient {
-    type HandlerEndpoint = McpClient;
+    type RemotePeer = McpClient;
     type State = ();
 }
 
-impl HasDefaultEndpoint for McpServerToClient {}
+impl HasDefaultPeer for McpServerToClient {}
 
 impl HasPeer<McpClient> for McpServerToClient {
     fn remote_style(_: McpClient) -> RemoteRoleStyle {

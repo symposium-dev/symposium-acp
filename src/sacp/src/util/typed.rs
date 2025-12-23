@@ -20,7 +20,7 @@
 use jsonrpcmsg::Params;
 
 use crate::{
-    Handled, HasDefaultEndpoint, JrConnectionCx, JrMessageHandler, JrNotification, JrRequest,
+    Handled, HasDefaultPeer, JrConnectionCx, JrMessageHandler, JrNotification, JrRequest,
     JrRequestCx, MessageCx, UntypedMessage,
     role::{HasPeer, JrLink, JrRole},
     util::json_cast,
@@ -357,11 +357,11 @@ impl<Link: JrLink> MatchMessageFrom<Link> {
         op: impl AsyncFnOnce(Req, JrRequestCx<Req::Response>) -> Result<H, crate::Error>,
     ) -> Self
     where
-        Link: HasDefaultEndpoint,
-        Link: HasPeer<<Link as JrLink>::HandlerEndpoint>,
+        Link: HasDefaultPeer,
+        Link: HasPeer<<Link as JrLink>::RemotePeer>,
         H: crate::IntoHandled<(Req, JrRequestCx<Req::Response>)>,
     {
-        self.if_request_from(<Link::HandlerEndpoint>::default(), op)
+        self.if_request_from(<Link::RemotePeer>::default(), op)
             .await
     }
 
@@ -415,11 +415,11 @@ impl<Link: JrLink> MatchMessageFrom<Link> {
         op: impl AsyncFnOnce(N) -> Result<H, crate::Error>,
     ) -> Self
     where
-        Link: HasDefaultEndpoint,
-        Link: HasPeer<<Link as JrLink>::HandlerEndpoint>,
+        Link: HasDefaultPeer,
+        Link: HasPeer<<Link as JrLink>::RemotePeer>,
         H: crate::IntoHandled<N>,
     {
-        self.if_notification_from(<Link as JrLink>::HandlerEndpoint::default(), op)
+        self.if_notification_from(<Link as JrLink>::RemotePeer::default(), op)
             .await
     }
 

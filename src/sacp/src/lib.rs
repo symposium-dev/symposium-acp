@@ -130,7 +130,7 @@ pub use jsonrpc::{
 };
 
 pub use role::{
-    Agent, AgentToClient, Client, ClientToAgent, Conductor, HasDefaultEndpoint, HasPeer, JrLink,
+    Agent, AgentToClient, Client, ClientToAgent, Conductor, HasDefaultPeer, HasPeer, JrLink,
     JrRole, ProxyToConductor,
 };
 

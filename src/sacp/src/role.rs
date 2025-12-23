@@ -26,17 +26,19 @@ use crate::{
 /// provides role-specific behavior like handling unhandled messages.
 #[expect(async_fn_in_trait)]
 pub trait JrLink: Debug + Copy + Send + Sync + 'static + Eq + Ord + Hash + Default {
-    /// The default endpoint type for handlers registered on this role.
+    /// The role being played by the remote peer on this link.
     ///
-    /// This determines which endpoint messages are assumed to come from when
-    /// using `on_receive_request`, `on_receive_notification`, etc. without
-    /// an explicit endpoint specification.
+    /// When you use [`JrConnectionCx::send_request`] or [`JrConnectionBuilder::on_receive_request`], etc.
+    /// this is the default peer that you are communicating with.
     ///
-    /// For roles with a single counterpart (like `ClientToAgent`), this is
-    /// typically that counterpart's endpoint. For roles that can receive from
-    /// multiple endpoints (like proxies), this should be set to an explicit
-    /// endpoint to avoid ambiguity.
-    type HandlerEndpoint: JrRole;
+    /// But that default convenience is only permitted for links that
+    /// implement [`HasDefaultEndpoint`]. More complex links like [`ProxyToConductor`]
+    /// multiplex multiple "logical peers" over a single link. In that case, the
+    /// `RemotePeer` is the [`Conductor`] that arranges messages.
+    /// Because those links do not implement [`HasDefaultEndpoint`], users are required
+    /// to explicitly specify the peer role they wish to use by
+    /// calling [`JrConnectionCx::send_request_to`].
+    type RemotePeer: JrRole;
 
     /// State maintained for connections this role.
     type State: Default;
@@ -58,7 +60,7 @@ pub trait JrLink: Debug + Copy + Send + Sync + 'static + Eq + Ord + Hash + Defau
 }
 
 /// A role that has a default endpoint for sending messages (the default is `JrLink::HandlerEndpoint`)
-pub trait HasDefaultEndpoint: JrLink {}
+pub trait HasDefaultPeer: JrLink {}
 
 /// A logical destination for messages (e.g., Client, Agent, McpServer).
 pub trait JrRole: Debug + Copy + Send + Sync + 'static + Eq + Ord + Hash + Default {}
@@ -170,9 +172,9 @@ impl RemoteRoleStyle {
 
 /// A generic endpoint for untyped connections.
 #[derive(Debug, Default, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct UntypedEndpoint;
+pub struct UntypedRole;
 
-impl JrRole for UntypedEndpoint {}
+impl JrRole for UntypedRole {}
 
 /// Endpoint representing the client direction.
 #[derive(Debug, Default, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -205,15 +207,15 @@ impl JrRole for Conductor {}
 pub struct UntypedLink;
 
 impl JrLink for UntypedLink {
-    type HandlerEndpoint = UntypedEndpoint;
+    type RemotePeer = UntypedRole;
 
     type State = ();
 }
 
-impl HasDefaultEndpoint for UntypedLink {}
+impl HasDefaultPeer for UntypedLink {}
 
-impl HasPeer<UntypedEndpoint> for UntypedLink {
-    fn remote_style(_end: UntypedEndpoint) -> RemoteRoleStyle {
+impl HasPeer<UntypedRole> for UntypedLink {
+    fn remote_style(_end: UntypedRole) -> RemoteRoleStyle {
         RemoteRoleStyle::Counterpart
     }
 }
@@ -230,7 +232,7 @@ impl UntypedLink {
 pub struct ClientToAgent;
 
 impl JrLink for ClientToAgent {
-    type HandlerEndpoint = Agent;
+    type RemotePeer = Agent;
 
     type State = ();
 
@@ -256,7 +258,7 @@ impl JrLink for ClientToAgent {
     }
 }
 
-impl HasDefaultEndpoint for ClientToAgent {}
+impl HasDefaultPeer for ClientToAgent {}
 
 impl HasPeer<Agent> for ClientToAgent {
     fn remote_style(_end: Agent) -> RemoteRoleStyle {
@@ -269,11 +271,11 @@ impl HasPeer<Agent> for ClientToAgent {
 pub struct AgentToClient;
 
 impl JrLink for AgentToClient {
-    type HandlerEndpoint = Client;
+    type RemotePeer = Client;
     type State = ();
 }
 
-impl HasDefaultEndpoint for AgentToClient {}
+impl HasDefaultPeer for AgentToClient {}
 
 impl HasPeer<Client> for AgentToClient {
     fn remote_style(_end: Client) -> RemoteRoleStyle {
@@ -286,7 +288,7 @@ impl HasPeer<Client> for AgentToClient {
 pub struct ConductorToClient;
 
 impl JrLink for ConductorToClient {
-    type HandlerEndpoint = Client;
+    type RemotePeer = Client;
     type State = ();
 }
 
@@ -309,11 +311,11 @@ impl HasPeer<Agent> for ConductorToClient {
 pub struct ConductorToProxy;
 
 impl JrLink for ConductorToProxy {
-    type HandlerEndpoint = Agent;
+    type RemotePeer = Agent;
     type State = ();
 }
 
-impl HasDefaultEndpoint for ConductorToProxy {}
+impl HasDefaultPeer for ConductorToProxy {}
 
 impl HasPeer<Agent> for ConductorToProxy {
     fn remote_style(_end: Agent) -> RemoteRoleStyle {
@@ -326,11 +328,11 @@ impl HasPeer<Agent> for ConductorToProxy {
 pub struct ConductorToAgent;
 
 impl JrLink for ConductorToAgent {
-    type HandlerEndpoint = Agent;
+    type RemotePeer = Agent;
     type State = ();
 }
 
-impl HasDefaultEndpoint for ConductorToAgent {}
+impl HasDefaultPeer for ConductorToAgent {}
 
 impl HasPeer<Agent> for ConductorToAgent {
     fn remote_style(_end: Agent) -> RemoteRoleStyle {
@@ -351,7 +353,7 @@ pub struct ProxyToConductor;
 pub struct ProxyToConductorState {}
 
 impl JrLink for ProxyToConductor {
-    type HandlerEndpoint = Conductor;
+    type RemotePeer = Conductor;
     type State = ProxyToConductorState;
 
     async fn default_message_handler(
