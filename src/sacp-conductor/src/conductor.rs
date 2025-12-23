@@ -122,8 +122,8 @@ use sacp::schema::{
 };
 use sacp::{Agent, Client, Component, Error, JrMessage};
 use sacp::{
-    HasDefaultEndpoint, JrConnectionBuilder, JrConnectionCx, JrNotification, JrRequest,
-    JrRequestCx, JrResponse, JrRole, MessageCx, UntypedMessage,
+    JrConnectionBuilder, JrConnectionCx, JrEndpoint, JrNotification, JrRequest, JrRequestCx,
+    JrResponse, JrRole, MessageCx, UntypedMessage,
 };
 use sacp::{
     JrMessageHandler, JrResponsePayload,
@@ -751,7 +751,7 @@ impl ConductorResponder {
         request: Req,
     ) -> JrResponse<Req::Response> {
         if source_component_index == 0 {
-            client.send_request(request)
+            client.send_request_to(Client, request)
         } else {
             self.proxies[source_component_index - 1].send_request(SuccessorMessage {
                 message: request,
@@ -783,7 +783,7 @@ impl ConductorResponder {
         );
         if source_component_index == 0 {
             tracing::debug!("Sending notification directly to client");
-            client.send_notification(notification)
+            client.send_notification_to(Client, notification)
         } else {
             tracing::debug!(
                 target_proxy = source_component_index - 1,
@@ -829,43 +829,30 @@ impl ConductorResponder {
                 proxies_count = self.proxies.len(),
                 "Proxy mode: forwarding successor message to conductor's successor"
             );
-            // Wrap the message as a successor message before sending
-            let to_successor_message = message.map(
-                |request, request_cx| {
-                    (
-                        SuccessorMessage {
-                            message: request,
-                            meta: None,
-                        },
-                        request_cx,
-                    )
-                },
-                |notification| SuccessorMessage {
-                    message: notification,
-                    meta: None,
-                },
-            );
-            return connection_cx.send_proxied_message_to(Client, to_successor_message);
+            return connection_cx.send_proxied_message_to_via(Agent, conductor_tx, message);
         }
 
         tracing::debug!(?message, "forward_client_to_agent_message");
 
         MatchMessageFrom::new(message, connection_cx)
-            .if_request(async |request: InitializeProxyRequest, request_cx| {
-                // Proxy forwarding InitializeProxyRequest to its successor
-                tracing::debug!("forward_client_to_agent_message: InitializeProxyRequest");
-                // Wrap the request_cx to convert InitializeResponse back to InitializeProxyResponse
-                self.forward_initialize_request(
-                    target_component_index,
-                    conductor_tx,
-                    connection_cx,
-                    request.initialize,
-                    request_cx,
-                )
-                .await
-            })
+            .if_request_from(
+                Client,
+                async |request: InitializeProxyRequest, request_cx| {
+                    // Proxy forwarding InitializeProxyRequest to its successor
+                    tracing::debug!("forward_client_to_agent_message: InitializeProxyRequest");
+                    // Wrap the request_cx to convert InitializeResponse back to InitializeProxyResponse
+                    self.forward_initialize_request(
+                        target_component_index,
+                        conductor_tx,
+                        connection_cx,
+                        request.initialize,
+                        request_cx,
+                    )
+                    .await
+                },
+            )
             .await
-            .if_request(async |request: InitializeRequest, request_cx| {
+            .if_request_from(Client, async |request: InitializeRequest, request_cx| {
                 // Direct InitializeRequest (shouldn't happen after initialization, but handle it)
                 tracing::debug!("forward_client_to_agent_message: InitializeRequest");
                 self.forward_initialize_request(
@@ -878,7 +865,7 @@ impl ConductorResponder {
                 .await
             })
             .await
-            .if_request(async |request: NewSessionRequest, request_cx| {
+            .if_request_from(Client, async |request: NewSessionRequest, request_cx| {
                 // When forwarding "session/new", we adjust MCP servers to manage "acp:" URLs.
                 self.forward_session_new_request(
                     target_component_index,
@@ -890,7 +877,8 @@ impl ConductorResponder {
                 .await
             })
             .await
-            .if_request(
+            .if_request_from(
+                Client,
                 async |request: McpOverAcpMessage<UntypedMessage>, request_cx| {
                     let McpOverAcpMessage {
                         connection_id,
@@ -910,23 +898,26 @@ impl ConductorResponder {
                 },
             )
             .await
-            .if_notification(async |notification: McpOverAcpMessage<UntypedMessage>| {
-                let McpOverAcpMessage {
-                    connection_id,
-                    message: mcp_notification,
-                    ..
-                } = notification;
-                self.bridge_connections
-                    .get_mut(&connection_id)
-                    .ok_or_else(|| {
-                        sacp::util::internal_error(format!(
-                            "unknown connection id: {}",
-                            connection_id
-                        ))
-                    })?
-                    .send(MessageCx::Notification(mcp_notification))
-                    .await
-            })
+            .if_notification_from(
+                Client,
+                async |notification: McpOverAcpMessage<UntypedMessage>| {
+                    let McpOverAcpMessage {
+                        connection_id,
+                        message: mcp_notification,
+                        ..
+                    } = notification;
+                    self.bridge_connections
+                        .get_mut(&connection_id)
+                        .ok_or_else(|| {
+                            sacp::util::internal_error(format!(
+                                "unknown connection id: {}",
+                                connection_id
+                            ))
+                        })?
+                        .send(MessageCx::Notification(mcp_notification))
+                        .await
+                },
+            )
             .await
             .otherwise(async |message| {
                 // Otherwise, just send the message along "as is".
@@ -934,10 +925,13 @@ impl ConductorResponder {
                     self.agent
                         .as_ref()
                         .expect("targeting agent")
-                        .send_proxied_message_via(conductor_tx, message)
+                        .send_proxied_message_to_via(Agent, conductor_tx, message)
                 } else {
-                    self.proxies[target_component_index]
-                        .send_proxied_message_via(conductor_tx, message)
+                    self.proxies[target_component_index].send_proxied_message_to_via(
+                        Agent,
+                        conductor_tx,
+                        message,
+                    )
                 }
             })
             .await
@@ -1485,27 +1479,32 @@ pub enum ConductorMessage {
     },
 }
 
-trait JrConnectionCxExt {
-    fn send_proxied_message_via(
+trait JrConnectionCxExt<Role: JrRole> {
+    fn send_proxied_message_to_via<End: JrEndpoint>(
         &self,
+        end: End,
         conductor_tx: &mpsc::Sender<ConductorMessage>,
         message: MessageCx,
-    ) -> Result<(), sacp::Error>;
+    ) -> Result<(), sacp::Error>
+    where
+        Role: sacp::HasEndpoint<End>;
 }
 
-impl<Role: HasDefaultEndpoint + sacp::HasEndpoint<<Role as JrRole>::HandlerEndpoint>>
-    JrConnectionCxExt for JrConnectionCx<Role>
-{
-    fn send_proxied_message_via(
+impl<Role: JrRole> JrConnectionCxExt<Role> for JrConnectionCx<Role> {
+    fn send_proxied_message_to_via<End: JrEndpoint>(
         &self,
+        end: End,
         conductor_tx: &mpsc::Sender<ConductorMessage>,
         message: MessageCx,
-    ) -> Result<(), sacp::Error> {
+    ) -> Result<(), sacp::Error>
+    where
+        Role: sacp::HasEndpoint<End>,
+    {
         match message {
             MessageCx::Request(request, request_cx) => self
-                .send_request(request)
+                .send_request_to(end, request)
                 .forward_response_via(conductor_tx, request_cx),
-            MessageCx::Notification(notification) => self.send_notification(notification),
+            MessageCx::Notification(notification) => self.send_notification_to(end, notification),
         }
     }
 }

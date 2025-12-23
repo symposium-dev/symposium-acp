@@ -101,7 +101,7 @@ pub async fn prompt_with_callback(
             sacp::on_receive_message!(),
         )
         .connect_to(component)?
-        .with_client(|cx: sacp::JrConnectionCx<ClientToAgent>| async move {
+        .run_until(|cx: sacp::JrConnectionCx<ClientToAgent>| async move {
             // Initialize the agent
             let _init_response = cx
                 .send_request(InitializeRequest {
@@ -113,7 +113,11 @@ pub async fn prompt_with_callback(
                 .block_task()
                 .await?;
 
-            let mut session = cx.build_session(PathBuf::from(".")).spawn_session().await?;
+            let mut session = cx
+                .build_session(PathBuf::from("."))
+                .block_task()
+                .start_session()
+                .await?;
 
             session.send_prompt(prompt_text)?;
 

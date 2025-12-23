@@ -223,7 +223,7 @@ impl<H: JrMessageHandler> JrMessageHandler for &mut H {
 /// `JrConnection` provides a builder-style API for creating JSON-RPC servers and clients.
 /// You start by calling `Role::builder()` (e.g., `ClientToAgent::builder()`), then add message
 /// handlers, and finally drive the connection with either [`serve`](JrConnectionBuilder::serve)
-/// or [`with_client`](JrConnectionBuilder::with_client), providing a component implementation
+/// or [`run_until`](JrConnectionBuilder::run_until), providing a component implementation
 /// (e.g., [`ByteStreams`] for byte streams).
 ///
 /// # JSON-RPC Primer
@@ -447,9 +447,9 @@ impl<H: JrMessageHandler> JrMessageHandler for &mut H {
 /// The connection will process incoming messages and invoke your handlers until the
 /// connection is closed or an error occurs.
 ///
-/// ## Client Mode: `with_client()`
+/// ## Client Mode: `run_until()`
 ///
-/// Use [`with_client`](Self::with_client) when you need to both handle incoming messages
+/// Use [`run_until`](Self::run_until) when you need to both handle incoming messages
 /// AND send your own requests/notifications:
 ///
 /// ```no_run
@@ -461,7 +461,7 @@ impl<H: JrMessageHandler> JrMessageHandler for &mut H {
 ///     .on_receive_request(async |req: MyRequest, request_cx, cx| {
 ///         request_cx.respond(MyResponse { status: "ok".into() })
 ///     }, sacp::on_receive_request!())
-///     .with_client(MockTransport, async |cx| {
+///     .run_until(MockTransport, async |cx| {
 ///         // You can send requests to the other side
 ///         let response = cx.send_request(InitializeRequest::make())
 ///             .block_task()
@@ -528,7 +528,7 @@ pub struct JrConnectionBuilder<H: JrMessageHandler, R: JrResponder<H::Role> = Nu
 impl<Role: JrRole> JrConnectionBuilder<NullHandler<Role>, NullResponder> {
     /// Create a new JrConnection with the given role.
     /// This type follows a builder pattern; use other methods to configure and then invoke
-    /// [`Self::serve`] (to use as a server) or [`Self::with_client`] to use as a client.
+    /// [`Self::serve`] (to use as a server) or [`Self::run_until`] to use as a client.
     pub(crate) fn new(role: Role) -> Self {
         Self {
             name: Default::default(),
@@ -982,7 +982,7 @@ impl<H: JrMessageHandler, R: JrResponder<H::Role>> JrConnectionBuilder<H, R> {
     }
 
     /// Connect these handlers to a transport layer.
-    /// The resulting connection must then be either [served](`JrConnection::serve`) or [used as a client](`JrConnection::with_client`).
+    /// The resulting connection must then be either [served](`JrConnection::serve`) or [run until completion](`JrConnection::run_until`).
     pub fn connect_to(
         self,
         transport: impl Component + 'static,
@@ -1114,18 +1114,18 @@ impl<H: JrMessageHandler, R: JrResponder<H::Role>> JrConnectionBuilder<H, R> {
         self.connect_to(transport)?.serve().await
     }
 
-    /// Convenience method to connect to a transport and run a client function.
+    /// Convenience method to connect to a transport and run until a closure completes.
     ///
     /// This is equivalent to:
     /// ```ignore
-    /// handler_chain.connect_to(transport)?.with_client(main_fn).await
+    /// handler_chain.connect_to(transport)?.run_until(main_fn).await
     /// ```
-    pub async fn with_client(
+    pub async fn run_until(
         self,
         transport: impl Component + 'static,
         main_fn: impl AsyncFnOnce(JrConnectionCx<H::Role>) -> Result<(), crate::Error>,
     ) -> Result<(), crate::Error> {
-        self.connect_to(transport)?.with_client(main_fn).await
+        self.connect_to(transport)?.run_until(main_fn).await
     }
 }
 
@@ -1135,7 +1135,7 @@ impl<H: JrMessageHandler, R: JrResponder<H::Role>> JrConnectionBuilder<H, R> {
 /// via `connect_to()`. It can be driven in two modes:
 ///
 /// - [`serve()`](Self::serve) - Run as a server, handling incoming messages until the connection closes
-/// - [`with_client()`](Self::with_client) - Run with client logic, allowing you to send requests/notifications
+/// - [`run_until()`](Self::run_until) - Run until a closure completes, allowing you to send requests/notifications
 ///
 /// Most users won't construct this directly - instead use `JrConnectionBuilder::connect_to()` or
 /// `JrConnectionBuilder::serve()` for convenience.
@@ -1165,7 +1165,7 @@ impl<H: JrMessageHandler, R: JrResponder<H::Role>> JrConnection<H, R> {
     ///
     /// Use this mode when you only need to respond to incoming messages and don't need
     /// to initiate your own requests. If you need to send requests to the other side,
-    /// use [`with_client`](Self::with_client) instead.
+    /// use [`run_until`](Self::run_until) instead.
     ///
     /// # Example: Byte Stream Transport
     ///
@@ -1191,11 +1191,11 @@ impl<H: JrMessageHandler, R: JrResponder<H::Role>> JrConnection<H, R> {
     /// # }
     /// ```
     pub async fn serve(self) -> Result<(), crate::Error> {
-        self.with_client(async move |_cx| future::pending().await)
+        self.run_until(async move |_cx| future::pending().await)
             .await
     }
 
-    /// Run the connection in client mode, both handling incoming messages and sending your own.
+    /// Run the connection until the provided closure completes.
     ///
     /// This drives the connection by:
     /// 1. Running your registered handlers in the background to process incoming messages
@@ -1229,7 +1229,7 @@ impl<H: JrMessageHandler, R: JrResponder<H::Role>> JrConnection<H, R> {
     ///         request_cx.respond(MyResponse { status: "ok".into() })
     ///     }, sacp::on_receive_request!())
     ///     .connect_to(transport)?
-    ///     .with_client(async |cx| {
+    ///     .run_until(async |cx| {
     ///         // Initialize the protocol
     ///         let init_response = cx.send_request(InitializeRequest::make())
     ///             .block_task()
@@ -1250,13 +1250,12 @@ impl<H: JrMessageHandler, R: JrResponder<H::Role>> JrConnection<H, R> {
     ///
     /// # Parameters
     ///
-    /// - `transport`: The transport implementation for sending/receiving messages
     /// - `main_fn`: Your client logic. Receives a [`JrConnectionCx<R>`] for sending messages.
     ///
     /// # Errors
     ///
     /// Returns an error if the connection closes before `main_fn` completes.
-    pub async fn with_client<T>(
+    pub async fn run_until<T>(
         self,
         main_fn: impl AsyncFnOnce(JrConnectionCx<H::Role>) -> Result<T, crate::Error>,
     ) -> Result<T, crate::Error> {

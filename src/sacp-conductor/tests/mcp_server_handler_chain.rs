@@ -167,7 +167,7 @@ async fn run_test(
                 ))
                 .await
         })
-        .with_client(transport, editor_task)
+        .run_until(transport, editor_task)
         .await
 }
 

@@ -136,7 +136,7 @@ async fn run_test_with_components(
                 ))
                 .await
         })
-        .with_client(transport, editor_task)
+        .run_until(transport, editor_task)
         .await
 }
 

@@ -73,7 +73,7 @@
 //!
 //! - [`reusable_components`] - Defining agents/proxies with [`Component`]
 //! - [`custom_message_handlers`] - Implementing [`JrMessageHandler`]
-//! - [`connecting_as_client`] - Using `with_client` to send requests
+//! - [`connecting_as_client`] - Using `run_until` to send requests
 //! - [`global_mcp_server`] - Adding a shared MCP server to a handler chain
 //! - [`per_session_mcp_server`] - Creating per-session MCP servers
 //!
@@ -194,7 +194,7 @@ pub mod custom_message_handlers {
 pub mod connecting_as_client {
     //! Pattern: Connecting as a client.
     //!
-    //! To connect to a JSON-RPC server and send requests, use [`with_client`].
+    //! To connect to a JSON-RPC server and send requests, use [`run_until`].
     //! This gives you a connection context for sending requests while the
     //! connection handles incoming messages in the background.
     //!
@@ -212,7 +212,7 @@ pub mod connecting_as_client {
     //!             println!("Session updated: {:?}", notif);
     //!             Ok(())
     //!         }, sacp::on_receive_notification!())
-    //!         .with_client(transport, async |cx| {
+    //!         .run_until(transport, async |cx| {
     //!             // Initialize the connection
     //!             let _init_response = cx.send_request(InitializeRequest {
     //!                 protocol_version: Default::default(),
@@ -241,11 +241,11 @@ pub mod connecting_as_client {
     //!
     //! # Note on `block_task`
     //!
-    //! Using [`block_task`] is safe inside `with_client` because the closure runs
+    //! Using [`block_task`] is safe inside `run_until` because the closure runs
     //! as a spawned task, not on the event loop. The event loop continues processing
     //! messages (including the response you're waiting for) while your task blocks.
     //!
-    //! [`with_client`]: crate::JrConnectionBuilder::with_client
+    //! [`run_until`]: crate::JrConnectionBuilder::run_until
     //! [`block_task`]: crate::JrResponse::block_task
 }
 
@@ -329,7 +329,7 @@ pub mod per_session_mcp_server {
     //!
     //! # Simple example: proxy everything
     //!
-    //! Use [`spawn_session_proxy`] when you just want to inject an MCP server
+    //! Use [`start_session_proxy`] when you just want to inject an MCP server
     //! and proxy all messages without any additional processing:
     //!
     //! ```
@@ -348,10 +348,12 @@ pub mod per_session_mcp_server {
     //!                     }, sacp::tool_fn!())
     //!                 .build();
     //!
-    //!             cx.build_session_from(request)
+    //!             let _session_id = cx.build_session_from(request)
     //!                 .with_mcp_server(mcp_server)?
-    //!                 .spawn_session_proxy(request_cx)
-    //!                 .await
+    //!                 .block_task()
+    //!                 .start_session_proxy(request_cx)
+    //!                 .await?;
+    //!             Ok(())
     //!         }, sacp::on_receive_request!())
     //!         .serve(transport)
     //!         .await
@@ -360,7 +362,7 @@ pub mod per_session_mcp_server {
     //!
     //! # Advanced example: intercept before proxying
     //!
-    //! Use [`spawn_session`] + [`proxy_remaining_messages`] when you need to
+    //! Use [`start_session`] + [`proxy_remaining_messages`] when you need to
     //! do something with the session before handing off to proxy mode:
     //!
     //! ```
@@ -381,7 +383,8 @@ pub mod per_session_mcp_server {
     //!
     //!             let active_session = cx.build_session_from(request)
     //!                 .with_mcp_server(mcp_server)?
-    //!                 .spawn_session()
+    //!                 .block_task()
+    //!                 .start_session()
     //!                 .await?;
     //!
     //!             // Do something with the session before proxying...
@@ -403,10 +406,10 @@ pub mod per_session_mcp_server {
     //! 1. The MCP server is converted into a dynamic handler via `into_dynamic_handler()`
     //! 2. The handler is registered for the session's message routing
     //! 3. The MCP server's URL is added to the `NewSessionRequest`
-    //! 4. The handler lives as long as the session (dropped when `run_session` completes)
+    //! 4. The handler lives as long as the session (dropped when `run_until` completes)
     //!
-    //! [`spawn_session_proxy`]: crate::SessionBuilder::spawn_session_proxy
-    //! [`spawn_session`]: crate::SessionBuilder::spawn_session
+    //! [`start_session_proxy`]: crate::SessionBuilder::start_session_proxy
+    //! [`start_session`]: crate::SessionBuilder::start_session
     //! [`proxy_remaining_messages`]: crate::ActiveSession::proxy_remaining_messages
     //! [`SessionBuilder::with_mcp_server`]: crate::SessionBuilder::with_mcp_server
 }

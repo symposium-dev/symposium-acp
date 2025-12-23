@@ -52,7 +52,7 @@ async fn test_scoped_mcp_server_through_proxy() -> Result<(), sacp::Error> {
 async fn test_scoped_mcp_server_through_session() -> Result<(), sacp::Error> {
     ClientToAgent::builder()
         .connect_to(Conductor::new("conductor".to_string(), vec![ElizaAgent::new()], McpBridgeMode::default()))?
-        .with_client(async |cx| {
+        .run_until(async |cx| {
             // Initialize first
             cx.send_request(sacp::schema::InitializeRequest {
                 protocol_version: Default::default(),
@@ -67,7 +67,8 @@ async fn test_scoped_mcp_server_through_session() -> Result<(), sacp::Error> {
             let result = cx
                 .build_session(".")
                 .with_mcp_server(make_mcp_server(&collected_values))?
-                .run_session(async |mut active_session| {
+                .block_task()
+                .run_until(async |mut active_session| {
                     active_session
                         .send_prompt(r#"Use tool test::push with {"elements": ["Hello", "world"]}"#)?;
                     active_session.read_to_string().await

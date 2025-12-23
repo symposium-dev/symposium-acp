@@ -164,7 +164,7 @@ async fn test_multiple_handlers_different_methods() {
             });
 
             let result = client
-                .with_client(
+                .run_until(
                     client_transport,
                     async |cx| -> std::result::Result<(), sacp::Error> {
                         // Test foo request
@@ -285,7 +285,7 @@ async fn test_handler_priority_ordering() {
             });
 
             let result = client
-                .with_client(
+                .run_until(
                     client_transport,
                     async |cx| -> std::result::Result<(), sacp::Error> {
                         let response = recv(cx.send_request(TrackRequest {
@@ -431,7 +431,7 @@ async fn test_fallthrough_behavior() {
             });
 
             let result = client
-                .with_client(
+                .run_until(
                     client_transport,
                     async |cx| -> std::result::Result<(), sacp::Error> {
                         // Send method2 - should fallthrough handler1 to handler2
@@ -502,7 +502,7 @@ async fn test_no_handler_claims() {
             });
 
             let result = client
-                .with_client(
+                .run_until(
                     client_transport,
                     async |cx| -> std::result::Result<(), sacp::Error> {
                         // Send "bar" request which no handler claims
@@ -594,7 +594,7 @@ async fn test_handler_claims_notification() {
             });
 
             let result = client
-                .with_client(
+                .run_until(
                     client_transport,
                     async |cx| -> std::result::Result<(), sacp::Error> {
                         cx.send_notification(EventNotification {

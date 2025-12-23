@@ -51,7 +51,7 @@
 //! - [Roles and endpoints](cookbook#roles-and-endpoints) - Understanding `JrRole`, `JrEndpoint`, and how proxies work
 //! - [Reusable components](cookbook::reusable_components) - Defining agents/proxies with [`Component`]
 //! - [Custom message handlers](cookbook::custom_message_handlers) - Implementing [`JrMessageHandler`]
-//! - [Connecting as a client](cookbook::connecting_as_client) - Using `with_client` to send requests
+//! - [Connecting as a client](cookbook::connecting_as_client) - Using `run_until` to send requests
 //! - [Global MCP server](cookbook::global_mcp_server) - Adding MCP servers to a handler chain
 //! - [Per-session MCP server](cookbook::per_session_mcp_server) - Creating MCP servers per session
 //!

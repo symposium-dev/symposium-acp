@@ -116,7 +116,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             },
             sacp::on_receive_request!(),
         )
-        .with_client(transport, |cx: JrConnectionCx<ClientToAgent>| async move {
+        .run_until(transport, |cx: JrConnectionCx<ClientToAgent>| async move {
             // Initialize the agent
             eprintln!("🤝 Initializing agent...");
             let init_response = cx

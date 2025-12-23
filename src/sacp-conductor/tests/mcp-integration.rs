@@ -63,7 +63,7 @@ async fn run_test_with_mode(
                 ))
                 .await
         })
-        .with_client(transport, editor_task)
+        .run_until(transport, editor_task)
         .await
 }
 
@@ -206,7 +206,7 @@ async fn test_agent_handles_prompt() -> Result<(), sacp::Error> {
             ],
             Default::default(),
         ))?
-        .with_client(async |editor_cx| {
+        .run_until(async |editor_cx| {
             // Initialize
             recv(editor_cx.send_request(InitializeRequest {
                 protocol_version: Default::default(),

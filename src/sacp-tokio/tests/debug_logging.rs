@@ -68,7 +68,7 @@ async fn test_acp_agent_debug_callback() -> Result<(), Box<dyn std::error::Error
                 ))
                 .await
         })
-        .with_client(transport, async |client_cx| {
+        .run_until(transport, async |client_cx| {
             // Send an initialize request
             let _init_response = recv(client_cx.send_request(InitializeRequest {
                 protocol_version: Default::default(),
