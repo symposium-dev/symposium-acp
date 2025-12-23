@@ -122,8 +122,8 @@ use sacp::schema::{
 };
 use sacp::{Agent, Client, Component, Error, JrMessage};
 use sacp::{
-    HasDefaultEndpoint, JrConnectionBuilder, JrConnectionCx, JrNotification, JrRequest,
-    JrRequestCx, JrResponse, JrRole, MessageCx, UntypedMessage,
+    JrConnectionBuilder, JrConnectionCx, JrEndpoint, JrNotification, JrRequest, JrRequestCx,
+    JrResponse, JrRole, MessageCx, UntypedMessage,
 };
 use sacp::{
     JrMessageHandler, JrResponsePayload,
@@ -829,7 +829,7 @@ impl ConductorResponder {
                 proxies_count = self.proxies.len(),
                 "Proxy mode: forwarding successor message to conductor's successor"
             );
-            return connection_cx.send_proxied_message_to(Agent, message);
+            return connection_cx.send_proxied_message_to_via(Agent, conductor_tx, message);
         }
 
         tracing::debug!(?message, "forward_client_to_agent_message");
@@ -918,10 +918,13 @@ impl ConductorResponder {
                     self.agent
                         .as_ref()
                         .expect("targeting agent")
-                        .send_proxied_message_via(conductor_tx, message)
+                        .send_proxied_message_to_via(Agent, conductor_tx, message)
                 } else {
-                    self.proxies[target_component_index]
-                        .send_proxied_message_via(conductor_tx, message)
+                    self.proxies[target_component_index].send_proxied_message_to_via(
+                        Agent,
+                        conductor_tx,
+                        message,
+                    )
                 }
             })
             .await
@@ -1469,27 +1472,32 @@ pub enum ConductorMessage {
     },
 }
 
-trait JrConnectionCxExt {
-    fn send_proxied_message_via(
+trait JrConnectionCxExt<Role: JrRole> {
+    fn send_proxied_message_to_via<End: JrEndpoint>(
         &self,
+        end: End,
         conductor_tx: &mpsc::Sender<ConductorMessage>,
         message: MessageCx,
-    ) -> Result<(), sacp::Error>;
+    ) -> Result<(), sacp::Error>
+    where
+        Role: sacp::HasEndpoint<End>;
 }
 
-impl<Role: HasDefaultEndpoint + sacp::HasEndpoint<<Role as JrRole>::HandlerEndpoint>>
-    JrConnectionCxExt for JrConnectionCx<Role>
-{
-    fn send_proxied_message_via(
+impl<Role: JrRole> JrConnectionCxExt<Role> for JrConnectionCx<Role> {
+    fn send_proxied_message_to_via<End: JrEndpoint>(
         &self,
+        end: End,
         conductor_tx: &mpsc::Sender<ConductorMessage>,
         message: MessageCx,
-    ) -> Result<(), sacp::Error> {
+    ) -> Result<(), sacp::Error>
+    where
+        Role: sacp::HasEndpoint<End>,
+    {
         match message {
             MessageCx::Request(request, request_cx) => self
-                .send_request(request)
+                .send_request_to(end, request)
                 .forward_response_via(conductor_tx, request_cx),
-            MessageCx::Notification(notification) => self.send_notification(notification),
+            MessageCx::Notification(notification) => self.send_notification_to(end, notification),
         }
     }
 }
