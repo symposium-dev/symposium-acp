@@ -94,7 +94,7 @@ async fn test_tool_fn_greet() -> Result<(), sacp::Error> {
     .await?;
 
     expect_test::expect![[r#"
-        "OK: CallToolResult { content: [Annotated { raw: Text(RawTextContent { text: \"\\\"Hello, World!\\\"\", meta: None }), annotations: None }], structured_content: Some(String(\"Hello, World!\")), is_error: Some(false), meta: None }"
+        "OK: CallToolResult { content: [Annotated { raw: Text(RawTextContent { text: \"\\\"Hello, World!\\\"\", meta: None }), annotations: None }], structured_content: None, is_error: Some(false), meta: None }"
     "#]].assert_debug_eq(&result);
 
     Ok(())
