@@ -26,6 +26,11 @@ use crate::{
 /// provides role-specific behavior like handling unhandled messages.
 #[expect(async_fn_in_trait)]
 pub trait JrLink: Debug + Copy + Send + Sync + 'static + Eq + Ord + Hash + Default {
+    /// The role being played by the local side on this link.
+    ///
+    /// For example, `ClientToAgent` has `LocalRole = Client`.
+    type LocalRole: JrRole;
+
     /// The role being played by the remote peer on this link.
     ///
     /// When you use [`JrConnectionCx::send_request`] or [`JrConnectionBuilder::on_receive_request`], etc.
@@ -207,8 +212,8 @@ impl JrRole for Conductor {}
 pub struct UntypedLink;
 
 impl JrLink for UntypedLink {
+    type LocalRole = UntypedRole;
     type RemotePeer = UntypedRole;
-
     type State = ();
 }
 
@@ -232,8 +237,8 @@ impl UntypedLink {
 pub struct ClientToAgent;
 
 impl JrLink for ClientToAgent {
+    type LocalRole = Client;
     type RemotePeer = Agent;
-
     type State = ();
 
     async fn default_message_handler(
@@ -271,6 +276,7 @@ impl HasPeer<Agent> for ClientToAgent {
 pub struct AgentToClient;
 
 impl JrLink for AgentToClient {
+    type LocalRole = Agent;
     type RemotePeer = Client;
     type State = ();
 }
@@ -288,6 +294,7 @@ impl HasPeer<Client> for AgentToClient {
 pub struct ConductorToClient;
 
 impl JrLink for ConductorToClient {
+    type LocalRole = Conductor;
     type RemotePeer = Client;
     type State = ();
 }
@@ -311,6 +318,7 @@ impl HasPeer<Agent> for ConductorToClient {
 pub struct ConductorToProxy;
 
 impl JrLink for ConductorToProxy {
+    type LocalRole = Conductor;
     type RemotePeer = Agent;
     type State = ();
 }
@@ -328,6 +336,7 @@ impl HasPeer<Agent> for ConductorToProxy {
 pub struct ConductorToAgent;
 
 impl JrLink for ConductorToAgent {
+    type LocalRole = Conductor;
     type RemotePeer = Agent;
     type State = ();
 }
@@ -353,6 +362,7 @@ pub struct ProxyToConductor;
 pub struct ProxyToConductorState {}
 
 impl JrLink for ProxyToConductor {
+    type LocalRole = Agent;
     type RemotePeer = Conductor;
     type State = ProxyToConductorState;
 
