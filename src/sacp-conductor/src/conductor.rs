@@ -343,13 +343,10 @@ impl JrResponder<ConductorToClient> for ConductorResponder {
         // Components are now spawned lazily in forward_initialize_request
         // when the first Initialize request is received.
 
-        let mut conductor_tx = self.conductor_tx.clone();
-
         // This is the "central actor" of the conductor. Most other things forward messages
         // via `conductor_tx` into this loop. This lets us serialize the conductor's activity.
         while let Some(message) = self.conductor_rx.next().await {
-            self.handle_conductor_message(&cx, message, &mut conductor_tx)
-                .await?;
+            self.handle_conductor_message(&cx, message).await?;
         }
         Ok(())
     }
@@ -551,7 +548,6 @@ impl ConductorResponder {
         &mut self,
         client: &JrConnectionCx<ConductorToClient>,
         message: ConductorMessage,
-        conductor_tx: &mut mpsc::Sender<ConductorMessage>,
     ) -> Result<(), sacp::Error> {
         tracing::debug!(?message, "handle_conductor_message");
 
@@ -563,13 +559,8 @@ impl ConductorResponder {
                 if let Err(e) = self.trace_client_to_agent(target_component_index, &message) {
                     tracing::warn!("Failed to trace client-to-agent message: {e}");
                 }
-                self.forward_client_to_agent_message(
-                    conductor_tx,
-                    target_component_index,
-                    message,
-                    client,
-                )
-                .await
+                self.forward_client_to_agent_message(target_component_index, message, client)
+                    .await
             }
 
             ConductorMessage::AgentToClient {
@@ -584,12 +575,7 @@ impl ConductorResponder {
                 if let Err(e) = self.trace_agent_to_client(source_component_index, &message) {
                     tracing::warn!("Failed to trace agent-to-client message: {e}");
                 }
-                self.send_message_to_predecessor_of(
-                    conductor_tx,
-                    client,
-                    source_component_index,
-                    message,
-                )
+                self.send_message_to_predecessor_of(client, source_component_index, message)
             }
 
             // New MCP connection request. Send it back along the chain to get a connection id.
@@ -613,7 +599,7 @@ impl ConductorResponder {
                     },
                 )
                 .on_receiving_result({
-                    let mut conductor_tx = conductor_tx.clone();
+                    let mut conductor_tx = self.conductor_tx.clone();
                     async move |result| {
                         match result {
                             Ok(response) => conductor_tx
@@ -673,7 +659,7 @@ impl ConductorResponder {
 
                 let source_component = SourceComponentIndex::Component(self.proxies.len());
                 self.trace_agent_to_client(source_component, &wrapped)?;
-                self.send_message_to_predecessor_of(conductor_tx, client, source_component, wrapped)
+                self.send_message_to_predecessor_of(client, source_component, wrapped)
             }
 
             // MCP client disconnected. Remove it from our map and send the
@@ -708,7 +694,6 @@ impl ConductorResponder {
     ///   proxy's client.
     fn send_message_to_predecessor_of<Req: JrRequest, N: JrNotification>(
         &mut self,
-        conductor_tx: &mpsc::Sender<ConductorMessage>,
         client: &JrConnectionCx<ConductorToClient>,
         source_component_index: SourceComponentIndex,
         message: MessageCx<Req, N>,
@@ -735,7 +720,7 @@ impl ConductorResponder {
         match message {
             MessageCx::Request(request, request_cx) => self
                 .send_request_to_predecessor_of(client, source_component_index, request)
-                .forward_response_via(conductor_tx, request_cx),
+                .forward_response_via(&self.conductor_tx, request_cx),
             MessageCx::Notification(notification) => self.send_notification_to_predecessor_of(
                 client,
                 source_component_index,
@@ -802,7 +787,6 @@ impl ConductorResponder {
     /// Makes changes to select messages along the way (e.g., `initialize` and `session/new`).
     async fn forward_client_to_agent_message(
         &mut self,
-        conductor_tx: &mut mpsc::Sender<ConductorMessage>,
         target_component_index: usize,
         message: MessageCx,
         connection_cx: &JrConnectionCx<ConductorToClient>,
@@ -814,10 +798,7 @@ impl ConductorResponder {
         );
 
         // Ensure components are initialized before processing any message.
-        let Some(message) = self
-            .ensure_initialized(conductor_tx, connection_cx, message)
-            .await?
-        else {
+        let Some(message) = self.ensure_initialized(connection_cx, message).await? else {
             return Ok(());
         };
 
@@ -829,7 +810,7 @@ impl ConductorResponder {
                 proxies_count = self.proxies.len(),
                 "Proxy mode: forwarding successor message to conductor's successor"
             );
-            return connection_cx.send_proxied_message_to_via(Agent, conductor_tx, message);
+            return connection_cx.send_proxied_message_to_via(Agent, &self.conductor_tx, message);
         }
 
         tracing::debug!(?message, "forward_client_to_agent_message");
@@ -843,7 +824,6 @@ impl ConductorResponder {
                     // Wrap the request_cx to convert InitializeResponse back to InitializeProxyResponse
                     self.forward_initialize_request(
                         target_component_index,
-                        conductor_tx,
                         connection_cx,
                         request.initialize,
                         request_cx,
@@ -857,7 +837,6 @@ impl ConductorResponder {
                 tracing::debug!("forward_client_to_agent_message: InitializeRequest");
                 self.forward_initialize_request(
                     target_component_index,
-                    conductor_tx,
                     connection_cx,
                     request,
                     request_cx,
@@ -870,7 +849,6 @@ impl ConductorResponder {
                 self.forward_session_new_request(
                     target_component_index,
                     request,
-                    &conductor_tx,
                     request_cx,
                     connection_cx,
                 )
@@ -925,11 +903,11 @@ impl ConductorResponder {
                     self.agent
                         .as_ref()
                         .expect("targeting agent")
-                        .send_proxied_message_to_via(Agent, conductor_tx, message)
+                        .send_proxied_message_to_via(Agent, &self.conductor_tx, message)
                 } else {
                     self.proxies[target_component_index].send_proxied_message_to_via(
                         Agent,
-                        conductor_tx,
+                        &self.conductor_tx,
                         message,
                     )
                 }
@@ -951,7 +929,6 @@ impl ConductorResponder {
     async fn forward_initialize_request(
         &mut self,
         target_component_index: usize,
-        conductor_tx: &mpsc::Sender<ConductorMessage>,
         connection_cx: &JrConnectionCx<ConductorToClient>,
         initialize_req: InitializeRequest,
         request_cx: JrRequestCx<InitializeResponse>,
@@ -965,7 +942,7 @@ impl ConductorResponder {
         let is_agent = self.is_agent_component(target_component_index);
         tracing::debug!(?is_agent, "forward_initialize_request");
 
-        let conductor_tx = conductor_tx.clone();
+        let conductor_tx = self.conductor_tx.clone();
 
         if is_agent {
             // Agent component - send InitializeRequest
@@ -1031,7 +1008,6 @@ impl ConductorResponder {
     /// - `Err(_)` - A fatal error occurred
     async fn ensure_initialized(
         &mut self,
-        conductor_tx: &mut mpsc::Sender<ConductorMessage>,
         client: &JrConnectionCx<ConductorToClient>,
         message: MessageCx,
     ) -> Result<Option<MessageCx>, Error> {
@@ -1054,7 +1030,6 @@ impl ConductorResponder {
                             );
                             let (modified_request, modified_request_cx) = self
                                 .lazy_initialize_components(
-                                    conductor_tx,
                                     client,
                                     proxy_init_request.initialize,
                                     true, // proxy_mode
@@ -1082,7 +1057,6 @@ impl ConductorResponder {
                             tracing::debug!("ensure_initialized: InitializeRequest (agent mode)");
                             let (modified_request, modified_request_cx) = self
                                 .lazy_initialize_components(
-                                    conductor_tx,
                                     client,
                                     init_request,
                                     false, // proxy_mode
@@ -1121,7 +1095,6 @@ impl ConductorResponder {
 
     async fn lazy_initialize_components(
         &mut self,
-        conductor_tx: &mpsc::Sender<ConductorMessage>,
         cx: &JrConnectionCx<ConductorToClient>,
         initialize_request: InitializeRequest,
         proxy_mode: bool,
@@ -1165,7 +1138,7 @@ impl ConductorResponder {
                     // Intercept agent-to-client messages from the agent.
                     .on_receive_message(
                         {
-                            let mut conductor_tx = conductor_tx.clone();
+                            let mut conductor_tx = self.conductor_tx.clone();
                             async move |message_cx: MessageCx, _cx| {
                                 conductor_tx
                                     .send(ConductorMessage::AgentToClient {
@@ -1196,7 +1169,7 @@ impl ConductorResponder {
                     // Intercept messages sent by a proxy component to its successor.
                     .on_receive_message(
                         {
-                            let mut conductor_tx = conductor_tx.clone();
+                            let mut conductor_tx = self.conductor_tx.clone();
                             async move |message_cx: MessageCx<
                                 SuccessorMessage,
                                 SuccessorMessage,
@@ -1217,7 +1190,7 @@ impl ConductorResponder {
                     // Intercept agent-to-client messages from the proxy.
                     .on_receive_message(
                         {
-                            let mut conductor_tx = conductor_tx.clone();
+                            let mut conductor_tx = self.conductor_tx.clone();
                             async move |message_cx: MessageCx<UntypedMessage, UntypedMessage>,
                                         _cx| {
                                 conductor_tx
@@ -1254,7 +1227,6 @@ impl ConductorResponder {
         &mut self,
         target_component_index: usize,
         mut request: NewSessionRequest,
-        conductor_tx: &mpsc::Sender<ConductorMessage>,
         request_cx: JrRequestCx<NewSessionResponse>,
         connection_cx: &JrConnectionCx<ConductorToClient>,
     ) -> Result<(), sacp::Error> {
@@ -1266,7 +1238,7 @@ impl ConductorResponder {
                     .transform_mcp_server(
                         connection_cx,
                         mcp_server,
-                        conductor_tx,
+                        &self.conductor_tx,
                         &self.mcp_bridge_mode,
                     )
                     .await?;
@@ -1276,11 +1248,11 @@ impl ConductorResponder {
                 .as_ref()
                 .expect("`is_agent_component` returning true => has an agent")
                 .send_request(request)
-                .forward_response_via(conductor_tx, request_cx)
+                .forward_response_via(&self.conductor_tx, request_cx)
         } else {
             self.proxies[target_component_index]
                 .send_request(request)
-                .forward_response_via(conductor_tx, request_cx)
+                .forward_response_via(&self.conductor_tx, request_cx)
         }
     }
 }
