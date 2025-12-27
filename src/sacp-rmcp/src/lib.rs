@@ -56,7 +56,7 @@ where
                 self.name.clone()
             }
 
-            fn connect(&self, _cx: McpContext<Link>) -> DynComponent {
+            fn connect(&self, _cx: McpContext<Link>) -> DynComponent<sacp::mcp::McpServerToClient> {
                 let service = (self.new_fn)();
                 DynComponent::new(RmcpServerComponent { service })
             }
@@ -79,11 +79,14 @@ struct RmcpServerComponent<S> {
     service: S,
 }
 
-impl<S> Component for RmcpServerComponent<S>
+impl<S> Component<sacp::mcp::McpServerToClient> for RmcpServerComponent<S>
 where
     S: rmcp::Service<rmcp::RoleServer>,
 {
-    async fn serve(self, client: impl Component) -> Result<(), sacp::Error> {
+    async fn serve(
+        self,
+        client: impl Component<sacp::mcp::McpClientToServer>,
+    ) -> Result<(), sacp::Error> {
         // Create tokio byte streams that rmcp expects
         let (mcp_server_stream, mcp_client_stream) = tokio::io::duplex(8192);
         let (mcp_server_read, mcp_server_write) = tokio::io::split(mcp_server_stream);
@@ -95,7 +98,7 @@ where
 
         // Spawn task to connect byte_streams to the provided client
         tokio::spawn(async move {
-            let _ = byte_streams.serve(client).await;
+            let _ = Component::<sacp::mcp::McpServerToClient>::serve(byte_streams, client).await;
         });
 
         // Run the rmcp server with the server side of the duplex stream

@@ -274,7 +274,7 @@ where
         self.name.clone()
     }
 
-    fn connect(&self, mcp_cx: McpContext<Link>) -> DynComponent {
+    fn connect(&self, mcp_cx: McpContext<Link>) -> DynComponent<crate::mcp::McpServerToClient> {
         DynComponent::new(McpServerConnection {
             data: self.data.clone(),
             mcp_cx,
@@ -291,11 +291,14 @@ where
     mcp_cx: McpContext<Link>,
 }
 
-impl<Link: JrLink> Component for McpServerConnection<Link>
+impl<Link: JrLink> Component<crate::mcp::McpServerToClient> for McpServerConnection<Link>
 where
     Link: HasPeer<Agent>,
 {
-    async fn serve(self, client: impl Component) -> Result<(), crate::Error> {
+    async fn serve(
+        self,
+        client: impl Component<crate::mcp::McpClientToServer>,
+    ) -> Result<(), crate::Error> {
         // Create tokio byte streams that rmcp expects
         let (mcp_server_stream, mcp_client_stream) = tokio::io::duplex(8192);
         let (mcp_server_read, mcp_server_write) = tokio::io::split(mcp_server_stream);
@@ -307,7 +310,7 @@ where
 
         // Spawn task to connect byte_streams to the provided client
         tokio::spawn(async move {
-            let _ = byte_streams.serve(client).await;
+            let _ = Component::<crate::mcp::McpServerToClient>::serve(byte_streams, client).await;
         });
 
         // Run the rmcp server with the server side of the duplex stream

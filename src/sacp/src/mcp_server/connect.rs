@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use crate::{DynComponent, JrLink, mcp_server::McpContext};
+use crate::{DynComponent, JrLink, mcp::McpServerToClient, mcp_server::McpContext};
 
 /// Trait for types that can create MCP server connections.
 ///
@@ -23,7 +23,7 @@ use crate::{DynComponent, JrLink, mcp_server::McpContext};
 ///         self.name.clone()
 ///     }
 ///
-///     fn connect(&self, cx: McpContext<Link>) -> DynComponent {
+///     fn connect(&self, cx: McpContext<Link>) -> DynComponent<McpServerToClient> {
 ///         // Create and return a component that handles MCP requests
 ///         DynComponent::new(MyMcpComponent::new(cx))
 ///     }
@@ -40,7 +40,7 @@ pub trait McpServerConnect<Link: JrLink>: Send + Sync + 'static {
     ///
     /// The [`McpContext`] provides access to the ACP connection context and the
     /// server's ACP URL.
-    fn connect(&self, cx: McpContext<Link>) -> DynComponent;
+    fn connect(&self, cx: McpContext<Link>) -> DynComponent<McpServerToClient>;
 }
 
 impl<Link: JrLink, S: ?Sized + McpServerConnect<Link>> McpServerConnect<Link> for Box<S> {
@@ -48,7 +48,7 @@ impl<Link: JrLink, S: ?Sized + McpServerConnect<Link>> McpServerConnect<Link> fo
         S::name(self)
     }
 
-    fn connect(&self, cx: McpContext<Link>) -> DynComponent {
+    fn connect(&self, cx: McpContext<Link>) -> DynComponent<McpServerToClient> {
         S::connect(self, cx)
     }
 }
@@ -58,7 +58,7 @@ impl<Link: JrLink, S: ?Sized + McpServerConnect<Link>> McpServerConnect<Link> fo
         S::name(self)
     }
 
-    fn connect(&self, cx: McpContext<Link>) -> DynComponent {
+    fn connect(&self, cx: McpContext<Link>) -> DynComponent<McpServerToClient> {
         S::connect(self, cx)
     }
 }

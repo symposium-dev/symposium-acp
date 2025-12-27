@@ -81,7 +81,7 @@ pub fn content_block_to_string(block: &ContentBlock) -> String {
 /// # }
 /// ```
 pub async fn prompt_with_callback(
-    component: impl Component,
+    component: impl Component<sacp::role::AgentToClient>,
     prompt_text: impl ToString,
     mut callback: impl AsyncFnMut(ContentBlock) + Send,
 ) -> Result<(), sacp::Error> {
@@ -216,7 +216,7 @@ pub async fn prompt_with_callback(
 /// # }
 /// ```
 pub async fn prompt(
-    component: impl Component,
+    component: impl Component<sacp::role::AgentToClient>,
     prompt_text: impl ToString,
 ) -> Result<String, sacp::Error> {
     let mut accumulated_text = String::new();

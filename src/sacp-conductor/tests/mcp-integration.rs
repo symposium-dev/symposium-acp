@@ -13,8 +13,7 @@ use sacp::schema::{
     ContentBlock, InitializeRequest, NewSessionRequest, PromptRequest, SessionNotification,
     TextContent,
 };
-use sacp_conductor::Conductor;
-use sacp_conductor::McpBridgeMode;
+use sacp_conductor::{Conductor, McpBridgeMode, ProxiesAndAgent};
 use sacp_test::test_binaries;
 
 use tokio::io::duplex;
@@ -38,7 +37,7 @@ fn conductor_command() -> Vec<String> {
 
 async fn run_test_with_mode(
     mode: McpBridgeMode,
-    components: Vec<sacp::DynComponent>,
+    components: ProxiesAndAgent,
     editor_task: impl AsyncFnOnce(sacp::JrConnectionCx<sacp::ClientToAgent>) -> Result<(), sacp::Error>,
 ) -> Result<(), sacp::Error> {
     // Initialize tracing for debug output
@@ -74,10 +73,7 @@ async fn test_proxy_provides_mcp_tools_stdio() -> Result<(), sacp::Error> {
         McpBridgeMode::Stdio {
             conductor_command: conductor_command(),
         },
-        vec![
-            mcp_integration::proxy::create(),
-            sacp::DynComponent::new(ElizaAgent::new()),
-        ],
+        ProxiesAndAgent::new(ElizaAgent::new()).proxy(mcp_integration::proxy::ProxyComponent),
         async |editor_cx| {
             // Send initialization request
             let init_response = recv(editor_cx.send_request(InitializeRequest {
@@ -125,10 +121,7 @@ async fn test_proxy_provides_mcp_tools_stdio() -> Result<(), sacp::Error> {
 async fn test_proxy_provides_mcp_tools_http() -> Result<(), sacp::Error> {
     run_test_with_mode(
         McpBridgeMode::Http,
-        vec![
-            mcp_integration::proxy::create(),
-            sacp::DynComponent::new(ElizaAgent::new()),
-        ],
+        ProxiesAndAgent::new(ElizaAgent::new()).proxy(mcp_integration::proxy::ProxyComponent),
         async |editor_cx| {
             // Send initialization request
             let init_response = recv(editor_cx.send_request(InitializeRequest {
@@ -200,10 +193,7 @@ async fn test_agent_handles_prompt() -> Result<(), sacp::Error> {
         )
         .connect_to(Conductor::new_agent(
             "mcp-integration-conductor".to_string(),
-            vec![
-                mcp_integration::proxy::create(),
-                sacp::DynComponent::new(ElizaAgent::new()),
-            ],
+            ProxiesAndAgent::new(ElizaAgent::new()).proxy(mcp_integration::proxy::ProxyComponent),
             Default::default(),
         ))?
         .run_until(async |editor_cx| {

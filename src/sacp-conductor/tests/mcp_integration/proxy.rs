@@ -1,8 +1,8 @@
 //! Proxy component that provides MCP tools
 
 use sacp::Component;
-use sacp::ProxyToConductor;
 use sacp::mcp_server::McpServer;
+use sacp::role::{ConductorToProxy, ProxyToConductor};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -20,10 +20,10 @@ struct EchoOutput {
     result: String,
 }
 
-struct ProxyComponent;
+pub struct ProxyComponent;
 
-impl Component for ProxyComponent {
-    async fn serve(self, client: impl Component) -> Result<(), sacp::Error> {
+impl Component<ProxyToConductor> for ProxyComponent {
+    async fn serve(self, client: impl Component<ConductorToProxy>) -> Result<(), sacp::Error> {
         let test_server = McpServer::builder("test")
             .instructions("A simple test MCP server with an echo tool")
             .tool_fn_mut(
@@ -44,8 +44,4 @@ impl Component for ProxyComponent {
             .serve(client)
             .await
     }
-}
-
-pub fn create() -> sacp::DynComponent {
-    sacp::DynComponent::new(ProxyComponent)
 }

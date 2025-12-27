@@ -6,12 +6,13 @@
 //! from being invoked.
 
 use sacp::mcp_server::McpServer;
+use sacp::role::{AgentToClient, ProxyToConductor};
 use sacp::schema::{
     AgentCapabilities, InitializeRequest, InitializeResponse, NewSessionRequest,
     NewSessionResponse, SessionId,
 };
-use sacp::{Agent, AgentToClient, Client, Component, ProxyToConductor};
-use sacp_conductor::Conductor;
+use sacp::{Agent, Client, Component};
+use sacp_conductor::{Conductor, ProxiesAndAgent};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
@@ -67,8 +68,11 @@ struct ProxyWithMcpAndHandler {
     config: Arc<HandlerConfig>,
 }
 
-impl Component for ProxyWithMcpAndHandler {
-    async fn serve(self, client: impl Component) -> Result<(), sacp::Error> {
+impl Component<ProxyToConductor> for ProxyWithMcpAndHandler {
+    async fn serve(
+        self,
+        client: impl Component<sacp::role::ConductorToProxy>,
+    ) -> Result<(), sacp::Error> {
         let config = Arc::clone(&self.config);
 
         // Create an MCP server with a simple tool
@@ -116,8 +120,11 @@ impl Component for ProxyWithMcpAndHandler {
 /// A simple agent that responds to initialization and session requests
 struct SimpleAgent;
 
-impl Component for SimpleAgent {
-    async fn serve(self, client: impl Component) -> Result<(), sacp::Error> {
+impl Component<AgentToClient> for SimpleAgent {
+    async fn serve(
+        self,
+        client: impl Component<sacp::role::ClientToAgent>,
+    ) -> Result<(), sacp::Error> {
         AgentToClient::builder()
             .name("simple-agent")
             .on_receive_request(
@@ -149,7 +156,8 @@ impl Component for SimpleAgent {
 }
 
 async fn run_test(
-    components: Vec<sacp::DynComponent>,
+    proxies: Vec<sacp::DynComponent<ProxyToConductor>>,
+    agent: sacp::DynComponent<AgentToClient>,
     editor_task: impl AsyncFnOnce(sacp::JrConnectionCx<sacp::ClientToAgent>) -> Result<(), sacp::Error>,
 ) -> Result<(), sacp::Error> {
     let (editor_out, conductor_in) = duplex(1024);
@@ -160,12 +168,16 @@ async fn run_test(
     sacp::ClientToAgent::builder()
         .name("editor-to-conductor")
         .with_spawned(|_cx| async move {
-            Conductor::new_agent("conductor".to_string(), components, Default::default())
-                .run(sacp::ByteStreams::new(
-                    conductor_out.compat_write(),
-                    conductor_in.compat(),
-                ))
-                .await
+            Conductor::new_agent(
+                "conductor".to_string(),
+                ProxiesAndAgent::new(agent).proxies(proxies),
+                Default::default(),
+            )
+            .run(sacp::ByteStreams::new(
+                conductor_out.compat_write(),
+                conductor_in.compat(),
+            ))
+            .await
         })
         .run_until(transport, editor_task)
         .await
@@ -177,12 +189,12 @@ async fn test_new_session_handler_invoked_with_mcp_server() -> Result<(), sacp::
     let handler_config = HandlerConfig::new();
     let handler_config_clone = Arc::clone(&handler_config);
 
-    let proxy = sacp::DynComponent::new(ProxyWithMcpAndHandler {
+    let proxy = sacp::DynComponent::<ProxyToConductor>::new(ProxyWithMcpAndHandler {
         config: handler_config,
     });
-    let agent = sacp::DynComponent::new(SimpleAgent);
+    let agent = sacp::DynComponent::<AgentToClient>::new(SimpleAgent);
 
-    run_test(vec![proxy, agent], async |editor_cx| {
+    run_test(vec![proxy], agent, async |editor_cx| {
         // Initialize first
         let _init_response = recv(editor_cx.send_request(InitializeRequest {
             protocol_version: Default::default(),

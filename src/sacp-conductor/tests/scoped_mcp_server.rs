@@ -6,10 +6,8 @@
 
 use elizacp::ElizaAgent;
 use sacp::mcp_server::McpServer;
-use sacp::{
-    Agent, ClientToAgent, Component, DynComponent, HasPeer, JrLink, JrResponder, ProxyToConductor,
-};
-use sacp_conductor::{Conductor, McpBridgeMode};
+use sacp::{Agent, ClientToAgent, Component, HasPeer, JrLink, JrResponder, ProxyToConductor};
+use sacp_conductor::{Conductor, McpBridgeMode, ProxiesAndAgent};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::sync::Mutex;
@@ -22,10 +20,7 @@ use std::sync::Mutex;
 async fn test_scoped_mcp_server_through_proxy() -> Result<(), sacp::Error> {
     let conductor = Conductor::new_agent(
         "conductor".to_string(),
-        vec![
-            DynComponent::new(ScopedProxy),
-            DynComponent::new(ElizaAgent::new()),
-        ],
+        ProxiesAndAgent::new(ElizaAgent::new()).proxy(ScopedProxy),
         Default::default(),
     );
 
@@ -50,7 +45,7 @@ async fn test_scoped_mcp_server_through_proxy() -> Result<(), sacp::Error> {
 #[tokio::test]
 async fn test_scoped_mcp_server_through_session() -> Result<(), sacp::Error> {
     ClientToAgent::builder()
-        .connect_to(Conductor::new_agent("conductor".to_string(), vec![ElizaAgent::new()], McpBridgeMode::default()))?
+        .connect_to(Conductor::new_agent("conductor".to_string(), ProxiesAndAgent::new(ElizaAgent::new()), McpBridgeMode::default()))?
         .run_until(async |cx| {
             // Initialize first
             cx.send_request(sacp::schema::InitializeRequest {
@@ -121,8 +116,11 @@ where
         .build()
 }
 
-impl Component for ScopedProxy {
-    async fn serve(self, client: impl Component) -> Result<(), sacp::Error> {
+impl Component<ProxyToConductor> for ScopedProxy {
+    async fn serve(
+        self,
+        client: impl Component<sacp::role::ConductorToProxy>,
+    ) -> Result<(), sacp::Error> {
         // Stack-local data that the MCP tool will push to
         let values: Mutex<Vec<String>> = Mutex::new(Vec::new());
 

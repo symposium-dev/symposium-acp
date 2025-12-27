@@ -20,7 +20,8 @@
 //! Run `just prep-tests` before running these tests.
 
 use sacp::Component;
-use sacp_conductor::Conductor;
+use sacp::role::{AgentToClient, ProxyToConductor};
+use sacp_conductor::{Conductor, ProxiesAndAgent};
 use sacp_test::arrow_proxy::run_arrow_proxy;
 use sacp_test::test_binaries::{arrow_proxy_example, conductor_binary, elizacp_binary};
 use sacp_tokio::AcpAgent;
@@ -31,8 +32,11 @@ use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
 /// Runs the arrow proxy logic in-process instead of spawning a subprocess.
 struct MockArrowProxy;
 
-impl Component for MockArrowProxy {
-    async fn serve(self, client: impl Component) -> Result<(), sacp::Error> {
+impl Component<ProxyToConductor> for MockArrowProxy {
+    async fn serve(
+        self,
+        client: impl Component<sacp::role::ConductorToProxy>,
+    ) -> Result<(), sacp::Error> {
         run_arrow_proxy(client).await
     }
 }
@@ -41,9 +45,12 @@ impl Component for MockArrowProxy {
 /// Runs the Eliza agent logic in-process instead of spawning a subprocess.
 struct MockEliza;
 
-impl Component for MockEliza {
-    async fn serve(self, client: impl Component) -> Result<(), sacp::Error> {
-        elizacp::ElizaAgent::new().serve(client).await
+impl Component<AgentToClient> for MockEliza {
+    async fn serve(
+        self,
+        client: impl Component<sacp::role::ClientToAgent>,
+    ) -> Result<(), sacp::Error> {
+        Component::<AgentToClient>::serve(elizacp::ElizaAgent::new(), client).await
     }
 }
 
@@ -59,21 +66,27 @@ impl MockInnerConductor {
     }
 }
 
-impl Component for MockInnerConductor {
-    async fn serve(self, client: impl Component) -> Result<(), sacp::Error> {
+impl Component<ProxyToConductor> for MockInnerConductor {
+    async fn serve(
+        self,
+        client: impl Component<sacp::role::ConductorToProxy>,
+    ) -> Result<(), sacp::Error> {
         // Create mock arrow proxy components for the inner conductor
         // This conductor is ONLY proxies - no actual agent
-        let mut components: Vec<sacp::DynComponent> = Vec::new();
+        // Use Component::serve instead of .run() to get the ProxyToConductor impl
+        let mut components: Vec<sacp::DynComponent<ProxyToConductor>> = Vec::new();
         for _ in 0..self.num_arrow_proxies {
             components.push(sacp::DynComponent::new(MockArrowProxy));
         }
 
-        Conductor::new_proxy(
-            "inner-conductor".to_string(),
-            components,
-            Default::default(),
+        Component::<ProxyToConductor>::serve(
+            Conductor::new_proxy(
+                "inner-conductor".to_string(),
+                components,
+                Default::default(),
+            ),
+            client,
         )
-        .run(client)
         .await
     }
 }
@@ -83,7 +96,6 @@ async fn test_nested_conductor_with_arrow_proxies() -> Result<(), sacp::Error> {
     // Create the nested component chain using mock components
     // Inner conductor will manage: arrow_proxy1 -> arrow_proxy2 -> eliza
     // Outer conductor will manage: inner_conductor only
-    let inner_conductor = sacp::DynComponent::new(MockInnerConductor::new(2));
 
     // Create duplex streams for editor <-> conductor communication
     let (editor_write, conductor_read) = duplex(8192);
@@ -93,7 +105,7 @@ async fn test_nested_conductor_with_arrow_proxies() -> Result<(), sacp::Error> {
     let conductor_handle = tokio::spawn(async move {
         Conductor::new_agent(
             "outer-conductor".to_string(),
-            vec![inner_conductor, sacp::DynComponent::new(MockEliza)],
+            ProxiesAndAgent::new(MockEliza).proxy(MockInnerConductor::new(2)),
             Default::default(),
         )
         .run(sacp::ByteStreams::new(
@@ -158,7 +170,7 @@ async fn test_nested_conductor_with_external_arrow_proxies() -> Result<(), sacp:
     let conductor_handle = tokio::spawn(async move {
         Conductor::new_agent(
             "outer-conductor".to_string(),
-            vec![inner_conductor, eliza],
+            ProxiesAndAgent::new(eliza).proxy(inner_conductor),
             Default::default(),
         )
         .run(sacp::ByteStreams::new(

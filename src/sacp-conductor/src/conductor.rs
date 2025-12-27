@@ -117,7 +117,11 @@ use futures::{
     channel::mpsc::{self},
 };
 use sacp::{
-    Agent, BoxFuture, Client, Component, Error, HasPeer, JrMessage, role::ConductorToConductor,
+    Agent, BoxFuture, Client, Component, Error, HasPeer, JrMessage,
+    role::{
+        AgentToClient, ConductorToAgent, ConductorToClient, ConductorToConductor, ConductorToProxy,
+        ProxyToConductor,
+    },
     util::MatchMessage,
 };
 use sacp::{
@@ -132,13 +136,9 @@ use sacp::{
     JrResponse, JrRole, MessageCx, UntypedMessage,
 };
 use sacp::{
-    JrMessageHandler, JrResponsePayload,
+    JrMessageHandler, JrResponder, JrResponsePayload,
     schema::{InitializeProxyRequest, InitializeRequest, NewSessionRequest},
     util::MatchMessageFrom,
-};
-use sacp::{
-    JrResponder,
-    role::{ConductorToAgent, ConductorToClient, ConductorToProxy},
 };
 use tracing::{debug, info};
 
@@ -270,7 +270,10 @@ impl<Link: ConductorLink> Conductor<Link> {
     ///     .serve()
     ///     .await
     /// ```
-    pub async fn run(self, transport: impl Component + 'static) -> Result<(), sacp::Error> {
+    pub async fn run(
+        self,
+        transport: impl Component<Link::ConnectsTo> + 'static,
+    ) -> Result<(), sacp::Error> {
         self.into_connection_builder()
             .connect_to(transport)?
             .serve()
@@ -304,8 +307,11 @@ impl<Link: ConductorLink> Conductor<Link> {
     }
 }
 
-impl<Link: ConductorLink> sacp::Component for Conductor<Link> {
-    async fn serve(self, client: impl sacp::Component) -> Result<(), sacp::Error> {
+impl<Link: ConductorLink> Component<Link::Speaks> for Conductor<Link> {
+    async fn serve(
+        self,
+        client: impl sacp::Component<Link::ConnectsTo>,
+    ) -> Result<(), sacp::Error> {
         self.run(client).await
     }
 }
@@ -890,7 +896,7 @@ where
     fn spawn_proxies(
         &mut self,
         cx: JrConnectionCx<Link>,
-        proxy_components: Vec<sacp::DynComponent>,
+        proxy_components: Vec<sacp::DynComponent<ProxyToConductor>>,
     ) -> Result<(), sacp::Error> {
         assert!(self.proxies.is_empty());
 
@@ -1104,29 +1110,34 @@ pub enum SourceComponentIndex {
 /// are proxies that forward to an outer conductor.
 pub trait InstantiateProxies: Send {
     /// Instantiate proxy components based on the Initialize request.
+    ///
+    /// Returns proxy components typed as `DynComponent<ProxyToConductor>` since proxies
+    /// communicate with the conductor.
     fn instantiate_proxies(
         self: Box<Self>,
         req: InitializeRequest,
     ) -> futures::future::BoxFuture<
         'static,
-        Result<(InitializeRequest, Vec<sacp::DynComponent>), sacp::Error>,
+        Result<(InitializeRequest, Vec<sacp::DynComponent<ProxyToConductor>>), sacp::Error>,
     >;
 }
 
 /// Simple implementation: provide all proxy components unconditionally.
+///
+/// Requires `T: Component<ProxyToConductor>`.
 impl<T> InstantiateProxies for Vec<T>
 where
-    T: Component + 'static,
+    T: Component<ProxyToConductor> + 'static,
 {
     fn instantiate_proxies(
         self: Box<Self>,
         req: InitializeRequest,
     ) -> futures::future::BoxFuture<
         'static,
-        Result<(InitializeRequest, Vec<sacp::DynComponent>), sacp::Error>,
+        Result<(InitializeRequest, Vec<sacp::DynComponent<ProxyToConductor>>), sacp::Error>,
     > {
         Box::pin(async move {
-            let components: Vec<sacp::DynComponent> = (*self)
+            let components: Vec<sacp::DynComponent<ProxyToConductor>> = (*self)
                 .into_iter()
                 .map(|c| sacp::DynComponent::new(c))
                 .collect();
@@ -1140,7 +1151,10 @@ impl<F, Fut> InstantiateProxies for F
 where
     F: FnOnce(InitializeRequest) -> Fut + Send + 'static,
     Fut: std::future::Future<
-            Output = Result<(InitializeRequest, Vec<sacp::DynComponent>), sacp::Error>,
+            Output = Result<
+                (InitializeRequest, Vec<sacp::DynComponent<ProxyToConductor>>),
+                sacp::Error,
+            >,
         > + Send
         + 'static,
 {
@@ -1149,7 +1163,7 @@ where
         req: InitializeRequest,
     ) -> futures::future::BoxFuture<
         'static,
-        Result<(InitializeRequest, Vec<sacp::DynComponent>), sacp::Error>,
+        Result<(InitializeRequest, Vec<sacp::DynComponent<ProxyToConductor>>), sacp::Error>,
     > {
         Box::pin(async move { (*self)(req).await })
     }
@@ -1162,8 +1176,9 @@ where
 pub trait InstantiateProxiesAndAgent: Send {
     /// Instantiate proxy and agent components based on the Initialize request.
     ///
-    /// Returns the (possibly modified) request, a vector of proxy components,
-    /// and the agent component.
+    /// Returns the (possibly modified) request, a vector of proxy components
+    /// (typed as `DynComponent<ProxyToConductor>`), and the agent component
+    /// (typed as `DynComponent<AgentToClient>`).
     fn instantiate_proxies_and_agent(
         self: Box<Self>,
         req: InitializeRequest,
@@ -1172,8 +1187,8 @@ pub trait InstantiateProxiesAndAgent: Send {
         Result<
             (
                 InitializeRequest,
-                Vec<sacp::DynComponent>,
-                sacp::DynComponent,
+                Vec<sacp::DynComponent<ProxyToConductor>>,
+                sacp::DynComponent<AgentToClient>,
             ),
             sacp::Error,
         >,
@@ -1183,7 +1198,7 @@ pub trait InstantiateProxiesAndAgent: Send {
 /// Wrapper to convert a single agent component (no proxies) into InstantiateProxiesAndAgent.
 pub struct AgentOnly<A>(pub A);
 
-impl<A: Component + 'static> InstantiateProxiesAndAgent for AgentOnly<A> {
+impl<A: Component<AgentToClient> + 'static> InstantiateProxiesAndAgent for AgentOnly<A> {
     fn instantiate_proxies_and_agent(
         self: Box<Self>,
         req: InitializeRequest,
@@ -1192,8 +1207,8 @@ impl<A: Component + 'static> InstantiateProxiesAndAgent for AgentOnly<A> {
         Result<
             (
                 InitializeRequest,
-                Vec<sacp::DynComponent>,
-                sacp::DynComponent,
+                Vec<sacp::DynComponent<ProxyToConductor>>,
+                sacp::DynComponent<AgentToClient>,
             ),
             sacp::Error,
         >,
@@ -1202,48 +1217,47 @@ impl<A: Component + 'static> InstantiateProxiesAndAgent for AgentOnly<A> {
     }
 }
 
-/// Wrapper to create proxies and agent from separate components.
-pub struct ProxiesAndAgent<P, A> {
-    pub proxies: P,
-    pub agent: A,
+/// Builder for creating proxies and agent components.
+///
+/// # Example
+/// ```ignore
+/// ProxiesAndAgent::new(ElizaAgent::new())
+///     .proxy(LoggingProxy::new())
+///     .proxy(AuthProxy::new())
+/// ```
+pub struct ProxiesAndAgent {
+    proxies: Vec<sacp::DynComponent<ProxyToConductor>>,
+    agent: sacp::DynComponent<AgentToClient>,
 }
 
-impl<P, A> InstantiateProxiesAndAgent for ProxiesAndAgent<Vec<P>, A>
-where
-    P: Component + 'static,
-    A: Component + 'static,
-{
-    fn instantiate_proxies_and_agent(
-        self: Box<Self>,
-        req: InitializeRequest,
-    ) -> futures::future::BoxFuture<
-        'static,
-        Result<
-            (
-                InitializeRequest,
-                Vec<sacp::DynComponent>,
-                sacp::DynComponent,
-            ),
-            sacp::Error,
-        >,
-    > {
-        Box::pin(async move {
-            let proxies: Vec<sacp::DynComponent> = self
-                .proxies
-                .into_iter()
-                .map(|c| sacp::DynComponent::new(c))
-                .collect();
-            let agent = sacp::DynComponent::new(self.agent);
-            Ok((req, proxies, agent))
-        })
+impl ProxiesAndAgent {
+    /// Create a new builder with the given agent component.
+    pub fn new(agent: impl Component<AgentToClient> + 'static) -> Self {
+        Self {
+            proxies: vec![],
+            agent: sacp::DynComponent::new(agent),
+        }
+    }
+
+    /// Add a single proxy component.
+    pub fn proxy(mut self, proxy: impl Component<ProxyToConductor> + 'static) -> Self {
+        self.proxies.push(sacp::DynComponent::new(proxy));
+        self
+    }
+
+    /// Add multiple proxy components.
+    pub fn proxies<P, I>(mut self, proxies: I) -> Self
+    where
+        P: Component<ProxyToConductor> + 'static,
+        I: IntoIterator<Item = P>,
+    {
+        self.proxies
+            .extend(proxies.into_iter().map(sacp::DynComponent::new));
+        self
     }
 }
 
-/// Simple implementation for Vec<T>: last element is the agent, rest are proxies.
-impl<T> InstantiateProxiesAndAgent for Vec<T>
-where
-    T: Component + 'static,
-{
+impl InstantiateProxiesAndAgent for ProxiesAndAgent {
     fn instantiate_proxies_and_agent(
         self: Box<Self>,
         req: InitializeRequest,
@@ -1252,22 +1266,13 @@ where
         Result<
             (
                 InitializeRequest,
-                Vec<sacp::DynComponent>,
-                sacp::DynComponent,
+                Vec<sacp::DynComponent<ProxyToConductor>>,
+                sacp::DynComponent<AgentToClient>,
             ),
             sacp::Error,
         >,
     > {
-        Box::pin(async move {
-            let mut components: Vec<sacp::DynComponent> = (*self)
-                .into_iter()
-                .map(|c| sacp::DynComponent::new(c))
-                .collect();
-            let agent = components
-                .pop()
-                .ok_or_else(|| sacp::util::internal_error("no agent component in list"))?;
-            Ok((req, components, agent))
-        })
+        Box::pin(async move { Ok((req, self.proxies, self.agent)) })
     }
 }
 
@@ -1279,8 +1284,8 @@ where
             Output = Result<
                 (
                     InitializeRequest,
-                    Vec<sacp::DynComponent>,
-                    sacp::DynComponent,
+                    Vec<sacp::DynComponent<ProxyToConductor>>,
+                    sacp::DynComponent<AgentToClient>,
                 ),
                 sacp::Error,
             >,
@@ -1295,8 +1300,8 @@ where
         Result<
             (
                 InitializeRequest,
-                Vec<sacp::DynComponent>,
-                sacp::DynComponent,
+                Vec<sacp::DynComponent<ProxyToConductor>>,
+                sacp::DynComponent<AgentToClient>,
             ),
             sacp::Error,
         >,
@@ -1470,6 +1475,8 @@ impl<T: JrResponsePayload> JrResponseExt<T> for JrResponse<T> {
 /// * ConductorToClient -- conductor is acting as an agent, so when its last proxy sends to its successor, the conductor sends that message to its agent component
 /// * ConductorToConductor -- conductor is acting as a proxy, so when its last proxy sends to its successor, the (inner) conductor sends that message to its successor, via the outer conductor
 pub trait ConductorLink: JrLink + HasPeer<Client> {
+    type Speaks: JrLink<ConnectsTo = Self::ConnectsTo>;
+
     /// The type used to instantiate components for this link type.
     type Instantiator: Send;
 
@@ -1495,6 +1502,9 @@ pub trait ConductorLink: JrLink + HasPeer<Client> {
 }
 
 impl ConductorLink for ConductorToClient {
+    /// In this mode, the conductor acts as an agent talking to a client.
+    type Speaks = AgentToClient;
+
     type Instantiator = Box<dyn InstantiateProxiesAndAgent>;
 
     async fn initialize(
@@ -1592,6 +1602,9 @@ impl ConductorLink for ConductorToClient {
 }
 
 impl ConductorLink for ConductorToConductor {
+    /// In this mode, the conductor acts as a proxy talking to an (outer) conductor..
+    type Speaks = ProxyToConductor;
+
     type Instantiator = Box<dyn InstantiateProxies>;
 
     async fn initialize(

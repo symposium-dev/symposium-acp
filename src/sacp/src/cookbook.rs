@@ -95,6 +95,7 @@ pub mod reusable_components {
     //!
     //! ```
     //! use sacp::{Component, AgentToClient};
+    //! use sacp::role::JrLink;
     //! use sacp::schema::{
     //!     InitializeRequest, InitializeResponse, AgentCapabilities,
     //! };
@@ -103,8 +104,8 @@ pub mod reusable_components {
     //!     name: String,
     //! }
     //!
-    //! impl Component for MyAgent {
-    //!     async fn serve(self, client: impl Component) -> Result<(), sacp::Error> {
+    //! impl Component<AgentToClient> for MyAgent {
+    //!     async fn serve(self, client: impl Component<<AgentToClient as JrLink>::ConnectsTo>) -> Result<(), sacp::Error> {
     //!         AgentToClient::builder()
     //!             .name(&self.name)
     //!             .on_receive_request(async move |req: InitializeRequest, request_cx, _cx| {
@@ -201,10 +202,10 @@ pub mod connecting_as_client {
     //! # Example
     //!
     //! ```
-    //! use sacp::{ClientToAgent, Component};
+    //! use sacp::{ClientToAgent, AgentToClient, Component};
     //! use sacp::schema::{InitializeRequest, NewSessionRequest, SessionNotification};
     //!
-    //! async fn connect_to_agent(transport: impl Component) -> Result<(), sacp::Error> {
+    //! async fn connect_to_agent(transport: impl Component<AgentToClient>) -> Result<(), sacp::Error> {
     //!     ClientToAgent::builder()
     //!         .name("my-client")
     //!         .on_receive_notification(async |notif: SessionNotification, _cx| {
@@ -290,8 +291,8 @@ pub mod global_mcp_server {
     //!     mcp_server: McpServer<ProxyToConductor, R>,
     //! }
     //!
-    //! impl<R: JrResponder<ProxyToConductor> + Send + 'static> Component for MyProxy<R> {
-    //!     async fn serve(self, client: impl Component) -> Result<(), sacp::Error> {
+    //! impl<R: JrResponder<ProxyToConductor> + Send + 'static> Component<ProxyToConductor> for MyProxy<R> {
+    //!     async fn serve(self, client: impl Component<sacp::role::ConductorToProxy>) -> Result<(), sacp::Error> {
     //!         ProxyToConductor::builder()
     //!             .with_mcp_server(self.mcp_server)
     //!             .serve(client)
@@ -336,8 +337,9 @@ pub mod per_session_mcp_server {
     //! use sacp::mcp_server::McpServer;
     //! use sacp::schema::NewSessionRequest;
     //! use sacp::{Agent, Client, Component, ProxyToConductor};
+    //! use sacp::role::ConductorToProxy;
     //!
-    //! async fn run_proxy(transport: impl Component) -> Result<(), sacp::Error> {
+    //! async fn run_proxy(transport: impl Component<ConductorToProxy>) -> Result<(), sacp::Error> {
     //!     ProxyToConductor::builder()
     //!         .on_receive_request_from(Client, async |request: NewSessionRequest, request_cx, cx| {
     //!             let cwd = request.cwd.clone();
@@ -369,8 +371,9 @@ pub mod per_session_mcp_server {
     //! use sacp::mcp_server::McpServer;
     //! use sacp::schema::NewSessionRequest;
     //! use sacp::{Agent, Client, Component, ProxyToConductor};
+    //! use sacp::role::ConductorToProxy;
     //!
-    //! async fn run_proxy(transport: impl Component) -> Result<(), sacp::Error> {
+    //! async fn run_proxy(transport: impl Component<ConductorToProxy>) -> Result<(), sacp::Error> {
     //!     ProxyToConductor::builder()
     //!         .on_receive_request_from(Client, async |request: NewSessionRequest, request_cx, cx| {
     //!             let cwd = request.cwd.clone();

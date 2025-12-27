@@ -61,12 +61,11 @@ async fn test_acp_agent_debug_callback() -> Result<(), Box<dyn std::error::Error
     UntypedLink::builder()
         .name("test-client")
         .with_spawned(|_cx| async move {
-            agent
-                .serve(sacp::ByteStreams::new(
-                    agent_out.compat_write(),
-                    agent_in.compat(),
-                ))
-                .await
+            Component::<UntypedLink>::serve(
+                agent,
+                sacp::ByteStreams::new(agent_out.compat_write(), agent_in.compat()),
+            )
+            .await
         })
         .run_until(transport, async |client_cx| {
             // Send an initialize request

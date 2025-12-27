@@ -1,5 +1,5 @@
 use futures::{SinkExt as _, StreamExt as _, channel::mpsc};
-use sacp::mcp::{McpClientToServer, McpServerEnd};
+use sacp::mcp::{McpClientToServer, McpServerEnd, McpServerToClient};
 use sacp::schema::McpDisconnectNotification;
 use sacp::{Component, DynComponent, MessageCx};
 use tracing::info;
@@ -12,7 +12,7 @@ use crate::conductor::ConductorMessage;
 #[derive(Debug)]
 pub struct McpBridgeConnectionActor {
     /// How to connect to the MCP server
-    transport: DynComponent,
+    transport: DynComponent<McpServerToClient>,
 
     /// Sender for messages to the conductor
     conductor_tx: mpsc::Sender<ConductorMessage>,
@@ -23,7 +23,7 @@ pub struct McpBridgeConnectionActor {
 
 impl McpBridgeConnectionActor {
     pub fn new(
-        component: impl Component,
+        component: impl Component<sacp::mcp::McpServerToClient>,
         conductor_tx: mpsc::Sender<ConductorMessage>,
         to_mcp_client_rx: mpsc::Receiver<MessageCx>,
     ) -> Self {

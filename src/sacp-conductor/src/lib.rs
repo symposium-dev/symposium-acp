@@ -90,9 +90,73 @@ pub use self::conductor::*;
 
 use clap::{Parser, Subcommand};
 
+use sacp::role::{AgentToClient, ProxyToConductor};
+use sacp::schema::InitializeRequest;
 use sacp_tokio::{AcpAgent, Stdio};
 use tracing::Instrument;
 use tracing_subscriber::{EnvFilter, layer::SubscriberExt, util::SubscriberInitExt};
+
+/// Wrapper for command-line component lists that can serve as either
+/// proxies-only (for proxy mode) or proxies+agent (for agent mode).
+///
+/// This exists because `AcpAgent` implements `Component<L>` for all `L`,
+/// so a `Vec<AcpAgent>` can be used as either a list of proxies or as
+/// proxies + final agent depending on the conductor mode.
+pub struct CommandLineComponents(pub Vec<AcpAgent>);
+
+impl InstantiateProxies for CommandLineComponents {
+    fn instantiate_proxies(
+        self: Box<Self>,
+        req: InitializeRequest,
+    ) -> futures::future::BoxFuture<
+        'static,
+        Result<(InitializeRequest, Vec<sacp::DynComponent<ProxyToConductor>>), sacp::Error>,
+    > {
+        Box::pin(async move {
+            let proxies = self
+                .0
+                .into_iter()
+                .map(|c| sacp::DynComponent::new(c))
+                .collect();
+            Ok((req, proxies))
+        })
+    }
+}
+
+impl InstantiateProxiesAndAgent for CommandLineComponents {
+    fn instantiate_proxies_and_agent(
+        self: Box<Self>,
+        req: InitializeRequest,
+    ) -> futures::future::BoxFuture<
+        'static,
+        Result<
+            (
+                InitializeRequest,
+                Vec<sacp::DynComponent<ProxyToConductor>>,
+                sacp::DynComponent<AgentToClient>,
+            ),
+            sacp::Error,
+        >,
+    > {
+        Box::pin(async move {
+            let mut iter = self.0.into_iter().peekable();
+            let mut proxies: Vec<sacp::DynComponent<ProxyToConductor>> = Vec::new();
+
+            // All but the last element are proxies
+            while let Some(component) = iter.next() {
+                if iter.peek().is_some() {
+                    proxies.push(sacp::DynComponent::new(component));
+                } else {
+                    // Last element is the agent
+                    let agent = sacp::DynComponent::new(component);
+                    return Ok((req, proxies, agent));
+                }
+            }
+
+            Err(sacp::util::internal_error("no agent component in list"))
+        })
+    }
+}
 
 /// Wrapper to implement WriteEvent for TraceHandle.
 struct TraceHandleWriter(sacp_trace_viewer::TraceHandle);
@@ -303,7 +367,7 @@ async fn initialize_conductor<Link: ConductorLink>(
     trace_writer: Option<trace::TraceWriter>,
     name: String,
     components: Vec<String>,
-    new_conductor: impl FnOnce(String, Vec<AcpAgent>, crate::McpBridgeMode) -> Conductor<Link>,
+    new_conductor: impl FnOnce(String, CommandLineComponents, crate::McpBridgeMode) -> Conductor<Link>,
 ) -> Result<(), sacp::Error> {
     // Parse agents and optionally wrap with debug callbacks
     let providers: Vec<AcpAgent> = components
@@ -326,7 +390,7 @@ async fn initialize_conductor<Link: ConductorLink>(
     };
 
     // Create conductor with optional trace writer
-    let mut conductor = new_conductor(name, providers, Default::default());
+    let mut conductor = new_conductor(name, CommandLineComponents(providers), Default::default());
     if let Some(writer) = trace_writer {
         conductor = conductor.with_trace_writer(writer);
     }

@@ -985,7 +985,7 @@ impl<H: JrMessageHandler, R: JrResponder<H::Link>> JrConnectionBuilder<H, R> {
     /// The resulting connection must then be either [served](`JrConnection::serve`) or [run until completion](`JrConnection::run_until`).
     pub fn connect_to(
         self,
-        transport: impl Component + 'static,
+        transport: impl Component<<H::Link as JrLink>::ConnectsTo> + 'static,
     ) -> Result<JrConnection<H, R>, crate::Error> {
         let Self {
             name,
@@ -1110,7 +1110,10 @@ impl<H: JrMessageHandler, R: JrResponder<H::Link>> JrConnectionBuilder<H, R> {
     /// ```ignore
     /// handler_chain.connect_to(transport)?.serve().await
     /// ```
-    pub async fn serve(self, transport: impl Component + 'static) -> Result<(), crate::Error> {
+    pub async fn serve(
+        self,
+        transport: impl Component<<H::Link as JrLink>::ConnectsTo> + 'static,
+    ) -> Result<(), crate::Error> {
         self.connect_to(transport)?.serve().await
     }
 
@@ -1122,7 +1125,7 @@ impl<H: JrMessageHandler, R: JrResponder<H::Link>> JrConnectionBuilder<H, R> {
     /// ```
     pub async fn run_until(
         self,
-        transport: impl Component + 'static,
+        transport: impl Component<<H::Link as JrLink>::ConnectsTo> + 'static,
         main_fn: impl AsyncFnOnce(JrConnectionCx<H::Link>) -> Result<(), crate::Error>,
     ) -> Result<(), crate::Error> {
         self.connect_to(transport)?.run_until(main_fn).await
@@ -2838,13 +2841,13 @@ where
     }
 }
 
-impl<OutgoingSink, IncomingStream> Component for Lines<OutgoingSink, IncomingStream>
+impl<OutgoingSink, IncomingStream, L: JrLink> Component<L> for Lines<OutgoingSink, IncomingStream>
 where
     OutgoingSink: futures::Sink<String, Error = std::io::Error> + Send + 'static,
     IncomingStream: futures::Stream<Item = std::io::Result<String>> + Send + 'static,
 {
-    async fn serve(self, client: impl Component) -> Result<(), crate::Error> {
-        let (channel, serve_self) = self.into_server();
+    async fn serve(self, client: impl Component<L::ConnectsTo>) -> Result<(), crate::Error> {
+        let (channel, serve_self) = Component::<L>::into_server(self);
         match futures::future::select(Box::pin(client.serve(channel)), serve_self).await {
             Either::Left((result, _)) => result,
             Either::Right((result, _)) => result,
@@ -2931,13 +2934,13 @@ where
     }
 }
 
-impl<OB, IB> Component for ByteStreams<OB, IB>
+impl<OB, IB, L: JrLink> Component<L> for ByteStreams<OB, IB>
 where
     OB: AsyncWrite + Send + 'static,
     IB: AsyncRead + Send + 'static,
 {
-    async fn serve(self, client: impl Component) -> Result<(), crate::Error> {
-        let (channel, serve_self) = self.into_server();
+    async fn serve(self, client: impl Component<L::ConnectsTo>) -> Result<(), crate::Error> {
+        let (channel, serve_self) = Component::<L>::into_server(self);
         match futures::future::select(pin!(client.serve(channel)), serve_self).await {
             Either::Left((result, _)) => result,
             Either::Right((result, _)) => result,
@@ -2965,7 +2968,7 @@ where
             });
 
         // Delegate to Lines component
-        Lines::new(outgoing_sink, incoming_lines).into_server()
+        Component::<L>::into_server(Lines::new(outgoing_sink, incoming_lines))
     }
 }
 
@@ -3036,8 +3039,8 @@ impl Channel {
     }
 }
 
-impl Component for Channel {
-    async fn serve(self, client: impl Component) -> Result<(), crate::Error> {
+impl<L: JrLink> Component<L> for Channel {
+    async fn serve(self, client: impl Component<L::ConnectsTo>) -> Result<(), crate::Error> {
         let (client_channel, client_serve) = client.into_server();
 
         match futures::try_join!(

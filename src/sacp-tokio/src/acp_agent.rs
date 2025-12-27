@@ -258,8 +258,8 @@ async fn monitor_child(
     }
 }
 
-impl sacp::Component for AcpAgent {
-    async fn serve(self, client: impl sacp::Component) -> Result<(), sacp::Error> {
+impl<L: sacp::role::JrLink> sacp::Component<L> for AcpAgent {
+    async fn serve(self, client: impl sacp::Component<L::ConnectsTo>) -> Result<(), sacp::Error> {
         use futures::AsyncBufReadExt;
         use futures::AsyncWriteExt;
         use futures::StreamExt;
@@ -338,7 +338,8 @@ impl sacp::Component for AcpAgent {
 
         // Race the protocol against child process exit
         // If the child exits early (e.g., with an error), we return that error
-        let protocol_future = sacp::Lines::new(outgoing_sink, incoming_lines).serve(client);
+        let protocol_future =
+            sacp::Component::<L>::serve(sacp::Lines::new(outgoing_sink, incoming_lines), client);
 
         tokio::select! {
             result = protocol_future => result,

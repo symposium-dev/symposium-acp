@@ -3,6 +3,7 @@
 //! This proxy demonstrates basic proxy functionality by intercepting
 //! `session/update` notifications and prepending `>` to the content.
 
+use sacp::role::ConductorToProxy;
 use sacp::schema::{ContentBlock, ContentChunk, SessionNotification, SessionUpdate};
 use sacp::{Agent, Client, Component, ProxyToConductor};
 
@@ -11,7 +12,9 @@ use sacp::{Agent, Client, Component, ProxyToConductor};
 /// # Arguments
 ///
 /// * `transport` - Component to the predecessor (conductor or another proxy)
-pub async fn run_arrow_proxy(transport: impl Component + 'static) -> Result<(), sacp::Error> {
+pub async fn run_arrow_proxy(
+    transport: impl Component<ConductorToProxy> + 'static,
+) -> Result<(), sacp::Error> {
     ProxyToConductor::builder()
         .name("arrow-proxy")
         // Intercept session notifications from successor (agent) and modify them.

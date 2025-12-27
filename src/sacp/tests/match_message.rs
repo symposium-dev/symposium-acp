@@ -78,8 +78,8 @@ async fn modify_message_en_route() -> Result<(), sacp::Error> {
 
     struct TestComponent;
 
-    impl Component for TestComponent {
-        async fn serve(self, client: impl Component) -> Result<(), sacp::Error> {
+    impl Component<UntypedLink> for TestComponent {
+        async fn serve(self, client: impl Component<UntypedLink>) -> Result<(), sacp::Error> {
             UntypedLink::builder()
                 .with_handler(PushHandler {
                     message: "b".to_string(),
@@ -149,8 +149,8 @@ async fn modify_message_en_route_inline() -> Result<(), sacp::Error> {
 
     struct TestComponent;
 
-    impl Component for TestComponent {
-        async fn serve(self, client: impl Component) -> Result<(), sacp::Error> {
+    impl Component<UntypedLink> for TestComponent {
+        async fn serve(self, client: impl Component<UntypedLink>) -> Result<(), sacp::Error> {
             UntypedLink::builder()
                 .on_receive_request(
                     async move |mut request: EchoRequestResponse,
@@ -201,8 +201,8 @@ async fn modify_message_and_stop() -> Result<(), sacp::Error> {
 
     struct TestComponent;
 
-    impl Component for TestComponent {
-        async fn serve(self, client: impl Component) -> Result<(), sacp::Error> {
+    impl Component<UntypedLink> for TestComponent {
+        async fn serve(self, client: impl Component<UntypedLink>) -> Result<(), sacp::Error> {
             UntypedLink::builder()
                 .on_receive_request(
                     async move |request: EchoRequestResponse,

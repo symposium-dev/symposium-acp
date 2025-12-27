@@ -4,9 +4,9 @@
 //! when tools return non-object types like bare strings or integers.
 
 use sacp::Component;
-use sacp::ProxyToConductor;
 use sacp::mcp_server::McpServer;
-use sacp_conductor::Conductor;
+use sacp::role::{AgentToClient, ProxyToConductor};
+use sacp_conductor::{Conductor, ProxiesAndAgent};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use tokio::io::duplex;
@@ -17,7 +17,7 @@ use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
 struct EmptyInput {}
 
 /// Create a proxy with tools that return different types
-fn create_test_proxy() -> Result<sacp::DynComponent, sacp::Error> {
+fn create_test_proxy() -> Result<sacp::DynComponent<ProxyToConductor>, sacp::Error> {
     let mcp_server = McpServer::builder("test_server".to_string())
         .instructions("Test MCP server with various output types")
         .tool_fn_mut(
@@ -41,8 +41,13 @@ struct ProxyWithTestServer<R: sacp::JrResponder<ProxyToConductor>> {
     mcp_server: McpServer<ProxyToConductor, R>,
 }
 
-impl<R: sacp::JrResponder<ProxyToConductor> + 'static + Send> Component for ProxyWithTestServer<R> {
-    async fn serve(self, client: impl Component) -> Result<(), sacp::Error> {
+impl<R: sacp::JrResponder<ProxyToConductor> + 'static + Send> Component<ProxyToConductor>
+    for ProxyWithTestServer<R>
+{
+    async fn serve(
+        self,
+        client: impl Component<sacp::role::ConductorToProxy>,
+    ) -> Result<(), sacp::Error> {
         ProxyToConductor::builder()
             .name("test-proxy")
             .with_mcp_server(self.mcp_server)
@@ -54,8 +59,11 @@ impl<R: sacp::JrResponder<ProxyToConductor> + 'static + Send> Component for Prox
 /// Elizacp agent component wrapper for testing
 struct ElizacpAgentComponent;
 
-impl Component for ElizacpAgentComponent {
-    async fn serve(self, client: impl Component) -> Result<(), sacp::Error> {
+impl Component<AgentToClient> for ElizacpAgentComponent {
+    async fn serve(
+        self,
+        client: impl Component<sacp::role::ClientToAgent>,
+    ) -> Result<(), sacp::Error> {
         let (elizacp_write, client_read) = duplex(8192);
         let (client_write, elizacp_read) = duplex(8192);
 
@@ -66,12 +74,15 @@ impl Component for ElizacpAgentComponent {
             sacp::ByteStreams::new(client_write.compat_write(), client_read.compat());
 
         tokio::spawn(async move {
-            if let Err(e) = elizacp::ElizaAgent::new().serve(elizacp_transport).await {
+            if let Err(e) =
+                Component::<AgentToClient>::serve(elizacp::ElizaAgent::new(), elizacp_transport)
+                    .await
+            {
                 tracing::error!("Elizacp error: {}", e);
             }
         });
 
-        client_transport.serve(client).await
+        Component::<AgentToClient>::serve(client_transport, client).await
     }
 }
 
@@ -80,10 +91,7 @@ async fn test_tool_returning_string() -> Result<(), sacp::Error> {
     let result = yopo::prompt(
         Conductor::new_agent(
             "test-conductor".to_string(),
-            vec![
-                create_test_proxy()?,
-                sacp::DynComponent::new(ElizacpAgentComponent),
-            ],
+            ProxiesAndAgent::new(ElizacpAgentComponent).proxy(create_test_proxy()?),
             Default::default(),
         ),
         r#"Use tool test_server::return_string with {}"#,
@@ -104,10 +112,7 @@ async fn test_tool_returning_integer() -> Result<(), sacp::Error> {
     let result = yopo::prompt(
         Conductor::new_agent(
             "test-conductor".to_string(),
-            vec![
-                create_test_proxy()?,
-                sacp::DynComponent::new(ElizacpAgentComponent),
-            ],
+            ProxiesAndAgent::new(ElizacpAgentComponent).proxy(create_test_proxy()?),
             Default::default(),
         ),
         r#"Use tool test_server::return_integer with {}"#,

@@ -49,6 +49,14 @@ pub trait JrLink: Debug + Copy + Send + Sync + 'static + Eq + Ord + Hash + Defau
     /// calling [`JrConnectionCx::send_request_to`].
     type RemotePeer: JrRole;
 
+    /// The link type that connects to this link.
+    ///
+    /// For example, `ClientToAgent::ConnectsTo = AgentToClient`.
+    /// This is used by `Component<L>` to express the relationship:
+    /// a component that implements `Component<L>` can serve as the
+    /// transport for a connection using link `L::ConnectsTo`.
+    type ConnectsTo: JrLink;
+
     /// State maintained for connections this role.
     type State: Default + Send;
 
@@ -218,6 +226,7 @@ pub struct UntypedLink;
 impl JrLink for UntypedLink {
     type LocalRole = UntypedRole;
     type RemotePeer = UntypedRole;
+    type ConnectsTo = UntypedLink;
     type State = ();
 }
 
@@ -243,6 +252,7 @@ pub struct ClientToAgent;
 impl JrLink for ClientToAgent {
     type LocalRole = Client;
     type RemotePeer = Agent;
+    type ConnectsTo = AgentToClient;
     type State = ();
 
     async fn default_message_handler(
@@ -282,6 +292,7 @@ pub struct AgentToClient;
 impl JrLink for AgentToClient {
     type LocalRole = Agent;
     type RemotePeer = Client;
+    type ConnectsTo = ClientToAgent;
     type State = ();
 }
 
@@ -300,6 +311,7 @@ pub struct ConductorToClient;
 impl JrLink for ConductorToClient {
     type LocalRole = Conductor;
     type RemotePeer = Client;
+    type ConnectsTo = ClientToAgent; // Client talks to conductor as if it were an agent
     type State = ();
 }
 
@@ -317,6 +329,9 @@ pub struct ConductorToConductor;
 impl JrLink for ConductorToConductor {
     type LocalRole = Conductor;
     type RemotePeer = Client;
+
+    /// From the (remote) conductor's perspective, thie (local) conductor is a proxy
+    type ConnectsTo = ConductorToProxy;
     type State = ();
 }
 
@@ -337,8 +352,14 @@ impl HasPeer<Client> for ConductorToConductor {
 pub struct ConductorToProxy;
 
 impl JrLink for ConductorToProxy {
+    /// The conductor has a special role when talking to a proxy.
     type LocalRole = Conductor;
+
+    /// The remote peer acts as an agent (with special powers...).
     type RemotePeer = Agent;
+
+    type ConnectsTo = ProxyToConductor;
+
     type State = ();
 }
 
@@ -355,8 +376,15 @@ impl HasPeer<Agent> for ConductorToProxy {
 pub struct ConductorToAgent;
 
 impl JrLink for ConductorToAgent {
-    type LocalRole = Conductor;
+    /// The conductor acts as any other client here.
+    type LocalRole = Client;
+
+    /// The remote role is an agent.
     type RemotePeer = Agent;
+
+    /// From the (remote) agent's perspective, the conductor is acting as any other client
+    type ConnectsTo = AgentToClient;
+
     type State = ();
 }
 
@@ -383,6 +411,7 @@ pub struct ProxyToConductorState {}
 impl JrLink for ProxyToConductor {
     type LocalRole = Agent;
     type RemotePeer = Conductor;
+    type ConnectsTo = ConductorToProxy;
     type State = ProxyToConductorState;
 
     async fn default_message_handler(
