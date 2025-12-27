@@ -155,7 +155,7 @@ mod mcp_bridge;
 ///
 pub struct Conductor<Link: ConductorLink> {
     name: String,
-    component_list: Box<dyn ComponentList>,
+    instantiator: Link::Instantiator,
     mcp_bridge_mode: crate::McpBridgeMode,
     trace_writer: Option<crate::trace::TraceWriter>,
     link: Link,
@@ -165,12 +165,12 @@ impl<Link: ConductorLink> Conductor<Link> {
     pub fn new(
         link: Link,
         name: impl ToString,
-        component_list: impl ComponentList + 'static,
+        instantiator: Link::Instantiator,
         mcp_bridge_mode: crate::McpBridgeMode,
     ) -> Self {
         Conductor {
             name: name.to_string(),
-            component_list: Box::new(component_list),
+            instantiator,
             mcp_bridge_mode,
             trace_writer: None,
             link,
@@ -182,10 +182,15 @@ impl Conductor<ConductorToClient> {
     /// Create a conductor in agent mode (the last component is an agent).
     pub fn new_agent(
         name: impl ToString,
-        component_list: impl ComponentList + 'static,
+        instantiator: impl InstantiateProxiesAndAgent + 'static,
         mcp_bridge_mode: crate::McpBridgeMode,
     ) -> Self {
-        Conductor::new(ConductorToClient, name, component_list, mcp_bridge_mode)
+        Conductor::new(
+            ConductorToClient,
+            name,
+            Box::new(instantiator),
+            mcp_bridge_mode,
+        )
     }
 }
 
@@ -193,10 +198,15 @@ impl Conductor<ConductorToConductor> {
     /// Create a conductor in proxy mode (forwards to another conductor).
     pub fn new_proxy(
         name: impl ToString,
-        component_list: impl ComponentList + 'static,
+        instantiator: impl InstantiateProxies + 'static,
         mcp_bridge_mode: crate::McpBridgeMode,
     ) -> Self {
-        Conductor::new(ConductorToConductor, name, component_list, mcp_bridge_mode)
+        Conductor::new(
+            ConductorToConductor,
+            name,
+            Box::new(instantiator),
+            mcp_bridge_mode,
+        )
     }
 }
 
@@ -232,7 +242,7 @@ impl<Link: ConductorLink> Conductor<Link> {
         let responder = ConductorResponder {
             conductor_rx,
             conductor_tx: conductor_tx.clone(),
-            component_list: Some(self.component_list),
+            instantiator: Some(self.instantiator),
             bridge_listeners: Default::default(),
             bridge_connections: Default::default(),
             mcp_bridge_mode: self.mcp_bridge_mode,
@@ -342,9 +352,9 @@ where
     /// Manages active connections to MCP clients.
     bridge_connections: HashMap<String, McpBridgeConnection>,
 
-    /// The component list for lazy initialization.
+    /// The instantiator for lazy initialization.
     /// Set to None after components are instantiated.
-    component_list: Option<Box<dyn ComponentList>>,
+    instantiator: Option<Link::Instantiator>,
 
     /// The chain of proxies before the agent (if any).
     ///
@@ -865,46 +875,29 @@ where
         message: MessageCx,
     ) -> Result<MessageCx, Error> {
         // Already initialized - pass through
-        if self.component_list.is_none() {
+        let Some(instantiator) = self.instantiator.take() else {
             return Ok(message);
-        }
+        };
 
-        let message = self.link.initialize(message, client, self).await?;
+        let message = self
+            .link
+            .initialize(message, client, instantiator, self)
+            .await?;
         Ok(message)
     }
 
-    /// Invoked on the first message we receive, no matter what it is.
-    /// Creates the conductor's proxies and initializes the components.
-    async fn lazy_initialize_components(
+    /// Spawn proxy components and add them to the proxies list.
+    fn spawn_proxies(
         &mut self,
         cx: JrConnectionCx<Link>,
-        initialize_request: InitializeRequest,
-    ) -> Result<InitializeRequest, sacp::Error> {
+        proxy_components: Vec<sacp::DynComponent>,
+    ) -> Result<(), sacp::Error> {
         assert!(self.proxies.is_empty());
 
-        info!(?initialize_request, "lazy_initialize_components");
-
-        let Some(component_list) = self.component_list.take() else {
-            return Err(sacp::util::internal_error("no component list"));
-        };
-
-        let (modified_req, mut dyn_components) = component_list
-            .instantiate_components(initialize_request)
-            .await?;
-
-        debug!(
-            ?modified_req,
-            dyn_components_len = dyn_components.len(),
-            "instantiated components"
-        );
-
-        // If we are in agent mode, spawn the agent component
-        self.successor =
-            self.link
-                .new_successor(cx.clone(), &mut dyn_components, &self.conductor_tx)?;
+        info!(proxy_count = proxy_components.len(), "spawn_proxies");
 
         // Spawn each proxy component
-        for (component_index, dyn_component) in dyn_components.into_iter().enumerate() {
+        for (component_index, dyn_component) in proxy_components.into_iter().enumerate() {
             debug!(component_index, "spawning proxy");
 
             let proxy_cx = cx.spawn_connection(
@@ -956,9 +949,9 @@ where
             self.proxies.push(proxy_cx);
         }
 
-        info!(proxy_count = self.proxies.len(), "Components spawned");
+        info!(proxy_count = self.proxies.len(), "Proxies spawned");
 
-        Ok(modified_req)
+        Ok(())
     }
 
     async fn forward_message_to_proxy(
@@ -1105,51 +1098,13 @@ pub enum SourceComponentIndex {
     Proxy(usize),
 }
 
-/// Trait for lazy component instantiation based on the Initialize request.
+/// Trait for lazy proxy instantiation (proxy mode).
 ///
-/// This trait enables the conductor to defer component selection until after
-/// receiving and examining the Initialize request from the upstream client.
-/// This allows dynamic proxy chain construction based on client capabilities.
-///
-/// Implementations return component specifications (things that implement `Component`),
-/// and the conductor handles spawning and wiring them together.
-///
-/// # Examples
-///
-/// Simple case - provide all components unconditionally:
-/// ```ignore
-/// let components: Vec<sacp::DynComponent> = vec![
-///     sacp::DynComponent::new(AcpAgent::from_str("python proxy.py")?),
-///     sacp::DynComponent::new(AcpAgent::from_str("python agent.py")?),
-/// ];
-/// Conductor::new("my-conductor", components, None)
-/// ```
-///
-/// Dynamic case - examine capabilities and choose components conditionally:
-/// ```ignore
-/// Conductor::new("my-conductor", |_cx, _conductor_tx, init_req| async move {
-///     let needs_auth = init_req.capabilities.contains(&"auth");
-///     let mut components: Vec<sacp::DynComponent> = Vec::new();
-///     if needs_auth {
-///         components.push(sacp::DynComponent::new(AcpAgent::from_str("python auth-proxy.py")?));
-///     }
-///     components.push(sacp::DynComponent::new(AcpAgent::from_str("python agent.py")?));
-///     Ok((init_req, components))
-/// }, None)
-/// ```
-pub trait ComponentList: Send {
-    /// Select components based on the Initialize request.
-    ///
-    /// # Arguments
-    ///
-    /// * `req` - The Initialize request from the upstream client
-    ///
-    /// # Returns
-    ///
-    /// A tuple of:
-    /// * The (potentially modified) Initialize request to forward downstream
-    /// * A vector of component specifications to be spawned by the conductor
-    fn instantiate_components(
+/// Used by conductors in proxy mode (`ConductorToConductor`) where all components
+/// are proxies that forward to an outer conductor.
+pub trait InstantiateProxies: Send {
+    /// Instantiate proxy components based on the Initialize request.
+    fn instantiate_proxies(
         self: Box<Self>,
         req: InitializeRequest,
     ) -> futures::future::BoxFuture<
@@ -1158,12 +1113,12 @@ pub trait ComponentList: Send {
     >;
 }
 
-/// Simple implementation: provide all components unconditionally.
-impl<T> ComponentList for Vec<T>
+/// Simple implementation: provide all proxy components unconditionally.
+impl<T> InstantiateProxies for Vec<T>
 where
     T: Component + 'static,
 {
-    fn instantiate_components(
+    fn instantiate_proxies(
         self: Box<Self>,
         req: InitializeRequest,
     ) -> futures::future::BoxFuture<
@@ -1180,8 +1135,8 @@ where
     }
 }
 
-/// Dynamic implementation: closure receives the Initialize request and returns components.
-impl<F, Fut> ComponentList for F
+/// Dynamic implementation: closure receives the Initialize request and returns proxies.
+impl<F, Fut> InstantiateProxies for F
 where
     F: FnOnce(InitializeRequest) -> Fut + Send + 'static,
     Fut: std::future::Future<
@@ -1189,12 +1144,162 @@ where
         > + Send
         + 'static,
 {
-    fn instantiate_components(
+    fn instantiate_proxies(
         self: Box<Self>,
         req: InitializeRequest,
     ) -> futures::future::BoxFuture<
         'static,
         Result<(InitializeRequest, Vec<sacp::DynComponent>), sacp::Error>,
+    > {
+        Box::pin(async move { (*self)(req).await })
+    }
+}
+
+/// Trait for lazy proxy and agent instantiation (agent mode).
+///
+/// Used by conductors in agent mode (`ConductorToClient`) where there are
+/// zero or more proxies followed by an agent component.
+pub trait InstantiateProxiesAndAgent: Send {
+    /// Instantiate proxy and agent components based on the Initialize request.
+    ///
+    /// Returns the (possibly modified) request, a vector of proxy components,
+    /// and the agent component.
+    fn instantiate_proxies_and_agent(
+        self: Box<Self>,
+        req: InitializeRequest,
+    ) -> futures::future::BoxFuture<
+        'static,
+        Result<
+            (
+                InitializeRequest,
+                Vec<sacp::DynComponent>,
+                sacp::DynComponent,
+            ),
+            sacp::Error,
+        >,
+    >;
+}
+
+/// Wrapper to convert a single agent component (no proxies) into InstantiateProxiesAndAgent.
+pub struct AgentOnly<A>(pub A);
+
+impl<A: Component + 'static> InstantiateProxiesAndAgent for AgentOnly<A> {
+    fn instantiate_proxies_and_agent(
+        self: Box<Self>,
+        req: InitializeRequest,
+    ) -> futures::future::BoxFuture<
+        'static,
+        Result<
+            (
+                InitializeRequest,
+                Vec<sacp::DynComponent>,
+                sacp::DynComponent,
+            ),
+            sacp::Error,
+        >,
+    > {
+        Box::pin(async move { Ok((req, Vec::new(), sacp::DynComponent::new(self.0))) })
+    }
+}
+
+/// Wrapper to create proxies and agent from separate components.
+pub struct ProxiesAndAgent<P, A> {
+    pub proxies: P,
+    pub agent: A,
+}
+
+impl<P, A> InstantiateProxiesAndAgent for ProxiesAndAgent<Vec<P>, A>
+where
+    P: Component + 'static,
+    A: Component + 'static,
+{
+    fn instantiate_proxies_and_agent(
+        self: Box<Self>,
+        req: InitializeRequest,
+    ) -> futures::future::BoxFuture<
+        'static,
+        Result<
+            (
+                InitializeRequest,
+                Vec<sacp::DynComponent>,
+                sacp::DynComponent,
+            ),
+            sacp::Error,
+        >,
+    > {
+        Box::pin(async move {
+            let proxies: Vec<sacp::DynComponent> = self
+                .proxies
+                .into_iter()
+                .map(|c| sacp::DynComponent::new(c))
+                .collect();
+            let agent = sacp::DynComponent::new(self.agent);
+            Ok((req, proxies, agent))
+        })
+    }
+}
+
+/// Simple implementation for Vec<T>: last element is the agent, rest are proxies.
+impl<T> InstantiateProxiesAndAgent for Vec<T>
+where
+    T: Component + 'static,
+{
+    fn instantiate_proxies_and_agent(
+        self: Box<Self>,
+        req: InitializeRequest,
+    ) -> futures::future::BoxFuture<
+        'static,
+        Result<
+            (
+                InitializeRequest,
+                Vec<sacp::DynComponent>,
+                sacp::DynComponent,
+            ),
+            sacp::Error,
+        >,
+    > {
+        Box::pin(async move {
+            let mut components: Vec<sacp::DynComponent> = (*self)
+                .into_iter()
+                .map(|c| sacp::DynComponent::new(c))
+                .collect();
+            let agent = components
+                .pop()
+                .ok_or_else(|| sacp::util::internal_error("no agent component in list"))?;
+            Ok((req, components, agent))
+        })
+    }
+}
+
+/// Dynamic implementation: closure receives the Initialize request and returns proxies + agent.
+impl<F, Fut> InstantiateProxiesAndAgent for F
+where
+    F: FnOnce(InitializeRequest) -> Fut + Send + 'static,
+    Fut: std::future::Future<
+            Output = Result<
+                (
+                    InitializeRequest,
+                    Vec<sacp::DynComponent>,
+                    sacp::DynComponent,
+                ),
+                sacp::Error,
+            >,
+        > + Send
+        + 'static,
+{
+    fn instantiate_proxies_and_agent(
+        self: Box<Self>,
+        req: InitializeRequest,
+    ) -> futures::future::BoxFuture<
+        'static,
+        Result<
+            (
+                InitializeRequest,
+                Vec<sacp::DynComponent>,
+                sacp::DynComponent,
+            ),
+            sacp::Error,
+        >,
     > {
         Box::pin(async move { (*self)(req).await })
     }
@@ -1365,11 +1470,18 @@ impl<T: JrResponsePayload> JrResponseExt<T> for JrResponse<T> {
 /// * ConductorToClient -- conductor is acting as an agent, so when its last proxy sends to its successor, the conductor sends that message to its agent component
 /// * ConductorToConductor -- conductor is acting as a proxy, so when its last proxy sends to its successor, the (inner) conductor sends that message to its successor, via the outer conductor
 pub trait ConductorLink: JrLink + HasPeer<Client> {
-    /// Handle an incoming message from the client or conductor, depending on `Self`
+    /// The type used to instantiate components for this link type.
+    type Instantiator: Send;
+
+    /// Handle initialization: parse the init request, instantiate components, and spawn them.
+    ///
+    /// Takes ownership of the instantiator and returns the (possibly modified) init request
+    /// wrapped in a MessageCx for forwarding.
     fn initialize(
         self,
         message: MessageCx,
         cx: JrConnectionCx<Self>,
+        instantiator: Self::Instantiator,
         responder: &mut ConductorResponder<Self>,
     ) -> impl Future<Output = Result<MessageCx, sacp::Error>> + Send;
 
@@ -1380,22 +1492,16 @@ pub trait ConductorLink: JrLink + HasPeer<Client> {
         cx: JrConnectionCx<Self>,
         conductor_tx: &mut mpsc::Sender<ConductorMessage>,
     ) -> impl Future<Output = Result<Handled<MessageCx>, sacp::Error>> + Send;
-
-    /// Create the "successor" of the conductor, which is either an agent component (popped from `components`) or the outer conductor.
-    fn new_successor(
-        self,
-        cx: JrConnectionCx<Self>,
-        dyn_components: &mut Vec<sacp::DynComponent>,
-        conductor_tx: &mpsc::Sender<ConductorMessage>,
-    ) -> Result<Arc<dyn ConductorSuccessor<Self>>, sacp::Error>;
 }
 
 impl ConductorLink for ConductorToClient {
-    /// Handle an incoming message from the client or conductor, depending on `Self`
+    type Instantiator = Box<dyn InstantiateProxiesAndAgent>;
+
     async fn initialize(
         self,
         message: MessageCx,
         client: JrConnectionCx<Self>,
+        instantiator: Self::Instantiator,
         responder: &mut ConductorResponder<Self>,
     ) -> Result<MessageCx, sacp::Error> {
         let invalid_request =
@@ -1421,11 +1527,42 @@ impl ConductorLink for ConductorToClient {
             }
         };
 
-        let modified_request = responder
-            .lazy_initialize_components(client, init_request)
+        // Instantiate proxies and agent
+        let (modified_req, proxy_components, agent_component) = instantiator
+            .instantiate_proxies_and_agent(init_request)
             .await?;
+
+        // Spawn the agent component
+        debug!(?agent_component, "spawning agent");
+        let agent_cx = client.spawn_connection(
+            ConductorToAgent::builder()
+                .name("conductor-to-agent")
+                // Intercept agent-to-client messages from the agent.
+                .on_receive_message(
+                    {
+                        let mut conductor_tx = responder.conductor_tx.clone();
+                        async move |message_cx: MessageCx, _cx| {
+                            conductor_tx
+                                .send(ConductorMessage::AgentToClient {
+                                    source_component_index: SourceComponentIndex::Successor,
+                                    message: message_cx,
+                                })
+                                .await
+                                .map_err(sacp::util::internal_error)
+                        }
+                    },
+                    sacp::on_receive_message!(),
+                )
+                .connect_to(agent_component)?,
+            |c| Box::pin(c.serve()),
+        )?;
+        responder.successor = Arc::new(agent_cx);
+
+        // Spawn the proxy components
+        responder.spawn_proxies(client.clone(), proxy_components)?;
+
         Ok(MessageCx::Request(
-            modified_request.to_untyped_message()?,
+            modified_req.to_untyped_message()?,
             request_cx,
         ))
     }
@@ -1452,54 +1589,16 @@ impl ConductorLink for ConductorToClient {
             .await
             .done()
     }
-
-    fn new_successor(
-        self,
-        cx: JrConnectionCx<Self>,
-        dyn_components: &mut Vec<sacp::DynComponent>,
-        conductor_tx: &mpsc::Sender<ConductorMessage>,
-    ) -> Result<Arc<dyn ConductorSuccessor<Self>>, sacp::Error> {
-        // The successor in conductor-to-client mode is an agent component.
-        // Pop it from the end of the list.
-        let Some(agent_component) = dyn_components.pop() else {
-            return Err(sacp::util::internal_error("no agent component"));
-        };
-
-        // Spawn the agent component (if any)
-        debug!(?agent_component, "spawning agent");
-        let agent_cx = cx.spawn_connection(
-            ConductorToAgent::builder()
-                .name("conductor-to-agent")
-                // Intercept agent-to-client messages from the agent.
-                .on_receive_message(
-                    {
-                        let mut conductor_tx = conductor_tx.clone();
-                        async move |message_cx: MessageCx, _cx| {
-                            conductor_tx
-                                .send(ConductorMessage::AgentToClient {
-                                    source_component_index: SourceComponentIndex::Successor,
-                                    message: message_cx,
-                                })
-                                .await
-                                .map_err(sacp::util::internal_error)
-                        }
-                    },
-                    sacp::on_receive_message!(),
-                )
-                .connect_to(agent_component)?,
-            |c| Box::pin(c.serve()),
-        )?;
-
-        Ok(Arc::new(agent_cx))
-    }
 }
 
 impl ConductorLink for ConductorToConductor {
-    /// Handle an incoming message from the client or conductor, depending on `Self`
+    type Instantiator = Box<dyn InstantiateProxies>;
+
     async fn initialize(
         self,
         message: MessageCx,
         client_cx: JrConnectionCx<Self>,
+        instantiator: Self::Instantiator,
         responder: &mut ConductorResponder<Self>,
     ) -> Result<MessageCx, sacp::Error> {
         let invalid_request =
@@ -1527,11 +1626,18 @@ impl ConductorLink for ConductorToConductor {
         };
 
         tracing::debug!("ensure_initialized: InitializeProxyRequest (proxy mode)");
-        let modified_request = responder
-            .lazy_initialize_components(client_cx, initialize)
-            .await?;
+
+        // Instantiate proxies (no agent in proxy mode)
+        let (modified_req, proxy_components) = instantiator.instantiate_proxies(initialize).await?;
+
+        // In proxy mode, our successor is the outer conductor (via our client connection)
+        responder.successor = Arc::new(());
+
+        // Spawn the proxy components
+        responder.spawn_proxies(client_cx.clone(), proxy_components)?;
+
         Ok(MessageCx::Request(
-            modified_request.to_untyped_message()?,
+            modified_req.to_untyped_message()?,
             request_cx,
         ))
     }
@@ -1571,17 +1677,6 @@ impl ConductorLink for ConductorToConductor {
             })
             .await
             .done()
-    }
-
-    fn new_successor(
-        self,
-        #[expect(unused_variables)] cx: JrConnectionCx<Self>,
-        #[expect(unused_variables)] components: &mut Vec<sacp::DynComponent>,
-        #[expect(unused_variables)] conductor_tx: &mpsc::Sender<ConductorMessage>,
-    ) -> Result<Arc<dyn ConductorSuccessor<Self>>, sacp::Error> {
-        // Our successor doesn't require any state, it's just sending a message
-        // to our agent, so the "Self" type here is ()
-        Ok(Arc::new(()))
     }
 }
 

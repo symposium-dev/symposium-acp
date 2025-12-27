@@ -89,7 +89,7 @@ pub mod trace;
 pub use self::conductor::*;
 
 use clap::{Parser, Subcommand};
-use sacp::role::{ConductorToClient, ConductorToConductor};
+
 use sacp_tokio::{AcpAgent, Stdio};
 use tracing::Instrument;
 use tracing_subscriber::{EnvFilter, layer::SubscriberExt, util::SubscriberInitExt};
@@ -275,21 +275,21 @@ impl ConductorArgs {
         match self.command {
             ConductorCommand::Agent { name, components } => {
                 initialize_conductor(
-                    ConductorToClient,
                     debug_logger,
                     trace_writer,
                     name,
                     components,
+                    |name, providers, mcp_mode| Conductor::new_agent(name, providers, mcp_mode),
                 )
                 .await
             }
             ConductorCommand::Proxy { name, proxies } => {
                 initialize_conductor(
-                    ConductorToConductor,
                     debug_logger,
                     trace_writer,
                     name,
                     proxies,
+                    |name, providers, mcp_mode| Conductor::new_proxy(name, providers, mcp_mode),
                 )
                 .await
             }
@@ -298,12 +298,12 @@ impl ConductorArgs {
     }
 }
 
-async fn initialize_conductor(
-    link: impl ConductorLink,
+async fn initialize_conductor<Link: ConductorLink>(
     debug_logger: Option<&debug_logger::DebugLogger>,
     trace_writer: Option<trace::TraceWriter>,
     name: String,
     components: Vec<String>,
+    new_conductor: impl FnOnce(String, Vec<AcpAgent>, crate::McpBridgeMode) -> Conductor<Link>,
 ) -> Result<(), sacp::Error> {
     // Parse agents and optionally wrap with debug callbacks
     let providers: Vec<AcpAgent> = components
@@ -326,7 +326,7 @@ async fn initialize_conductor(
     };
 
     // Create conductor with optional trace writer
-    let mut conductor = Conductor::new(link, name, providers, Default::default());
+    let mut conductor = new_conductor(name, providers, Default::default());
     if let Some(writer) = trace_writer {
         conductor = conductor.with_trace_writer(writer);
     }
