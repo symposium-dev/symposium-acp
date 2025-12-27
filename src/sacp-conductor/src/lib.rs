@@ -89,6 +89,7 @@ pub mod trace;
 pub use self::conductor::*;
 
 use clap::{Parser, Subcommand};
+use sacp::role::{ConductorToClient, ConductorToConductor};
 use sacp_tokio::{AcpAgent, Stdio};
 use tracing::Instrument;
 use tracing_subscriber::{EnvFilter, layer::SubscriberExt, util::SubscriberInitExt};
@@ -163,9 +164,20 @@ pub enum ConductorCommand {
         #[arg(short, long, default_value = "conductor")]
         name: String,
 
+        /// List of commands to chain together; the final command must be the agent.
+        components: Vec<String>,
+    },
+
+    /// Run as a proxy orchestrating a proxy chain
+    Proxy {
+        /// Name of the proxy
+        #[arg(short, long, default_value = "conductor")]
+        name: String,
+
         /// List of proxy commands to chain together
         proxies: Vec<String>,
     },
+
     /// Run as MCP bridge connecting stdio to TCP
     Mcp {
         /// TCP port to connect to on localhost
@@ -184,14 +196,15 @@ impl ConductorArgs {
         // Only set up tracing if --debug is enabled
         let debug_logger = if self.debug {
             // Extract proxy list to create the debug logger
-            let proxies = match &self.command {
-                ConductorCommand::Agent { proxies, .. } => proxies.clone(),
+            let components = match &self.command {
+                ConductorCommand::Agent { components, .. } => components.clone(),
+                ConductorCommand::Proxy { proxies, .. } => proxies.clone(),
                 ConductorCommand::Mcp { .. } => Vec::new(),
             };
 
             // Create debug logger
             Some(
-                debug_logger::DebugLogger::new(self.debug_dir.clone(), &proxies)
+                debug_logger::DebugLogger::new(self.debug_dir.clone(), &components)
                     .await
                     .map_err(|e| anyhow::anyhow!("Failed to create debug logger: {}", e))?,
             )
@@ -260,40 +273,67 @@ impl ConductorArgs {
         trace_writer: Option<trace::TraceWriter>,
     ) -> Result<(), sacp::Error> {
         match self.command {
-            ConductorCommand::Agent { name, proxies } => {
-                // Parse agents and optionally wrap with debug callbacks
-                let providers: Vec<AcpAgent> = proxies
-                    .into_iter()
-                    .enumerate()
-                    .map(|(i, s)| {
-                        let mut agent = AcpAgent::from_str(&s)?;
-                        if let Some(logger) = debug_logger {
-                            agent = agent.with_debug(logger.create_callback(i.to_string()));
-                        }
-                        Ok(agent)
-                    })
-                    .collect::<Result<Vec<_>, sacp::Error>>()?;
-
-                // Create Stdio component with optional debug logging
-                let stdio = if let Some(logger) = debug_logger {
-                    Stdio::new().with_debug(logger.create_callback("C".to_string()))
-                } else {
-                    Stdio::new()
-                };
-
-                // Create conductor with optional trace writer
-                let mut conductor = Conductor::new(name, providers, Default::default());
-                if let Some(writer) = trace_writer {
-                    conductor = conductor.with_trace_writer(writer);
-                }
-
-                conductor
-                    .into_connection_builder()
-                    .connect_to(stdio)?
-                    .serve()
-                    .await
+            ConductorCommand::Agent { name, components } => {
+                initialize_conductor(
+                    ConductorToClient,
+                    debug_logger,
+                    trace_writer,
+                    name,
+                    components,
+                )
+                .await
+            }
+            ConductorCommand::Proxy { name, proxies } => {
+                initialize_conductor(
+                    ConductorToConductor,
+                    debug_logger,
+                    trace_writer,
+                    name,
+                    proxies,
+                )
+                .await
             }
             ConductorCommand::Mcp { port } => mcp_bridge::run_mcp_bridge(port).await,
         }
     }
+}
+
+async fn initialize_conductor(
+    link: impl ConductorLink,
+    debug_logger: Option<&debug_logger::DebugLogger>,
+    trace_writer: Option<trace::TraceWriter>,
+    name: String,
+    components: Vec<String>,
+) -> Result<(), sacp::Error> {
+    // Parse agents and optionally wrap with debug callbacks
+    let providers: Vec<AcpAgent> = components
+        .into_iter()
+        .enumerate()
+        .map(|(i, s)| {
+            let mut agent = AcpAgent::from_str(&s)?;
+            if let Some(logger) = debug_logger {
+                agent = agent.with_debug(logger.create_callback(i.to_string()));
+            }
+            Ok(agent)
+        })
+        .collect::<Result<Vec<_>, sacp::Error>>()?;
+
+    // Create Stdio component with optional debug logging
+    let stdio = if let Some(logger) = debug_logger {
+        Stdio::new().with_debug(logger.create_callback("C".to_string()))
+    } else {
+        Stdio::new()
+    };
+
+    // Create conductor with optional trace writer
+    let mut conductor = Conductor::new(link, name, providers, Default::default());
+    if let Some(writer) = trace_writer {
+        conductor = conductor.with_trace_writer(writer);
+    }
+
+    conductor
+        .into_connection_builder()
+        .connect_to(stdio)?
+        .serve()
+        .await
 }

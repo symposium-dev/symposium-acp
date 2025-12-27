@@ -20,7 +20,7 @@ use std::sync::Mutex;
 /// a reference to `collected_values` which lives on the stack.
 #[tokio::test]
 async fn test_scoped_mcp_server_through_proxy() -> Result<(), sacp::Error> {
-    let conductor = Conductor::new(
+    let conductor = Conductor::new_agent(
         "conductor".to_string(),
         vec![
             DynComponent::new(ScopedProxy),
@@ -50,7 +50,7 @@ async fn test_scoped_mcp_server_through_proxy() -> Result<(), sacp::Error> {
 #[tokio::test]
 async fn test_scoped_mcp_server_through_session() -> Result<(), sacp::Error> {
     ClientToAgent::builder()
-        .connect_to(Conductor::new("conductor".to_string(), vec![ElizaAgent::new()], McpBridgeMode::default()))?
+        .connect_to(Conductor::new_agent("conductor".to_string(), vec![ElizaAgent::new()], McpBridgeMode::default()))?
         .run_until(async |cx| {
             // Initialize first
             cx.send_request(sacp::schema::InitializeRequest {

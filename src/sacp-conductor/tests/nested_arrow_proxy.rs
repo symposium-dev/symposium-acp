@@ -34,7 +34,7 @@ async fn test_conductor_with_two_external_arrow_proxies() -> Result<(), sacp::Er
 
     // Spawn the conductor with three components
     let conductor_handle = tokio::spawn(async move {
-        Conductor::new(
+        Conductor::new_agent(
             "test-conductor".to_string(),
             vec![arrow_proxy1, arrow_proxy2, eliza],
             Default::default(),

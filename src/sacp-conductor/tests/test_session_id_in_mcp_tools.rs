@@ -99,7 +99,7 @@ async fn test_list_tools_from_mcp_server() -> Result<(), sacp::Error> {
 
     // Use yopo to send the prompt and get the response
     let result = yopo::prompt(
-        Conductor::new(
+        Conductor::new_agent(
             "test-conductor".to_string(),
             vec![proxy, eliza],
             Default::default(),
@@ -120,7 +120,7 @@ async fn test_list_tools_from_mcp_server() -> Result<(), sacp::Error> {
 #[tokio::test]
 async fn test_session_id_delivered_to_mcp_tools() -> Result<(), sacp::Error> {
     let result = yopo::prompt(
-        Conductor::new(
+        Conductor::new_agent(
             "test-conductor".to_string(),
             vec![
                 create_echo_proxy()?,

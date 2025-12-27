@@ -78,7 +78,7 @@ impl Component for ElizacpAgentComponent {
 #[tokio::test]
 async fn test_tool_returning_string() -> Result<(), sacp::Error> {
     let result = yopo::prompt(
-        Conductor::new(
+        Conductor::new_agent(
             "test-conductor".to_string(),
             vec![
                 create_test_proxy()?,
@@ -102,7 +102,7 @@ async fn test_tool_returning_string() -> Result<(), sacp::Error> {
 #[tokio::test]
 async fn test_tool_returning_integer() -> Result<(), sacp::Error> {
     let result = yopo::prompt(
-        Conductor::new(
+        Conductor::new_agent(
             "test-conductor".to_string(),
             vec![
                 create_test_proxy()?,

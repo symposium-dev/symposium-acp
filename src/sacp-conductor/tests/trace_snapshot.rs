@@ -146,7 +146,7 @@ async fn test_trace_snapshot() -> Result<(), sacp::Error> {
 
     // Spawn the conductor with tracing to the channel
     let conductor_handle = tokio::spawn(async move {
-        Conductor::new(
+        Conductor::new_agent(
             "conductor".to_string(),
             vec![arrow_proxy_agent, eliza_agent],
             Default::default(),

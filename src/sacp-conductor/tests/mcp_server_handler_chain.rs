@@ -160,7 +160,7 @@ async fn run_test(
     sacp::ClientToAgent::builder()
         .name("editor-to-conductor")
         .with_spawned(|_cx| async move {
-            Conductor::new("conductor".to_string(), components, Default::default())
+            Conductor::new_agent("conductor".to_string(), components, Default::default())
                 .run(sacp::ByteStreams::new(
                     conductor_out.compat_write(),
                     conductor_in.compat(),

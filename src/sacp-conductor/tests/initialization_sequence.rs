@@ -81,8 +81,8 @@ impl Component for InitComponent {
                         *config.received_init_type.lock().expect("unpoisoned") =
                             Some(InitRequestType::InitializeProxy);
 
-                        // Forward to successor and respond
-                        cx.send_request_to(sacp::Agent, request)
+                        // Forward InitializeRequest (not InitializeProxyRequest) to successor
+                        cx.send_request_to(sacp::Agent, request.initialize)
                             .on_receiving_result(async move |response| {
                                 let response: InitializeResponse = response?;
                                 request_cx.respond(response)
@@ -129,7 +129,7 @@ async fn run_test_with_components(
     sacp::ClientToAgent::builder()
         .name("editor-to-connector")
         .with_spawned(|_cx| async move {
-            Conductor::new("conductor".to_string(), components, Default::default())
+            Conductor::new_agent("conductor".to_string(), components, Default::default())
                 .run(sacp::ByteStreams::new(
                     conductor_out.compat_write(),
                     conductor_in.compat(),
@@ -275,6 +275,124 @@ async fn test_three_components_all_proxies_get_initialize_proxy() -> Result<(), 
         Some(InitRequestType::Initialize),
         "Agent component should receive InitializeRequest"
     );
+
+    Ok(())
+}
+
+/// A proxy that incorrectly forwards InitializeProxyRequest instead of InitializeRequest.
+/// This tests that the conductor rejects such malformed forwarding.
+struct BadProxy;
+
+impl Component for BadProxy {
+    async fn serve(self, client: impl Component) -> Result<(), sacp::Error> {
+        ProxyToConductor::builder()
+            .name("bad-proxy")
+            .on_receive_request_from(
+                Client,
+                async move |request: InitializeProxyRequest, request_cx, cx| {
+                    // BUG: forwards InitializeProxyRequest instead of request.initialize
+                    cx.send_request_to(sacp::Agent, request)
+                        .on_receiving_result(async move |response| {
+                            let response: InitializeResponse = response?;
+                            request_cx.respond(response)
+                        })
+                },
+                sacp::on_receive_request!(),
+            )
+            .serve(client)
+            .await
+    }
+}
+
+#[tokio::test]
+async fn test_conductor_rejects_initialize_proxy_forwarded_to_agent() -> Result<(), sacp::Error> {
+    // BadProxy incorrectly forwards InitializeProxyRequest to the agent.
+    // The conductor should reject this with an error.
+    let result = run_test_with_components(
+        vec![
+            sacp::DynComponent::new(BadProxy),
+            InitComponent::new(&InitConfig::new()), // Agent
+        ],
+        async |editor_cx| {
+            let init_response = recv(editor_cx.send_request(InitializeRequest {
+                protocol_version: Default::default(),
+                client_capabilities: Default::default(),
+                meta: None,
+                client_info: None,
+            }))
+            .await;
+
+            if let Err(err) = init_response {
+                assert!(
+                    err.to_string().contains("initialize/proxy"),
+                    "Error should mention initialize/proxy: {:?}",
+                    err
+                );
+            }
+
+            Ok::<(), sacp::Error>(())
+        },
+    )
+    .await;
+
+    match result {
+        Ok(()) => panic!("Expected error when proxy forwards InitializeProxyRequest to agent"),
+        Err(err) => {
+            assert!(
+                err.to_string().contains("initialize/proxy"),
+                "Error should mention initialize/proxy: {:?}",
+                err
+            );
+        }
+    }
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_conductor_rejects_initialize_proxy_forwarded_to_proxy() -> Result<(), sacp::Error> {
+    // BadProxy incorrectly forwards InitializeProxyRequest to another proxy.
+    // The conductor should reject this with an error.
+    let result = run_test_with_components(
+        vec![
+            sacp::DynComponent::new(BadProxy),
+            InitComponent::new(&InitConfig::new()), // This proxy will receive the bad request
+            InitComponent::new(&InitConfig::new()), // Agent
+        ],
+        async |editor_cx| {
+            let init_response = recv(editor_cx.send_request(InitializeRequest {
+                protocol_version: Default::default(),
+                client_capabilities: Default::default(),
+                meta: None,
+                client_info: None,
+            }))
+            .await;
+
+            // The error may come through recv() or bubble up through the test harness
+            if let Err(err) = init_response {
+                assert!(
+                    err.to_string().contains("initialize/proxy"),
+                    "Error should mention initialize/proxy: {:?}",
+                    err
+                );
+            }
+
+            Ok::<(), sacp::Error>(())
+        },
+    )
+    .await;
+
+    // The error might bubble up through run_test_with_components instead
+    match result {
+        Ok(()) => panic!("Expected error when proxy forwards InitializeProxyRequest to proxy"),
+        Err(err) => {
+            assert!(
+                err.to_string().contains("initialize/proxy"),
+                "Error should mention initialize/proxy: {:?}",
+                err
+            );
+        }
+    }
 
     Ok(())
 }

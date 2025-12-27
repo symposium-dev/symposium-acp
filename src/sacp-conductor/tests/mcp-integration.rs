@@ -56,7 +56,7 @@ async fn run_test_with_mode(
     sacp::ClientToAgent::builder()
         .name("editor-to-connector")
         .with_spawned(|_cx| async move {
-            Conductor::new("conductor".to_string(), components, mode)
+            Conductor::new_agent("conductor".to_string(), components, mode)
                 .run(sacp::ByteStreams::new(
                     conductor_out.compat_write(),
                     conductor_in.compat(),
@@ -198,7 +198,7 @@ async fn test_agent_handles_prompt() -> Result<(), sacp::Error> {
             },
             sacp::on_receive_notification!(),
         )
-        .connect_to(Conductor::new(
+        .connect_to(Conductor::new_agent(
             "mcp-integration-conductor".to_string(),
             vec![
                 mcp_integration::proxy::create(),

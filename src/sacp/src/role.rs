@@ -24,12 +24,16 @@ use crate::{
 ///
 /// The role determines what operations are valid on a connection and
 /// provides role-specific behavior like handling unhandled messages.
-#[expect(async_fn_in_trait)]
 pub trait JrLink: Debug + Copy + Send + Sync + 'static + Eq + Ord + Hash + Default {
     /// The role being played by the local side on this link.
     ///
     /// For example, `ClientToAgent` has `LocalRole = Client`.
     type LocalRole: JrRole;
+
+    /// Create a new connection builder for this role.
+    fn builder() -> JrConnectionBuilder<NullHandler<Self>> {
+        JrConnectionBuilder::new(Self::default())
+    }
 
     /// The role being played by the remote peer on this link.
     ///
@@ -46,21 +50,21 @@ pub trait JrLink: Debug + Copy + Send + Sync + 'static + Eq + Ord + Hash + Defau
     type RemotePeer: JrRole;
 
     /// State maintained for connections this role.
-    type State: Default;
+    type State: Default + Send;
 
     /// Method invoked when there is no defined message handler.
     /// If this returns `no`, an error response will be sent.
-    async fn default_message_handler(
+    fn default_message_handler(
         message: MessageCx,
-        cx: JrConnectionCx<Self>,
-        state: &mut Self::State,
-    ) -> Result<Handled<MessageCx>, crate::Error> {
-        let _ = cx;
-        let _ = state;
-        Ok(Handled::No {
-            message,
-            retry: false,
-        })
+        #[expect(unused_variables)] cx: JrConnectionCx<Self>,
+        #[expect(unused_variables)] state: &mut Self::State,
+    ) -> impl Future<Output = Result<Handled<MessageCx>, crate::Error>> + Send {
+        async move {
+            Ok(Handled::No {
+                message,
+                retry: false,
+            })
+        }
     }
 }
 
@@ -305,11 +309,26 @@ impl HasPeer<Client> for ConductorToClient {
     }
 }
 
-// When the conductor is acting as a proxy, it can also receive messages
-// from the agent direction (wrapped in SuccessorMessage envelopes).
-impl HasPeer<Agent> for ConductorToClient {
+/// A conductor's connection to another conductor.
+/// The local conductor is acting as a proxy.
+#[derive(Debug, Default, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct ConductorToConductor;
+
+impl JrLink for ConductorToConductor {
+    type LocalRole = Conductor;
+    type RemotePeer = Client;
+    type State = ();
+}
+
+impl HasPeer<Agent> for ConductorToConductor {
     fn remote_style(_end: Agent) -> RemoteRoleStyle {
         RemoteRoleStyle::Successor
+    }
+}
+
+impl HasPeer<Client> for ConductorToConductor {
+    fn remote_style(_end: Client) -> RemoteRoleStyle {
+        RemoteRoleStyle::Counterpart
     }
 }
 

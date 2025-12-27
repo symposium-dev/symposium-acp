@@ -81,7 +81,7 @@ impl Component for ElizacpAgentComponent {
 #[tokio::test]
 async fn test_tool_fn_greet() -> Result<(), sacp::Error> {
     let result = yopo::prompt(
-        Conductor::new(
+        Conductor::new_agent(
             "test-conductor".to_string(),
             vec![
                 create_greet_proxy()?,

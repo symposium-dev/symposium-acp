@@ -68,7 +68,7 @@ impl Component for MockInnerConductor {
             components.push(sacp::DynComponent::new(MockArrowProxy));
         }
 
-        Conductor::new(
+        Conductor::new_proxy(
             "inner-conductor".to_string(),
             components,
             Default::default(),
@@ -91,7 +91,7 @@ async fn test_nested_conductor_with_arrow_proxies() -> Result<(), sacp::Error> {
 
     // Spawn the outer conductor with the inner conductor and eliza
     let conductor_handle = tokio::spawn(async move {
-        Conductor::new(
+        Conductor::new_agent(
             "outer-conductor".to_string(),
             vec![inner_conductor, sacp::DynComponent::new(MockEliza)],
             Default::default(),
@@ -144,7 +144,7 @@ async fn test_nested_conductor_with_external_arrow_proxies() -> Result<(), sacp:
     let arrow_proxy_path = arrow_proxy_example().to_string_lossy().to_string();
     let inner_conductor = AcpAgent::from_args([
         &conductor_path,
-        "agent",
+        "proxy",
         &arrow_proxy_path,
         &arrow_proxy_path,
     ])?;
@@ -156,7 +156,7 @@ async fn test_nested_conductor_with_external_arrow_proxies() -> Result<(), sacp:
 
     // Spawn the outer conductor with the inner conductor and eliza as external processes
     let conductor_handle = tokio::spawn(async move {
-        Conductor::new(
+        Conductor::new_agent(
             "outer-conductor".to_string(),
             vec![inner_conductor, eliza],
             Default::default(),

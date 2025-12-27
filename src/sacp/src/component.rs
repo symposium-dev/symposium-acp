@@ -27,7 +27,7 @@
 //! ```
 
 use futures::future::BoxFuture;
-use std::future::Future;
+use std::{fmt::Debug, future::Future};
 
 use crate::Channel;
 
@@ -215,7 +215,7 @@ impl Component for DynComponent {
     }
 }
 
-impl std::fmt::Debug for DynComponent {
+impl Debug for DynComponent {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("DynComponent")
             .field("type_name", &self.type_name())
