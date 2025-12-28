@@ -10,7 +10,7 @@ use agent_client_protocol_schema::{NewSessionRequest, NewSessionResponse, Sessio
 use crate::{
     Handled, JrConnectionCx, JrMessage, JrMessageHandler, MessageCx, UntypedMessage,
     jsonrpc::{JrConnectionBuilder, handlers::NullHandler},
-    peer::{AgentPeer, ClientPeer, ConductorPeer, JrPeer, UntypedPeer},
+    peer::{AgentPeer, ClientPeer, ConductorPeer, JrPeer, ProxyPeer, UntypedPeer},
     schema::{
         InitializeProxyRequest, InitializeRequest, METHOD_INITIALIZE_PROXY,
         METHOD_SUCCESSOR_MESSAGE, SuccessorMessage,
@@ -20,6 +20,7 @@ use crate::{
 
 /// Trait for JSON-RPC connection links.
 ///
+/// The link specifies two communicating peers, e.g., [`ClientToAgent`].
 /// The link determines what operations are valid on a connection and
 /// provides link-specific behavior like handling unhandled messages.
 pub trait JrLink: Debug + Copy + Send + Sync + 'static + Eq + Ord + Hash + Default {
@@ -30,7 +31,8 @@ pub trait JrLink: Debug + Copy + Send + Sync + 'static + Eq + Ord + Hash + Defau
 
     /// The link type that connects to this link.
     ///
-    /// For example, `ClientToAgent::ConnectsTo = AgentToClient`.
+    /// For example, `ConnectsTo` for [`ClientToAgent`] is [`AgentToClient`].
+    ///
     /// This is used by `Component<L>` to express the relationship:
     /// a component that implements `Component<L>` can serve as the
     /// transport for a connection using link `L::ConnectsTo`.
@@ -176,8 +178,7 @@ impl RemoteStyle {
 /// A generic link for testing scenarios.
 ///
 /// `UntypedLink` can send to and receive from any peer without transformation.
-/// This is useful for tests and scenarios where the exact link is not known
-/// at compile time.
+/// This is useful for tests but generally shouldn't really be used in production code.
 #[derive(Debug, Default, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct UntypedLink;
 
@@ -203,7 +204,8 @@ impl UntypedLink {
     }
 }
 
-/// A client's connection to an agent.
+/// A client connecting to its agent. Use this when attempting to issue prompts
+/// or requests to an agent using the SDK.
 #[derive(Debug, Default, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct ClientToAgent;
 
@@ -243,7 +245,7 @@ impl HasPeer<AgentPeer> for ClientToAgent {
     }
 }
 
-/// An agent's connection to a client.
+/// An agent connecting to its client. This is used when implementing agents.
 #[derive(Debug, Default, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct AgentToClient;
 
@@ -263,6 +265,12 @@ impl HasPeer<ClientPeer> for AgentToClient {
 }
 
 /// A conductor's connection to a client.
+/// The conductor is acting as a composite agent that combines
+/// some number of proxies with a final agent.
+///
+/// This is only meant to be used as a link type of the conductor itself;
+/// if you find yourself using it for something else you are probably
+/// doing something wrong.
 #[derive(Debug, Default, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct ConductorToClient;
 
@@ -278,7 +286,13 @@ impl HasPeer<ClientPeer> for ConductorToClient {
 }
 
 /// A conductor's connection to another conductor.
-/// The local conductor is acting as a proxy.
+/// The inner/local conductor is acting as a proxy
+/// and the outer/local conductor is acting as its conductor.
+/// This is used creating a proxy that uses a conductor to arrange many proxies.
+///
+/// This is only meant to be used as a link type of the conductor itself;
+/// if you find yourself using it for something else you are probably
+/// doing something wrong.
 #[derive(Debug, Default, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct ConductorToConductor;
 
@@ -301,6 +315,15 @@ impl HasPeer<ClientPeer> for ConductorToConductor {
 }
 
 /// A conductor's connection to a proxy.
+///
+/// This is only meant to be used by the conductor;
+/// if you find yourself using it for something else you are probably
+/// doing something wrong.
+///
+/// This is very similar to a [`ClientToAgent`] connection
+/// but conductors and proxies also exchange [`SuccessorMessage`] messages
+/// that indicate communication with the proxy's successor,
+/// which may be another proxy or an agent.
 #[derive(Debug, Default, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct ConductorToProxy;
 
@@ -310,7 +333,13 @@ impl JrLink for ConductorToProxy {
 }
 
 impl HasDefaultPeer for ConductorToProxy {
-    type DefaultPeer = AgentPeer;
+    type DefaultPeer = ProxyPeer;
+}
+
+impl HasPeer<ProxyPeer> for ConductorToProxy {
+    fn remote_style(_end: ProxyPeer) -> RemoteStyle {
+        RemoteStyle::Counterpart
+    }
 }
 
 impl HasPeer<AgentPeer> for ConductorToProxy {
@@ -319,7 +348,16 @@ impl HasPeer<AgentPeer> for ConductorToProxy {
     }
 }
 
-/// A conductor's connection to an agent.
+/// A conductor's connection to its final agent.
+///
+/// This is only meant to be used by the conductor;
+/// if you find yourself using it for something else you are probably
+/// doing something wrong.
+///
+/// This is the same as a [`ClientToAgent`] connection except that
+/// the default message handling is different; the conductor doesn't use
+/// dynamic handlers for individual sessions and therefore the default
+/// message handling simply doesn't include any "retry" logic.
 #[derive(Debug, Default, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct ConductorToAgent;
 
