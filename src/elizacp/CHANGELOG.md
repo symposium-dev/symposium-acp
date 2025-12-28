@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [10.0.0-alpha.1](https://github.com/symposium-dev/symposium-acp/compare/elizacp-v9.0.0...elizacp-v10.0.0-alpha.1) - 2025-12-28
+
+### Other
+
+- [**breaking**] split peer.rs into separate peer and link modules
+- [**breaking**] update module and documentation references from role to peer
+- [**breaking**] give component a link
+- update UntypedRole to UntypedLink in doc examples
+- *(sacp)* rename with_client to run_until
+- update references for renamed methods
+
 ## [9.0.0](https://github.com/symposium-dev/symposium-acp/compare/elizacp-v8.0.0...elizacp-v9.0.0) - 2025-12-19
 
 ### Added
