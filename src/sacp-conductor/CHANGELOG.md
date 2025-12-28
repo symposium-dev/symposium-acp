@@ -7,6 +7,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [10.0.0](https://github.com/symposium-dev/symposium-acp/compare/sacp-conductor-v9.0.0...sacp-conductor-v10.0.0) - 2025-12-28
+
+### Added
+
+- *(sacp)* add tool_fn for concurrent stateless tools
+
+### Fixed
+
+- *(sacp)* use unstructured output for non-object MCP tool results
+- *(sacp-conductor)* route proxied responses through conductor message loop
+- *(sacp-conductor)* use Agent endpoint for proxy mode successor forwarding
+
+### Other
+
+- [**breaking**] split peer.rs into separate peer and link modules
+- [**breaking**] update module and documentation references from role to peer
+- [**breaking**] rename FooRole types to FooPeer
+- [**breaking**] rename link endpoint types from Foo to FooRole
+- [**breaking**] give component a link
+- refactor!(conductor): replace ComponentList with typed instantiator traits
+- [**breaking**] split Conductor into agent vs proxy mode with ConductorLink trait
+- use self.conductor_tx
+- [**breaking**] rename End type param to Peer, endpoint vars to peer
+- update UntypedRole to UntypedLink in doc examples
+- [**breaking**] rename Endpoint to Role
+- *(sacp)* rename JrRole to JrLink, Role type param to Link
+- [**breaking**] rename JrRole to JrLink (and the Role associated type to Link)
+- *(sacp-conductor)* use explicit endpoints for ConductorToClient
+- *(sacp)* add block_task() builder pattern for SessionBuilder
+- *(sacp)* rename with_client to run_until
+- update references for renamed methods
+
 ## [9.0.0](https://github.com/symposium-dev/symposium-acp/compare/sacp-conductor-v8.0.0...sacp-conductor-v9.0.0) - 2025-12-19
 
 ### Added

@@ -7,6 +7,58 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [10.0.0](https://github.com/symposium-dev/symposium-acp/compare/sacp-v9.0.0...sacp-v10.0.0) - 2025-12-28
+
+### Added
+
+- *(sacp)* add LocalRole associated type to JrLink
+- *(sacp)* add on_proxy_session_start and return SessionId from start_session_proxy
+- *(sacp)* add on_session_start for spawned sessions
+- *(sacp)* add proxy_session for per-session MCP server injection
+- *(sacp)* add build_session_from for proxying session requests
+- *(sacp)* make tool_fn run concurrently
+- *(sacp)* add tool_fn for concurrent stateless tools
+
+### Fixed
+
+- *(sacp)* use unstructured output for non-object MCP tool results
+- *(sacp)* resolve race condition in proxy_remaining_messages
+
+### Other
+
+- [**breaking**] add ProxyPeer and improve link documentation
+- [**breaking**] split peer.rs into separate peer and link modules
+- [**breaking**] update module and documentation references from role to peer
+- [**breaking**] rename FooRole types to FooPeer
+- [**breaking**] replace RemotePeer with HasDefaultPeer::DefaultPeer
+- [**breaking**] remove LocalRole from JrLink trait
+- [**breaking**] rename link endpoint types from Foo to FooRole
+- [**breaking**] give component a link
+- [**breaking**] split Conductor into agent vs proxy mode with ConductorLink trait
+- [**breaking**] rename End type param to Peer, endpoint vars to peer
+- [**breaking**] more endpoint -> peer renames
+- update UntypedRole to UntypedLink in doc examples
+- [**breaking**] rename Endpoint to Role
+- *(sacp)* rename JrRole to JrLink, Role type param to Link
+- [**breaking**] rename JrRole to JrLink (and the Role associated type to Link)
+- *(deps)* upgrade rmcp to 0.12.0
+- *(sacp-conductor)* use explicit endpoints for ConductorToClient
+- better debug logging
+- cleanup the proxying code
+- *(sacp)* fix cookbook doctest for start_session_proxy
+- *(sacp)* add block_task() builder pattern for SessionBuilder
+- *(sacp)* rename spawn_session to start_session
+- *(sacp)* rename with_client to run_until
+- *(sacp)* add lifetime-safe session proxying API
+- *(sacp)* make all cookbook doctests compile and run
+- *(sacp)* make cookbook examples compile
+- *(sacp)* add cookbook module with common patterns
+- update references for renamed methods
+- *(sacp)* simplify McpServer handler architecture
+- rename to McpNewSessionHandler for clarity
+- *(sacp)* reduce public API surface for handler types
+- *(sacp)* extract process_stream_concurrently utility
+
 ## [9.0.0](https://github.com/symposium-dev/symposium-acp/compare/sacp-v8.0.0...sacp-v9.0.0) - 2025-12-19
 
 ### Added

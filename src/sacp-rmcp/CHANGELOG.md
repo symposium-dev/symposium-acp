@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [10.0.0](https://github.com/symposium-dev/symposium-acp/compare/sacp-rmcp-v9.0.0...sacp-rmcp-v10.0.0) - 2025-12-28
+
+### Other
+
+- [**breaking**] rename FooRole types to FooPeer
+- [**breaking**] rename link endpoint types from Foo to FooRole
+- [**breaking**] give component a link
+- [**breaking**] rename Endpoint to Role
+- *(sacp)* rename JrRole to JrLink, Role type param to Link
+- [**breaking**] rename JrRole to JrLink (and the Role associated type to Link)
+
 ## [9.0.0](https://github.com/symposium-dev/symposium-acp/compare/sacp-rmcp-v8.0.0...sacp-rmcp-v9.0.0) - 2025-12-19
 
 ### Added

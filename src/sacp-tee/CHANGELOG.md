@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [10.0.0](https://github.com/symposium-dev/symposium-acp/compare/sacp-tee-v9.0.0...sacp-tee-v10.0.0) - 2025-12-28
+
+### Other
+
+- [**breaking**] split peer.rs into separate peer and link modules
+- [**breaking**] update module and documentation references from role to peer
+- [**breaking**] give component a link
+- [**breaking**] rename JrRole to JrLink (and the Role associated type to Link)
+
 ## [9.0.0](https://github.com/symposium-dev/symposium-acp/compare/sacp-tee-v8.0.0...sacp-tee-v9.0.0) - 2025-12-19
 
 ### Other
