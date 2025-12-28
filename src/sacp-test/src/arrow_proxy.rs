@@ -5,7 +5,7 @@
 
 use sacp::role::ConductorToProxy;
 use sacp::schema::{ContentBlock, ContentChunk, SessionNotification, SessionUpdate};
-use sacp::{Agent, Client, Component, ProxyToConductor};
+use sacp::{AgentRole, ClientRole, Component, ProxyToConductor};
 
 /// Run the arrow proxy that adds `>` to each session update.
 ///
@@ -21,7 +21,7 @@ pub async fn run_arrow_proxy(
         // Using on_receive_notification_from(Agent, ...) automatically unwraps
         // SuccessorMessage envelopes.
         .on_receive_notification_from(
-            Agent,
+            AgentRole,
             async |mut notification: SessionNotification, cx| {
                 // Modify the content by adding > prefix
                 match &mut notification.update {
@@ -37,7 +37,7 @@ pub async fn run_arrow_proxy(
                 }
 
                 // Forward modified notification to predecessor (client)
-                cx.send_notification_to(Client, notification)?;
+                cx.send_notification_to(ClientRole, notification)?;
                 Ok(())
             },
             sacp::on_receive_notification!(),

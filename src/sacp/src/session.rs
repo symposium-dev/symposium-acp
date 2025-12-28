@@ -8,7 +8,7 @@ use futures::channel::mpsc;
 use tokio::sync::oneshot;
 
 use crate::{
-    Agent, Client, Handled, HasPeer, JrConnectionCx, JrLink, JrMessageHandler, JrRequestCx,
+    AgentRole, ClientRole, Handled, HasPeer, JrConnectionCx, JrLink, JrMessageHandler, JrRequestCx,
     MessageCx,
     jsonrpc::{
         DynamicHandlerRegistration,
@@ -36,7 +36,7 @@ pub trait SessionBlockState: Send + 'static + Sync + std::fmt::Debug {}
 
 impl<Link: JrLink> JrConnectionCx<Link>
 where
-    Link: HasPeer<Agent>,
+    Link: HasPeer<AgentRole>,
 {
     /// Session builder for a new session request.
     pub fn build_session(&self, cwd: impl AsRef<Path>) -> SessionBuilder<Link, NullResponder> {
@@ -114,7 +114,7 @@ pub struct SessionBuilder<
     Responder: JrResponder<Link> = NullResponder,
     BlockState: SessionBlockState = NonBlocking,
 > where
-    Link: HasPeer<Agent>,
+    Link: HasPeer<AgentRole>,
 {
     connection: JrConnectionCx<Link>,
     request: NewSessionRequest,
@@ -125,7 +125,7 @@ pub struct SessionBuilder<
 
 impl<Link> SessionBuilder<Link, NullResponder, NonBlocking>
 where
-    Link: HasPeer<Agent>,
+    Link: HasPeer<AgentRole>,
 {
     fn new(connection: &JrConnectionCx<Link>, request: NewSessionRequest) -> Self {
         SessionBuilder {
@@ -140,7 +140,7 @@ where
 
 impl<Link, Responder, BlockState> SessionBuilder<Link, Responder, BlockState>
 where
-    Link: HasPeer<Agent>,
+    Link: HasPeer<AgentRole>,
     Responder: JrResponder<Link>,
     BlockState: SessionBlockState,
 {
@@ -204,7 +204,7 @@ where
             } = self;
 
             let response = connection
-                .send_request_to(Agent, request)
+                .send_request_to(AgentRole, request)
                 .block_task()
                 .await?;
 
@@ -245,7 +245,7 @@ where
     where
         F: FnOnce(SessionId) -> Fut + Send + 'static,
         Fut: Future<Output = Result<(), crate::Error>> + Send,
-        Link: HasPeer<Client>,
+        Link: HasPeer<ClientRole>,
         Responder: 'static,
     {
         let connection = self.connection.clone();
@@ -266,7 +266,7 @@ where
 
             // Send the "new session" request to the agent
             let response = connection
-                .send_request_to(Agent, request)
+                .send_request_to(AgentRole, request)
                 .block_task()
                 .await?;
 
@@ -287,7 +287,7 @@ where
 
 impl<Link, Responder> SessionBuilder<Link, Responder, NonBlocking>
 where
-    Link: HasPeer<Agent>,
+    Link: HasPeer<AgentRole>,
     Responder: JrResponder<Link>,
 {
     /// Mark this session builder as being able to block the current task.
@@ -311,7 +311,7 @@ where
 
 impl<Link, Responder> SessionBuilder<Link, Responder, Blocking>
 where
-    Link: HasPeer<Agent>,
+    Link: HasPeer<AgentRole>,
     Responder: JrResponder<Link>,
 {
     /// Run this session synchronously. The current task will be blocked
@@ -337,7 +337,7 @@ where
         } = self;
 
         let response = connection
-            .send_request_to(Agent, request)
+            .send_request_to(AgentRole, request)
             .block_task()
             .await?;
 
@@ -371,7 +371,7 @@ where
 
         connection.clone().spawn(async move {
             let response = connection
-                .send_request_to(Agent, request)
+                .send_request_to(AgentRole, request)
                 .block_task()
                 .await?;
 
@@ -409,7 +409,7 @@ where
         request_cx: JrRequestCx<NewSessionResponse>,
     ) -> Result<SessionId, crate::Error>
     where
-        Link: HasPeer<Client>,
+        Link: HasPeer<ClientRole>,
         Responder: 'static,
     {
         let active_session = self.start_session().await?;
@@ -430,7 +430,7 @@ where
 /// (since the responders would die when the closure returns).
 pub struct ActiveSession<'responder, Link>
 where
-    Link: HasPeer<Agent>,
+    Link: HasPeer<AgentRole>,
 {
     session_id: SessionId,
     update_rx: mpsc::UnboundedReceiver<SessionMessage>,
@@ -467,7 +467,7 @@ pub enum SessionMessage {
 
 impl<'responder, Link> ActiveSession<'responder, Link>
 where
-    Link: HasPeer<Agent>,
+    Link: HasPeer<AgentRole>,
 {
     /// Access the session ID.
     pub fn session_id(&self) -> &SessionId {
@@ -506,7 +506,7 @@ where
         let update_tx = self.update_tx.clone();
         self.connection
             .send_request_to(
-                Agent,
+                AgentRole,
                 PromptRequest {
                     session_id: self.session_id.clone(),
                     prompt: vec![prompt.to_string().into()],
@@ -568,7 +568,7 @@ where
 
 impl<Link> ActiveSession<'static, Link>
 where
-    Link: HasPeer<Agent>,
+    Link: HasPeer<AgentRole>,
 {
     /// Proxy all remaining messages for this session between client and agent.
     ///
@@ -600,7 +600,7 @@ where
     /// out of order or lost during the transition.
     pub fn proxy_remaining_messages(self) -> Result<(), crate::Error>
     where
-        Link: HasPeer<Client>,
+        Link: HasPeer<ClientRole>,
     {
         // Destructure self to get ownership of all fields
         let ActiveSession {
@@ -633,7 +633,7 @@ where
             match message {
                 SessionMessage::SessionMessage(message_cx) => {
                     // Forward the message to the client
-                    connection.send_proxied_message_to(Client, message_cx)?;
+                    connection.send_proxied_message_to(ClientRole, message_cx)?;
                 }
                 SessionMessage::StopReason(_) => {
                     // StopReason is internal bookkeeping, not forwarded
@@ -659,7 +659,7 @@ where
 
 struct ActiveSessionHandler<Link>
 where
-    Link: HasPeer<Agent>,
+    Link: HasPeer<AgentRole>,
 {
     #[expect(dead_code)]
     role: Link,
@@ -669,7 +669,7 @@ where
 
 impl<Link> ActiveSessionHandler<Link>
 where
-    Link: HasPeer<Agent>,
+    Link: HasPeer<AgentRole>,
 {
     pub fn new(
         role: Link,
@@ -686,7 +686,7 @@ where
 
 impl<Link> JrMessageHandler for ActiveSessionHandler<Link>
 where
-    Link: HasPeer<Agent>,
+    Link: HasPeer<AgentRole>,
 {
     type Link = Link;
 
@@ -702,7 +702,7 @@ where
             "ActiveSessionHandler::handle_message"
         );
         MatchMessageFrom::new(message, &cx)
-            .if_message_from(Agent, async |message| {
+            .if_message_from(AgentRole, async |message| {
                 if let Some(session_id) = message.get_session_id()? {
                     tracing::trace!(
                         message_session_id = ?session_id,

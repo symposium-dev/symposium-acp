@@ -102,7 +102,7 @@ ProxyToConductor::builder()
 To explicitly handle and forward messages:
 
 ```rust
-use sacp::{Agent, Client, ProxyToConductor};
+use sacp::{AgentRole, ClientRole, ProxyToConductor};
 use sacp::schema::PromptRequest;
 
 ProxyToConductor::builder()
@@ -110,7 +110,7 @@ ProxyToConductor::builder()
     .on_receive_request(
         async |request: PromptRequest, _request_cx, cx| {
             // Forward request to agent
-            cx.send_request_to(Agent, request)?;
+            cx.send_request_to(AgentRole, request)?;
             Ok(())
         },
         sacp::on_receive_request!(),
@@ -367,8 +367,8 @@ The `conductor mcp PORT` process bridges between stdio and the conductor's ACP m
 When building proxies, you use `ProxyToConductor::builder()` from the `sacp` crate which provides:
 
 - `.on_receive_request()` / `.on_receive_notification()` for handling messages from client
-- `.on_receive_request_from(Agent, ...)` / `.on_receive_notification_from(Agent, ...)` for handling messages from agent
-- `cx.send_request_to(Agent, ...)` / `cx.send_notification_to(Client, ...)` for forwarding messages
+- `.on_receive_request_from(AgentRole, ...)` / `.on_receive_notification_from(AgentRole, ...)` for handling messages from agent
+- `cx.send_request_to(AgentRole, ...)` / `cx.send_notification_to(ClientRole, ...)` for forwarding messages
 - Automatic proxy capability handshake
 
 See [Building a Proxy](./building-proxy.md) for implementation guide.

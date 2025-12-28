@@ -336,12 +336,12 @@ pub mod per_session_mcp_server {
     //! ```
     //! use sacp::mcp_server::McpServer;
     //! use sacp::schema::NewSessionRequest;
-    //! use sacp::{Agent, Client, Component, ProxyToConductor};
+    //! use sacp::{AgentRole, ClientRole, Component, ProxyToConductor};
     //! use sacp::role::ConductorToProxy;
     //!
     //! async fn run_proxy(transport: impl Component<ConductorToProxy>) -> Result<(), sacp::Error> {
     //!     ProxyToConductor::builder()
-    //!         .on_receive_request_from(Client, async |request: NewSessionRequest, request_cx, cx| {
+    //!         .on_receive_request_from(ClientRole, async |request: NewSessionRequest, request_cx, cx| {
     //!             let cwd = request.cwd.clone();
     //!             let mcp_server = McpServer::builder("session-tools")
     //!                 .tool_fn("get_cwd", "Returns session working directory",
@@ -370,12 +370,12 @@ pub mod per_session_mcp_server {
     //! ```
     //! use sacp::mcp_server::McpServer;
     //! use sacp::schema::NewSessionRequest;
-    //! use sacp::{Agent, Client, Component, ProxyToConductor};
+    //! use sacp::{AgentRole, ClientRole, Component, ProxyToConductor};
     //! use sacp::role::ConductorToProxy;
     //!
     //! async fn run_proxy(transport: impl Component<ConductorToProxy>) -> Result<(), sacp::Error> {
     //!     ProxyToConductor::builder()
-    //!         .on_receive_request_from(Client, async |request: NewSessionRequest, request_cx, cx| {
+    //!         .on_receive_request_from(ClientRole, async |request: NewSessionRequest, request_cx, cx| {
     //!             let cwd = request.cwd.clone();
     //!             let mcp_server = McpServer::builder("session-tools")
     //!                 .tool_fn("get_cwd", "Returns session working directory",

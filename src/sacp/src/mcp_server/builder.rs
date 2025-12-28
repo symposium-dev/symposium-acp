@@ -19,7 +19,7 @@ use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
 
 use super::{McpContext, McpTool};
 use crate::{
-    Agent, ByteStreams, Component, DynComponent, HasPeer, JrLink,
+    AgentRole, ByteStreams, Component, DynComponent, HasPeer, JrLink,
     jsonrpc::responder::{ChainResponder, JrResponder, NullResponder},
     mcp_server::{
         McpServer, McpServerConnect,
@@ -78,7 +78,7 @@ impl<Link: JrLink> Default for McpServerData<Link> {
 
 impl<Link: JrLink> McpServerBuilder<Link, NullResponder>
 where
-    Link: HasPeer<Agent>,
+    Link: HasPeer<AgentRole>,
 {
     pub(super) fn new(name: String) -> Self {
         Self {
@@ -92,7 +92,7 @@ where
 
 impl<Link: JrLink, Responder: JrResponder<Link>> McpServerBuilder<Link, Responder>
 where
-    Link: HasPeer<Agent>,
+    Link: HasPeer<AgentRole>,
 {
     /// Set the server instructions that are provided to the client.
     pub fn instructions(mut self, instructions: impl ToString) -> Self {
@@ -258,7 +258,7 @@ where
 
 struct McpServerBuilt<Link: JrLink>
 where
-    Link: HasPeer<Agent>,
+    Link: HasPeer<AgentRole>,
 {
     #[expect(dead_code)]
     role: Link,
@@ -268,7 +268,7 @@ where
 
 impl<'scope, Link: JrLink> McpServerConnect<Link> for McpServerBuilt<Link>
 where
-    Link: HasPeer<Agent>,
+    Link: HasPeer<AgentRole>,
 {
     fn name(&self) -> String {
         self.name.clone()
@@ -285,7 +285,7 @@ where
 /// An MCP server instance connected to the ACP framework.
 pub(crate) struct McpServerConnection<Link: JrLink>
 where
-    Link: HasPeer<Agent>,
+    Link: HasPeer<AgentRole>,
 {
     data: Arc<McpServerData<Link>>,
     mcp_cx: McpContext<Link>,
@@ -293,7 +293,7 @@ where
 
 impl<Link: JrLink> Component<crate::mcp::McpServerToClient> for McpServerConnection<Link>
 where
-    Link: HasPeer<Agent>,
+    Link: HasPeer<AgentRole>,
 {
     async fn serve(
         self,
@@ -329,7 +329,7 @@ where
 
 impl<Link: JrLink> ServerHandler for McpServerConnection<Link>
 where
-    Link: HasPeer<Agent>,
+    Link: HasPeer<AgentRole>,
 {
     async fn call_tool(
         &self,

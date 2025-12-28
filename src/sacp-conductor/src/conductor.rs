@@ -117,7 +117,7 @@ use futures::{
     channel::mpsc::{self},
 };
 use sacp::{
-    Agent, BoxFuture, Client, Component, Error, HasPeer, JrMessage,
+    AgentRole, BoxFuture, ClientRole, Component, Error, HasPeer, JrMessage,
     role::{
         AgentToClient, ConductorToAgent, ConductorToClient, ConductorToConductor, ConductorToProxy,
         ProxyToConductor,
@@ -777,7 +777,7 @@ where
         request: Req,
     ) -> JrResponse<Req::Response> {
         if source_component_index == 0 {
-            client.send_request_to(Client, request)
+            client.send_request_to(ClientRole, request)
         } else {
             self.proxies[source_component_index - 1].send_request(SuccessorMessage {
                 message: request,
@@ -809,7 +809,7 @@ where
         );
         if source_component_index == 0 {
             tracing::debug!("Sending notification directly to client");
-            client.send_notification_to(Client, notification)
+            client.send_notification_to(ClientRole, notification)
         } else {
             tracing::debug!(
                 target_proxy = source_component_index - 1,
@@ -999,7 +999,7 @@ where
             .otherwise(async |message| {
                 // Otherwise, just send the message along "as is".
                 self.proxies[target_component_index].send_proxied_message_to_via(
-                    Agent,
+                    AgentRole,
                     &self.conductor_tx,
                     message,
                 )
@@ -1084,7 +1084,7 @@ where
             .await
             .otherwise(async |message| {
                 // Otherwise, just send the message along "as is".
-                agent_cx.send_proxied_message_to_via(Agent, &self.conductor_tx, message)
+                agent_cx.send_proxied_message_to_via(AgentRole, &self.conductor_tx, message)
             })
             .await
     }
@@ -1474,7 +1474,7 @@ impl<T: JrResponsePayload> JrResponseExt<T> for JrResponse<T> {
 ///
 /// * ConductorToClient -- conductor is acting as an agent, so when its last proxy sends to its successor, the conductor sends that message to its agent component
 /// * ConductorToConductor -- conductor is acting as a proxy, so when its last proxy sends to its successor, the (inner) conductor sends that message to its successor, via the outer conductor
-pub trait ConductorLink: JrLink + HasPeer<Client> {
+pub trait ConductorLink: JrLink + HasPeer<ClientRole> {
     type Speaks: JrLink<ConnectsTo = Self::ConnectsTo>;
 
     /// The type used to instantiate components for this link type.
@@ -1589,7 +1589,7 @@ impl ConductorLink for ConductorToClient {
         );
         MatchMessageFrom::new(message, &cx)
             // Any incoming messages from the client are client-to-agent messages targeting the first component.
-            .if_message_from(Client, async move |message: MessageCx| {
+            .if_message_from(ClientRole, async move |message: MessageCx| {
                 tracing::debug!(
                     method = ?message.message().method(),
                     "ConductorToClient::handle_message - matched Client"
@@ -1666,7 +1666,7 @@ impl ConductorLink for ConductorToConductor {
             "ConductorToConductor::handle_message"
         );
         MatchMessageFrom::new(message, &cx)
-            .if_message_from(Agent, {
+            .if_message_from(AgentRole, {
                 // Messages from our successor arrive already unwrapped
                 // (RemoteRoleStyle::Successor strips the SuccessorMessage envelope).
                 async |message: MessageCx| {
@@ -1680,7 +1680,7 @@ impl ConductorLink for ConductorToConductor {
             })
             .await
             // Any incoming messages from the client are client-to-agent messages targeting the first component.
-            .if_message_from(Client, async |message: MessageCx| {
+            .if_message_from(ClientRole, async |message: MessageCx| {
                 tracing::debug!(
                     method = ?message.message().method(),
                     "ConductorToConductor::handle_message - matched Client"
@@ -1723,7 +1723,11 @@ impl ConductorSuccessor<ConductorToConductor> for () {
     ) -> BoxFuture<'a, Result<(), sacp::Error>> {
         Box::pin(async move {
             debug!("Proxy mode: forwarding successor message to conductor's successor");
-            conductor_cx.send_proxied_message_to_via(Agent, &mut responder.conductor_tx, message)
+            conductor_cx.send_proxied_message_to_via(
+                AgentRole,
+                &mut responder.conductor_tx,
+                message,
+            )
         })
     }
 }

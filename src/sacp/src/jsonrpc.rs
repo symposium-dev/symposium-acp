@@ -35,7 +35,7 @@ use crate::jsonrpc::responder::{ChainResponder, JrResponder, NullResponder};
 use crate::jsonrpc::task_actor::{Task, TaskTx};
 use crate::mcp_server::McpServer;
 use crate::role::{HasDefaultPeer, HasPeer, JrLink, JrRole};
-use crate::{Agent, Client, Component};
+use crate::{AgentRole, ClientRole, Component};
 
 /// Handlers process incoming JSON-RPC messages on a [`JrConnection`].
 ///
@@ -974,7 +974,7 @@ impl<H: JrMessageHandler, R: JrResponder<H::Link>> JrConnectionBuilder<H, R> {
     ) -> JrConnectionBuilder<impl JrMessageHandler<Link = Link>, impl JrResponder<Link>>
     where
         H: JrMessageHandler<Link = Link>,
-        Link: HasPeer<Client> + HasPeer<Agent>,
+        Link: HasPeer<ClientRole> + HasPeer<AgentRole>,
     {
         let (message_handler, mcp_responder) = server.into_handler_and_responder();
         self.with_handler(message_handler)

@@ -22,12 +22,12 @@
 
 use rmcp::ServiceExt;
 use sacp::mcp_server::{McpContext, McpServer, McpServerConnect};
-use sacp::{Agent, ByteStreams, Component, DynComponent, HasPeer, JrLink, NullResponder};
+use sacp::{AgentRole, ByteStreams, Component, DynComponent, HasPeer, JrLink, NullResponder};
 use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
 
 pub trait McpServerExt<Link: JrLink>
 where
-    Link: HasPeer<Agent>,
+    Link: HasPeer<AgentRole>,
 {
     /// Create an MCP server from something that implements the [`McpServerConnect`] trait.
     ///
@@ -72,7 +72,7 @@ where
     }
 }
 
-impl<Link: JrLink> McpServerExt<Link> for McpServer<Link> where Link: HasPeer<Agent> {}
+impl<Link: JrLink> McpServerExt<Link> for McpServer<Link> where Link: HasPeer<AgentRole> {}
 
 /// Component wrapper for rmcp services.
 struct RmcpServerComponent<S> {

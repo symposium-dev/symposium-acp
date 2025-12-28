@@ -195,21 +195,21 @@ impl JrRole for UntypedRole {}
 
 /// Role representing the client direction.
 #[derive(Debug, Default, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct Client;
+pub struct ClientRole;
 
-impl JrRole for Client {}
+impl JrRole for ClientRole {}
 
 /// Role representing the agent direction.
 #[derive(Debug, Default, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct Agent;
+pub struct AgentRole;
 
-impl JrRole for Agent {}
+impl JrRole for AgentRole {}
 
 /// Role representing the conductor direction.
 #[derive(Debug, Default, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct Conductor;
+pub struct ConductorRole;
 
-impl JrRole for Conductor {}
+impl JrRole for ConductorRole {}
 
 // ============================================================================
 // Links - directional connection types
@@ -250,8 +250,8 @@ impl UntypedLink {
 pub struct ClientToAgent;
 
 impl JrLink for ClientToAgent {
-    type LocalRole = Client;
-    type RemotePeer = Agent;
+    type LocalRole = ClientRole;
+    type RemotePeer = AgentRole;
     type ConnectsTo = AgentToClient;
     type State = ();
 
@@ -261,7 +261,7 @@ impl JrLink for ClientToAgent {
         _state: &mut (),
     ) -> Result<Handled<MessageCx>, crate::Error> {
         MatchMessageFrom::new(message, &cx)
-            .if_message_from(Agent, async |message: MessageCx| {
+            .if_message_from(AgentRole, async |message: MessageCx| {
                 // Subtle: messages that have a session-id field
                 // should be captured by a dynamic message handler
                 // for that session -- but there is a race condition
@@ -279,8 +279,8 @@ impl JrLink for ClientToAgent {
 
 impl HasDefaultPeer for ClientToAgent {}
 
-impl HasPeer<Agent> for ClientToAgent {
-    fn remote_style(_end: Agent) -> RemoteRoleStyle {
+impl HasPeer<AgentRole> for ClientToAgent {
+    fn remote_style(_end: AgentRole) -> RemoteRoleStyle {
         RemoteRoleStyle::Counterpart
     }
 }
@@ -290,16 +290,16 @@ impl HasPeer<Agent> for ClientToAgent {
 pub struct AgentToClient;
 
 impl JrLink for AgentToClient {
-    type LocalRole = Agent;
-    type RemotePeer = Client;
+    type LocalRole = AgentRole;
+    type RemotePeer = ClientRole;
     type ConnectsTo = ClientToAgent;
     type State = ();
 }
 
 impl HasDefaultPeer for AgentToClient {}
 
-impl HasPeer<Client> for AgentToClient {
-    fn remote_style(_end: Client) -> RemoteRoleStyle {
+impl HasPeer<ClientRole> for AgentToClient {
+    fn remote_style(_end: ClientRole) -> RemoteRoleStyle {
         RemoteRoleStyle::Counterpart
     }
 }
@@ -309,14 +309,14 @@ impl HasPeer<Client> for AgentToClient {
 pub struct ConductorToClient;
 
 impl JrLink for ConductorToClient {
-    type LocalRole = Conductor;
-    type RemotePeer = Client;
+    type LocalRole = ConductorRole;
+    type RemotePeer = ClientRole;
     type ConnectsTo = ClientToAgent; // Client talks to conductor as if it were an agent
     type State = ();
 }
 
-impl HasPeer<Client> for ConductorToClient {
-    fn remote_style(_end: Client) -> RemoteRoleStyle {
+impl HasPeer<ClientRole> for ConductorToClient {
+    fn remote_style(_end: ClientRole) -> RemoteRoleStyle {
         RemoteRoleStyle::Counterpart
     }
 }
@@ -327,22 +327,22 @@ impl HasPeer<Client> for ConductorToClient {
 pub struct ConductorToConductor;
 
 impl JrLink for ConductorToConductor {
-    type LocalRole = Conductor;
-    type RemotePeer = Client;
+    type LocalRole = ConductorRole;
+    type RemotePeer = ClientRole;
 
     /// From the (remote) conductor's perspective, thie (local) conductor is a proxy
     type ConnectsTo = ConductorToProxy;
     type State = ();
 }
 
-impl HasPeer<Agent> for ConductorToConductor {
-    fn remote_style(_end: Agent) -> RemoteRoleStyle {
+impl HasPeer<AgentRole> for ConductorToConductor {
+    fn remote_style(_end: AgentRole) -> RemoteRoleStyle {
         RemoteRoleStyle::Successor
     }
 }
 
-impl HasPeer<Client> for ConductorToConductor {
-    fn remote_style(_end: Client) -> RemoteRoleStyle {
+impl HasPeer<ClientRole> for ConductorToConductor {
+    fn remote_style(_end: ClientRole) -> RemoteRoleStyle {
         RemoteRoleStyle::Counterpart
     }
 }
@@ -353,10 +353,10 @@ pub struct ConductorToProxy;
 
 impl JrLink for ConductorToProxy {
     /// The conductor has a special role when talking to a proxy.
-    type LocalRole = Conductor;
+    type LocalRole = ConductorRole;
 
     /// The remote peer acts as an agent (with special powers...).
-    type RemotePeer = Agent;
+    type RemotePeer = AgentRole;
 
     type ConnectsTo = ProxyToConductor;
 
@@ -365,8 +365,8 @@ impl JrLink for ConductorToProxy {
 
 impl HasDefaultPeer for ConductorToProxy {}
 
-impl HasPeer<Agent> for ConductorToProxy {
-    fn remote_style(_end: Agent) -> RemoteRoleStyle {
+impl HasPeer<AgentRole> for ConductorToProxy {
+    fn remote_style(_end: AgentRole) -> RemoteRoleStyle {
         RemoteRoleStyle::Counterpart
     }
 }
@@ -377,10 +377,10 @@ pub struct ConductorToAgent;
 
 impl JrLink for ConductorToAgent {
     /// The conductor acts as any other client here.
-    type LocalRole = Client;
+    type LocalRole = ClientRole;
 
     /// The remote role is an agent.
-    type RemotePeer = Agent;
+    type RemotePeer = AgentRole;
 
     /// From the (remote) agent's perspective, the conductor is acting as any other client
     type ConnectsTo = AgentToClient;
@@ -390,8 +390,8 @@ impl JrLink for ConductorToAgent {
 
 impl HasDefaultPeer for ConductorToAgent {}
 
-impl HasPeer<Agent> for ConductorToAgent {
-    fn remote_style(_end: Agent) -> RemoteRoleStyle {
+impl HasPeer<AgentRole> for ConductorToAgent {
+    fn remote_style(_end: AgentRole) -> RemoteRoleStyle {
         RemoteRoleStyle::Counterpart
     }
 }
@@ -409,8 +409,8 @@ pub struct ProxyToConductor;
 pub struct ProxyToConductorState {}
 
 impl JrLink for ProxyToConductor {
-    type LocalRole = Agent;
-    type RemotePeer = Conductor;
+    type LocalRole = AgentRole;
+    type RemotePeer = ConductorRole;
     type ConnectsTo = ConductorToProxy;
     type State = ProxyToConductorState;
 
@@ -421,7 +421,7 @@ impl JrLink for ProxyToConductor {
     ) -> Result<Handled<MessageCx>, crate::Error> {
         // Handle various special messages:
         let result = MatchMessageFrom::new(message, &cx)
-            .if_request_from(Client, async |_req: InitializeRequest, request_cx| {
+            .if_request_from(ClientRole, async |_req: InitializeRequest, request_cx| {
                 request_cx.respond_with_error(crate::Error::invalid_request().with_data(format!(
                     "proxies must be initialized with `{}`",
                     METHOD_INITIALIZE_PROXY
@@ -431,23 +431,23 @@ impl JrLink for ProxyToConductor {
             // Initialize Proxy coming from the client -- forward to the agent but
             // convert into a regular initialize.
             .if_request_from(
-                Client,
+                ClientRole,
                 async |request: InitializeProxyRequest, request_cx| {
                     let InitializeProxyRequest { initialize } = request;
-                    cx.send_request_to(Agent, initialize)
+                    cx.send_request_to(AgentRole, initialize)
                         .forward_to_request_cx(request_cx)
                 },
             )
             .await
             // Incoming request from the agent -- forward to the client
             .if_request_from(
-                Conductor,
+                ConductorRole,
                 async |agent_request: SuccessorMessage, request_cx| {
                     let SuccessorMessage {
                         message: request,
                         meta: _,
                     } = agent_request;
-                    cx.send_request_to(Client, request)
+                    cx.send_request_to(ClientRole, request)
                         .forward_to_request_cx(request_cx)
                 },
             )
@@ -455,26 +455,31 @@ impl JrLink for ProxyToConductor {
             // New session coming from the client -- proxy to the agent
             // and add a dynamic handler for that
             // session-id.
-            .if_request_from(Client, async |request: NewSessionRequest, request_cx| {
-                cx.send_request_to(Agent, request).on_receiving_result({
-                    let cx = cx.clone();
-                    async move |result| {
-                        if let Ok(NewSessionResponse { session_id, .. }) = &result {
-                            cx.add_dynamic_handler(ProxySessionMessages::new(session_id.clone()))?
+            .if_request_from(
+                ClientRole,
+                async |request: NewSessionRequest, request_cx| {
+                    cx.send_request_to(AgentRole, request).on_receiving_result({
+                        let cx = cx.clone();
+                        async move |result| {
+                            if let Ok(NewSessionResponse { session_id, .. }) = &result {
+                                cx.add_dynamic_handler(ProxySessionMessages::new(
+                                    session_id.clone(),
+                                ))?
                                 .run_indefinitely();
+                            }
+                            request_cx.respond_with_result(result)
                         }
-                        request_cx.respond_with_result(result)
-                    }
-                })
-            })
+                    })
+                },
+            )
             .await
             // Incoming notification from the agent -- forward to the client
-            .if_notification_from(Conductor, async |agent_notif: SuccessorMessage| {
+            .if_notification_from(ConductorRole, async |agent_notif: SuccessorMessage| {
                 let SuccessorMessage {
                     message: notif,
                     meta: _,
                 } = agent_notif;
-                cx.send_notification_to(Client, notif)
+                cx.send_notification_to(ClientRole, notif)
             })
             .await
             .done()?;
@@ -497,12 +502,12 @@ impl JrLink for ProxyToConductor {
                 retry: false,
             } => match message {
                 MessageCx::Request(request, request_cx) => {
-                    cx.send_request_to(Agent, request)
+                    cx.send_request_to(AgentRole, request)
                         .forward_to_request_cx(request_cx)?;
                     Ok(Handled::Yes)
                 }
                 MessageCx::Notification(notif) => {
-                    cx.send_notification_to(Agent, notif)?;
+                    cx.send_notification_to(AgentRole, notif)?;
                     Ok(Handled::Yes)
                 }
             },
@@ -531,7 +536,7 @@ impl<Link> ProxySessionMessages<Link> {
 
 impl<Link: JrLink> JrMessageHandler for ProxySessionMessages<Link>
 where
-    Link: HasPeer<Agent> + HasPeer<Client>,
+    Link: HasPeer<AgentRole> + HasPeer<ClientRole>,
 {
     type Link = Link;
 
@@ -541,11 +546,11 @@ where
         cx: JrConnectionCx<Self::Link>,
     ) -> Result<Handled<MessageCx>, crate::Error> {
         MatchMessageFrom::new(message, &cx)
-            .if_message_from(Agent, async |message| {
+            .if_message_from(AgentRole, async |message| {
                 // If this is for our session-id, proxy it to the client.
                 if let Some(session_id) = message.get_session_id()? {
                     if session_id == self.session_id {
-                        cx.send_proxied_message_to(Client, message)?;
+                        cx.send_proxied_message_to(ClientRole, message)?;
                         return Ok(Handled::Yes);
                     }
                 }
@@ -565,20 +570,20 @@ where
     }
 }
 
-impl HasPeer<Conductor> for ProxyToConductor {
-    fn remote_style(_end: Conductor) -> RemoteRoleStyle {
+impl HasPeer<ConductorRole> for ProxyToConductor {
+    fn remote_style(_end: ConductorRole) -> RemoteRoleStyle {
         RemoteRoleStyle::Counterpart
     }
 }
 
-impl HasPeer<Client> for ProxyToConductor {
-    fn remote_style(_end: Client) -> RemoteRoleStyle {
+impl HasPeer<ClientRole> for ProxyToConductor {
+    fn remote_style(_end: ClientRole) -> RemoteRoleStyle {
         RemoteRoleStyle::Counterpart
     }
 }
 
-impl HasPeer<Agent> for ProxyToConductor {
-    fn remote_style(_end: Agent) -> RemoteRoleStyle {
+impl HasPeer<AgentRole> for ProxyToConductor {
+    fn remote_style(_end: AgentRole) -> RemoteRoleStyle {
         RemoteRoleStyle::Successor
     }
 }
