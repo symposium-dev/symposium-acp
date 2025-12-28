@@ -137,6 +137,8 @@ pub mod link;
 pub mod mcp;
 /// MCP server support for providing MCP tools over ACP
 pub mod mcp_server;
+/// Message ordering, concurrency, and the dispatch loop
+pub mod ordering;
 /// Peer types for JSON-RPC connections
 pub mod peer;
 /// ACP protocol schema types - all message types, requests, responses, and supporting types

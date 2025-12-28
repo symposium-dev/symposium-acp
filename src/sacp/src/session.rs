@@ -230,7 +230,14 @@ where
         })
     }
 
-    /// Spawn a session proxy and run a closure with the session ID.
+    /// Spawn a proxy session and run a closure with the session ID.
+    ///
+    /// A **proxy session** starts the session with the agent and then automatically
+    /// proxies all session updates (prompts, tool calls, etc.) from the agent back
+    /// to the client. You don't need to handle any messages yourself - the proxy
+    /// takes care of forwarding everything. This is useful when you want to inject
+    /// and/or filter prompts coming from the client but otherwise not be involved
+    /// in the session.
     ///
     /// Unlike [`start_session_proxy`](Self::start_session_proxy), this method returns
     /// immediately without blocking the current task. The session handshake, client
@@ -405,12 +412,17 @@ where
             .map_err(|_| crate::Error::internal_error())
     }
 
-    /// Start a session and proxy all messages between client and agent.
+    /// Start a proxy session that forwards all messages between client and agent.
+    ///
+    /// A **proxy session** starts the session with the agent and then automatically
+    /// proxies all session updates (prompts, tool calls, etc.) from the agent back
+    /// to the client. You don't need to handle any messages yourself - the proxy
+    /// takes care of forwarding everything. This is useful when you want to inject
+    /// and/or filter prompts coming from the client but otherwise not be involved
+    /// in the session.
     ///
     /// This is a convenience method that combines [`start_session`](Self::start_session),
     /// responding to the client, and [`ActiveSession::proxy_remaining_messages`].
-    /// Use this when you want to inject MCP servers into a session but don't need
-    /// to actively interact with it.
     ///
     /// For more control (e.g., to send some messages before proxying), use
     /// [`start_session`](Self::start_session) instead and call
