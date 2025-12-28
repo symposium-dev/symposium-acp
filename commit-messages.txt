@@ -1,0 +1,129 @@
+# Improved commit messages for e8bbda18b3e2b9484a15dfab0cc4a7ffa30d4710..HEAD
+# Use: git rebase -i e8bbda18b3e2b9484a15dfab0cc4a7ffa30d4710
+# Then for each commit, copy the corresponding message below.
+
+================================================================================
+COMMIT 1: bae4a8f - refactor!: rename roles to FooRole
+================================================================================
+
+refactor!: rename link endpoint types from Foo to FooRole
+
+Rename the endpoint marker types to clarify they represent roles in a connection:
+- Client -> ClientRole
+- Agent -> AgentRole
+- Conductor -> ConductorRole
+- Untyped -> UntypedRole
+
+This is preparation for separating the concepts of "role" (who I am) from
+"peer" (who I'm talking to) and "link" (the relationship between two sides).
+
+BREAKING CHANGE: All references to Client, Agent, Conductor, Untyped as
+peer types must be updated to ClientRole, AgentRole, etc.
+
+================================================================================
+COMMIT 2: f9b9a5a - refactor!: remove local role
+================================================================================
+
+refactor!: remove LocalRole from JrLink trait
+
+The LocalRole associated type on JrLink was redundant - it captured "who am I"
+but that information is already implicit in the link type itself (e.g.,
+ClientToAgent implies the local side is a client).
+
+This simplifies the trait and removes unnecessary type parameters from
+connection handling code.
+
+BREAKING CHANGE: JrLink no longer has a LocalRole associated type.
+
+================================================================================
+COMMIT 3: 4de0fec - refactor!: move RemotePeer to DefaultPeer
+================================================================================
+
+refactor!: replace RemotePeer with HasDefaultPeer::DefaultPeer
+
+Move the "default peer" concept from JrLink::RemotePeer to a separate
+HasDefaultPeer trait with DefaultPeer associated type.
+
+This separation is important because:
+- Not all links have a single default peer (e.g., ProxyToConductor can
+  send to both ClientPeer and AgentPeer)
+- Links that DO have a default peer now explicitly implement HasDefaultPeer
+- The HasPeer<P> trait declares which peers a link can communicate with
+
+BREAKING CHANGE: JrLink::RemotePeer removed; implement HasDefaultPeer instead.
+
+================================================================================
+COMMIT 4: f3815bc - refactor!: rename Role to Peer
+================================================================================
+
+refactor!: rename FooRole types to FooPeer
+
+Complete the terminology shift from "role" to "peer":
+- ClientRole -> ClientPeer
+- AgentRole -> AgentPeer
+- ConductorRole -> ConductorPeer
+- UntypedRole -> UntypedPeer
+- JrRole trait -> JrPeer trait
+
+"Peer" better captures what these types represent: the logical destination
+for messages. A peer is "who you're talking to", not "who you are".
+
+BREAKING CHANGE: All FooRole types renamed to FooPeer.
+
+================================================================================
+COMMIT 5: 24ec6c4 - refactor!: s/role/peer
+================================================================================
+
+refactor!: update module and documentation references from role to peer
+
+Rename the role module to peer module and update all references:
+- sacp::role:: -> sacp::peer::
+- role.rs -> peer.rs
+- Doc comments updated to use "peer" terminology
+
+Also updates documentation to use clearer language:
+- "fulfill their role" -> "fulfill their responsibilities"
+- "role-agnostic" -> "link-agnostic"
+
+BREAKING CHANGE: sacp::role module renamed to sacp::peer.
+
+================================================================================
+COMMIT 6: 1689112 - refactor!: split peer/link modules
+================================================================================
+
+refactor!: split peer.rs into separate peer and link modules
+
+The peer module was conflating two distinct concepts:
+- Peers: logical message destinations (ClientPeer, AgentPeer, etc.)
+- Links: directional connection types (ClientToAgent, AgentToClient, etc.)
+
+Now split into:
+- peer.rs: JrPeer trait and peer types (ClientPeer, AgentPeer, ConductorPeer)
+- link.rs: JrLink trait, HasDefaultPeer, HasPeer, RemoteStyle, and all
+  link types (ClientToAgent, AgentToClient, ProxyToConductor, etc.)
+
+This clarifies the mental model:
+- Links capture the *relationship* between two sides
+- Peers identify *who* you're talking to
+
+BREAKING CHANGE: Link types moved from sacp::peer to sacp::link.
+
+================================================================================
+COMMIT 7: 48390ea - refactor!: more comments, introduce ProxyPeer
+================================================================================
+
+refactor!: add ProxyPeer and improve link documentation
+
+Introduce ProxyPeer as a distinct peer type for proxy connections, used by
+ConductorToProxy. Previously this incorrectly used AgentPeer as the default.
+
+Also adds extensive documentation to link types explaining:
+- When each link type should be used
+- Which link types are conductor-internal vs. general purpose
+- The relationship between ConductorToProxy and ClientToAgent
+- How SuccessorMessage routing works
+
+Key documentation additions:
+- ClientToAgent: "Use this when attempting to issue prompts or requests"
+- AgentToClient: "This is used when implementing agents"
+- ConductorTo* links: "Only meant to be used by the conductor itself"

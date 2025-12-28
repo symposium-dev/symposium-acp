@@ -1,7 +1,43 @@
 //! Cookbook of common patterns for building ACP components.
 //!
-//! This module contains documented examples of patterns that come up
-//! frequently when building agents, proxies, and other ACP components.
+//! This module contains guides for the three main things you can build with sacp:
+//!
+//! - **Clients** - Connect to an existing agent and send prompts
+//! - **Proxies** - Sit between client and agent to add capabilities (like MCP tools)
+//! - **Agents** - Respond to prompts with AI-powered responses
+//!
+//! # Building Clients
+//!
+//! A client connects to an agent, sends requests, and handles responses. Use
+//! [`ClientToAgent`] as your link type.
+//!
+//! - [`connecting_as_client`] - Basic pattern for sending requests
+//!
+//! # Building Proxies
+//!
+//! A proxy sits between client and agent, intercepting and optionally modifying
+//! messages. The most common use case is adding MCP tools. Use [`ProxyToConductor`]
+//! as your link type.
+//!
+//! **Important:** Proxies don't run standalone—they need the [`sacp-conductor`] to
+//! orchestrate the connection between client, proxies, and agent. See
+//! [`running_proxies_with_conductor`] for how to put the pieces together.
+//!
+//! - [`global_mcp_server`] - Add tools that work across all sessions
+//! - [`per_session_mcp_server`] - Add tools with session-specific state
+//! - [`reusable_components`] - Package your proxy as a [`Component`] for composition
+//! - [`running_proxies_with_conductor`] - Run your proxy with an agent
+//!
+//! [`sacp-conductor`]: https://crates.io/crates/sacp-conductor
+//!
+//! # Building Agents
+//!
+//! An agent receives prompts and generates responses. Use [`AgentToClient`] as
+//! your link type.
+//!
+//! - [`building_an_agent`] - Handle initialization, sessions, and prompts
+//! - [`reusable_components`] - Package your agent as a [`Component`]
+//! - [`custom_message_handlers`] - Fine-grained control over message routing
 //!
 //! # Roles and Peers
 //!
@@ -13,9 +49,12 @@
 //!
 //! *Peers* ([`JrPeer`]) are logical destinations for messages:
 //!
-//! - [`Client`] - The client peer (IDE, CLI, etc.)
-//! - [`Agent`] - The agent peer (AI-powered component)
-//! - [`Conductor`] - The conductor peer (orchestrates proxy chains)
+//! - [`ClientPeer`] - The client (IDE, CLI, etc.)
+//! - [`AgentPeer`] - The agent (AI-powered component)
+//!
+//! The crate also defines [`ConductorPeer`] and [`ProxyPeer`], but these are
+//! used internally to manage proxy orchestration; you shouldn't need them
+//! during typical usage.
 //!
 //! Most links have a single implicit peer, but proxies can send to
 //! multiple peers. Use [`send_request_to`] and [`send_notification_to`]
@@ -27,69 +66,283 @@
 //!
 //! | Link | Description | Can send to |
 //! |------|-------------|-------------|
-//! | [`ClientToAgent`] | Client's connection to an agent | `Agent` |
-//! | [`AgentToClient`] | Agent's connection to a client | `Client` |
-//! | [`ProxyToConductor`] | Proxy's connection to the conductor | `Client`, `Agent` |
-//! | [`ConductorToClient`] | Conductor's connection to a client | `Client`, `Agent` |
-//! | [`ConductorToProxy`] | Conductor's connection to a proxy | `Agent` |
-//! | [`ConductorToAgent`] | Conductor's connection to the final agent | `Agent` |
-//! | [`UntypedLink`] | Generic link for testing/dynamic scenarios | any |
+//! | [`ClientToAgent`] | Client's connection to an agent | `AgentPeer` |
+//! | [`AgentToClient`] | Agent's connection to a client | `ClientPeer` |
+//! | [`ProxyToConductor`] | Proxy's connection to the conductor | `ClientPeer`, `AgentPeer` |
+//! | [`ConductorToClient`] | Conductor's connection to a client | `ClientPeer`, `AgentPeer` |
+//! | [`ConductorToProxy`] | Conductor's connection to a proxy | `AgentPeer` |
+//! | [`ConductorToAgent`] | Conductor's connection to the final agent | `AgentPeer` |
 //!
 //! ## Proxies and Multiple Peers
 //!
 //! A proxy sits between client and agent, so it needs to send messages in
-//! both directions. [`ProxyToConductor`] implements `HasPeer<Client>` and
-//! `HasPeer<Agent>`, allowing it to forward messages appropriately:
+//! both directions. [`ProxyToConductor`] implements `HasPeer<ClientPeer>` and
+//! `HasPeer<AgentPeer>`, allowing it to forward messages appropriately:
 //!
 //! ```ignore
 //! // Forward a request toward the agent
-//! cx.send_request_to(Agent, request).forward_to_request_cx(request_cx)?;
+//! cx.send_request_to(AgentPeer, request).forward_to_request_cx(request_cx)?;
 //!
 //! // Send a notification toward the client
-//! cx.send_notification_to(Client, notification)?;
+//! cx.send_notification_to(ClientPeer, notification)?;
 //! ```
 //!
-//! When sending to `Agent` from a proxy, messages are automatically wrapped
-//! in [`SuccessorMessage`] envelopes. When receiving from `Agent`, they're
+//! When sending to `AgentPeer` from a proxy, messages are automatically wrapped
+//! in [`SuccessorMessage`] envelopes. When receiving from `AgentPeer`, they're
 //! automatically unwrapped.
 //!
-//! [`JrLink`]: crate::peer::JrLink
+//! [`JrLink`]: crate::link::JrLink
 //! [`JrPeer`]: crate::peer::JrPeer
-//! [`Client`]: crate::Client
-//! [`Agent`]: crate::Agent
-//! [`Conductor`]: crate::Conductor
+//! [`ClientPeer`]: crate::ClientPeer
+//! [`AgentPeer`]: crate::AgentPeer
+//! [`ConductorPeer`]: crate::ConductorPeer
+//! [`ProxyPeer`]: crate::peer::ProxyPeer
 //! [`ClientToAgent`]: crate::ClientToAgent
 //! [`AgentToClient`]: crate::AgentToClient
 //! [`ProxyToConductor`]: crate::ProxyToConductor
-//! [`ConductorToClient`]: crate::peer::ConductorToClient
-//! [`ConductorToProxy`]: crate::peer::ConductorToProxy
-//! [`ConductorToAgent`]: crate::peer::ConductorToAgent
-//! [`UntypedLink`]: crate::peer::UntypedLink
+//! [`ConductorToClient`]: crate::link::ConductorToClient
+//! [`ConductorToProxy`]: crate::link::ConductorToProxy
+//! [`ConductorToAgent`]: crate::link::ConductorToAgent
 //! [`SuccessorMessage`]: crate::schema::SuccessorMessage
 //! [`send_request_to`]: crate::JrConnectionCx::send_request_to
 //! [`send_notification_to`]: crate::JrConnectionCx::send_notification_to
-//!
-//! # Patterns
-//!
-//! - [`reusable_components`] - Defining agents/proxies with [`Component`]
-//! - [`custom_message_handlers`] - Implementing [`JrMessageHandler`]
-//! - [`connecting_as_client`] - Using `run_until` to send requests
-//! - [`global_mcp_server`] - Adding a shared MCP server to a handler chain
-//! - [`per_session_mcp_server`] - Creating per-session MCP servers
-//!
 //! [`Component`]: crate::Component
-//! [`JrMessageHandler`]: crate::JrMessageHandler
-//! [`reusable_components`]: crate::cookbook::reusable_components
-//! [`custom_message_handlers`]: crate::cookbook::custom_message_handlers
-//! [`connecting_as_client`]: crate::cookbook::connecting_as_client
-//! [`global_mcp_server`]: crate::cookbook::global_mcp_server
-//! [`per_session_mcp_server`]: crate::cookbook::per_session_mcp_server
+
+pub mod connecting_as_client {
+    //! Pattern: Connecting as a client.
+    //!
+    //! To connect to an ACP agent and send requests, use [`run_until`].
+    //! This runs your code while the connection handles incoming messages
+    //! in the background.
+    //!
+    //! # Basic Example
+    //!
+    //! ```
+    //! use sacp::{ClientToAgent, AgentToClient, Component};
+    //! use sacp::schema::InitializeRequest;
+    //!
+    //! async fn connect_to_agent(transport: impl Component<AgentToClient>) -> Result<(), sacp::Error> {
+    //!     ClientToAgent::builder()
+    //!         .name("my-client")
+    //!         .run_until(transport, async |cx| {
+    //!             // Initialize the connection
+    //!             cx.send_request(InitializeRequest {
+    //!                 protocol_version: Default::default(),
+    //!                 client_capabilities: Default::default(),
+    //!                 client_info: None,
+    //!                 meta: None,
+    //!             }).block_task().await?;
+    //!
+    //!             // Create a session and send a prompt
+    //!             cx.build_session_cwd()?
+    //!                 .block_task()
+    //!                 .run_until(async |mut session| {
+    //!                     session.send_prompt("Hello, agent!")?;
+    //!                     let response = session.read_to_string().await?;
+    //!                     println!("Agent said: {}", response);
+    //!                     Ok(())
+    //!                 })
+    //!                 .await
+    //!         })
+    //!         .await
+    //! }
+    //! ```
+    //!
+    //! # Using the Session Builder
+    //!
+    //! The [`build_session`] method creates a [`SessionBuilder`] that handles
+    //! session creation and provides convenient methods for interacting with
+    //! the session:
+    //!
+    //! - [`send_prompt`] - Send a text prompt to the agent
+    //! - [`read_update`] - Read the next update (text chunk, tool call, etc.)
+    //! - [`read_to_string`] - Read all text until the turn ends
+    //!
+    //! The session builder also supports adding MCP servers with [`with_mcp_server`].
+    //!
+    //! # Handling Permission Requests
+    //!
+    //! Agents may send [`RequestPermissionRequest`] to ask for user approval
+    //! before taking actions. Handle these with [`on_receive_request`]:
+    //!
+    //! ```ignore
+    //! ClientToAgent::builder()
+    //!     .on_receive_request(async |req: RequestPermissionRequest, request_cx, _cx| {
+    //!         // Auto-approve by selecting the first option (YOLO mode)
+    //!         let option_id = req.options.first().map(|opt| opt.id.clone());
+    //!         request_cx.respond(RequestPermissionResponse {
+    //!             outcome: match option_id {
+    //!                 Some(id) => RequestPermissionOutcome::Selected { option_id: id },
+    //!                 None => RequestPermissionOutcome::Cancelled,
+    //!             },
+    //!             meta: None,
+    //!         })
+    //!     }, sacp::on_receive_request!())
+    //!     .run_until(transport, async |cx| { /* ... */ })
+    //!     .await
+    //! ```
+    //!
+    //! # Note on `block_task`
+    //!
+    //! Using [`block_task`] is safe inside `run_until` because the closure runs
+    //! as a spawned task, not on the event loop. The event loop continues processing
+    //! messages (including the response you're waiting for) while your task blocks.
+    //!
+    //! [`run_until`]: crate::JrConnectionBuilder::run_until
+    //! [`block_task`]: crate::JrResponse::block_task
+    //! [`build_session`]: crate::JrConnectionCx::build_session
+    //! [`SessionBuilder`]: crate::SessionBuilder
+    //! [`send_prompt`]: crate::ActiveSession::send_prompt
+    //! [`read_update`]: crate::ActiveSession::read_update
+    //! [`read_to_string`]: crate::ActiveSession::read_to_string
+    //! [`with_mcp_server`]: crate::SessionBuilder::with_mcp_server
+    //! [`RequestPermissionRequest`]: crate::schema::RequestPermissionRequest
+    //! [`on_receive_request`]: crate::JrConnectionBuilder::on_receive_request
+}
+
+pub mod building_an_agent {
+    //! Pattern: Building an agent.
+    //!
+    //! An agent handles prompts and generates responses. At minimum, an agent must:
+    //!
+    //! 1. Handle [`InitializeRequest`] to establish the connection
+    //! 2. Handle [`NewSessionRequest`] to create sessions
+    //! 3. Handle [`PromptRequest`] to process prompts
+    //!
+    //! Use [`AgentToClient`] as your link type.
+    //!
+    //! # Minimal Example
+    //!
+    //! ```
+    //! use sacp::{AgentToClient, Component, MessageCx, JrConnectionCx};
+    //! use sacp::link::JrLink;
+    //! use sacp::schema::{
+    //!     InitializeRequest, InitializeResponse, AgentCapabilities,
+    //!     NewSessionRequest, NewSessionResponse,
+    //!     PromptRequest, PromptResponse, StopReason,
+    //! };
+    //!
+    //! async fn run_agent(transport: impl Component<sacp::ClientToAgent>) -> Result<(), sacp::Error> {
+    //!     AgentToClient::builder()
+    //!         .name("my-agent")
+    //!         // Handle initialization
+    //!         .on_receive_request(async |req: InitializeRequest, request_cx, _cx| {
+    //!             request_cx.respond(InitializeResponse {
+    //!                 protocol_version: req.protocol_version,
+    //!                 agent_capabilities: AgentCapabilities::default(),
+    //!                 auth_methods: vec![],
+    //!                 agent_info: None,
+    //!                 meta: None,
+    //!             })
+    //!         }, sacp::on_receive_request!())
+    //!         // Handle session creation
+    //!         .on_receive_request(async |req: NewSessionRequest, request_cx, _cx| {
+    //!             request_cx.respond(NewSessionResponse {
+    //!                 session_id: "session-1".into(),
+    //!                 modes: None,
+    //!                 meta: None,
+    //!             })
+    //!         }, sacp::on_receive_request!())
+    //!         // Handle prompts
+    //!         .on_receive_request(async |req: PromptRequest, request_cx, cx| {
+    //!             // Send streaming updates via notifications
+    //!             // cx.send_notification(SessionNotification { ... })?;
+    //!
+    //!             // Return final response
+    //!             request_cx.respond(PromptResponse {
+    //!                 stop_reason: StopReason::EndTurn,
+    //!                 meta: None,
+    //!             })
+    //!         }, sacp::on_receive_request!())
+    //!         // Reject unknown messages
+    //!         .on_receive_message(async |message: MessageCx, cx: JrConnectionCx<AgentToClient>| {
+    //!             message.respond_with_error(sacp::Error::method_not_found(), cx)
+    //!         }, sacp::on_receive_message!())
+    //!         .serve(transport)
+    //!         .await
+    //! }
+    //! ```
+    //!
+    //! # Streaming Responses
+    //!
+    //! To stream text or other updates to the client, send [`SessionNotification`]s
+    //! while processing a prompt:
+    //!
+    //! ```ignore
+    //! .on_receive_request(async |req: PromptRequest, request_cx, cx| {
+    //!     // Stream some text
+    //!     cx.send_notification(SessionNotification {
+    //!         session_id: req.session_id.clone(),
+    //!         update: SessionUpdate::Text(TextUpdate {
+    //!             text: "Hello, ".into(),
+    //!             // ...
+    //!         }),
+    //!         meta: None,
+    //!     })?;
+    //!
+    //!     cx.send_notification(SessionNotification {
+    //!         session_id: req.session_id.clone(),
+    //!         update: SessionUpdate::Text(TextUpdate {
+    //!             text: "world!".into(),
+    //!             // ...
+    //!         }),
+    //!         meta: None,
+    //!     })?;
+    //!
+    //!     request_cx.respond(PromptResponse {
+    //!         stop_reason: StopReason::EndTurn,
+    //!         meta: None,
+    //!     })
+    //! }, sacp::on_receive_request!())
+    //! ```
+    //!
+    //! # Requesting Permissions
+    //!
+    //! Before taking actions that require user approval (like running commands
+    //! or writing files), send a [`RequestPermissionRequest`]:
+    //!
+    //! ```ignore
+    //! let response = cx.send_request(RequestPermissionRequest {
+    //!     session_id: session_id.clone(),
+    //!     action: PermissionAction::Bash { command: "rm -rf /".into() },
+    //!     options: vec![
+    //!         PermissionOption { id: "allow".into(), label: "Allow".into() },
+    //!         PermissionOption { id: "deny".into(), label: "Deny".into() },
+    //!     ],
+    //!     meta: None,
+    //! }).block_task().await?;
+    //!
+    //! match response.outcome {
+    //!     RequestPermissionOutcome::Selected { option_id } if option_id == "allow" => {
+    //!         // User approved, proceed with action
+    //!     }
+    //!     _ => {
+    //!         // User denied or cancelled
+    //!     }
+    //! }
+    //! ```
+    //!
+    //! # As a Reusable Component
+    //!
+    //! For agents that will be composed with proxies, implement [`Component`].
+    //! See [`reusable_components`] for the pattern.
+    //!
+    //! [`InitializeRequest`]: crate::schema::InitializeRequest
+    //! [`NewSessionRequest`]: crate::schema::NewSessionRequest
+    //! [`PromptRequest`]: crate::schema::PromptRequest
+    //! [`SessionNotification`]: crate::schema::SessionNotification
+    //! [`RequestPermissionRequest`]: crate::schema::RequestPermissionRequest
+    //! [`AgentToClient`]: crate::AgentToClient
+    //! [`Component`]: crate::Component
+    //! [`reusable_components`]: super::reusable_components
+}
 
 pub mod reusable_components {
     //! Pattern: Defining reusable components.
     //!
-    //! When building agents or proxies, define a struct that implements [`Component`].
-    //! Internally, use the link's `builder()` method to set up handlers.
+    //! When building agents or proxies that will be composed together (for example,
+    //! with [`sacp-conductor`]), define a struct that implements [`Component`].
+    //! This allows your component to be connected to other components in a type-safe way.
     //!
     //! # Example
     //!
@@ -136,6 +389,7 @@ pub mod reusable_components {
     //! [`Component`]: crate::Component
     //! [`JrConnectionCx::spawn`]: crate::JrConnectionCx::spawn
     //! [`on_receiving_result`]: crate::JrResponse::on_receiving_result
+    //! [`sacp-conductor`]: https://crates.io/crates/sacp-conductor
 }
 
 pub mod custom_message_handlers {
@@ -143,6 +397,11 @@ pub mod custom_message_handlers {
     //!
     //! For reusable message handling logic, implement [`JrMessageHandler`] and use
     //! [`MatchMessage`] or [`MatchMessageFrom`] for type-safe dispatching.
+    //!
+    //! This is useful when you need to:
+    //! - Share message handling logic across multiple components
+    //! - Build complex routing logic that doesn't fit the builder pattern
+    //! - Integrate with existing handler infrastructure
     //!
     //! # Example
     //!
@@ -185,69 +444,11 @@ pub mod custom_message_handlers {
     //!
     //! - [`MatchMessage`] - Use when you don't need peer-aware handling
     //! - [`MatchMessageFrom`] - Use in proxies where messages come from different
-    //!   peers (`Client` vs `Agent`) and may need different handling
+    //!   peers (`ClientPeer` vs `AgentPeer`) and may need different handling
     //!
     //! [`JrMessageHandler`]: crate::JrMessageHandler
     //! [`MatchMessage`]: crate::util::MatchMessage
     //! [`MatchMessageFrom`]: crate::util::MatchMessageFrom
-}
-
-pub mod connecting_as_client {
-    //! Pattern: Connecting as a client.
-    //!
-    //! To connect to a JSON-RPC server and send requests, use [`run_until`].
-    //! This gives you a connection context for sending requests while the
-    //! connection handles incoming messages in the background.
-    //!
-    //! # Example
-    //!
-    //! ```
-    //! use sacp::{ClientToAgent, AgentToClient, Component};
-    //! use sacp::schema::{InitializeRequest, NewSessionRequest, SessionNotification};
-    //!
-    //! async fn connect_to_agent(transport: impl Component<AgentToClient>) -> Result<(), sacp::Error> {
-    //!     ClientToAgent::builder()
-    //!         .name("my-client")
-    //!         .on_receive_notification(async |notif: SessionNotification, _cx| {
-    //!             // Handle notifications from the agent
-    //!             println!("Session updated: {:?}", notif);
-    //!             Ok(())
-    //!         }, sacp::on_receive_notification!())
-    //!         .run_until(transport, async |cx| {
-    //!             // Initialize the connection
-    //!             let _init_response = cx.send_request(InitializeRequest {
-    //!                 protocol_version: Default::default(),
-    //!                 client_capabilities: Default::default(),
-    //!                 client_info: None,
-    //!                 meta: None,
-    //!             })
-    //!                 .block_task()
-    //!                 .await?;
-    //!
-    //!             // Create a session
-    //!             let session = cx.send_request(NewSessionRequest {
-    //!                 cwd: ".".into(),
-    //!                 mcp_servers: vec![],
-    //!                 meta: None,
-    //!             })
-    //!                 .block_task()
-    //!                 .await?;
-    //!
-    //!             println!("Session created: {:?}", session.session_id);
-    //!             Ok(())
-    //!         })
-    //!         .await
-    //! }
-    //! ```
-    //!
-    //! # Note on `block_task`
-    //!
-    //! Using [`block_task`] is safe inside `run_until` because the closure runs
-    //! as a spawned task, not on the event loop. The event loop continues processing
-    //! messages (including the response you're waiting for) while your task blocks.
-    //!
-    //! [`run_until`]: crate::JrConnectionBuilder::run_until
-    //! [`block_task`]: crate::JrResponse::block_task
 }
 
 pub mod global_mcp_server {
@@ -415,4 +616,79 @@ pub mod per_session_mcp_server {
     //! [`start_session`]: crate::SessionBuilder::start_session
     //! [`proxy_remaining_messages`]: crate::ActiveSession::proxy_remaining_messages
     //! [`SessionBuilder::with_mcp_server`]: crate::SessionBuilder::with_mcp_server
+}
+
+pub mod running_proxies_with_conductor {
+    //! Pattern: Running proxies with the conductor.
+    //!
+    //! Proxies don't run standalone. To add an MCP server (or other proxy behavior)
+    //! to an existing agent, you need the **conductor** to orchestrate the connection.
+    //!
+    //! The conductor:
+    //! 1. Accepts connections from clients
+    //! 2. Chains your proxies together
+    //! 3. Connects to the final agent
+    //! 4. Routes messages through the entire chain
+    //!
+    //! # Using the `sacp-conductor` binary
+    //!
+    //! The simplest way to run a proxy is with the [`sacp-conductor`] binary.
+    //! Configure it with a JSON file:
+    //!
+    //! ```json
+    //! {
+    //!   "proxies": [
+    //!     { "command": ["cargo", "run", "--bin", "my-proxy"] }
+    //!   ],
+    //!   "agent": { "command": ["claude-code", "--agent"] }
+    //! }
+    //! ```
+    //!
+    //! Then run:
+    //!
+    //! ```bash
+    //! sacp-conductor --config conductor.json
+    //! ```
+    //!
+    //! # Using the conductor as a library
+    //!
+    //! For more control, use [`sacp-conductor`] as a library with the [`Conductor`] type:
+    //!
+    //! ```ignore
+    //! use sacp_conductor::{Conductor, ProxiesAndAgent};
+    //!
+    //! // Define your proxy as a Component<ProxyToConductor>
+    //! let my_proxy = MyProxy::new();
+    //!
+    //! // Spawn the agent process
+    //! let agent_process = sacp_tokio::spawn_process("claude-code", &["--agent"]).await?;
+    //!
+    //! // Create the conductor with your proxy chain
+    //! let conductor = Conductor::new(ProxiesAndAgent {
+    //!     proxies: vec![Box::new(my_proxy)],
+    //!     agent: agent_process,
+    //! });
+    //!
+    //! // Run the conductor (it will accept client connections on stdin/stdout)
+    //! conductor.serve(client_transport).await?;
+    //! ```
+    //!
+    //! # Why can't I just connect my proxy directly to an agent?
+    //!
+    //! ACP uses a message envelope format for proxy chains. When a proxy sends a
+    //! message toward the agent, it gets wrapped in a [`SuccessorMessage`] envelope.
+    //! The conductor handles this wrapping/unwrapping automatically.
+    //!
+    //! If you connected directly to an agent, your proxy would send `SuccessorMessage`
+    //! envelopes that the agent doesn't understand.
+    //!
+    //! # Example: Complete proxy with conductor
+    //!
+    //! See the [`sacp-conductor` tests] for complete working examples of proxies
+    //! running with the conductor.
+    //!
+    //! [`sacp-conductor`]: https://crates.io/crates/sacp-conductor
+    //! [`Conductor`]: https://docs.rs/sacp-conductor/latest/sacp_conductor/struct.Conductor.html
+    //! [`SuccessorMessage`]: crate::schema::SuccessorMessage
+    //! [`sacp-conductor` tests]: https://github.com/symposium-dev/symposium-acp/tree/main/src/sacp-conductor/tests
 }

@@ -50,6 +50,19 @@ where
         )
     }
 
+    /// Session builder using the current working directory.
+    ///
+    /// This is a convenience wrapper around [`build_session`](Self::build_session)
+    /// that uses [`std::env::current_dir`] to get the working directory.
+    ///
+    /// Returns an error if the current directory cannot be determined.
+    pub fn build_session_cwd(&self) -> Result<SessionBuilder<Link, NullResponder>, crate::Error> {
+        let cwd = std::env::current_dir().map_err(|e| {
+            crate::Error::internal_error().with_data(format!("cannot get current directory: {e}"))
+        })?;
+        Ok(self.build_session(cwd))
+    }
+
     /// Session builder starting from an existing request.
     ///
     /// Use this when you've intercepted a `session.new` request and want to
