@@ -665,7 +665,6 @@ impl<H: JrMessageHandler, R: JrResponder<H::Link>> JrConnectionBuilder<H, R> {
     ) -> JrConnectionBuilder<impl JrMessageHandler<Link = H::Link>, R>
     where
         H::Link: HasDefaultPeer,
-        H::Link: HasPeer<<H::Link as JrLink>::RemotePeer>,
         Req: JrRequest,
         Notif: JrNotification,
         F: AsyncFnMut(MessageCx<Req, Notif>, JrConnectionCx<H::Link>) -> Result<T, crate::Error>
@@ -680,7 +679,7 @@ impl<H: JrMessageHandler, R: JrResponder<H::Link>> JrConnectionBuilder<H, R> {
             + Sync,
     {
         self.with_handler(MessageHandler::new(
-            <H::Link as JrLink>::RemotePeer::default(),
+            <H::Link as HasDefaultPeer>::DefaultPeer::default(),
             <H::Link>::default(),
             op,
             to_future_hack,
@@ -731,7 +730,6 @@ impl<H: JrMessageHandler, R: JrResponder<H::Link>> JrConnectionBuilder<H, R> {
     ) -> JrConnectionBuilder<impl JrMessageHandler<Link = H::Link>, R>
     where
         H::Link: HasDefaultPeer,
-        H::Link: HasPeer<<H::Link as JrLink>::RemotePeer>,
         F: AsyncFnMut(
                 Req,
                 JrRequestCx<Req::Response>,
@@ -749,7 +747,7 @@ impl<H: JrMessageHandler, R: JrResponder<H::Link>> JrConnectionBuilder<H, R> {
             + Sync,
     {
         self.with_handler(RequestHandler::new(
-            <H::Link as JrLink>::RemotePeer::default(),
+            <H::Link as HasDefaultPeer>::DefaultPeer::default(),
             <H::Link>::default(),
             op,
             to_future_hack,
@@ -799,7 +797,6 @@ impl<H: JrMessageHandler, R: JrResponder<H::Link>> JrConnectionBuilder<H, R> {
     ) -> JrConnectionBuilder<impl JrMessageHandler<Link = H::Link>, R>
     where
         H::Link: HasDefaultPeer,
-        H::Link: HasPeer<<H::Link as JrLink>::RemotePeer>,
         Notif: JrNotification,
         F: AsyncFnMut(Notif, JrConnectionCx<H::Link>) -> Result<T, crate::Error> + Send,
         T: IntoHandled<(Notif, JrConnectionCx<H::Link>)>,
@@ -812,7 +809,7 @@ impl<H: JrMessageHandler, R: JrResponder<H::Link>> JrConnectionBuilder<H, R> {
             + Sync,
     {
         self.with_handler(NotificationHandler::new(
-            <H::Link as JrLink>::RemotePeer::default(),
+            <H::Link as HasDefaultPeer>::DefaultPeer::default(),
             <H::Link>::default(),
             op,
             to_future_hack,
@@ -1632,9 +1629,8 @@ impl<Link: JrLink> JrConnectionCx<Link> {
     pub fn send_request<Req: JrRequest>(&self, request: Req) -> JrResponse<Req::Response>
     where
         Link: HasDefaultPeer,
-        Link: HasPeer<<Link as JrLink>::RemotePeer>,
     {
-        self.send_request_to(Link::RemotePeer::default(), request)
+        self.send_request_to(Link::DefaultPeer::default(), request)
     }
 
     /// Send an outgoing request to a specific counterpart role.
@@ -1715,9 +1711,8 @@ impl<Link: JrLink> JrConnectionCx<Link> {
     pub fn send_notification<N: JrNotification>(&self, notification: N) -> Result<(), crate::Error>
     where
         Link: HasDefaultPeer,
-        Link: HasPeer<<Link as JrLink>::RemotePeer>,
     {
-        self.send_notification_to(Link::RemotePeer::default(), notification)
+        self.send_notification_to(Link::DefaultPeer::default(), notification)
     }
 
     /// Send an outgoing notification to a specific counterpart role (no reply expected).

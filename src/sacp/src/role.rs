@@ -30,20 +30,6 @@ pub trait JrLink: Debug + Copy + Send + Sync + 'static + Eq + Ord + Hash + Defau
         JrConnectionBuilder::new(Self::default())
     }
 
-    /// The role being played by the remote peer on this link.
-    ///
-    /// When you use [`JrConnectionCx::send_request`] or [`JrConnectionBuilder::on_receive_request`], etc.
-    /// this is the default peer that you are communicating with.
-    ///
-    /// But that default convenience is only permitted for links that
-    /// implement [`HasDefaultPeer`]. More complex links like [`ProxyToConductor`]
-    /// multiplex multiple "logical peers" over a single link. In that case, the
-    /// `RemotePeer` is the [`Conductor`] that arranges messages.
-    /// Because those links do not implement [`HasDefaultPeer`], users are required
-    /// to explicitly specify the peer role they wish to use by
-    /// calling [`JrConnectionCx::send_request_to`].
-    type RemotePeer: JrRole;
-
     /// The link type that connects to this link.
     ///
     /// For example, `ClientToAgent::ConnectsTo = AgentToClient`.
@@ -72,7 +58,17 @@ pub trait JrLink: Debug + Copy + Send + Sync + 'static + Eq + Ord + Hash + Defau
 }
 
 /// A link that has a default peer for sending messages.
-pub trait HasDefaultPeer: JrLink {}
+///
+/// Links like [`ProxyToConductor`] multiplex multiple "logical peers" over a single link
+/// and do not implement this trait. Users of those links must explicitly specify
+/// the peer role by calling [`JrConnectionCx::send_request_to`].
+pub trait HasDefaultPeer: JrLink + HasPeer<Self::DefaultPeer> {
+    /// The default peer for this link.
+    ///
+    /// When you use [`JrConnectionCx::send_request`] or [`JrConnectionBuilder::on_receive_request`], etc.
+    /// this is the peer that you are communicating with.
+    type DefaultPeer: JrRole;
+}
 
 /// A logical destination for messages (e.g., Client, Agent, McpServer).
 pub trait JrRole: Debug + Copy + Send + Sync + 'static + Eq + Ord + Hash + Default {}
@@ -219,12 +215,13 @@ impl JrRole for ConductorRole {}
 pub struct UntypedLink;
 
 impl JrLink for UntypedLink {
-    type RemotePeer = UntypedRole;
     type ConnectsTo = UntypedLink;
     type State = ();
 }
 
-impl HasDefaultPeer for UntypedLink {}
+impl HasDefaultPeer for UntypedLink {
+    type DefaultPeer = UntypedRole;
+}
 
 impl HasPeer<UntypedRole> for UntypedLink {
     fn remote_style(_end: UntypedRole) -> RemoteRoleStyle {
@@ -244,7 +241,6 @@ impl UntypedLink {
 pub struct ClientToAgent;
 
 impl JrLink for ClientToAgent {
-    type RemotePeer = AgentRole;
     type ConnectsTo = AgentToClient;
     type State = ();
 
@@ -270,7 +266,9 @@ impl JrLink for ClientToAgent {
     }
 }
 
-impl HasDefaultPeer for ClientToAgent {}
+impl HasDefaultPeer for ClientToAgent {
+    type DefaultPeer = AgentRole;
+}
 
 impl HasPeer<AgentRole> for ClientToAgent {
     fn remote_style(_end: AgentRole) -> RemoteRoleStyle {
@@ -283,12 +281,13 @@ impl HasPeer<AgentRole> for ClientToAgent {
 pub struct AgentToClient;
 
 impl JrLink for AgentToClient {
-    type RemotePeer = ClientRole;
     type ConnectsTo = ClientToAgent;
     type State = ();
 }
 
-impl HasDefaultPeer for AgentToClient {}
+impl HasDefaultPeer for AgentToClient {
+    type DefaultPeer = ClientRole;
+}
 
 impl HasPeer<ClientRole> for AgentToClient {
     fn remote_style(_end: ClientRole) -> RemoteRoleStyle {
@@ -301,7 +300,6 @@ impl HasPeer<ClientRole> for AgentToClient {
 pub struct ConductorToClient;
 
 impl JrLink for ConductorToClient {
-    type RemotePeer = ClientRole;
     type ConnectsTo = ClientToAgent; // Client talks to conductor as if it were an agent
     type State = ();
 }
@@ -318,8 +316,6 @@ impl HasPeer<ClientRole> for ConductorToClient {
 pub struct ConductorToConductor;
 
 impl JrLink for ConductorToConductor {
-    type RemotePeer = ClientRole;
-
     /// From the (remote) conductor's perspective, thie (local) conductor is a proxy
     type ConnectsTo = ConductorToProxy;
     type State = ();
@@ -342,15 +338,13 @@ impl HasPeer<ClientRole> for ConductorToConductor {
 pub struct ConductorToProxy;
 
 impl JrLink for ConductorToProxy {
-    /// The remote peer acts as an agent (with special powers...).
-    type RemotePeer = AgentRole;
-
     type ConnectsTo = ProxyToConductor;
-
     type State = ();
 }
 
-impl HasDefaultPeer for ConductorToProxy {}
+impl HasDefaultPeer for ConductorToProxy {
+    type DefaultPeer = AgentRole;
+}
 
 impl HasPeer<AgentRole> for ConductorToProxy {
     fn remote_style(_end: AgentRole) -> RemoteRoleStyle {
@@ -363,16 +357,14 @@ impl HasPeer<AgentRole> for ConductorToProxy {
 pub struct ConductorToAgent;
 
 impl JrLink for ConductorToAgent {
-    /// The remote role is an agent.
-    type RemotePeer = AgentRole;
-
     /// From the (remote) agent's perspective, the conductor is acting as any other client
     type ConnectsTo = AgentToClient;
-
     type State = ();
 }
 
-impl HasDefaultPeer for ConductorToAgent {}
+impl HasDefaultPeer for ConductorToAgent {
+    type DefaultPeer = AgentRole;
+}
 
 impl HasPeer<AgentRole> for ConductorToAgent {
     fn remote_style(_end: AgentRole) -> RemoteRoleStyle {
@@ -393,7 +385,6 @@ pub struct ProxyToConductor;
 pub struct ProxyToConductorState {}
 
 impl JrLink for ProxyToConductor {
-    type RemotePeer = ConductorRole;
     type ConnectsTo = ConductorToProxy;
     type State = ProxyToConductorState;
 

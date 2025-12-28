@@ -358,10 +358,9 @@ impl<Link: JrLink> MatchMessageFrom<Link> {
     ) -> Self
     where
         Link: HasDefaultPeer,
-        Link: HasPeer<<Link as JrLink>::RemotePeer>,
         H: crate::IntoHandled<(Req, JrRequestCx<Req::Response>)>,
     {
-        self.if_request_from(<Link::RemotePeer>::default(), op)
+        self.if_request_from(<Link::DefaultPeer>::default(), op)
             .await
     }
 
@@ -416,10 +415,9 @@ impl<Link: JrLink> MatchMessageFrom<Link> {
     ) -> Self
     where
         Link: HasDefaultPeer,
-        Link: HasPeer<<Link as JrLink>::RemotePeer>,
         H: crate::IntoHandled<N>,
     {
-        self.if_notification_from(<Link as JrLink>::RemotePeer::default(), op)
+        self.if_notification_from(<Link as HasDefaultPeer>::DefaultPeer::default(), op)
             .await
     }
 

@@ -20,12 +20,13 @@ impl JrRole for McpServerEnd {}
 pub struct McpClientToServer;
 
 impl JrLink for McpClientToServer {
-    type RemotePeer = McpServerEnd;
     type ConnectsTo = McpServerToClient;
     type State = ();
 }
 
-impl HasDefaultPeer for McpClientToServer {}
+impl HasDefaultPeer for McpClientToServer {
+    type DefaultPeer = McpServerEnd;
+}
 
 impl HasPeer<McpServerEnd> for McpClientToServer {
     fn remote_style(_: McpServerEnd) -> RemoteRoleStyle {
@@ -45,12 +46,13 @@ impl McpClientToServer {
 pub struct McpServerToClient;
 
 impl JrLink for McpServerToClient {
-    type RemotePeer = McpClient;
     type ConnectsTo = McpClientToServer;
     type State = ();
 }
 
-impl HasDefaultPeer for McpServerToClient {}
+impl HasDefaultPeer for McpServerToClient {
+    type DefaultPeer = McpClient;
+}
 
 impl HasPeer<McpClient> for McpServerToClient {
     fn remote_style(_: McpClient) -> RemoteRoleStyle {
