@@ -20,7 +20,6 @@ impl JrRole for McpServerEnd {}
 pub struct McpClientToServer;
 
 impl JrLink for McpClientToServer {
-    type LocalRole = McpClient;
     type RemotePeer = McpServerEnd;
     type ConnectsTo = McpServerToClient;
     type State = ();
@@ -46,7 +45,6 @@ impl McpClientToServer {
 pub struct McpServerToClient;
 
 impl JrLink for McpServerToClient {
-    type LocalRole = McpServerEnd;
     type RemotePeer = McpClient;
     type ConnectsTo = McpClientToServer;
     type State = ();
