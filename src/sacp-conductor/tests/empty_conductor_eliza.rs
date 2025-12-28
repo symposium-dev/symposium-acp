@@ -7,7 +7,7 @@
 //! 4. The full chain works end-to-end
 
 use sacp::Component;
-use sacp::peer::{AgentToClient, ProxyToConductor};
+use sacp::link::{AgentToClient, ProxyToConductor};
 use sacp_conductor::{Conductor, ProxiesAndAgent};
 use tokio::io::duplex;
 use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
@@ -19,7 +19,7 @@ struct MockEmptyConductor;
 impl Component<ProxyToConductor> for MockEmptyConductor {
     async fn serve(
         self,
-        client: impl Component<sacp::peer::ConductorToProxy>,
+        client: impl Component<sacp::link::ConductorToProxy>,
     ) -> Result<(), sacp::Error> {
         // Create an empty conductor with no components - it should act as a passthrough
         // Use Component::serve instead of .run() to get the ProxyToConductor impl
@@ -43,7 +43,7 @@ struct MockEliza;
 impl Component<AgentToClient> for MockEliza {
     async fn serve(
         self,
-        client: impl Component<sacp::peer::ClientToAgent>,
+        client: impl Component<sacp::link::ClientToAgent>,
     ) -> Result<(), sacp::Error> {
         Component::<AgentToClient>::serve(elizacp::ElizaAgent::new(), client).await
     }

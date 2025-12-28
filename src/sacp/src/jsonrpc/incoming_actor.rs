@@ -13,7 +13,7 @@ use crate::jsonrpc::JrRequestCx;
 use crate::jsonrpc::ReplyMessage;
 use crate::jsonrpc::dynamic_handler::DynamicHandler;
 use crate::jsonrpc::dynamic_handler::DynamicHandlerMessage;
-use crate::peer::JrLink;
+use crate::link::JrLink;
 
 use super::Handled;
 

@@ -56,7 +56,7 @@ pub enum LineDirection {
 ///
 /// Use as a component to connect to an external agent:
 /// ```no_run
-/// # use sacp::peer::UntypedLink;
+/// # use sacp::link::UntypedLink;
 /// # use sacp::JrConnectionBuilder;
 /// # use sacp_tokio::AcpAgent;
 /// # use std::str::FromStr;
@@ -258,7 +258,7 @@ async fn monitor_child(
     }
 }
 
-impl<L: sacp::peer::JrLink> sacp::Component<L> for AcpAgent {
+impl<L: sacp::link::JrLink> sacp::Component<L> for AcpAgent {
     async fn serve(self, client: impl sacp::Component<L::ConnectsTo>) -> Result<(), sacp::Error> {
         use futures::AsyncBufReadExt;
         use futures::AsyncWriteExt;

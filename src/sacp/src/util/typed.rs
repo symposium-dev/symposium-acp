@@ -22,7 +22,8 @@ use jsonrpcmsg::Params;
 use crate::{
     Handled, HasDefaultPeer, JrConnectionCx, JrMessageHandler, JrNotification, JrRequest,
     JrRequestCx, MessageCx, UntypedMessage,
-    peer::{HasPeer, JrLink, JrPeer},
+    link::{HasPeer, JrLink},
+    peer::JrPeer,
     util::json_cast,
 };
 

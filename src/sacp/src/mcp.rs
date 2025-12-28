@@ -1,6 +1,6 @@
 use crate::{
     HasDefaultPeer, HasPeer, JrLink, JrPeer, jsonrpc::JrConnectionBuilder,
-    jsonrpc::handlers::NullHandler, peer::RemoteStyle,
+    jsonrpc::handlers::NullHandler, link::RemoteStyle,
 };
 
 /// The MCP client endpoint.

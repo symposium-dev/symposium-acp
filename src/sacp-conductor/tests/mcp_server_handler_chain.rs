@@ -5,8 +5,8 @@
 //! `Handled::No`, which prevented downstream `.on_receive_request_from()` handlers
 //! from being invoked.
 
+use sacp::link::{AgentToClient, ProxyToConductor};
 use sacp::mcp_server::McpServer;
-use sacp::peer::{AgentToClient, ProxyToConductor};
 use sacp::schema::{
     AgentCapabilities, InitializeRequest, InitializeResponse, NewSessionRequest,
     NewSessionResponse, SessionId,
@@ -71,7 +71,7 @@ struct ProxyWithMcpAndHandler {
 impl Component<ProxyToConductor> for ProxyWithMcpAndHandler {
     async fn serve(
         self,
-        client: impl Component<sacp::peer::ConductorToProxy>,
+        client: impl Component<sacp::link::ConductorToProxy>,
     ) -> Result<(), sacp::Error> {
         let config = Arc::clone(&self.config);
 
@@ -124,7 +124,7 @@ struct SimpleAgent;
 impl Component<AgentToClient> for SimpleAgent {
     async fn serve(
         self,
-        client: impl Component<sacp::peer::ClientToAgent>,
+        client: impl Component<sacp::link::ClientToAgent>,
     ) -> Result<(), sacp::Error> {
         AgentToClient::builder()
             .name("simple-agent")

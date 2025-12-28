@@ -95,7 +95,7 @@ pub mod reusable_components {
     //!
     //! ```
     //! use sacp::{Component, AgentToClient};
-    //! use sacp::peer::JrLink;
+    //! use sacp::link::JrLink;
     //! use sacp::schema::{
     //!     InitializeRequest, InitializeResponse, AgentCapabilities,
     //! };
@@ -154,7 +154,7 @@ pub mod custom_message_handlers {
     //! struct MyHandler;
     //!
     //! impl JrMessageHandler for MyHandler {
-    //!     type Link = sacp::peer::UntypedLink;
+    //!     type Link = sacp::link::UntypedLink;
     //!
     //!     async fn handle_message(
     //!         &mut self,
@@ -292,7 +292,7 @@ pub mod global_mcp_server {
     //! }
     //!
     //! impl<R: JrResponder<ProxyToConductor> + Send + 'static> Component<ProxyToConductor> for MyProxy<R> {
-    //!     async fn serve(self, client: impl Component<sacp::peer::ConductorToProxy>) -> Result<(), sacp::Error> {
+    //!     async fn serve(self, client: impl Component<sacp::link::ConductorToProxy>) -> Result<(), sacp::Error> {
     //!         ProxyToConductor::builder()
     //!             .with_mcp_server(self.mcp_server)
     //!             .serve(client)
@@ -337,7 +337,7 @@ pub mod per_session_mcp_server {
     //! use sacp::mcp_server::McpServer;
     //! use sacp::schema::NewSessionRequest;
     //! use sacp::{AgentPeer, ClientPeer, Component, ProxyToConductor};
-    //! use sacp::peer::ConductorToProxy;
+    //! use sacp::link::ConductorToProxy;
     //!
     //! async fn run_proxy(transport: impl Component<ConductorToProxy>) -> Result<(), sacp::Error> {
     //!     ProxyToConductor::builder()
@@ -371,7 +371,7 @@ pub mod per_session_mcp_server {
     //! use sacp::mcp_server::McpServer;
     //! use sacp::schema::NewSessionRequest;
     //! use sacp::{AgentPeer, ClientPeer, Component, ProxyToConductor};
-    //! use sacp::peer::ConductorToProxy;
+    //! use sacp::link::ConductorToProxy;
     //!
     //! async fn run_proxy(transport: impl Component<ConductorToProxy>) -> Result<(), sacp::Error> {
     //!     ProxyToConductor::builder()

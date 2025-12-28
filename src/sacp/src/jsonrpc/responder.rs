@@ -6,7 +6,7 @@
 
 use std::future::Future;
 
-use crate::{JrConnectionCx, peer::JrLink};
+use crate::{JrConnectionCx, link::JrLink};
 
 /// A responder runs background tasks alongside a connection.
 ///

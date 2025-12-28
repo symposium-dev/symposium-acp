@@ -3,7 +3,7 @@
 //! This proxy demonstrates basic proxy functionality by intercepting
 //! `session/update` notifications and prepending `>` to the content.
 
-use sacp::peer::ConductorToProxy;
+use sacp::link::ConductorToProxy;
 use sacp::schema::{ContentBlock, ContentChunk, SessionNotification, SessionUpdate};
 use sacp::{AgentPeer, ClientPeer, Component, ProxyToConductor};
 

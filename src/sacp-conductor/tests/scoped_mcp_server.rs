@@ -119,7 +119,7 @@ where
 impl Component<ProxyToConductor> for ScopedProxy {
     async fn serve(
         self,
-        client: impl Component<sacp::peer::ConductorToProxy>,
+        client: impl Component<sacp::link::ConductorToProxy>,
     ) -> Result<(), sacp::Error> {
         // Stack-local data that the MCP tool will push to
         let values: Mutex<Vec<String>> = Mutex::new(Vec::new());

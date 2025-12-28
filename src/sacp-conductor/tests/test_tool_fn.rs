@@ -5,8 +5,8 @@
 
 use sacp::Component;
 use sacp::ProxyToConductor;
+use sacp::link::AgentToClient;
 use sacp::mcp_server::McpServer;
-use sacp::peer::AgentToClient;
 use sacp_conductor::{Conductor, ProxiesAndAgent};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -45,7 +45,7 @@ impl<R: sacp::JrResponder<ProxyToConductor> + 'static + Send> Component<ProxyToC
 {
     async fn serve(
         self,
-        client: impl Component<sacp::peer::ConductorToProxy>,
+        client: impl Component<sacp::link::ConductorToProxy>,
     ) -> Result<(), sacp::Error> {
         ProxyToConductor::builder()
             .name("greet-proxy")
@@ -61,7 +61,7 @@ struct ElizacpAgentComponent;
 impl Component<AgentToClient> for ElizacpAgentComponent {
     async fn serve(
         self,
-        client: impl Component<sacp::peer::ClientToAgent>,
+        client: impl Component<sacp::link::ClientToAgent>,
     ) -> Result<(), sacp::Error> {
         // Create duplex channels for bidirectional communication
         let (elizacp_write, client_read) = duplex(8192);

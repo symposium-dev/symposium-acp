@@ -1,8 +1,8 @@
 //! Proxy component that provides MCP tools
 
 use sacp::Component;
+use sacp::link::{ConductorToProxy, ProxyToConductor};
 use sacp::mcp_server::McpServer;
-use sacp::peer::{ConductorToProxy, ProxyToConductor};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 

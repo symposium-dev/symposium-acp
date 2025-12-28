@@ -12,7 +12,7 @@
 //!
 //! ```rust,ignore
 //! use sacp::component::Component;
-//! use sacp::peer::AgentToClient;
+//! use sacp::link::AgentToClient;
 //!
 //! struct MyAgent {
 //!     // configuration fields
@@ -33,7 +33,7 @@
 use futures::future::BoxFuture;
 use std::{fmt::Debug, future::Future, marker::PhantomData};
 
-use crate::{Channel, peer::JrLink};
+use crate::{Channel, link::JrLink};
 
 /// A component that can participate in the Agent-Client Protocol.
 ///
@@ -96,7 +96,7 @@ use crate::{Channel, peer::JrLink};
 /// For storing different component types in the same collection, use [`DynComponent`]:
 ///
 /// ```rust,ignore
-/// use sacp::peer::AgentToClient;
+/// use sacp::link::AgentToClient;
 ///
 /// let components: Vec<DynComponent<AgentToClient>> = vec![
 ///     DynComponent::new(proxy1),

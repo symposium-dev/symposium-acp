@@ -10,7 +10,7 @@
 //! Building an ACP agent is straightforward with sacp's type-safe API:
 //!
 //! ```no_run
-//! use sacp::peer::UntypedLink;
+//! use sacp::link::UntypedLink;
 //! use sacp::{MessageCx, UntypedMessage};
 //! use sacp::schema::{InitializeRequest, InitializeResponse, AgentCapabilities};
 //! use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
@@ -97,12 +97,14 @@ pub mod cookbook;
 pub mod handler;
 /// JSON-RPC connection and handler infrastructure
 mod jsonrpc;
+/// Proxy support for building ACP proxy components
+/// Link types for JSON-RPC connections
+pub mod link;
 /// MCP declarations (minimal)
 pub mod mcp;
 /// MCP server support for providing MCP tools over ACP
 pub mod mcp_server;
-/// Proxy support for building ACP proxy components
-/// Role types for JSON-RPC connections
+/// Peer types for JSON-RPC connections
 pub mod peer;
 /// ACP protocol schema types - all message types, requests, responses, and supporting types
 pub mod schema;
@@ -129,10 +131,9 @@ pub use jsonrpc::{
     responder::{ChainResponder, JrResponder, NullResponder},
 };
 
-pub use peer::{
-    AgentPeer, AgentToClient, ClientPeer, ClientToAgent, ConductorPeer, HasDefaultPeer, HasPeer,
-    JrLink, JrPeer, ProxyToConductor,
-};
+pub use link::{AgentToClient, ClientToAgent, HasDefaultPeer, HasPeer, JrLink, ProxyToConductor};
+
+pub use peer::{AgentPeer, ClientPeer, ConductorPeer, JrPeer};
 
 pub use component::{Component, DynComponent};
 

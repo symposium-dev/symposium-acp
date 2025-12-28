@@ -118,7 +118,7 @@ use futures::{
 };
 use sacp::{
     AgentPeer, BoxFuture, ClientPeer, Component, Error, HasPeer, JrMessage,
-    peer::{
+    link::{
         AgentToClient, ConductorToAgent, ConductorToClient, ConductorToConductor, ConductorToProxy,
         ProxyToConductor,
     },

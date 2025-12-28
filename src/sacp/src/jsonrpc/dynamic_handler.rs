@@ -1,7 +1,7 @@
 use futures::future::BoxFuture;
 use uuid::Uuid;
 
-use crate::peer::JrLink;
+use crate::link::JrLink;
 use crate::{Handled, JrConnectionCx, JrMessageHandler, MessageCx};
 
 /// Internal dyn-safe wrapper around `JrMessageHandler`

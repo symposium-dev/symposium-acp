@@ -14,8 +14,8 @@ use crate::{
         DynamicHandlerRegistration,
         responder::{ChainResponder, JrResponder, NullResponder},
     },
+    link::ProxySessionMessages,
     mcp_server::McpServer,
-    peer::ProxySessionMessages,
     schema::SessionId,
     util::{MatchMessage, MatchMessageFrom, run_until},
 };

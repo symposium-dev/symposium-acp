@@ -4,7 +4,7 @@
 //! exchange simple "hello world" messages.
 
 use futures::{AsyncRead, AsyncWrite};
-use sacp::peer::UntypedLink;
+use sacp::link::UntypedLink;
 use sacp::{
     JrConnectionCx, JrMessage, JrNotification, JrRequest, JrRequestCx, JrResponse,
     JrResponsePayload,

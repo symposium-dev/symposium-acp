@@ -1,4 +1,4 @@
-use sacp::peer::UntypedLink;
+use sacp::link::UntypedLink;
 use sacp::{
     Component, Handled, JrConnectionCx, JrMessage, JrMessageHandler, JrRequest, JrRequestCx,
     JrResponsePayload, MessageCx, util::MatchMessageFrom,

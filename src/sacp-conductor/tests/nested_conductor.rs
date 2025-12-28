@@ -20,7 +20,7 @@
 //! Run `just prep-tests` before running these tests.
 
 use sacp::Component;
-use sacp::peer::{AgentToClient, ProxyToConductor};
+use sacp::link::{AgentToClient, ProxyToConductor};
 use sacp_conductor::{Conductor, ProxiesAndAgent};
 use sacp_test::arrow_proxy::run_arrow_proxy;
 use sacp_test::test_binaries::{arrow_proxy_example, conductor_binary, elizacp_binary};
@@ -35,7 +35,7 @@ struct MockArrowProxy;
 impl Component<ProxyToConductor> for MockArrowProxy {
     async fn serve(
         self,
-        client: impl Component<sacp::peer::ConductorToProxy>,
+        client: impl Component<sacp::link::ConductorToProxy>,
     ) -> Result<(), sacp::Error> {
         run_arrow_proxy(client).await
     }
@@ -48,7 +48,7 @@ struct MockEliza;
 impl Component<AgentToClient> for MockEliza {
     async fn serve(
         self,
-        client: impl Component<sacp::peer::ClientToAgent>,
+        client: impl Component<sacp::link::ClientToAgent>,
     ) -> Result<(), sacp::Error> {
         Component::<AgentToClient>::serve(elizacp::ElizaAgent::new(), client).await
     }
@@ -69,7 +69,7 @@ impl MockInnerConductor {
 impl Component<ProxyToConductor> for MockInnerConductor {
     async fn serve(
         self,
-        client: impl Component<sacp::peer::ConductorToProxy>,
+        client: impl Component<sacp::link::ConductorToProxy>,
     ) -> Result<(), sacp::Error> {
         // Create mock arrow proxy components for the inner conductor
         // This conductor is ONLY proxies - no actual agent
