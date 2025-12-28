@@ -99,6 +99,19 @@
 //! For contexts that outlive a single request, use `cx.connection_cx()` to get a
 //! [`JrConnectionCx`] you can store and use later.
 //!
+//! ## Message Ordering and Concurrency
+//!
+//! Methods named `on_*` (like [`on_receive_request`]) register callbacks that run inside
+//! the dispatch loop. These callbacks block further message processing until they complete,
+//! giving you ordering guarantees but also creating deadlock risk.
+//!
+//! See the [`ordering`] module for details on:
+//! - How the dispatch loop processes messages
+//! - When to use `spawn` vs `on_*` callbacks
+//! - How to avoid deadlocks
+//!
+//! [`on_receive_request`]: JrConnectionBuilder::on_receive_request
+//!
 //! ## Examples
 //!
 //! - [`simple_agent.rs`][simple] - Minimal agent implementation

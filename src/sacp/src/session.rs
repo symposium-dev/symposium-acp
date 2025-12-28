@@ -200,34 +200,40 @@ where
     ///     })?;
     /// // Returns immediately, session runs in background
     /// ```
+    ///
+    /// # Ordering
+    ///
+    /// This callback blocks the dispatch loop until the session starts and your
+    /// callback completes. See the [`ordering`](crate::ordering) module for details.
     pub fn on_session_start<F, Fut>(self, op: F) -> Result<(), crate::Error>
     where
         Responder: 'static,
         F: FnOnce(ActiveSession<'static, Link>) -> Fut + Send + 'static,
         Fut: Future<Output = Result<(), crate::Error>> + Send,
     {
-        let connection = self.connection.clone();
-        connection.spawn(async move {
-            let Self {
-                connection,
-                request,
-                dynamic_handler_registrations,
-                responder,
-                block_state: _,
-            } = self;
+        let Self {
+            connection,
+            request,
+            dynamic_handler_registrations,
+            responder,
+            block_state: _,
+        } = self;
 
-            let response = connection
-                .send_request_to(AgentPeer, request)
-                .block_task()
-                .await?;
+        connection
+            .send_request_to(AgentPeer, request)
+            .on_receiving_result({
+                let connection = connection.clone();
+                async move |result| {
+                    let response = result?;
 
-            connection.spawn(responder.run(connection.clone()))?;
+                    connection.spawn(responder.run(connection.clone()))?;
 
-            let active_session =
-                connection.attach_session(response, dynamic_handler_registrations)?;
+                    let active_session =
+                        connection.attach_session(response, dynamic_handler_registrations)?;
 
-            op(active_session).await
-        })
+                    op(active_session).await
+                }
+            })
     }
 
     /// Spawn a proxy session and run a closure with the session ID.
@@ -257,6 +263,11 @@ where
     ///     })?;
     /// // Returns immediately, session runs in background
     /// ```
+    ///
+    /// # Ordering
+    ///
+    /// This callback blocks the dispatch loop until the session starts and your
+    /// callback completes. See the [`ordering`](crate::ordering) module for details.
     pub fn on_proxy_session_start<F, Fut>(
         self,
         request_cx: JrRequestCx<NewSessionResponse>,
@@ -268,40 +279,41 @@ where
         Link: HasPeer<ClientPeer>,
         Responder: 'static,
     {
-        let connection = self.connection.clone();
-        connection.spawn(async move {
-            let Self {
-                connection,
-                request,
-                dynamic_handler_registrations,
-                responder,
-                block_state: _,
-            } = self;
+        let Self {
+            connection,
+            request,
+            dynamic_handler_registrations,
+            responder,
+            block_state: _,
+        } = self;
 
-            // Spawn off the connection and dynamic handlers to run indefinitely
-            connection.spawn(responder.run(connection.clone()))?;
-            dynamic_handler_registrations
-                .into_iter()
-                .for_each(|handler| handler.run_indefinitely());
+        // Spawn off the responder and dynamic handlers to run indefinitely
+        connection.spawn(responder.run(connection.clone()))?;
+        dynamic_handler_registrations
+            .into_iter()
+            .for_each(|handler| handler.run_indefinitely());
 
-            // Send the "new session" request to the agent
-            let response = connection
-                .send_request_to(AgentPeer, request)
-                .block_task()
-                .await?;
+        // Send the "new session" request to the agent
+        connection
+            .send_request_to(AgentPeer, request)
+            .on_receiving_result({
+                let connection = connection.clone();
+                async move |result| {
+                    let response = result?;
 
-            // Extract the session-id from the response and forward
-            // the restback to the client
-            let session_id = response.session_id.clone();
-            request_cx.respond(response)?;
+                    // Extract the session-id from the response and forward
+                    // the response back to the client
+                    let session_id = response.session_id.clone();
+                    request_cx.respond(response)?;
 
-            // Finally, install a dynamic handler to proxy messages from this session
-            connection
-                .add_dynamic_handler(ProxySessionMessages::new(session_id.clone()))?
-                .run_indefinitely();
+                    // Install a dynamic handler to proxy messages from this session
+                    connection
+                        .add_dynamic_handler(ProxySessionMessages::new(session_id.clone()))?
+                        .run_indefinitely();
 
-            op(session_id).await
-        })
+                    op(session_id).await
+                }
+            })
     }
 }
 

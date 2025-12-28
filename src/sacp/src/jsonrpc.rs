@@ -658,6 +658,12 @@ impl<H: JrMessageHandler, R: JrResponder<H::Link>> JrConnectionBuilder<H, R> {
     /// For most use cases, prefer [`on_receive_request`](Self::on_receive_request) or
     /// [`on_receive_notification`](Self::on_receive_notification) which provide cleaner APIs
     /// for handling requests or notifications separately.
+    ///
+    /// # Ordering
+    ///
+    /// This callback runs inside the dispatch loop and blocks further message processing
+    /// until it completes. See the [`ordering`](crate::ordering) module for details on
+    /// ordering guarantees and how to avoid deadlocks.
     pub fn on_receive_message<Req, Notif, F, T, ToFut>(
         self,
         op: F,
@@ -723,6 +729,12 @@ impl<H: JrMessageHandler, R: JrResponder<H::Link>> JrConnectionBuilder<H, R> {
     ///
     /// `Req` can be either a single request type or an enum of multiple request types.
     /// See the [type-driven dispatch](Self#type-driven-message-dispatch) section for details.
+    ///
+    /// # Ordering
+    ///
+    /// This callback runs inside the dispatch loop and blocks further message processing
+    /// until it completes. See the [`ordering`](crate::ordering) module for details on
+    /// ordering guarantees and how to avoid deadlocks.
     pub fn on_receive_request<Req: JrRequest, F, T, ToFut>(
         self,
         op: F,
@@ -790,6 +802,12 @@ impl<H: JrMessageHandler, R: JrResponder<H::Link>> JrConnectionBuilder<H, R> {
     ///
     /// `Notif` can be either a single notification type or an enum of multiple notification types.
     /// See the [type-driven dispatch](Self#type-driven-message-dispatch) section for details.
+    ///
+    /// # Ordering
+    ///
+    /// This callback runs inside the dispatch loop and blocks further message processing
+    /// until it completes. See the [`ordering`](crate::ordering) module for details on
+    /// ordering guarantees and how to avoid deadlocks.
     pub fn on_receive_notification<Notif, F, T, ToFut>(
         self,
         op: F,
@@ -825,6 +843,12 @@ impl<H: JrMessageHandler, R: JrResponder<H::Link>> JrConnectionBuilder<H, R> {
     ///
     /// For the common case of receiving from the default counterpart, use
     /// [`on_receive_message`](Self::on_receive_message) instead.
+    ///
+    /// # Ordering
+    ///
+    /// This callback runs inside the dispatch loop and blocks further message processing
+    /// until it completes. See the [`ordering`](crate::ordering) module for details on
+    /// ordering guarantees and how to avoid deadlocks.
     pub fn on_receive_message_from<
         Req: JrRequest,
         Notif: JrNotification,
@@ -881,6 +905,12 @@ impl<H: JrMessageHandler, R: JrResponder<H::Link>> JrConnectionBuilder<H, R> {
     ///     request_cx.respond(InitializeResponse::make())
     /// })
     /// ```
+    ///
+    /// # Ordering
+    ///
+    /// This callback runs inside the dispatch loop and blocks further message processing
+    /// until it completes. See the [`ordering`](crate::ordering) module for details on
+    /// ordering guarantees and how to avoid deadlocks.
     pub fn on_receive_request_from<Req: JrRequest, Peer: JrPeer, F, T, ToFut>(
         self,
         peer: Peer,
@@ -922,6 +952,12 @@ impl<H: JrMessageHandler, R: JrResponder<H::Link>> JrConnectionBuilder<H, R> {
     ///
     /// For the common case of receiving from the default counterpart, use
     /// [`on_receive_notification`](Self::on_receive_notification) instead.
+    ///
+    /// # Ordering
+    ///
+    /// This callback runs inside the dispatch loop and blocks further message processing
+    /// until it completes. See the [`ordering`](crate::ordering) module for details on
+    /// ordering guarantees and how to avoid deadlocks.
     pub fn on_receive_notification_from<Notif: JrNotification, Peer: JrPeer, F, T, ToFut>(
         self,
         peer: Peer,
@@ -2749,6 +2785,12 @@ impl<T: JrResponsePayload> JrResponse<T> {
     /// # }
     /// ```
     ///
+    /// # Ordering
+    ///
+    /// Like [`on_receiving_result`](Self::on_receiving_result), the callback blocks the
+    /// dispatch loop until it completes. See the [`ordering`](crate::ordering) module
+    /// for details.
+    ///
     /// # When to Use
     ///
     /// Use this when:
@@ -2813,11 +2855,17 @@ impl<T: JrResponsePayload> JrResponse<T> {
     /// # }
     /// ```
     ///
-    /// # Event Loop Safety
+    /// # Ordering
     ///
-    /// Unlike [`block_task`](Self::block_task), this method is safe to use in handlers because
-    /// it schedules the task to run later rather than blocking the current task. The event loop
-    /// remains free to process messages, including the response itself.
+    /// The callback runs as a spawned task, but the dispatch loop waits for it to complete
+    /// before processing the next message. This gives you ordering guarantees: no other
+    /// messages will be processed while your callback runs.
+    ///
+    /// This differs from [`block_task`](Self::block_task), which signals completion immediately
+    /// upon receiving the response (before your code processes it).
+    ///
+    /// See the [`ordering`](crate::ordering) module for details on ordering guarantees
+    /// and how to avoid deadlocks.
     ///
     /// # Error Handling
     ///
@@ -2828,10 +2876,10 @@ impl<T: JrResponsePayload> JrResponse<T> {
     ///
     /// Use this method when:
     /// - You're in a handler callback (not a spawned task)
-    /// - You want to process the response asynchronously
-    /// - You don't need the response value immediately
+    /// - You want ordering guarantees (no other messages processed during your callback)
+    /// - You need to do async work before "releasing" control back to the dispatch loop
     ///
-    /// For spawned tasks where you need linear control flow, consider [`block_task`](Self::block_task).
+    /// For spawned tasks where you don't need ordering guarantees, consider [`block_task`](Self::block_task).
     #[track_caller]
     pub fn on_receiving_result<F>(
         self,
