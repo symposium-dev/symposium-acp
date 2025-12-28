@@ -37,8 +37,8 @@ impl Default for Stdio {
     }
 }
 
-impl Component for Stdio {
-    async fn serve(self, client: impl Component) -> Result<(), sacp::Error> {
+impl<L: sacp::link::JrLink> Component<L> for Stdio {
+    async fn serve(self, client: impl Component<L::ConnectsTo>) -> Result<(), sacp::Error> {
         if let Some(callback) = self.debug_callback {
             use futures::AsyncBufReadExt;
             use futures::AsyncWriteExt;
@@ -73,16 +73,16 @@ impl Component for Stdio {
             ))
                 as std::pin::Pin<Box<dyn futures::Sink<String, Error = std::io::Error> + Send>>;
 
-            sacp::Lines::new(outgoing_sink, incoming_lines)
-                .serve(client)
-                .await
+            Component::<L>::serve(sacp::Lines::new(outgoing_sink, incoming_lines), client).await
         } else {
             // Without debug: use simple ByteStreams
-            ByteStreams::new(
-                tokio::io::stdout().compat_write(),
-                tokio::io::stdin().compat(),
+            Component::<L>::serve(
+                ByteStreams::new(
+                    tokio::io::stdout().compat_write(),
+                    tokio::io::stdin().compat(),
+                ),
+                client,
             )
-            .serve(client)
             .await
         }
     }

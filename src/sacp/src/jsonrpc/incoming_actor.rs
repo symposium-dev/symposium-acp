@@ -13,7 +13,7 @@ use crate::jsonrpc::JrRequestCx;
 use crate::jsonrpc::ReplyMessage;
 use crate::jsonrpc::dynamic_handler::DynamicHandler;
 use crate::jsonrpc::dynamic_handler::DynamicHandlerMessage;
-use crate::role::JrRole;
+use crate::link::JrLink;
 
 use super::Handled;
 
@@ -25,20 +25,20 @@ use super::Handled;
 /// - Converts jsonrpcmsg::Request to UntypedMessage for handlers
 ///
 /// This is the protocol layer - it has no knowledge of how messages arrived.
-pub(super) async fn incoming_protocol_actor<Role: JrRole>(
-    json_rpc_cx: &JrConnectionCx<Role>,
+pub(super) async fn incoming_protocol_actor<Link: JrLink>(
+    json_rpc_cx: &JrConnectionCx<Link>,
     transport_rx: mpsc::UnboundedReceiver<Result<jsonrpcmsg::Message, crate::Error>>,
-    dynamic_handler_rx: mpsc::UnboundedReceiver<DynamicHandlerMessage<Role>>,
+    dynamic_handler_rx: mpsc::UnboundedReceiver<DynamicHandlerMessage<Link>>,
     reply_tx: mpsc::UnboundedSender<ReplyMessage>,
-    mut handler: impl JrMessageHandler<Role = Role>,
+    mut handler: impl JrMessageHandler<Link = Link>,
 ) -> Result<(), crate::Error> {
     let mut my_rx = transport_rx
         .map(IncomingProtocolMsg::Transport)
         .merge(dynamic_handler_rx.map(IncomingProtocolMsg::DynamicHandler));
 
-    let mut dynamic_handlers: FxHashMap<Uuid, Box<dyn DynamicHandler<Role>>> = FxHashMap::default();
+    let mut dynamic_handlers: FxHashMap<Uuid, Box<dyn DynamicHandler<Link>>> = FxHashMap::default();
     let mut pending_messages: Vec<MessageCx> = vec![];
-    let mut state = <Role::State>::default();
+    let mut state = <Link::State>::default();
 
     while let Some(message_result) = my_rx.next().await {
         tracing::trace!(message = ?message_result, actor = "incoming_protocol_actor");
@@ -123,20 +123,20 @@ pub(super) async fn incoming_protocol_actor<Role: JrRole>(
 }
 
 #[derive(Debug)]
-enum IncomingProtocolMsg<Role: JrRole> {
+enum IncomingProtocolMsg<Link: JrLink> {
     Transport(Result<jsonrpcmsg::Message, crate::Error>),
-    DynamicHandler(DynamicHandlerMessage<Role>),
+    DynamicHandler(DynamicHandlerMessage<Link>),
 }
 
 /// Dispatches a JSON-RPC request to the handler.
 /// Report an error back to the server if it does not get handled.
-async fn dispatch_request<Role: JrRole>(
-    json_rpc_cx: &JrConnectionCx<Role>,
+async fn dispatch_request<Link: JrLink>(
+    json_rpc_cx: &JrConnectionCx<Link>,
     request: jsonrpcmsg::Request,
-    dynamic_handlers: &mut FxHashMap<Uuid, Box<dyn DynamicHandler<Role>>>,
-    handler: &mut impl JrMessageHandler<Role = Role>,
+    dynamic_handlers: &mut FxHashMap<Uuid, Box<dyn DynamicHandler<Link>>>,
+    handler: &mut impl JrMessageHandler<Link = Link>,
     pending_messages: &mut Vec<MessageCx>,
-    state: &mut Role::State,
+    state: &mut Link::State,
 ) -> Result<(), crate::Error> {
     let message = UntypedMessage::new(&request.method, &request.params).expect("well-formed JSON");
 
@@ -190,7 +190,7 @@ async fn dispatch_request<Role: JrRole>(
     }
 
     // Finally, apply the default handler for the role.
-    match Role::default_message_handler(message_cx, json_rpc_cx.clone(), state).await? {
+    match Link::default_message_handler(message_cx, json_rpc_cx.clone(), state).await? {
         Handled::Yes => {
             tracing::trace!(method = ?request.method, handler = "default", "Handled successfully");
             return Ok(());

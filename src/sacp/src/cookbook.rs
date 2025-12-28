@@ -3,29 +3,29 @@
 //! This module contains documented examples of patterns that come up
 //! frequently when building agents, proxies, and other ACP components.
 //!
-//! # Roles and Endpoints
+//! # Roles and Peers
 //!
-//! ACP connections are typed by their *role*, which captures both "who I am"
-//! and "who I'm talking to". Roles implement [`JrRole`] and determine what
+//! ACP connections are typed by their *link*, which captures both "who I am"
+//! and "who I'm talking to". Links implement [`JrLink`] and determine what
 //! operations are valid on a connection.
 //!
-//! ## Endpoints
+//! ## Peers
 //!
-//! *Endpoints* ([`JrEndpoint`]) are logical destinations for messages:
+//! *Peers* ([`JrPeer`]) are logical destinations for messages:
 //!
-//! - [`Client`] - The client endpoint (IDE, CLI, etc.)
-//! - [`Agent`] - The agent endpoint (AI-powered component)
-//! - [`Conductor`] - The conductor endpoint (orchestrates proxy chains)
+//! - [`Client`] - The client peer (IDE, CLI, etc.)
+//! - [`Agent`] - The agent peer (AI-powered component)
+//! - [`Conductor`] - The conductor peer (orchestrates proxy chains)
 //!
-//! Most roles have a single implicit endpoint, but proxies can send to
-//! multiple endpoints. Use [`send_request_to`] and [`send_notification_to`]
+//! Most links have a single implicit peer, but proxies can send to
+//! multiple peers. Use [`send_request_to`] and [`send_notification_to`]
 //! to specify the destination explicitly.
 //!
-//! ## Role Types
+//! ## Link Types
 //!
-//! The built-in role types are:
+//! The built-in link types are:
 //!
-//! | Role | Description | Can send to |
+//! | Link | Description | Can send to |
 //! |------|-------------|-------------|
 //! | [`ClientToAgent`] | Client's connection to an agent | `Agent` |
 //! | [`AgentToClient`] | Agent's connection to a client | `Client` |
@@ -33,13 +33,13 @@
 //! | [`ConductorToClient`] | Conductor's connection to a client | `Client`, `Agent` |
 //! | [`ConductorToProxy`] | Conductor's connection to a proxy | `Agent` |
 //! | [`ConductorToAgent`] | Conductor's connection to the final agent | `Agent` |
-//! | [`UntypedRole`] | Generic role for testing/dynamic scenarios | any |
+//! | [`UntypedLink`] | Generic link for testing/dynamic scenarios | any |
 //!
-//! ## Proxies and Multiple Endpoints
+//! ## Proxies and Multiple Peers
 //!
 //! A proxy sits between client and agent, so it needs to send messages in
-//! both directions. [`ProxyToConductor`] implements `HasEndpoint<Client>` and
-//! `HasEndpoint<Agent>`, allowing it to forward messages appropriately:
+//! both directions. [`ProxyToConductor`] implements `HasPeer<Client>` and
+//! `HasPeer<Agent>`, allowing it to forward messages appropriately:
 //!
 //! ```ignore
 //! // Forward a request toward the agent
@@ -53,18 +53,18 @@
 //! in [`SuccessorMessage`] envelopes. When receiving from `Agent`, they're
 //! automatically unwrapped.
 //!
-//! [`JrRole`]: crate::role::JrRole
-//! [`JrEndpoint`]: crate::role::JrEndpoint
+//! [`JrLink`]: crate::peer::JrLink
+//! [`JrPeer`]: crate::peer::JrPeer
 //! [`Client`]: crate::Client
 //! [`Agent`]: crate::Agent
 //! [`Conductor`]: crate::Conductor
 //! [`ClientToAgent`]: crate::ClientToAgent
 //! [`AgentToClient`]: crate::AgentToClient
 //! [`ProxyToConductor`]: crate::ProxyToConductor
-//! [`ConductorToClient`]: crate::role::ConductorToClient
-//! [`ConductorToProxy`]: crate::role::ConductorToProxy
-//! [`ConductorToAgent`]: crate::role::ConductorToAgent
-//! [`UntypedRole`]: crate::role::UntypedRole
+//! [`ConductorToClient`]: crate::peer::ConductorToClient
+//! [`ConductorToProxy`]: crate::peer::ConductorToProxy
+//! [`ConductorToAgent`]: crate::peer::ConductorToAgent
+//! [`UntypedLink`]: crate::peer::UntypedLink
 //! [`SuccessorMessage`]: crate::schema::SuccessorMessage
 //! [`send_request_to`]: crate::JrConnectionCx::send_request_to
 //! [`send_notification_to`]: crate::JrConnectionCx::send_notification_to
@@ -89,12 +89,13 @@ pub mod reusable_components {
     //! Pattern: Defining reusable components.
     //!
     //! When building agents or proxies, define a struct that implements [`Component`].
-    //! Internally, use the role's `builder()` method to set up handlers.
+    //! Internally, use the link's `builder()` method to set up handlers.
     //!
     //! # Example
     //!
     //! ```
     //! use sacp::{Component, AgentToClient};
+    //! use sacp::link::JrLink;
     //! use sacp::schema::{
     //!     InitializeRequest, InitializeResponse, AgentCapabilities,
     //! };
@@ -103,8 +104,8 @@ pub mod reusable_components {
     //!     name: String,
     //! }
     //!
-    //! impl Component for MyAgent {
-    //!     async fn serve(self, client: impl Component) -> Result<(), sacp::Error> {
+    //! impl Component<AgentToClient> for MyAgent {
+    //!     async fn serve(self, client: impl Component<<AgentToClient as JrLink>::ConnectsTo>) -> Result<(), sacp::Error> {
     //!         AgentToClient::builder()
     //!             .name(&self.name)
     //!             .on_receive_request(async move |req: InitializeRequest, request_cx, _cx| {
@@ -153,12 +154,12 @@ pub mod custom_message_handlers {
     //! struct MyHandler;
     //!
     //! impl JrMessageHandler for MyHandler {
-    //!     type Role = sacp::role::UntypedRole;
+    //!     type Link = sacp::link::UntypedLink;
     //!
     //!     async fn handle_message(
     //!         &mut self,
     //!         message: MessageCx,
-    //!         _cx: JrConnectionCx<Self::Role>,
+    //!         _cx: JrConnectionCx<Self::Link>,
     //!     ) -> Result<Handled<MessageCx>, sacp::Error> {
     //!         MatchMessage::new(message)
     //!             .if_request(async |req: InitializeRequest, request_cx| {
@@ -182,9 +183,9 @@ pub mod custom_message_handlers {
     //!
     //! # When to use `MatchMessage` vs `MatchMessageFrom`
     //!
-    //! - [`MatchMessage`] - Use when you don't need endpoint-aware handling
+    //! - [`MatchMessage`] - Use when you don't need peer-aware handling
     //! - [`MatchMessageFrom`] - Use in proxies where messages come from different
-    //!   endpoints (`Client` vs `Agent`) and may need different handling
+    //!   peers (`Client` vs `Agent`) and may need different handling
     //!
     //! [`JrMessageHandler`]: crate::JrMessageHandler
     //! [`MatchMessage`]: crate::util::MatchMessage
@@ -201,10 +202,10 @@ pub mod connecting_as_client {
     //! # Example
     //!
     //! ```
-    //! use sacp::{ClientToAgent, Component};
+    //! use sacp::{ClientToAgent, AgentToClient, Component};
     //! use sacp::schema::{InitializeRequest, NewSessionRequest, SessionNotification};
     //!
-    //! async fn connect_to_agent(transport: impl Component) -> Result<(), sacp::Error> {
+    //! async fn connect_to_agent(transport: impl Component<AgentToClient>) -> Result<(), sacp::Error> {
     //!     ClientToAgent::builder()
     //!         .name("my-client")
     //!         .on_receive_notification(async |notif: SessionNotification, _cx| {
@@ -290,8 +291,8 @@ pub mod global_mcp_server {
     //!     mcp_server: McpServer<ProxyToConductor, R>,
     //! }
     //!
-    //! impl<R: JrResponder<ProxyToConductor> + Send + 'static> Component for MyProxy<R> {
-    //!     async fn serve(self, client: impl Component) -> Result<(), sacp::Error> {
+    //! impl<R: JrResponder<ProxyToConductor> + Send + 'static> Component<ProxyToConductor> for MyProxy<R> {
+    //!     async fn serve(self, client: impl Component<sacp::link::ConductorToProxy>) -> Result<(), sacp::Error> {
     //!         ProxyToConductor::builder()
     //!             .with_mcp_server(self.mcp_server)
     //!             .serve(client)
@@ -335,11 +336,12 @@ pub mod per_session_mcp_server {
     //! ```
     //! use sacp::mcp_server::McpServer;
     //! use sacp::schema::NewSessionRequest;
-    //! use sacp::{Agent, Client, Component, ProxyToConductor};
+    //! use sacp::{AgentPeer, ClientPeer, Component, ProxyToConductor};
+    //! use sacp::link::ConductorToProxy;
     //!
-    //! async fn run_proxy(transport: impl Component) -> Result<(), sacp::Error> {
+    //! async fn run_proxy(transport: impl Component<ConductorToProxy>) -> Result<(), sacp::Error> {
     //!     ProxyToConductor::builder()
-    //!         .on_receive_request_from(Client, async |request: NewSessionRequest, request_cx, cx| {
+    //!         .on_receive_request_from(ClientPeer, async |request: NewSessionRequest, request_cx, cx| {
     //!             let cwd = request.cwd.clone();
     //!             let mcp_server = McpServer::builder("session-tools")
     //!                 .tool_fn("get_cwd", "Returns session working directory",
@@ -368,11 +370,12 @@ pub mod per_session_mcp_server {
     //! ```
     //! use sacp::mcp_server::McpServer;
     //! use sacp::schema::NewSessionRequest;
-    //! use sacp::{Agent, Client, Component, ProxyToConductor};
+    //! use sacp::{AgentPeer, ClientPeer, Component, ProxyToConductor};
+    //! use sacp::link::ConductorToProxy;
     //!
-    //! async fn run_proxy(transport: impl Component) -> Result<(), sacp::Error> {
+    //! async fn run_proxy(transport: impl Component<ConductorToProxy>) -> Result<(), sacp::Error> {
     //!     ProxyToConductor::builder()
-    //!         .on_receive_request_from(Client, async |request: NewSessionRequest, request_cx, cx| {
+    //!         .on_receive_request_from(ClientPeer, async |request: NewSessionRequest, request_cx, cx| {
     //!             let cwd = request.cwd.clone();
     //!             let mcp_server = McpServer::builder("session-tools")
     //!                 .tool_fn("get_cwd", "Returns session working directory",

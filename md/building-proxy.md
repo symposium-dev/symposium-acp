@@ -18,14 +18,14 @@ Proxies are designed to work with the **conductor**, which chains multiple proxi
 Here's a minimal proxy that adds a ">" prefix to all agent messages:
 
 ```rust
-use sacp::{Agent, Client, Component, ProxyToConductor};
+use sacp::{AgentPeer, ClientPeer, Component, ProxyToConductor};
 use sacp::schema::{ContentBlock, ContentChunk, SessionNotification, SessionUpdate};
 
 pub async fn run_arrow_proxy(transport: impl Component) -> Result<(), sacp::Error> {
     ProxyToConductor::builder()
         .name("arrow-proxy")
         .on_receive_notification_from(
-            Agent,
+            AgentPeer,
             async |mut notification: SessionNotification, cx| {
                 // Modify content from the agent
                 if let SessionUpdate::AgentMessageChunk(ContentChunk { content, .. }) = 
@@ -37,7 +37,7 @@ pub async fn run_arrow_proxy(transport: impl Component) -> Result<(), sacp::Erro
                 }
 
                 // Forward to client
-                cx.send_notification_to(Client, notification)?;
+                cx.send_notification_to(ClientPeer, notification)?;
                 Ok(())
             },
             sacp::on_receive_notification!(),
@@ -50,23 +50,23 @@ pub async fn run_arrow_proxy(transport: impl Component) -> Result<(), sacp::Erro
 
 ## Core Concepts
 
-### Endpoints: Agent and Client
+### Peers: AgentPeer and ClientPeer
 
-Proxies communicate with two endpoints:
+Proxies communicate with two peers:
 
-- **`Agent`** - The downstream direction (toward the AI agent)
-- **`Client`** - The upstream direction (toward the editor)
+- **`AgentPeer`** - The downstream direction (toward the AI agent)
+- **`ClientPeer`** - The upstream direction (toward the editor)
 
-When you receive a message, you typically forward it (possibly modified) to the other endpoint:
+When you receive a message, you typically forward it (possibly modified) to the other peer:
 
 ```rust
-use sacp::{Agent, Client};
+use sacp::{AgentPeer, ClientPeer};
 
 // Message from client -> forward to agent
-cx.send_request_to(Agent, modified_request)?;
+cx.send_request_to(AgentPeer, modified_request)?;
 
 // Message from agent -> forward to client  
-cx.send_notification_to(Client, modified_notification)?;
+cx.send_notification_to(ClientPeer, modified_notification)?;
 ```
 
 ### The Builder Pattern
@@ -79,7 +79,7 @@ ProxyToConductor::builder()
     // Handle messages from client (default)
     .on_receive_request(handler, sacp::on_receive_request!())
     // Handle messages from agent
-    .on_receive_notification_from(Agent, handler, sacp::on_receive_notification!())
+    .on_receive_notification_from(AgentPeer, handler, sacp::on_receive_notification!())
     .connect_to(transport)?
     .serve()
     .await
@@ -97,8 +97,8 @@ To handle messages from the **agent**, use the `_from` variants:
 .on_receive_notification(handler, macro!())
 
 // From agent
-.on_receive_request_from(Agent, handler, macro!())
-.on_receive_notification_from(Agent, handler, macro!())
+.on_receive_request_from(AgentPeer, handler, macro!())
+.on_receive_notification_from(AgentPeer, handler, macro!())
 ```
 
 ### The Witness Macro
@@ -144,7 +144,7 @@ ProxyToConductor::builder()
             request.prompt.insert(0, context);
 
             // Forward modified request to agent
-            cx.send_request_to(Agent, request)?;
+            cx.send_request_to(AgentPeer, request)?;
             Ok(())
         },
         sacp::on_receive_request!(),
@@ -162,11 +162,11 @@ Modify or filter responses from the agent:
 ProxyToConductor::builder()
     .name("filter-proxy")
     .on_receive_notification_from(
-        Agent,
+        AgentPeer,
         async |notification: SessionNotification, cx| {
             // Filter or modify the notification
             if should_forward(&notification) {
-                cx.send_notification_to(Client, notification)?;
+                cx.send_notification_to(ClientPeer, notification)?;
             }
             Ok(())
         },
@@ -227,7 +227,7 @@ The `tool_fn_mut!()` macro is required due to Rust language limitations (similar
 For proxies that can be composed into the conductor, implement `Component`:
 
 ```rust
-use sacp::{Agent, Client, Component, ProxyToConductor};
+use sacp::{AgentPeer, ClientPeer, Component, ProxyToConductor};
 
 pub struct MyProxy {
     config: ProxyConfig,
@@ -238,12 +238,12 @@ impl Component for MyProxy {
         ProxyToConductor::builder()
             .name("my-proxy")
             .on_receive_notification_from(
-                Agent,
+                AgentPeer,
                 {
                     let config = self.config.clone();
                     async move |notification: SessionNotification, cx| {
                         // Use config here...
-                        cx.send_notification_to(Client, notification)?;
+                        cx.send_notification_to(ClientPeer, notification)?;
                         Ok(())
                     }
                 },
@@ -282,7 +282,7 @@ Request handlers receive three parameters:
         // cx: JrConnectionCx - for sending other messages, spawning tasks
         
         // Forward to agent (response routing is automatic)
-        cx.send_request_to(Agent, request)?;
+        cx.send_request_to(AgentPeer, request)?;
         Ok(())
     },
     sacp::on_receive_request!(),
@@ -295,12 +295,12 @@ Notification handlers receive two parameters:
 
 ```rust
 .on_receive_notification_from(
-    Agent,
+    AgentPeer,
     async |notification: SomeNotification, cx| {
         // notification: The typed notification
         // cx: JrConnectionCx - for sending messages
         
-        cx.send_notification_to(Client, notification)?;
+        cx.send_notification_to(ClientPeer, notification)?;
         Ok(())
     },
     sacp::on_receive_notification!(),

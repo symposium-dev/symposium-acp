@@ -9,7 +9,7 @@
 
 use expect_test::expect;
 use futures::{AsyncRead, AsyncWrite};
-use sacp::role::UntypedRole;
+use sacp::link::UntypedLink;
 use sacp::{JrConnectionCx, JrMessage, JrRequest, JrRequestCx, JrResponse, JrResponsePayload};
 use serde::{Deserialize, Serialize};
 use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
@@ -111,7 +111,7 @@ async fn test_invalid_json() {
 
             // No handlers - all requests will return errors
             let server_transport = sacp::ByteStreams::new(server_writer, server_reader);
-            let server = UntypedRole::builder();
+            let server = UntypedLink::builder();
 
             // Spawn server
             tokio::task::spawn_local(async move {
@@ -165,7 +165,7 @@ async fn test_incomplete_line() {
 
     // No handlers needed for EOF test
     let transport = sacp::ByteStreams::new(output, input);
-    let connection = UntypedRole::builder();
+    let connection = UntypedLink::builder();
 
     // The server should handle EOF mid-message gracefully
     let result = connection.serve(transport).await;
@@ -190,9 +190,9 @@ async fn test_unknown_method() {
 
             // No handlers - all requests will be "method not found"
             let server_transport = sacp::ByteStreams::new(server_writer, server_reader);
-            let server = UntypedRole::builder();
+            let server = UntypedLink::builder();
             let client_transport = sacp::ByteStreams::new(client_writer, client_reader);
-            let client = UntypedRole::builder();
+            let client = UntypedLink::builder();
 
             // Spawn server
             tokio::task::spawn_local(async move {
@@ -267,10 +267,10 @@ async fn test_handler_returns_error() {
             let (server_reader, server_writer, client_reader, client_writer) = setup_test_streams();
 
             let server_transport = sacp::ByteStreams::new(server_writer, server_reader);
-            let server = UntypedRole::builder().on_receive_request(
+            let server = UntypedLink::builder().on_receive_request(
                 async |_request: ErrorRequest,
                        request_cx: JrRequestCx<SimpleResponse>,
-                       _connection_cx: JrConnectionCx<UntypedRole>| {
+                       _connection_cx: JrConnectionCx<UntypedLink>| {
                     // Explicitly return an error
                     request_cx.respond_with_error(sacp::Error::new((
                         -32000,
@@ -281,7 +281,7 @@ async fn test_handler_returns_error() {
             );
 
             let client_transport = sacp::ByteStreams::new(client_writer, client_reader);
-            let client = UntypedRole::builder();
+            let client = UntypedLink::builder();
 
             tokio::task::spawn_local(async move {
                 server.serve(server_transport).await.ok();
@@ -354,10 +354,10 @@ async fn test_missing_required_params() {
             // Handler that validates params - since EmptyRequest has no params but we're checking
             // against SimpleRequest which requires a message field, this will fail
             let server_transport = sacp::ByteStreams::new(server_writer, server_reader);
-            let server = UntypedRole::builder().on_receive_request(
+            let server = UntypedLink::builder().on_receive_request(
                 async |_request: EmptyRequest,
                        request_cx: JrRequestCx<SimpleResponse>,
-                       _connection_cx: JrConnectionCx<UntypedRole>| {
+                       _connection_cx: JrConnectionCx<UntypedLink>| {
                     // This will be called, but EmptyRequest parsing already succeeded
                     // The test is actually checking if EmptyRequest (no params) fails to parse as SimpleRequest
                     // But with the new API, EmptyRequest parses successfully since it expects no params
@@ -369,7 +369,7 @@ async fn test_missing_required_params() {
             );
 
             let client_transport = sacp::ByteStreams::new(client_writer, client_reader);
-            let client = UntypedRole::builder();
+            let client = UntypedLink::builder();
 
             tokio::task::spawn_local(async move {
                 server.serve(server_transport).await.ok();

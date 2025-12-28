@@ -22,12 +22,12 @@
 
 use rmcp::ServiceExt;
 use sacp::mcp_server::{McpContext, McpServer, McpServerConnect};
-use sacp::{Agent, ByteStreams, Component, DynComponent, HasEndpoint, JrRole, NullResponder};
+use sacp::{AgentPeer, ByteStreams, Component, DynComponent, HasPeer, JrLink, NullResponder};
 use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
 
-pub trait McpServerExt<Role: JrRole>
+pub trait McpServerExt<Link: JrLink>
 where
-    Role: HasEndpoint<Agent>,
+    Link: HasPeer<AgentPeer>,
 {
     /// Create an MCP server from something that implements the [`McpServerConnect`] trait.
     ///
@@ -37,7 +37,7 @@ where
     fn from_rmcp<S>(
         name: impl ToString,
         new_fn: impl Fn() -> S + Send + Sync + 'static,
-    ) -> McpServer<Role, NullResponder>
+    ) -> McpServer<Link, NullResponder>
     where
         S: rmcp::Service<rmcp::RoleServer>,
     {
@@ -46,9 +46,9 @@ where
             new_fn: F,
         }
 
-        impl<Role, F, S> McpServerConnect<Role> for RmcpServer<F>
+        impl<Link, F, S> McpServerConnect<Link> for RmcpServer<F>
         where
-            Role: JrRole,
+            Link: JrLink,
             F: Fn() -> S + Send + Sync + 'static,
             S: rmcp::Service<rmcp::RoleServer>,
         {
@@ -56,7 +56,7 @@ where
                 self.name.clone()
             }
 
-            fn connect(&self, _cx: McpContext<Role>) -> DynComponent {
+            fn connect(&self, _cx: McpContext<Link>) -> DynComponent<sacp::mcp::McpServerToClient> {
                 let service = (self.new_fn)();
                 DynComponent::new(RmcpServerComponent { service })
             }
@@ -72,18 +72,21 @@ where
     }
 }
 
-impl<Role: JrRole> McpServerExt<Role> for McpServer<Role> where Role: HasEndpoint<Agent> {}
+impl<Link: JrLink> McpServerExt<Link> for McpServer<Link> where Link: HasPeer<AgentPeer> {}
 
 /// Component wrapper for rmcp services.
 struct RmcpServerComponent<S> {
     service: S,
 }
 
-impl<S> Component for RmcpServerComponent<S>
+impl<S> Component<sacp::mcp::McpServerToClient> for RmcpServerComponent<S>
 where
     S: rmcp::Service<rmcp::RoleServer>,
 {
-    async fn serve(self, client: impl Component) -> Result<(), sacp::Error> {
+    async fn serve(
+        self,
+        client: impl Component<sacp::mcp::McpClientToServer>,
+    ) -> Result<(), sacp::Error> {
         // Create tokio byte streams that rmcp expects
         let (mcp_server_stream, mcp_client_stream) = tokio::io::duplex(8192);
         let (mcp_server_read, mcp_server_write) = tokio::io::split(mcp_server_stream);
@@ -95,7 +98,7 @@ where
 
         // Spawn task to connect byte_streams to the provided client
         tokio::spawn(async move {
-            let _ = byte_streams.serve(client).await;
+            let _ = Component::<sacp::mcp::McpServerToClient>::serve(byte_streams, client).await;
         });
 
         // Run the rmcp server with the server side of the duplex stream

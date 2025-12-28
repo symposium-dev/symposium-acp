@@ -164,7 +164,7 @@ sequenceDiagram
 
 **Why route through conductor instead of direct bridge-to-proxy?**
 - Maintains consistent message ordering through central conductor queue
-- Preserves conductor's role as sole message router
+- Preserves conductor as sole message router
 - Simplifies error handling and lifecycle management
 
 **Why use connection_id instead of session_id in `_mcp/*` messages?**

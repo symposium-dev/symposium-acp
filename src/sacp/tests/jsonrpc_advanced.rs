@@ -6,7 +6,7 @@
 //! - Out-of-order response handling
 
 use futures::{AsyncRead, AsyncWrite};
-use sacp::role::UntypedRole;
+use sacp::link::UntypedLink;
 use sacp::{JrConnectionCx, JrMessage, JrRequest, JrRequestCx, JrResponse, JrResponsePayload};
 use serde::{Deserialize, Serialize};
 use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
@@ -147,10 +147,10 @@ async fn test_bidirectional_communication() {
             let (server_reader, server_writer, client_reader, client_writer) = setup_test_streams();
 
             let side_a_transport = sacp::ByteStreams::new(server_writer, server_reader);
-            let side_a = UntypedRole::builder().on_receive_request(
+            let side_a = UntypedLink::builder().on_receive_request(
                 async |request: PingRequest,
                        request_cx: JrRequestCx<PongResponse>,
-                       _connection_cx: JrConnectionCx<UntypedRole>| {
+                       _connection_cx: JrConnectionCx<UntypedLink>| {
                     request_cx.respond(PongResponse {
                         value: request.value + 1,
                     })
@@ -159,7 +159,7 @@ async fn test_bidirectional_communication() {
             );
 
             let side_b_transport = sacp::ByteStreams::new(client_writer, client_reader);
-            let side_b = UntypedRole::builder();
+            let side_b = UntypedLink::builder();
 
             // Spawn side_a as server
             tokio::task::spawn_local(async move {
@@ -201,10 +201,10 @@ async fn test_request_ids() {
             let (server_reader, server_writer, client_reader, client_writer) = setup_test_streams();
 
             let server_transport = sacp::ByteStreams::new(server_writer, server_reader);
-            let server = UntypedRole::builder().on_receive_request(
+            let server = UntypedLink::builder().on_receive_request(
                 async |request: PingRequest,
                        request_cx: JrRequestCx<PongResponse>,
-                       _connection_cx: JrConnectionCx<UntypedRole>| {
+                       _connection_cx: JrConnectionCx<UntypedLink>| {
                     request_cx.respond(PongResponse {
                         value: request.value + 1,
                     })
@@ -213,7 +213,7 @@ async fn test_request_ids() {
             );
 
             let client_transport = sacp::ByteStreams::new(client_writer, client_reader);
-            let client = UntypedRole::builder();
+            let client = UntypedLink::builder();
 
             tokio::task::spawn_local(async move {
                 server.serve(server_transport).await.ok();
@@ -263,10 +263,10 @@ async fn test_out_of_order_responses() {
             let (server_reader, server_writer, client_reader, client_writer) = setup_test_streams();
 
             let server_transport = sacp::ByteStreams::new(server_writer, server_reader);
-            let server = UntypedRole::builder().on_receive_request(
+            let server = UntypedLink::builder().on_receive_request(
                 async |request: SlowRequest,
                        request_cx: JrRequestCx<SlowResponse>,
-                       _connection_cx: JrConnectionCx<UntypedRole>| {
+                       _connection_cx: JrConnectionCx<UntypedLink>| {
                     // Simulate delay
                     tokio::time::sleep(tokio::time::Duration::from_millis(request.delay_ms)).await;
                     request_cx.respond(SlowResponse { id: request.id })
@@ -275,7 +275,7 @@ async fn test_out_of_order_responses() {
             );
 
             let client_transport = sacp::ByteStreams::new(client_writer, client_reader);
-            let client = UntypedRole::builder();
+            let client = UntypedLink::builder();
 
             tokio::task::spawn_local(async move {
                 server.serve(server_transport).await.ok();

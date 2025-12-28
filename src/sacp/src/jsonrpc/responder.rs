@@ -6,23 +6,24 @@
 
 use std::future::Future;
 
-use crate::{JrConnectionCx, role::JrRole};
+use crate::{JrConnectionCx, link::JrLink};
 
 /// A responder runs background tasks alongside a connection.
 ///
 /// Responders are composed using [`ChainResponder`] and run in parallel
 /// when the connection is active.
-pub trait JrResponder<Role: JrRole>: Send {
+pub trait JrResponder<Link: JrLink>: Send {
     /// Run this responder to completion.
-    fn run(self, cx: JrConnectionCx<Role>) -> impl Future<Output = Result<(), crate::Error>> + Send;
+    fn run(self, cx: JrConnectionCx<Link>)
+    -> impl Future<Output = Result<(), crate::Error>> + Send;
 }
 
 /// A no-op responder that completes immediately.
 #[derive(Default)]
 pub struct NullResponder;
 
-impl<Role: JrRole> JrResponder<Role> for NullResponder {
-    async fn run(self, _cx: JrConnectionCx<Role>) -> Result<(), crate::Error> {
+impl<Link: JrLink> JrResponder<Link> for NullResponder {
+    async fn run(self, _cx: JrConnectionCx<Link>) -> Result<(), crate::Error> {
         Ok(())
     }
 }
@@ -40,10 +41,10 @@ impl<A, B> ChainResponder<A, B> {
     }
 }
 
-impl<Role: JrRole, A: JrResponder<Role>, B: JrResponder<Role>> JrResponder<Role>
+impl<Link: JrLink, A: JrResponder<Link>, B: JrResponder<Link>> JrResponder<Link>
     for ChainResponder<A, B>
 {
-    async fn run(self, cx: JrConnectionCx<Role>) -> Result<(), crate::Error> {
+    async fn run(self, cx: JrConnectionCx<Link>) -> Result<(), crate::Error> {
         // Box the futures to avoid stack overflow with deeply nested responder chains
         let a_fut = Box::pin(self.a.run(cx.clone()));
         let b_fut = Box::pin(self.b.run(cx.clone()));
@@ -65,13 +66,13 @@ impl<F> SpawnedResponder<F> {
     }
 }
 
-impl<Role, F, Fut> JrResponder<Role> for SpawnedResponder<F>
+impl<Link, F, Fut> JrResponder<Link> for SpawnedResponder<F>
 where
-    Role: JrRole,
-    F: FnOnce(JrConnectionCx<Role>) -> Fut + Send,
+    Link: JrLink,
+    F: FnOnce(JrConnectionCx<Link>) -> Fut + Send,
     Fut: Future<Output = Result<(), crate::Error>> + Send,
 {
-    async fn run(self, cx: JrConnectionCx<Role>) -> Result<(), crate::Error> {
+    async fn run(self, cx: JrConnectionCx<Link>) -> Result<(), crate::Error> {
         let location = self.location;
         (self.task_fn)(cx).await.map_err(|err| {
             let data = err.data.clone();

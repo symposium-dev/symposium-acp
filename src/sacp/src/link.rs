@@ -1,10 +1,7 @@
-//! Role traits and Role types for ACP and related protocols.
+//! Link types for ACP and related protocols.
 //!
-//! Roles are directional - they capture both "who I am" and "who I'm talking to".
+//! Links are directional - they capture the relationship between two sides.
 //! For example, `ClientToAgent` is a client's connection to an agent.
-//!
-//! Endpoints are logical destinations for messages. Most roles have a single
-//! implicit endpoint, but proxies can send to multiple endpoints (`Client` or `Agent`).
 
 use std::{fmt::Debug, hash::Hash};
 
@@ -13,6 +10,7 @@ use agent_client_protocol_schema::{NewSessionRequest, NewSessionResponse, Sessio
 use crate::{
     Handled, JrConnectionCx, JrMessage, JrMessageHandler, MessageCx, UntypedMessage,
     jsonrpc::{JrConnectionBuilder, handlers::NullHandler},
+    peer::{AgentPeer, ClientPeer, ConductorPeer, JrPeer, ProxyPeer, UntypedPeer},
     schema::{
         InitializeProxyRequest, InitializeRequest, METHOD_INITIALIZE_PROXY,
         METHOD_SUCCESSOR_MESSAGE, SuccessorMessage,
@@ -20,59 +18,68 @@ use crate::{
     util::{MatchMessageFrom, json_cast},
 };
 
-/// Trait for JSON-RPC connection roles.
+/// Trait for JSON-RPC connection links.
 ///
-/// The role determines what operations are valid on a connection and
-/// provides role-specific behavior like handling unhandled messages.
-#[expect(async_fn_in_trait)]
-pub trait JrRole: Debug + Copy + Send + Sync + 'static + Eq + Ord + Hash + Default {
-    /// The default endpoint type for handlers registered on this role.
-    ///
-    /// This determines which endpoint messages are assumed to come from when
-    /// using `on_receive_request`, `on_receive_notification`, etc. without
-    /// an explicit endpoint specification.
-    ///
-    /// For roles with a single counterpart (like `ClientToAgent`), this is
-    /// typically that counterpart's endpoint. For roles that can receive from
-    /// multiple endpoints (like proxies), this should be set to an explicit
-    /// endpoint to avoid ambiguity.
-    type HandlerEndpoint: JrEndpoint;
+/// The link specifies two communicating peers, e.g., [`ClientToAgent`].
+/// The link determines what operations are valid on a connection and
+/// provides link-specific behavior like handling unhandled messages.
+pub trait JrLink: Debug + Copy + Send + Sync + 'static + Eq + Ord + Hash + Default {
+    /// Create a new connection builder for this link.
+    fn builder() -> JrConnectionBuilder<NullHandler<Self>> {
+        JrConnectionBuilder::new(Self::default())
+    }
 
-    /// State maintained for connections this role.
-    type State: Default;
+    /// The link type that connects to this link.
+    ///
+    /// For example, `ConnectsTo` for [`ClientToAgent`] is [`AgentToClient`].
+    ///
+    /// This is used by `Component<L>` to express the relationship:
+    /// a component that implements `Component<L>` can serve as the
+    /// transport for a connection using link `L::ConnectsTo`.
+    type ConnectsTo: JrLink;
+
+    /// State maintained for connections this link.
+    type State: Default + Send;
 
     /// Method invoked when there is no defined message handler.
     /// If this returns `no`, an error response will be sent.
-    async fn default_message_handler(
+    fn default_message_handler(
         message: MessageCx,
-        cx: JrConnectionCx<Self>,
-        state: &mut Self::State,
-    ) -> Result<Handled<MessageCx>, crate::Error> {
-        let _ = cx;
-        let _ = state;
-        Ok(Handled::No {
-            message,
-            retry: false,
-        })
+        #[expect(unused_variables)] cx: JrConnectionCx<Self>,
+        #[expect(unused_variables)] state: &mut Self::State,
+    ) -> impl Future<Output = Result<Handled<MessageCx>, crate::Error>> + Send {
+        async move {
+            Ok(Handled::No {
+                message,
+                retry: false,
+            })
+        }
     }
 }
 
-/// A role that has a default endpoint for sending messages (the default is `JrRole::HandlerEndpoint`)
-pub trait HasDefaultEndpoint: JrRole {}
-
-/// A logical destination for messages (e.g., Client, Agent, McpServer).
-pub trait JrEndpoint: Debug + Copy + Send + Sync + 'static + Eq + Ord + Hash + Default {}
-
-/// Declares that a role can send messages to a specific endpoint.
-pub trait HasEndpoint<End: JrEndpoint>: JrRole {
-    /// Returns the remote role style for sending to this endpoint.
-    fn remote_style(end: End) -> RemoteRoleStyle;
+/// A link that has a default peer for sending messages.
+///
+/// Links like [`ProxyToConductor`] multiplex multiple "logical peers" over a single link
+/// and do not implement this trait. Users of those links must explicitly specify
+/// the peer by calling [`JrConnectionCx::send_request_to`].
+pub trait HasDefaultPeer: JrLink + HasPeer<Self::DefaultPeer> {
+    /// The default peer for this link.
+    ///
+    /// When you use [`JrConnectionCx::send_request`] or [`JrConnectionBuilder::on_receive_request`], etc.
+    /// this is the peer that you are communicating with.
+    type DefaultPeer: JrPeer;
 }
 
-/// Describes how messages are transformed when sent to a remote endpoint.
+/// Declares that a link can send messages to a specific peer.
+pub trait HasPeer<Peer: JrPeer>: JrLink {
+    /// Returns the remote style for sending to this peer.
+    fn remote_style(peer: Peer) -> RemoteStyle;
+}
+
+/// Describes how messages are transformed when sent to a remote peer.
 #[derive(Debug)]
 #[non_exhaustive]
-pub enum RemoteRoleStyle {
+pub enum RemoteStyle {
     /// Pass each message through exactly as it is.
     Counterpart,
 
@@ -80,14 +87,14 @@ pub enum RemoteRoleStyle {
     Successor,
 }
 
-impl RemoteRoleStyle {
+impl RemoteStyle {
     pub(crate) fn transform_outgoing_message<M: JrMessage>(
         &self,
         msg: M,
     ) -> Result<UntypedMessage, crate::Error> {
         match self {
-            RemoteRoleStyle::Counterpart => msg.to_untyped_message(),
-            RemoteRoleStyle::Successor => SuccessorMessage {
+            RemoteStyle::Counterpart => msg.to_untyped_message(),
+            RemoteStyle::Successor => SuccessorMessage {
                 message: msg,
                 meta: None,
             }
@@ -95,7 +102,7 @@ impl RemoteRoleStyle {
         }
     }
 
-    pub(crate) async fn handle_incoming_message<R: JrRole>(
+    pub(crate) async fn handle_incoming_message<R: JrLink>(
         &self,
         message_cx: MessageCx,
         connection_cx: JrConnectionCx<R>,
@@ -111,11 +118,11 @@ impl RemoteRoleStyle {
             "handle_incoming_message: enter"
         );
         match self {
-            RemoteRoleStyle::Counterpart => {
+            RemoteStyle::Counterpart => {
                 tracing::trace!("handle_incoming_message: Counterpart style, passing through");
                 return handle_message(message_cx, connection_cx).await;
             }
-            RemoteRoleStyle::Successor => (),
+            RemoteStyle::Successor => (),
         }
 
         let method = message_cx.method();
@@ -165,73 +172,45 @@ impl RemoteRoleStyle {
 }
 
 // ============================================================================
-// Endpoints - logical destinations for messages
+// Links - directional connection types
 // ============================================================================
 
-/// A generic endpoint for untyped connections.
-#[derive(Debug, Default, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct UntypedEndpoint;
-
-impl JrEndpoint for UntypedEndpoint {}
-
-/// Endpoint representing the client direction.
-#[derive(Debug, Default, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct Client;
-
-impl JrEndpoint for Client {}
-
-/// Endpoint representing the agent direction.
-#[derive(Debug, Default, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct Agent;
-
-impl JrEndpoint for Agent {}
-
-/// Endpoint representing the conductor direction.
-#[derive(Debug, Default, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct Conductor;
-
-impl JrEndpoint for Conductor {}
-
-// ============================================================================
-// Roles - directional connection types
-// ============================================================================
-
-/// A generic role for testing and dynamic dispatch scenarios.
+/// A generic link for testing scenarios.
 ///
-/// `UntypedRole` can send to and receive from any endpoint without transformation.
-/// This is useful for tests and scenarios where the exact role is not known
-/// at compile time.
+/// `UntypedLink` can send to and receive from any peer without transformation.
+/// This is useful for tests but generally shouldn't really be used in production code.
 #[derive(Debug, Default, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct UntypedRole;
+pub struct UntypedLink;
 
-impl JrRole for UntypedRole {
-    type HandlerEndpoint = UntypedEndpoint;
-
+impl JrLink for UntypedLink {
+    type ConnectsTo = UntypedLink;
     type State = ();
 }
 
-impl HasDefaultEndpoint for UntypedRole {}
+impl HasDefaultPeer for UntypedLink {
+    type DefaultPeer = UntypedPeer;
+}
 
-impl HasEndpoint<UntypedEndpoint> for UntypedRole {
-    fn remote_style(_end: UntypedEndpoint) -> RemoteRoleStyle {
-        RemoteRoleStyle::Counterpart
+impl HasPeer<UntypedPeer> for UntypedLink {
+    fn remote_style(_end: UntypedPeer) -> RemoteStyle {
+        RemoteStyle::Counterpart
     }
 }
 
-impl UntypedRole {
-    /// Create a connection builder with an untyped role.
-    pub fn builder() -> JrConnectionBuilder<NullHandler<UntypedRole>> {
-        JrConnectionBuilder::new(UntypedRole)
+impl UntypedLink {
+    /// Create a connection builder with an untyped link.
+    pub fn builder() -> JrConnectionBuilder<NullHandler<UntypedLink>> {
+        JrConnectionBuilder::new(UntypedLink)
     }
 }
 
-/// A client's connection to an agent.
+/// A client connecting to its agent. Use this when attempting to issue prompts
+/// or requests to an agent using the SDK.
 #[derive(Debug, Default, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct ClientToAgent;
 
-impl JrRole for ClientToAgent {
-    type HandlerEndpoint = Agent;
-
+impl JrLink for ClientToAgent {
+    type ConnectsTo = AgentToClient;
     type State = ();
 
     async fn default_message_handler(
@@ -240,7 +219,7 @@ impl JrRole for ClientToAgent {
         _state: &mut (),
     ) -> Result<Handled<MessageCx>, crate::Error> {
         MatchMessageFrom::new(message, &cx)
-            .if_message_from(Agent, async |message: MessageCx| {
+            .if_message_from(AgentPeer, async |message: MessageCx| {
                 // Subtle: messages that have a session-id field
                 // should be captured by a dynamic message handler
                 // for that session -- but there is a race condition
@@ -256,91 +235,151 @@ impl JrRole for ClientToAgent {
     }
 }
 
-impl HasDefaultEndpoint for ClientToAgent {}
+impl HasDefaultPeer for ClientToAgent {
+    type DefaultPeer = AgentPeer;
+}
 
-impl HasEndpoint<Agent> for ClientToAgent {
-    fn remote_style(_end: Agent) -> RemoteRoleStyle {
-        RemoteRoleStyle::Counterpart
+impl HasPeer<AgentPeer> for ClientToAgent {
+    fn remote_style(_end: AgentPeer) -> RemoteStyle {
+        RemoteStyle::Counterpart
     }
 }
 
-/// An agent's connection to a client.
+/// An agent connecting to its client. This is used when implementing agents.
 #[derive(Debug, Default, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct AgentToClient;
 
-impl JrRole for AgentToClient {
-    type HandlerEndpoint = Client;
+impl JrLink for AgentToClient {
+    type ConnectsTo = ClientToAgent;
     type State = ();
 }
 
-impl HasDefaultEndpoint for AgentToClient {}
+impl HasDefaultPeer for AgentToClient {
+    type DefaultPeer = ClientPeer;
+}
 
-impl HasEndpoint<Client> for AgentToClient {
-    fn remote_style(_end: Client) -> RemoteRoleStyle {
-        RemoteRoleStyle::Counterpart
+impl HasPeer<ClientPeer> for AgentToClient {
+    fn remote_style(_end: ClientPeer) -> RemoteStyle {
+        RemoteStyle::Counterpart
     }
 }
 
 /// A conductor's connection to a client.
+/// The conductor is acting as a composite agent that combines
+/// some number of proxies with a final agent.
+///
+/// This is only meant to be used as a link type of the conductor itself;
+/// if you find yourself using it for something else you are probably
+/// doing something wrong.
 #[derive(Debug, Default, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct ConductorToClient;
 
-impl JrRole for ConductorToClient {
-    type HandlerEndpoint = Client;
+impl JrLink for ConductorToClient {
+    type ConnectsTo = ClientToAgent; // Client talks to conductor as if it were an agent
     type State = ();
 }
 
-impl HasEndpoint<Client> for ConductorToClient {
-    fn remote_style(_end: Client) -> RemoteRoleStyle {
-        RemoteRoleStyle::Counterpart
+impl HasPeer<ClientPeer> for ConductorToClient {
+    fn remote_style(_end: ClientPeer) -> RemoteStyle {
+        RemoteStyle::Counterpart
     }
 }
 
-// When the conductor is acting as a proxy, it can also receive messages
-// from the agent direction (wrapped in SuccessorMessage envelopes).
-impl HasEndpoint<Agent> for ConductorToClient {
-    fn remote_style(_end: Agent) -> RemoteRoleStyle {
-        RemoteRoleStyle::Successor
+/// A conductor's connection to another conductor.
+/// The inner/local conductor is acting as a proxy
+/// and the outer/local conductor is acting as its conductor.
+/// This is used creating a proxy that uses a conductor to arrange many proxies.
+///
+/// This is only meant to be used as a link type of the conductor itself;
+/// if you find yourself using it for something else you are probably
+/// doing something wrong.
+#[derive(Debug, Default, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct ConductorToConductor;
+
+impl JrLink for ConductorToConductor {
+    /// From the (remote) conductor's perspective, thie (local) conductor is a proxy
+    type ConnectsTo = ConductorToProxy;
+    type State = ();
+}
+
+impl HasPeer<AgentPeer> for ConductorToConductor {
+    fn remote_style(_end: AgentPeer) -> RemoteStyle {
+        RemoteStyle::Successor
+    }
+}
+
+impl HasPeer<ClientPeer> for ConductorToConductor {
+    fn remote_style(_end: ClientPeer) -> RemoteStyle {
+        RemoteStyle::Counterpart
     }
 }
 
 /// A conductor's connection to a proxy.
+///
+/// This is only meant to be used by the conductor;
+/// if you find yourself using it for something else you are probably
+/// doing something wrong.
+///
+/// This is very similar to a [`ClientToAgent`] connection
+/// but conductors and proxies also exchange [`SuccessorMessage`] messages
+/// that indicate communication with the proxy's successor,
+/// which may be another proxy or an agent.
 #[derive(Debug, Default, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct ConductorToProxy;
 
-impl JrRole for ConductorToProxy {
-    type HandlerEndpoint = Agent;
+impl JrLink for ConductorToProxy {
+    type ConnectsTo = ProxyToConductor;
     type State = ();
 }
 
-impl HasDefaultEndpoint for ConductorToProxy {}
+impl HasDefaultPeer for ConductorToProxy {
+    type DefaultPeer = ProxyPeer;
+}
 
-impl HasEndpoint<Agent> for ConductorToProxy {
-    fn remote_style(_end: Agent) -> RemoteRoleStyle {
-        RemoteRoleStyle::Counterpart
+impl HasPeer<ProxyPeer> for ConductorToProxy {
+    fn remote_style(_end: ProxyPeer) -> RemoteStyle {
+        RemoteStyle::Counterpart
     }
 }
 
-/// A conductor's connection to an agent.
+impl HasPeer<AgentPeer> for ConductorToProxy {
+    fn remote_style(_end: AgentPeer) -> RemoteStyle {
+        RemoteStyle::Counterpart
+    }
+}
+
+/// A conductor's connection to its final agent.
+///
+/// This is only meant to be used by the conductor;
+/// if you find yourself using it for something else you are probably
+/// doing something wrong.
+///
+/// This is the same as a [`ClientToAgent`] connection except that
+/// the default message handling is different; the conductor doesn't use
+/// dynamic handlers for individual sessions and therefore the default
+/// message handling simply doesn't include any "retry" logic.
 #[derive(Debug, Default, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct ConductorToAgent;
 
-impl JrRole for ConductorToAgent {
-    type HandlerEndpoint = Agent;
+impl JrLink for ConductorToAgent {
+    /// From the (remote) agent's perspective, the conductor is acting as any other client
+    type ConnectsTo = AgentToClient;
     type State = ();
 }
 
-impl HasDefaultEndpoint for ConductorToAgent {}
+impl HasDefaultPeer for ConductorToAgent {
+    type DefaultPeer = AgentPeer;
+}
 
-impl HasEndpoint<Agent> for ConductorToAgent {
-    fn remote_style(_end: Agent) -> RemoteRoleStyle {
-        RemoteRoleStyle::Counterpart
+impl HasPeer<AgentPeer> for ConductorToAgent {
+    fn remote_style(_end: AgentPeer) -> RemoteStyle {
+        RemoteStyle::Counterpart
     }
 }
 
 /// A proxy's connection to a conductor.
 ///
-/// Proxies can send to two endpoints:
+/// Proxies can send to two peers:
 /// - `Client`: messages pass through unchanged
 /// - `Agent`: messages are wrapped in a `SuccessorMessage` envelope
 #[derive(Debug, Default, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -350,8 +389,8 @@ pub struct ProxyToConductor;
 #[derive(Default)]
 pub struct ProxyToConductorState {}
 
-impl JrRole for ProxyToConductor {
-    type HandlerEndpoint = Conductor;
+impl JrLink for ProxyToConductor {
+    type ConnectsTo = ConductorToProxy;
     type State = ProxyToConductorState;
 
     async fn default_message_handler(
@@ -361,7 +400,7 @@ impl JrRole for ProxyToConductor {
     ) -> Result<Handled<MessageCx>, crate::Error> {
         // Handle various special messages:
         let result = MatchMessageFrom::new(message, &cx)
-            .if_request_from(Client, async |_req: InitializeRequest, request_cx| {
+            .if_request_from(ClientPeer, async |_req: InitializeRequest, request_cx| {
                 request_cx.respond_with_error(crate::Error::invalid_request().with_data(format!(
                     "proxies must be initialized with `{}`",
                     METHOD_INITIALIZE_PROXY
@@ -371,23 +410,23 @@ impl JrRole for ProxyToConductor {
             // Initialize Proxy coming from the client -- forward to the agent but
             // convert into a regular initialize.
             .if_request_from(
-                Client,
+                ClientPeer,
                 async |request: InitializeProxyRequest, request_cx| {
                     let InitializeProxyRequest { initialize } = request;
-                    cx.send_request_to(Agent, initialize)
+                    cx.send_request_to(AgentPeer, initialize)
                         .forward_to_request_cx(request_cx)
                 },
             )
             .await
             // Incoming request from the agent -- forward to the client
             .if_request_from(
-                Conductor,
+                ConductorPeer,
                 async |agent_request: SuccessorMessage, request_cx| {
                     let SuccessorMessage {
                         message: request,
                         meta: _,
                     } = agent_request;
-                    cx.send_request_to(Client, request)
+                    cx.send_request_to(ClientPeer, request)
                         .forward_to_request_cx(request_cx)
                 },
             )
@@ -395,26 +434,31 @@ impl JrRole for ProxyToConductor {
             // New session coming from the client -- proxy to the agent
             // and add a dynamic handler for that
             // session-id.
-            .if_request_from(Client, async |request: NewSessionRequest, request_cx| {
-                cx.send_request_to(Agent, request).on_receiving_result({
-                    let cx = cx.clone();
-                    async move |result| {
-                        if let Ok(NewSessionResponse { session_id, .. }) = &result {
-                            cx.add_dynamic_handler(ProxySessionMessages::new(session_id.clone()))?
+            .if_request_from(
+                ClientPeer,
+                async |request: NewSessionRequest, request_cx| {
+                    cx.send_request_to(AgentPeer, request).on_receiving_result({
+                        let cx = cx.clone();
+                        async move |result| {
+                            if let Ok(NewSessionResponse { session_id, .. }) = &result {
+                                cx.add_dynamic_handler(ProxySessionMessages::new(
+                                    session_id.clone(),
+                                ))?
                                 .run_indefinitely();
+                            }
+                            request_cx.respond_with_result(result)
                         }
-                        request_cx.respond_with_result(result)
-                    }
-                })
-            })
+                    })
+                },
+            )
             .await
             // Incoming notification from the agent -- forward to the client
-            .if_notification_from(Conductor, async |agent_notif: SuccessorMessage| {
+            .if_notification_from(ConductorPeer, async |agent_notif: SuccessorMessage| {
                 let SuccessorMessage {
                     message: notif,
                     meta: _,
                 } = agent_notif;
-                cx.send_notification_to(Client, notif)
+                cx.send_notification_to(ClientPeer, notif)
             })
             .await
             .done()?;
@@ -437,12 +481,12 @@ impl JrRole for ProxyToConductor {
                 retry: false,
             } => match message {
                 MessageCx::Request(request, request_cx) => {
-                    cx.send_request_to(Agent, request)
+                    cx.send_request_to(AgentPeer, request)
                         .forward_to_request_cx(request_cx)?;
                     Ok(Handled::Yes)
                 }
                 MessageCx::Notification(notif) => {
-                    cx.send_notification_to(Agent, notif)?;
+                    cx.send_notification_to(AgentPeer, notif)?;
                     Ok(Handled::Yes)
                 }
             },
@@ -454,12 +498,12 @@ impl JrRole for ProxyToConductor {
 ///
 /// This is used internally to handle session message routing after a
 /// `session.new` request has been forwarded.
-pub(crate) struct ProxySessionMessages<Role> {
+pub(crate) struct ProxySessionMessages<Link> {
     session_id: SessionId,
-    _marker: std::marker::PhantomData<Role>,
+    _marker: std::marker::PhantomData<Link>,
 }
 
-impl<Role> ProxySessionMessages<Role> {
+impl<Link> ProxySessionMessages<Link> {
     /// Create a new proxy handler for the given session.
     pub fn new(session_id: SessionId) -> Self {
         Self {
@@ -469,23 +513,23 @@ impl<Role> ProxySessionMessages<Role> {
     }
 }
 
-impl<Role: JrRole> JrMessageHandler for ProxySessionMessages<Role>
+impl<Link: JrLink> JrMessageHandler for ProxySessionMessages<Link>
 where
-    Role: HasEndpoint<Agent> + HasEndpoint<Client>,
+    Link: HasPeer<AgentPeer> + HasPeer<ClientPeer>,
 {
-    type Role = Role;
+    type Link = Link;
 
     async fn handle_message(
         &mut self,
         message: MessageCx,
-        cx: JrConnectionCx<Self::Role>,
+        cx: JrConnectionCx<Self::Link>,
     ) -> Result<Handled<MessageCx>, crate::Error> {
         MatchMessageFrom::new(message, &cx)
-            .if_message_from(Agent, async |message| {
+            .if_message_from(AgentPeer, async |message| {
                 // If this is for our session-id, proxy it to the client.
                 if let Some(session_id) = message.get_session_id()? {
                     if session_id == self.session_id {
-                        cx.send_proxied_message_to(Client, message)?;
+                        cx.send_proxied_message_to(ClientPeer, message)?;
                         return Ok(Handled::Yes);
                     }
                 }
@@ -505,21 +549,21 @@ where
     }
 }
 
-impl HasEndpoint<Conductor> for ProxyToConductor {
-    fn remote_style(_end: Conductor) -> RemoteRoleStyle {
-        RemoteRoleStyle::Counterpart
+impl HasPeer<ConductorPeer> for ProxyToConductor {
+    fn remote_style(_end: ConductorPeer) -> RemoteStyle {
+        RemoteStyle::Counterpart
     }
 }
 
-impl HasEndpoint<Client> for ProxyToConductor {
-    fn remote_style(_end: Client) -> RemoteRoleStyle {
-        RemoteRoleStyle::Counterpart
+impl HasPeer<ClientPeer> for ProxyToConductor {
+    fn remote_style(_end: ClientPeer) -> RemoteStyle {
+        RemoteStyle::Counterpart
     }
 }
 
-impl HasEndpoint<Agent> for ProxyToConductor {
-    fn remote_style(_end: Agent) -> RemoteRoleStyle {
-        RemoteRoleStyle::Successor
+impl HasPeer<AgentPeer> for ProxyToConductor {
+    fn remote_style(_end: AgentPeer) -> RemoteStyle {
+        RemoteStyle::Successor
     }
 }
 

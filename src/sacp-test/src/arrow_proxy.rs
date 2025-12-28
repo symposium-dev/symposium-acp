@@ -3,22 +3,25 @@
 //! This proxy demonstrates basic proxy functionality by intercepting
 //! `session/update` notifications and prepending `>` to the content.
 
+use sacp::link::ConductorToProxy;
 use sacp::schema::{ContentBlock, ContentChunk, SessionNotification, SessionUpdate};
-use sacp::{Agent, Client, Component, ProxyToConductor};
+use sacp::{AgentPeer, ClientPeer, Component, ProxyToConductor};
 
 /// Run the arrow proxy that adds `>` to each session update.
 ///
 /// # Arguments
 ///
 /// * `transport` - Component to the predecessor (conductor or another proxy)
-pub async fn run_arrow_proxy(transport: impl Component + 'static) -> Result<(), sacp::Error> {
+pub async fn run_arrow_proxy(
+    transport: impl Component<ConductorToProxy> + 'static,
+) -> Result<(), sacp::Error> {
     ProxyToConductor::builder()
         .name("arrow-proxy")
         // Intercept session notifications from successor (agent) and modify them.
         // Using on_receive_notification_from(Agent, ...) automatically unwraps
         // SuccessorMessage envelopes.
         .on_receive_notification_from(
-            Agent,
+            AgentPeer,
             async |mut notification: SessionNotification, cx| {
                 // Modify the content by adding > prefix
                 match &mut notification.update {
@@ -34,7 +37,7 @@ pub async fn run_arrow_proxy(transport: impl Component + 'static) -> Result<(), 
                 }
 
                 // Forward modified notification to predecessor (client)
-                cx.send_notification_to(Client, notification)?;
+                cx.send_notification_to(ClientPeer, notification)?;
                 Ok(())
             },
             sacp::on_receive_notification!(),

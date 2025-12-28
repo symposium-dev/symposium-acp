@@ -3,7 +3,7 @@
 use elizacp::ElizaAgent;
 use expect_test::expect;
 use sacp::Component;
-use sacp::role::UntypedRole;
+use sacp::link::UntypedLink;
 use sacp::schema::{
     ContentBlock, InitializeRequest, McpServer, NewSessionRequest, PromptRequest,
     SessionNotification, TextContent,
@@ -37,7 +37,7 @@ async fn test_elizacp_mcp_tool_call() -> Result<(), sacp::Error> {
     // Create channel to collect session notifications
     let (notification_tx, mut notification_rx) = futures::channel::mpsc::unbounded();
 
-    UntypedRole::builder()
+    UntypedLink::builder()
         .name("test-client")
         .on_receive_notification(
             {

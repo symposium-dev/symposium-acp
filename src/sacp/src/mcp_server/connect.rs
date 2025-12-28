@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use crate::{DynComponent, JrRole, mcp_server::McpContext};
+use crate::{DynComponent, JrLink, mcp::McpServerToClient, mcp_server::McpContext};
 
 /// Trait for types that can create MCP server connections.
 ///
@@ -12,24 +12,24 @@ use crate::{DynComponent, JrRole, mcp_server::McpContext};
 ///
 /// ```rust,ignore
 /// use sacp::mcp_server::{McpServerConnect, McpContext};
-/// use sacp::{DynComponent, JrRole};
+/// use sacp::{DynComponent, JrLink};
 ///
 /// struct MyMcpServer {
 ///     name: String,
 /// }
 ///
-/// impl<Role: JrRole> McpServerConnect<Role> for MyMcpServer {
+/// impl<Link: JrLink> McpServerConnect<Link> for MyMcpServer {
 ///     fn name(&self) -> String {
 ///         self.name.clone()
 ///     }
 ///
-///     fn connect(&self, cx: McpContext<Role>) -> DynComponent {
+///     fn connect(&self, cx: McpContext<Link>) -> DynComponent<McpServerToClient> {
 ///         // Create and return a component that handles MCP requests
 ///         DynComponent::new(MyMcpComponent::new(cx))
 ///     }
 /// }
 /// ```
-pub trait McpServerConnect<Role: JrRole>: Send + Sync + 'static {
+pub trait McpServerConnect<Link: JrLink>: Send + Sync + 'static {
     /// The name of the MCP server, used to identify it in session responses.
     fn name(&self) -> String;
 
@@ -40,25 +40,25 @@ pub trait McpServerConnect<Role: JrRole>: Send + Sync + 'static {
     ///
     /// The [`McpContext`] provides access to the ACP connection context and the
     /// server's ACP URL.
-    fn connect(&self, cx: McpContext<Role>) -> DynComponent;
+    fn connect(&self, cx: McpContext<Link>) -> DynComponent<McpServerToClient>;
 }
 
-impl<Role: JrRole, S: ?Sized + McpServerConnect<Role>> McpServerConnect<Role> for Box<S> {
+impl<Link: JrLink, S: ?Sized + McpServerConnect<Link>> McpServerConnect<Link> for Box<S> {
     fn name(&self) -> String {
         S::name(self)
     }
 
-    fn connect(&self, cx: McpContext<Role>) -> DynComponent {
+    fn connect(&self, cx: McpContext<Link>) -> DynComponent<McpServerToClient> {
         S::connect(self, cx)
     }
 }
 
-impl<Role: JrRole, S: ?Sized + McpServerConnect<Role>> McpServerConnect<Role> for Arc<S> {
+impl<Link: JrLink, S: ?Sized + McpServerConnect<Link>> McpServerConnect<Link> for Arc<S> {
     fn name(&self) -> String {
         S::name(self)
     }
 
-    fn connect(&self, cx: McpContext<Role>) -> DynComponent {
+    fn connect(&self, cx: McpContext<Link>) -> DynComponent<McpServerToClient> {
         S::connect(self, cx)
     }
 }

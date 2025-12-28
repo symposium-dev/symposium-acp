@@ -10,7 +10,7 @@
 //! Building an ACP agent is straightforward with sacp's type-safe API:
 //!
 //! ```no_run
-//! use sacp::role::UntypedRole;
+//! use sacp::link::UntypedLink;
 //! use sacp::{MessageCx, UntypedMessage};
 //! use sacp::schema::{InitializeRequest, InitializeResponse, AgentCapabilities};
 //! use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
@@ -18,7 +18,7 @@
 //! # #[tokio::main]
 //! # async fn main() -> Result<(), sacp::Error> {
 //! // Start by creating an agent connection
-//! UntypedRole::builder()
+//! UntypedLink::builder()
 //! .name("my-agent") // Give it a name for logging purposes
 //! .on_receive_request(async move |initialize: InitializeRequest, request_cx, _cx| {
 //!     // Create one or more request handlers -- these are attempted in order.
@@ -48,7 +48,7 @@
 //!
 //! The [`cookbook`] module contains documented patterns for common tasks:
 //!
-//! - [Roles and endpoints](cookbook#roles-and-endpoints) - Understanding `JrRole`, `JrEndpoint`, and how proxies work
+//! - [Roles and peers](cookbook#roles-and-peers) - Understanding `JrLink`, `JrPeer`, and how proxies work
 //! - [Reusable components](cookbook::reusable_components) - Defining agents/proxies with [`Component`]
 //! - [Custom message handlers](cookbook::custom_message_handlers) - Implementing [`JrMessageHandler`]
 //! - [Connecting as a client](cookbook::connecting_as_client) - Using `run_until` to send requests
@@ -97,13 +97,15 @@ pub mod cookbook;
 pub mod handler;
 /// JSON-RPC connection and handler infrastructure
 mod jsonrpc;
+/// Proxy support for building ACP proxy components
+/// Link types for JSON-RPC connections
+pub mod link;
 /// MCP declarations (minimal)
 pub mod mcp;
 /// MCP server support for providing MCP tools over ACP
 pub mod mcp_server;
-/// Proxy support for building ACP proxy components
-/// Role types for JSON-RPC connections
-pub mod role;
+/// Peer types for JSON-RPC connections
+pub mod peer;
 /// ACP protocol schema types - all message types, requests, responses, and supporting types
 pub mod schema;
 /// Utility functions and types
@@ -129,10 +131,9 @@ pub use jsonrpc::{
     responder::{ChainResponder, JrResponder, NullResponder},
 };
 
-pub use role::{
-    Agent, AgentToClient, Client, ClientToAgent, Conductor, HasDefaultEndpoint, HasEndpoint,
-    JrEndpoint, JrRole, ProxyToConductor,
-};
+pub use link::{AgentToClient, ClientToAgent, HasDefaultPeer, HasPeer, JrLink, ProxyToConductor};
+
+pub use peer::{AgentPeer, ClientPeer, ConductorPeer, JrPeer};
 
 pub use component::{Component, DynComponent};
 

@@ -56,7 +56,7 @@ pub enum LineDirection {
 ///
 /// Use as a component to connect to an external agent:
 /// ```no_run
-/// # use sacp::role::UntypedRole;
+/// # use sacp::link::UntypedLink;
 /// # use sacp::JrConnectionBuilder;
 /// # use sacp_tokio::AcpAgent;
 /// # use std::str::FromStr;
@@ -64,7 +64,7 @@ pub enum LineDirection {
 /// let agent = AcpAgent::from_str("python my_agent.py")?;
 ///
 /// // The agent process will be spawned automatically when served
-/// UntypedRole::builder()
+/// UntypedLink::builder()
 ///     .connect_to(agent)?
 ///     .run_until(|cx| async move {
 ///         // Use the connection to communicate with the agent process
@@ -258,8 +258,8 @@ async fn monitor_child(
     }
 }
 
-impl sacp::Component for AcpAgent {
-    async fn serve(self, client: impl sacp::Component) -> Result<(), sacp::Error> {
+impl<L: sacp::link::JrLink> sacp::Component<L> for AcpAgent {
+    async fn serve(self, client: impl sacp::Component<L::ConnectsTo>) -> Result<(), sacp::Error> {
         use futures::AsyncBufReadExt;
         use futures::AsyncWriteExt;
         use futures::StreamExt;
@@ -338,7 +338,8 @@ impl sacp::Component for AcpAgent {
 
         // Race the protocol against child process exit
         // If the child exits early (e.g., with an error), we return that error
-        let protocol_future = sacp::Lines::new(outgoing_sink, incoming_lines).serve(client);
+        let protocol_future =
+            sacp::Component::<L>::serve(sacp::Lines::new(outgoing_sink, incoming_lines), client);
 
         tokio::select! {
             result = protocol_future => result,

@@ -1,4 +1,4 @@
-use sacp::role::UntypedRole;
+use sacp::link::UntypedLink;
 use sacp::{
     Component, Handled, JrConnectionCx, JrMessage, JrMessageHandler, JrRequest, JrRequestCx,
     JrResponsePayload, MessageCx, util::MatchMessageFrom,
@@ -51,12 +51,12 @@ impl JrRequest for EchoRequestResponse {
 struct EchoHandler;
 
 impl JrMessageHandler for EchoHandler {
-    type Role = UntypedRole;
+    type Link = UntypedLink;
 
     async fn handle_message(
         &mut self,
         message: MessageCx,
-        cx: JrConnectionCx<Self::Role>,
+        cx: JrConnectionCx<Self::Link>,
     ) -> Result<Handled<MessageCx>, sacp::Error> {
         MatchMessageFrom::new(message, &cx)
             .if_request(async move |request: EchoRequestResponse, request_cx| {
@@ -78,9 +78,9 @@ async fn modify_message_en_route() -> Result<(), sacp::Error> {
 
     struct TestComponent;
 
-    impl Component for TestComponent {
-        async fn serve(self, client: impl Component) -> Result<(), sacp::Error> {
-            UntypedRole::builder()
+    impl Component<UntypedLink> for TestComponent {
+        async fn serve(self, client: impl Component<UntypedLink>) -> Result<(), sacp::Error> {
+            UntypedLink::builder()
                 .with_handler(PushHandler {
                     message: "b".to_string(),
                 })
@@ -95,12 +95,12 @@ async fn modify_message_en_route() -> Result<(), sacp::Error> {
     }
 
     impl JrMessageHandler for PushHandler {
-        type Role = UntypedRole;
+        type Link = UntypedLink;
 
         async fn handle_message(
             &mut self,
             message: MessageCx,
-            cx: JrConnectionCx<Self::Role>,
+            cx: JrConnectionCx<Self::Link>,
         ) -> Result<Handled<MessageCx>, sacp::Error> {
             MatchMessageFrom::new(message, &cx)
                 .if_request(async move |mut request: EchoRequestResponse, request_cx| {
@@ -119,7 +119,7 @@ async fn modify_message_en_route() -> Result<(), sacp::Error> {
         }
     }
 
-    UntypedRole::builder()
+    UntypedLink::builder()
         .connect_to(TestComponent)?
         .run_until(async |cx| {
             let result = cx
@@ -149,13 +149,13 @@ async fn modify_message_en_route_inline() -> Result<(), sacp::Error> {
 
     struct TestComponent;
 
-    impl Component for TestComponent {
-        async fn serve(self, client: impl Component) -> Result<(), sacp::Error> {
-            UntypedRole::builder()
+    impl Component<UntypedLink> for TestComponent {
+        async fn serve(self, client: impl Component<UntypedLink>) -> Result<(), sacp::Error> {
+            UntypedLink::builder()
                 .on_receive_request(
                     async move |mut request: EchoRequestResponse,
                                 request_cx: JrRequestCx<EchoRequestResponse>,
-                                _connection_cx: JrConnectionCx<UntypedRole>| {
+                                _connection_cx: JrConnectionCx<UntypedLink>| {
                         request.text.push("b".to_string());
                         Ok(Handled::No {
                             message: (request, request_cx),
@@ -170,7 +170,7 @@ async fn modify_message_en_route_inline() -> Result<(), sacp::Error> {
         }
     }
 
-    UntypedRole::builder()
+    UntypedLink::builder()
         .connect_to(TestComponent)?
         .run_until(async |cx| {
             let result = cx
@@ -201,13 +201,13 @@ async fn modify_message_and_stop() -> Result<(), sacp::Error> {
 
     struct TestComponent;
 
-    impl Component for TestComponent {
-        async fn serve(self, client: impl Component) -> Result<(), sacp::Error> {
-            UntypedRole::builder()
+    impl Component<UntypedLink> for TestComponent {
+        async fn serve(self, client: impl Component<UntypedLink>) -> Result<(), sacp::Error> {
+            UntypedLink::builder()
                 .on_receive_request(
                     async move |request: EchoRequestResponse,
                                 request_cx: JrRequestCx<EchoRequestResponse>,
-                                _connection_cx: JrConnectionCx<UntypedRole>| {
+                                _connection_cx: JrConnectionCx<UntypedLink>| {
                         request_cx.respond(request)
                     },
                     sacp::on_receive_request!(),
@@ -215,7 +215,7 @@ async fn modify_message_and_stop() -> Result<(), sacp::Error> {
                 .on_receive_request(
                     async move |mut request: EchoRequestResponse,
                                 request_cx: JrRequestCx<EchoRequestResponse>,
-                                _connection_cx: JrConnectionCx<UntypedRole>| {
+                                _connection_cx: JrConnectionCx<UntypedLink>| {
                         request.text.push("b".to_string());
                         Ok(Handled::No {
                             message: (request, request_cx),
@@ -230,7 +230,7 @@ async fn modify_message_and_stop() -> Result<(), sacp::Error> {
         }
     }
 
-    UntypedRole::builder()
+    UntypedLink::builder()
         .connect_to(TestComponent)?
         .run_until(async |cx| {
             let result = cx

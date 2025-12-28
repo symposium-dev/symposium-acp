@@ -27,16 +27,16 @@
 //!
 //! ```rust,ignore
 //! use sacp::mcp_server::{McpServer, McpServerConnect, McpContext};
-//! use sacp::{DynComponent, JrRole};
+//! use sacp::{DynComponent, JrLink};
 //!
 //! struct MyCustomServer;
 //!
-//! impl<Role: JrRole> McpServerConnect<Role> for MyCustomServer {
+//! impl<Link: JrLink> McpServerConnect<Link> for MyCustomServer {
 //!     fn name(&self) -> String {
 //!         "my-custom-server".to_string()
 //!     }
 //!
-//!     fn connect(&self, cx: McpContext<Role>) -> DynComponent {
+//!     fn connect(&self, cx: McpContext<Link>) -> DynComponent {
 //!         // Return a component that serves MCP requests
 //!         DynComponent::new(my_mcp_component)
 //!     }

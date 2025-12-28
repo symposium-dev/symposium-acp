@@ -3,7 +3,7 @@
 use schemars::JsonSchema;
 use serde::{Serialize, de::DeserializeOwned};
 
-use crate::JrRole;
+use crate::JrLink;
 
 use super::McpContext;
 
@@ -32,7 +32,7 @@ use super::McpContext;
 ///
 /// struct EchoTool;
 ///
-/// impl<Role: sacp::JrRole> McpTool<Role> for EchoTool {
+/// impl<Role: sacp::JrLink> McpTool<Link> for EchoTool {
 ///     type Input = EchoInput;
 ///     type Output = EchoOutput;
 ///
@@ -47,7 +47,7 @@ use super::McpContext;
 ///     async fn call_tool(
 ///         &self,
 ///         input: EchoInput,
-///         _context: McpContext<Role>,
+///         _context: McpContext<Link>,
 ///     ) -> Result<EchoOutput, sacp::Error> {
 ///         Ok(EchoOutput {
 ///             echoed: format!("Echo: {}", input.message),
@@ -55,7 +55,7 @@ use super::McpContext;
 ///     }
 /// }
 /// ```
-pub trait McpTool<Role: JrRole>: Send + Sync {
+pub trait McpTool<Link: JrLink>: Send + Sync {
     /// The type of input the tool accepts.
     type Input: JsonSchema + DeserializeOwned + Send + 'static;
 
@@ -77,6 +77,6 @@ pub trait McpTool<Role: JrRole>: Send + Sync {
     fn call_tool(
         &self,
         input: Self::Input,
-        context: McpContext<Role>,
+        context: McpContext<Link>,
     ) -> impl Future<Output = Result<Self::Output, crate::Error>> + Send;
 }

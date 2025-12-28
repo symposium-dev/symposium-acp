@@ -1,34 +1,36 @@
 use crate::{
-    HasDefaultEndpoint, HasEndpoint, JrEndpoint, JrRole, jsonrpc::JrConnectionBuilder,
-    jsonrpc::handlers::NullHandler, role::RemoteRoleStyle,
+    HasDefaultPeer, HasPeer, JrLink, JrPeer, jsonrpc::JrConnectionBuilder,
+    jsonrpc::handlers::NullHandler, link::RemoteStyle,
 };
 
 /// The MCP client endpoint.
 #[derive(Debug, Default, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct McpClient;
 
-impl JrEndpoint for McpClient {}
+impl JrPeer for McpClient {}
 
 /// The MCP server endpoint.
 #[derive(Debug, Default, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct McpServerEnd;
 
-impl JrEndpoint for McpServerEnd {}
+impl JrPeer for McpServerEnd {}
 
 /// An MCP client's connection to an MCP server.
 #[derive(Debug, Default, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct McpClientToServer;
 
-impl JrRole for McpClientToServer {
-    type HandlerEndpoint = McpServerEnd;
+impl JrLink for McpClientToServer {
+    type ConnectsTo = McpServerToClient;
     type State = ();
 }
 
-impl HasDefaultEndpoint for McpClientToServer {}
+impl HasDefaultPeer for McpClientToServer {
+    type DefaultPeer = McpServerEnd;
+}
 
-impl HasEndpoint<McpServerEnd> for McpClientToServer {
-    fn remote_style(_: McpServerEnd) -> RemoteRoleStyle {
-        RemoteRoleStyle::Counterpart
+impl HasPeer<McpServerEnd> for McpClientToServer {
+    fn remote_style(_: McpServerEnd) -> RemoteStyle {
+        RemoteStyle::Counterpart
     }
 }
 
@@ -43,16 +45,18 @@ impl McpClientToServer {
 #[derive(Debug, Default, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct McpServerToClient;
 
-impl JrRole for McpServerToClient {
-    type HandlerEndpoint = McpClient;
+impl JrLink for McpServerToClient {
+    type ConnectsTo = McpClientToServer;
     type State = ();
 }
 
-impl HasDefaultEndpoint for McpServerToClient {}
+impl HasDefaultPeer for McpServerToClient {
+    type DefaultPeer = McpClient;
+}
 
-impl HasEndpoint<McpClient> for McpServerToClient {
-    fn remote_style(_: McpClient) -> RemoteRoleStyle {
-        RemoteRoleStyle::Counterpart
+impl HasPeer<McpClient> for McpServerToClient {
+    fn remote_style(_: McpClient) -> RemoteStyle {
+        RemoteStyle::Counterpart
     }
 }
 
