@@ -1,5 +1,5 @@
 use crate::jsonrpc::{Handled, IntoHandled, JrMessageHandler};
-use crate::role::{HasPeer, JrLink, JrPeer};
+use crate::peer::{HasPeer, JrLink, JrPeer};
 use crate::{JrConnectionCx, JrNotification, JrRequest, MessageCx, UntypedMessage};
 // Types re-exported from crate root
 use super::JrRequestCx;

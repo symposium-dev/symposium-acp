@@ -9,7 +9,7 @@ pub mod test_binaries;
 /// This is only for documentation examples that don't actually run.
 pub struct MockTransport;
 
-impl<L: role::JrLink> Component<L> for MockTransport {
+impl<L: peer::JrLink> Component<L> for MockTransport {
     async fn serve(self, _client: impl Component<L::ConnectsTo>) -> Result<(), Error> {
         panic!("MockTransport should never be used in running code - it's only for doctests")
     }

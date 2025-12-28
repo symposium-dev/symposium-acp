@@ -1,7 +1,7 @@
 //! Utilities for pattern matching on untyped JSON-RPC messages.
 //!
 //! When handling [`UntypedMessage`]s, you can use [`MatchMessage`] for simple parsing
-//! or [`MatchMessageFrom`] when you need role-aware peer transforms (e.g., unwrapping
+//! or [`MatchMessageFrom`] when you need peer-aware transforms (e.g., unwrapping
 //! proxy envelopes).
 //!
 //! # When to use which
@@ -22,7 +22,7 @@ use jsonrpcmsg::Params;
 use crate::{
     Handled, HasDefaultPeer, JrConnectionCx, JrMessageHandler, JrNotification, JrRequest,
     JrRequestCx, MessageCx, UntypedMessage,
-    role::{HasPeer, JrLink, JrPeer},
+    peer::{HasPeer, JrLink, JrPeer},
     util::json_cast,
 };
 
@@ -276,7 +276,7 @@ impl MatchMessage {
 /// a more ergonomic API for matching on message types in connection handlers.
 ///
 /// Use this when you need peer-aware transforms (e.g., unwrapping proxy envelopes)
-/// before parsing messages. For simple parsing without role awareness (e.g., inside
+/// before parsing messages. For simple parsing without peer awareness (e.g., inside
 /// a callback), use [`MatchMessage`] instead.
 ///
 /// This wraps [`MatchMessage`] and applies peer-specific message transformations

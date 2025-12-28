@@ -37,7 +37,7 @@ impl Default for Stdio {
     }
 }
 
-impl<L: sacp::role::JrLink> Component<L> for Stdio {
+impl<L: sacp::peer::JrLink> Component<L> for Stdio {
     async fn serve(self, client: impl Component<L::ConnectsTo>) -> Result<(), sacp::Error> {
         if let Some(callback) = self.debug_callback {
             use futures::AsyncBufReadExt;

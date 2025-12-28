@@ -6,7 +6,7 @@
 //! from being invoked.
 
 use sacp::mcp_server::McpServer;
-use sacp::role::{AgentToClient, ProxyToConductor};
+use sacp::peer::{AgentToClient, ProxyToConductor};
 use sacp::schema::{
     AgentCapabilities, InitializeRequest, InitializeResponse, NewSessionRequest,
     NewSessionResponse, SessionId,
@@ -71,7 +71,7 @@ struct ProxyWithMcpAndHandler {
 impl Component<ProxyToConductor> for ProxyWithMcpAndHandler {
     async fn serve(
         self,
-        client: impl Component<sacp::role::ConductorToProxy>,
+        client: impl Component<sacp::peer::ConductorToProxy>,
     ) -> Result<(), sacp::Error> {
         let config = Arc::clone(&self.config);
 
@@ -124,7 +124,7 @@ struct SimpleAgent;
 impl Component<AgentToClient> for SimpleAgent {
     async fn serve(
         self,
-        client: impl Component<sacp::role::ClientToAgent>,
+        client: impl Component<sacp::peer::ClientToAgent>,
     ) -> Result<(), sacp::Error> {
         AgentToClient::builder()
             .name("simple-agent")

@@ -1,7 +1,7 @@
 //! Integration test for AcpAgent debug logging
 
 use sacp::Component;
-use sacp::role::UntypedLink;
+use sacp::peer::UntypedLink;
 use sacp::schema::InitializeRequest;
 use sacp_tokio::{AcpAgent, LineDirection};
 use std::str::FromStr;

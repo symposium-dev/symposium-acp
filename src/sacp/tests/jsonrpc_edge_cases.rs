@@ -7,7 +7,7 @@
 //! - Client disconnect handling
 
 use futures::{AsyncRead, AsyncWrite};
-use sacp::role::UntypedLink;
+use sacp::peer::UntypedLink;
 use sacp::{JrConnectionCx, JrMessage, JrRequest, JrRequestCx, JrResponse, JrResponsePayload};
 use serde::{Deserialize, Serialize};
 use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};

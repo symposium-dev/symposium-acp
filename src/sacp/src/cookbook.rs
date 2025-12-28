@@ -13,9 +13,9 @@
 //!
 //! *Peers* ([`JrPeer`]) are logical destinations for messages:
 //!
-//! - [`Client`] - The client role (IDE, CLI, etc.)
-//! - [`Agent`] - The agent role (AI-powered component)
-//! - [`Conductor`] - The conductor role (orchestrates proxy chains)
+//! - [`Client`] - The client peer (IDE, CLI, etc.)
+//! - [`Agent`] - The agent peer (AI-powered component)
+//! - [`Conductor`] - The conductor peer (orchestrates proxy chains)
 //!
 //! Most links have a single implicit peer, but proxies can send to
 //! multiple peers. Use [`send_request_to`] and [`send_notification_to`]
@@ -53,18 +53,18 @@
 //! in [`SuccessorMessage`] envelopes. When receiving from `Agent`, they're
 //! automatically unwrapped.
 //!
-//! [`JrLink`]: crate::role::JrLink
-//! [`JrPeer`]: crate::role::JrPeer
+//! [`JrLink`]: crate::peer::JrLink
+//! [`JrPeer`]: crate::peer::JrPeer
 //! [`Client`]: crate::Client
 //! [`Agent`]: crate::Agent
 //! [`Conductor`]: crate::Conductor
 //! [`ClientToAgent`]: crate::ClientToAgent
 //! [`AgentToClient`]: crate::AgentToClient
 //! [`ProxyToConductor`]: crate::ProxyToConductor
-//! [`ConductorToClient`]: crate::role::ConductorToClient
-//! [`ConductorToProxy`]: crate::role::ConductorToProxy
-//! [`ConductorToAgent`]: crate::role::ConductorToAgent
-//! [`UntypedLink`]: crate::role::UntypedLink
+//! [`ConductorToClient`]: crate::peer::ConductorToClient
+//! [`ConductorToProxy`]: crate::peer::ConductorToProxy
+//! [`ConductorToAgent`]: crate::peer::ConductorToAgent
+//! [`UntypedLink`]: crate::peer::UntypedLink
 //! [`SuccessorMessage`]: crate::schema::SuccessorMessage
 //! [`send_request_to`]: crate::JrConnectionCx::send_request_to
 //! [`send_notification_to`]: crate::JrConnectionCx::send_notification_to
@@ -89,13 +89,13 @@ pub mod reusable_components {
     //! Pattern: Defining reusable components.
     //!
     //! When building agents or proxies, define a struct that implements [`Component`].
-    //! Internally, use the role's `builder()` method to set up handlers.
+    //! Internally, use the link's `builder()` method to set up handlers.
     //!
     //! # Example
     //!
     //! ```
     //! use sacp::{Component, AgentToClient};
-    //! use sacp::role::JrLink;
+    //! use sacp::peer::JrLink;
     //! use sacp::schema::{
     //!     InitializeRequest, InitializeResponse, AgentCapabilities,
     //! };
@@ -154,7 +154,7 @@ pub mod custom_message_handlers {
     //! struct MyHandler;
     //!
     //! impl JrMessageHandler for MyHandler {
-    //!     type Link = sacp::role::UntypedLink;
+    //!     type Link = sacp::peer::UntypedLink;
     //!
     //!     async fn handle_message(
     //!         &mut self,
@@ -292,7 +292,7 @@ pub mod global_mcp_server {
     //! }
     //!
     //! impl<R: JrResponder<ProxyToConductor> + Send + 'static> Component<ProxyToConductor> for MyProxy<R> {
-    //!     async fn serve(self, client: impl Component<sacp::role::ConductorToProxy>) -> Result<(), sacp::Error> {
+    //!     async fn serve(self, client: impl Component<sacp::peer::ConductorToProxy>) -> Result<(), sacp::Error> {
     //!         ProxyToConductor::builder()
     //!             .with_mcp_server(self.mcp_server)
     //!             .serve(client)
@@ -337,7 +337,7 @@ pub mod per_session_mcp_server {
     //! use sacp::mcp_server::McpServer;
     //! use sacp::schema::NewSessionRequest;
     //! use sacp::{AgentPeer, ClientPeer, Component, ProxyToConductor};
-    //! use sacp::role::ConductorToProxy;
+    //! use sacp::peer::ConductorToProxy;
     //!
     //! async fn run_proxy(transport: impl Component<ConductorToProxy>) -> Result<(), sacp::Error> {
     //!     ProxyToConductor::builder()
@@ -371,7 +371,7 @@ pub mod per_session_mcp_server {
     //! use sacp::mcp_server::McpServer;
     //! use sacp::schema::NewSessionRequest;
     //! use sacp::{AgentPeer, ClientPeer, Component, ProxyToConductor};
-    //! use sacp::role::ConductorToProxy;
+    //! use sacp::peer::ConductorToProxy;
     //!
     //! async fn run_proxy(transport: impl Component<ConductorToProxy>) -> Result<(), sacp::Error> {
     //!     ProxyToConductor::builder()

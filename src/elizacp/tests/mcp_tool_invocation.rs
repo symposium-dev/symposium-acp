@@ -3,7 +3,7 @@
 use elizacp::ElizaAgent;
 use expect_test::expect;
 use sacp::Component;
-use sacp::role::UntypedLink;
+use sacp::peer::UntypedLink;
 use sacp::schema::{
     ContentBlock, InitializeRequest, McpServer, NewSessionRequest, PromptRequest,
     SessionNotification, TextContent,

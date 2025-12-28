@@ -58,7 +58,7 @@ impl HttpMcpBridge {
     }
 }
 
-impl<L: sacp::role::JrLink> sacp::Component<L> for HttpMcpBridge {
+impl<L: sacp::peer::JrLink> sacp::Component<L> for HttpMcpBridge {
     async fn serve(self, client: impl Component<L::ConnectsTo>) -> Result<(), sacp::Error> {
         let (channel, serve_self) = Component::<L>::into_server(self);
         match futures::future::select(pin!(client.serve(channel)), serve_self).await {

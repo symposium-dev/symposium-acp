@@ -3,7 +3,7 @@ use std::panic::Location;
 use futures::{FutureExt, channel::mpsc, future::BoxFuture};
 
 use crate::JrConnectionCx;
-use crate::role::JrLink;
+use crate::peer::JrLink;
 use crate::util::process_stream_concurrently;
 
 pub type TaskTx = mpsc::UnboundedSender<Task>;

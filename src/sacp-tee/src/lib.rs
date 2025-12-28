@@ -193,10 +193,10 @@ impl Tee {
     }
 }
 
-impl Component<sacp::role::ProxyToConductor> for Tee {
+impl Component<sacp::peer::ProxyToConductor> for Tee {
     async fn serve(
         self,
-        client: impl Component<sacp::role::ConductorToProxy>,
+        client: impl Component<sacp::peer::ConductorToProxy>,
     ) -> Result<(), sacp::Error> {
         // Create the log writer actor
         let (log_writer, log_tx) = LogWriter::new(self.log_file.clone());

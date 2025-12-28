@@ -90,7 +90,7 @@ pub use self::conductor::*;
 
 use clap::{Parser, Subcommand};
 
-use sacp::role::{AgentToClient, ProxyToConductor};
+use sacp::peer::{AgentToClient, ProxyToConductor};
 use sacp::schema::InitializeRequest;
 use sacp_tokio::{AcpAgent, Stdio};
 use tracing::Instrument;

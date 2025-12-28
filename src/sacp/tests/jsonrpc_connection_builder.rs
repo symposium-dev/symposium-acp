@@ -4,7 +4,7 @@
 //! and that requests/notifications are routed correctly based on which
 //! handler claims them.
 
-use sacp::role::UntypedLink;
+use sacp::peer::UntypedLink;
 use sacp::{
     JrConnectionCx, JrMessage, JrNotification, JrRequest, JrRequestCx, JrResponse,
     JrResponsePayload,

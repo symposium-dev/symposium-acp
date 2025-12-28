@@ -2,7 +2,7 @@
 
 use sacp::Component;
 use sacp::mcp_server::McpServer;
-use sacp::role::{ConductorToProxy, ProxyToConductor};
+use sacp::peer::{ConductorToProxy, ProxyToConductor};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 

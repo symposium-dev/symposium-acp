@@ -5,7 +5,7 @@
 
 use sacp::Component;
 use sacp::mcp_server::McpServer;
-use sacp::role::{AgentToClient, ProxyToConductor};
+use sacp::peer::{AgentToClient, ProxyToConductor};
 use sacp_conductor::{Conductor, ProxiesAndAgent};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -46,7 +46,7 @@ impl<R: sacp::JrResponder<ProxyToConductor> + 'static + Send> Component<ProxyToC
 {
     async fn serve(
         self,
-        client: impl Component<sacp::role::ConductorToProxy>,
+        client: impl Component<sacp::peer::ConductorToProxy>,
     ) -> Result<(), sacp::Error> {
         ProxyToConductor::builder()
             .name("test-proxy")
@@ -62,7 +62,7 @@ struct ElizacpAgentComponent;
 impl Component<AgentToClient> for ElizacpAgentComponent {
     async fn serve(
         self,
-        client: impl Component<sacp::role::ClientToAgent>,
+        client: impl Component<sacp::peer::ClientToAgent>,
     ) -> Result<(), sacp::Error> {
         let (elizacp_write, client_read) = duplex(8192);
         let (client_write, elizacp_read) = duplex(8192);

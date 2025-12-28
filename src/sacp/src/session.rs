@@ -15,7 +15,7 @@ use crate::{
         responder::{ChainResponder, JrResponder, NullResponder},
     },
     mcp_server::McpServer,
-    role::ProxySessionMessages,
+    peer::ProxySessionMessages,
     schema::SessionId,
     util::{MatchMessage, MatchMessageFrom, run_until},
 };

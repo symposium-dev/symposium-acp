@@ -12,7 +12,7 @@
 //!
 //! ```rust,ignore
 //! use sacp::component::Component;
-//! use sacp::role::AgentToClient;
+//! use sacp::peer::AgentToClient;
 //!
 //! struct MyAgent {
 //!     // configuration fields
@@ -33,7 +33,7 @@
 use futures::future::BoxFuture;
 use std::{fmt::Debug, future::Future, marker::PhantomData};
 
-use crate::{Channel, role::JrLink};
+use crate::{Channel, peer::JrLink};
 
 /// A component that can participate in the Agent-Client Protocol.
 ///
@@ -46,7 +46,7 @@ use crate::{Channel, role::JrLink};
 ///   local side is an agent talking to a client
 /// - A proxy implements `Component<ProxyToConductor>` - it serves connections where the
 ///   local side is a proxy talking to a conductor
-/// - Transports like `Channel` implement `Component<L>` for all `L` since they're role-agnostic
+/// - Transports like `Channel` implement `Component<L>` for all `L` since they're link-agnostic
 ///
 /// # Component Types
 ///
@@ -70,7 +70,7 @@ use crate::{Channel, role::JrLink};
 /// # Implementation Example
 ///
 /// ```rust,ignore
-/// use sacp::{Component, role::AgentToClient};
+/// use sacp::{Component, peer::AgentToClient};
 ///
 /// struct MyAgent {
 ///     config: AgentConfig,
@@ -96,7 +96,7 @@ use crate::{Channel, role::JrLink};
 /// For storing different component types in the same collection, use [`DynComponent`]:
 ///
 /// ```rust,ignore
-/// use sacp::role::AgentToClient;
+/// use sacp::peer::AgentToClient;
 ///
 /// let components: Vec<DynComponent<AgentToClient>> = vec![
 ///     DynComponent::new(proxy1),
@@ -208,7 +208,7 @@ impl<C: Component<L>, L: JrLink> ErasedComponent<L> for C {
 /// # Examples
 ///
 /// ```rust,ignore
-/// use sacp::{DynComponent, role::AgentToClient};
+/// use sacp::{DynComponent, peer::AgentToClient};
 ///
 /// let components: Vec<DynComponent<AgentToClient>> = vec![
 ///     DynComponent::new(Proxy1),

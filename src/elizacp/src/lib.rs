@@ -383,10 +383,10 @@ fn parse_tool_call(input: &str) -> Option<(String, String, String)> {
     ))
 }
 
-impl Component<sacp::role::AgentToClient> for ElizaAgent {
+impl Component<sacp::peer::AgentToClient> for ElizaAgent {
     async fn serve(
         self,
-        client: impl Component<sacp::role::ClientToAgent>,
+        client: impl Component<sacp::peer::ClientToAgent>,
     ) -> Result<(), sacp::Error> {
         AgentToClient::builder()
             .name("elizacp")

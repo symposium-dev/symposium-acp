@@ -195,7 +195,7 @@ When p3 sends `_proxy/successor/request`, the conductor forwards it to `final-ag
 
 ## Capability Handshake
 
-The conductor uses a two-way capability handshake to ensure components can fulfill their role.
+The conductor uses a two-way capability handshake to ensure components can fulfill their responsibilities.
 
 ### Normal Mode (Conductor as Root)
 
@@ -246,8 +246,8 @@ See [Protocol Reference](./protocol.md) for detailed message formats.
 
 ## Component Types Summary
 
-| Component | Role | SACP Awareness | Communication |
-|-----------|------|----------------|---------------|
+| Component | Function | SACP Awareness | Communication |
+|-----------|----------|----------------|---------------|
 | Editor | User interface | No | Standard ACP with conductor |
 | Conductor (normal mode) | Orchestrator | Yes | Routes messages between components, sits in the middle of all connections |
 | Conductor (proxy mode) | Proxy + Orchestrator | Yes | Routes messages for sub-chain AND forwards final component's messages to its own successor |

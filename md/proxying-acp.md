@@ -126,13 +126,13 @@ To editors, the conductor is a normal ACP agent - no special capabilities are ad
 
 **Proxy Capability Handshake:**
 
-The conductor uses a two-way capability handshake to verify that proxy components can fulfill their role:
+The conductor uses a two-way capability handshake to verify that proxy components can fulfill their responsibilities:
 
 1. **Conductor offers proxy capability** - When initializing non-last components (proxies), the conductor includes `"proxy": true` in the `_meta` field of the InitializeRequest
 2. **Component accepts proxy capability** - The component must respond with `"proxy": true` in the `_meta` field of its InitializeResponse  
 3. **Last component (agent)** - The final component is treated as a standard ACP agent and does NOT receive the proxy capability offer
 
-**Why a two-way handshake?** The proxy capability is an *active protocol* - it requires the component to handle `_proxy/successor/*` messages and route communications appropriately. Unlike passive capabilities (like "http" or "sse") which are just declarations, proxy components must actively participate in message routing. If a component doesn't respond with the proxy capability, the conductor fails initialization with an error like "component X is not a proxy", since that component cannot fulfill its required role in the chain.
+**Why a two-way handshake?** The proxy capability is an *active protocol* - it requires the component to handle `_proxy/successor/*` messages and route communications appropriately. Unlike passive capabilities (like "http" or "sse") which are just declarations, proxy components must actively participate in message routing. If a component doesn't respond with the proxy capability, the conductor fails initialization with an error like "component X is not a proxy", since that component cannot fulfill its required function in the chain.
 
 
 # Shiny future

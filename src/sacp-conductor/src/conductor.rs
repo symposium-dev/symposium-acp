@@ -37,7 +37,7 @@
 //!
 //! ## Proxy vs Agent Initialization
 //!
-//! Components discover their role via the initialization request type they receive:
+//! Components discover whether they're a proxy or agent via the initialization request they receive:
 //!
 //! - **Proxy components**: Receive `InitializeProxyRequest` (`_proxy/initialize` method)
 //! - **Agent component**: Receives standard `InitializeRequest` (`initialize` method)
@@ -118,7 +118,7 @@ use futures::{
 };
 use sacp::{
     AgentPeer, BoxFuture, ClientPeer, Component, Error, HasPeer, JrMessage,
-    role::{
+    peer::{
         AgentToClient, ConductorToAgent, ConductorToClient, ConductorToConductor, ConductorToProxy,
         ProxyToConductor,
     },

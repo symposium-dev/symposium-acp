@@ -6,7 +6,7 @@
 //! 3. Last component (agent) receives `InitializeRequest`
 
 use elizacp::ElizaAgent;
-use sacp::role::ProxyToConductor;
+use sacp::peer::ProxyToConductor;
 use sacp::schema::{
     AgentCapabilities, InitializeProxyRequest, InitializeRequest, InitializeResponse,
 };
@@ -71,7 +71,7 @@ impl InitComponent {
 impl Component<ProxyToConductor> for InitComponent {
     async fn serve(
         self,
-        client: impl Component<sacp::role::ConductorToProxy>,
+        client: impl Component<sacp::peer::ConductorToProxy>,
     ) -> Result<(), sacp::Error> {
         let config = self.config;
         let config2 = Arc::clone(&config);
@@ -266,7 +266,7 @@ struct BadProxy;
 impl Component<ProxyToConductor> for BadProxy {
     async fn serve(
         self,
-        client: impl Component<sacp::role::ConductorToProxy>,
+        client: impl Component<sacp::peer::ConductorToProxy>,
     ) -> Result<(), sacp::Error> {
         ProxyToConductor::builder()
             .name("bad-proxy")
@@ -290,7 +290,7 @@ impl Component<ProxyToConductor> for BadProxy {
 /// Run test with explicit proxy and agent DynComponents (for mixing different types)
 async fn run_bad_proxy_test(
     proxies: Vec<sacp::DynComponent<ProxyToConductor>>,
-    agent: sacp::DynComponent<sacp::role::AgentToClient>,
+    agent: sacp::DynComponent<sacp::peer::AgentToClient>,
     editor_task: impl AsyncFnOnce(sacp::JrConnectionCx<sacp::ClientToAgent>) -> Result<(), sacp::Error>,
 ) -> Result<(), sacp::Error> {
     let (editor_out, conductor_in) = duplex(1024);

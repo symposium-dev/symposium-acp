@@ -34,7 +34,7 @@ use crate::jsonrpc::responder::SpawnedResponder;
 use crate::jsonrpc::responder::{ChainResponder, JrResponder, NullResponder};
 use crate::jsonrpc::task_actor::{Task, TaskTx};
 use crate::mcp_server::McpServer;
-use crate::role::{HasDefaultPeer, HasPeer, JrLink, JrPeer};
+use crate::peer::{HasDefaultPeer, HasPeer, JrLink, JrPeer};
 use crate::{AgentPeer, ClientPeer, Component};
 
 /// Handlers process incoming JSON-RPC messages on a [`JrConnection`].
@@ -483,7 +483,7 @@ impl<H: JrMessageHandler> JrMessageHandler for &mut H {
 /// # Example: Complete Agent
 ///
 /// ```no_run
-/// # use sacp::role::UntypedLink;
+/// # use sacp::peer::UntypedLink;
 /// # use sacp::{JrConnectionBuilder};
 /// # use sacp::ByteStreams;
 /// # use sacp::schema::{InitializeRequest, InitializeResponse, PromptRequest, PromptResponse, SessionNotification};
@@ -700,7 +700,7 @@ impl<H: JrMessageHandler, R: JrResponder<H::Link>> JrConnectionBuilder<H, R> {
     /// # Example
     ///
     /// ```ignore
-    /// # use sacp::role::UntypedLink;
+    /// # use sacp::peer::UntypedLink;
     /// # use sacp::{JrConnectionBuilder};
     /// # use sacp::schema::{PromptRequest, PromptResponse, SessionNotification};
     /// # fn example(connection: JrConnectionBuilder<impl sacp::JrMessageHandler<Link = UntypedLink>>) {
@@ -1170,7 +1170,7 @@ impl<H: JrMessageHandler, R: JrResponder<H::Link>> JrConnection<H, R> {
     /// # Example: Byte Stream Transport
     ///
     /// ```no_run
-    /// # use sacp::role::UntypedLink;
+    /// # use sacp::peer::UntypedLink;
     /// # use sacp::{JrConnectionBuilder};
     /// # use sacp::ByteStreams;
     /// # use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
@@ -1211,7 +1211,7 @@ impl<H: JrMessageHandler, R: JrResponder<H::Link>> JrConnection<H, R> {
     /// # Example
     ///
     /// ```no_run
-    /// # use sacp::role::UntypedLink;
+    /// # use sacp::peer::UntypedLink;
     /// # use sacp::{JrConnectionBuilder};
     /// # use sacp::ByteStreams;
     /// # use sacp::schema::InitializeRequest;
@@ -1519,7 +1519,7 @@ impl<Link: JrLink> JrConnectionCx<Link> {
     /// # Example: Proxying to a backend connection
     ///
     /// ```
-    /// # use sacp::role::UntypedLink;
+    /// # use sacp::peer::UntypedLink;
     /// # use sacp::{JrConnectionBuilder, JrConnectionCx};
     /// # use sacp_test::*;
     /// # async fn example(cx: JrConnectionCx<UntypedLink>) -> Result<(), sacp::Error> {
@@ -1591,7 +1591,7 @@ impl<Link: JrLink> JrConnectionCx<Link> {
     ///
     /// ```compile_fail
     /// # use sacp_test::*;
-    /// # async fn example(cx: sacp::JrConnectionCx<sacp::role::UntypedLink>) -> Result<(), sacp::Error> {
+    /// # async fn example(cx: sacp::JrConnectionCx<sacp::peer::UntypedLink>) -> Result<(), sacp::Error> {
     /// // ❌ This doesn't compile - prevents blocking the event loop
     /// let response = cx.send_request(MyRequest {}).await?;
     /// # Ok(())
@@ -1600,7 +1600,7 @@ impl<Link: JrLink> JrConnectionCx<Link> {
     ///
     /// ```no_run
     /// # use sacp_test::*;
-    /// # async fn example(cx: sacp::JrConnectionCx<sacp::role::UntypedLink>) -> Result<(), sacp::Error> {
+    /// # async fn example(cx: sacp::JrConnectionCx<sacp::peer::UntypedLink>) -> Result<(), sacp::Error> {
     /// // ✅ Option 1: Schedule callback (safe in handlers)
     /// cx.send_request(MyRequest {})
     ///     .on_receiving_result(async |result| {
@@ -1622,10 +1622,10 @@ impl<Link: JrLink> JrConnectionCx<Link> {
     /// # Ok(())
     /// # }
     /// ```
-    /// Send an outgoing request to the default counterpart role.
+    /// Send an outgoing request to the default counterpart peer.
     ///
-    /// This is a convenience method that uses the connection's remote role.
-    /// For explicit control over the target role, use [`send_request_to`](Self::send_request_to).
+    /// This is a convenience method that uses the connection's default peer.
+    /// For explicit control over the target peer, use [`send_request_to`](Self::send_request_to).
     pub fn send_request<Req: JrRequest>(&self, request: Req) -> JrResponse<Req::Response>
     where
         Link: HasDefaultPeer,
@@ -1633,9 +1633,9 @@ impl<Link: JrLink> JrConnectionCx<Link> {
         self.send_request_to(Link::DefaultPeer::default(), request)
     }
 
-    /// Send an outgoing request to a specific counterpart role.
+    /// Send an outgoing request to a specific counterpart peer.
     ///
-    /// The message will be transformed according to the role's [`SendsToRole`](crate::SendsToRole)
+    /// The message will be transformed according to the link's [`HasPeer`](crate::HasPeer)
     /// implementation before being sent.
     pub fn send_request_to<Peer: JrPeer, Req: JrRequest>(
         &self,
@@ -1691,17 +1691,17 @@ impl<Link: JrLink> JrConnectionCx<Link> {
             .map(move |json| <Req::Response>::from_value(&method, json))
     }
 
-    /// Send an outgoing notification to the default counterpart role (no reply expected).
+    /// Send an outgoing notification to the default counterpart peer (no reply expected).
     ///
     /// Notifications are fire-and-forget messages that don't have IDs and don't expect responses.
     /// This method sends the notification immediately and returns.
     ///
-    /// This is a convenience method that uses the role's default counterpart.
-    /// For explicit control over the target role, use [`send_notification_to`](Self::send_notification_to).
+    /// This is a convenience method that uses the link's default peer.
+    /// For explicit control over the target peer, use [`send_notification_to`](Self::send_notification_to).
     ///
     /// ```no_run
     /// # use sacp_test::*;
-    /// # async fn example(cx: sacp::JrConnectionCx<sacp::role::UntypedLink>) -> Result<(), sacp::Error> {
+    /// # async fn example(cx: sacp::JrConnectionCx<sacp::peer::UntypedLink>) -> Result<(), sacp::Error> {
     /// cx.send_notification(StatusUpdate {
     ///     message: "Processing...".into(),
     /// })?;
@@ -1715,9 +1715,9 @@ impl<Link: JrLink> JrConnectionCx<Link> {
         self.send_notification_to(Link::DefaultPeer::default(), notification)
     }
 
-    /// Send an outgoing notification to a specific counterpart role (no reply expected).
+    /// Send an outgoing notification to a specific counterpart peer (no reply expected).
     ///
-    /// The message will be transformed according to the role's [`SendsToRole`](crate::SendsToRole)
+    /// The message will be transformed according to the link's [`HasPeer`](crate::HasPeer)
     /// implementation before being sent.
     pub fn send_notification_to<Peer: JrPeer, N: JrNotification>(
         &self,
@@ -2414,7 +2414,7 @@ impl JrNotification for UntypedMessage {}
 ///
 /// ```no_run
 /// # use sacp_test::*;
-/// # async fn example(cx: sacp::JrConnectionCx<sacp::role::UntypedLink>) -> Result<(), sacp::Error> {
+/// # async fn example(cx: sacp::JrConnectionCx<sacp::peer::UntypedLink>) -> Result<(), sacp::Error> {
 /// cx.send_request(MyRequest {})
 ///     .on_receiving_result(async |result| {
 ///         match result {
@@ -2439,7 +2439,7 @@ impl JrNotification for UntypedMessage {}
 ///
 /// ```no_run
 /// # use sacp_test::*;
-/// # async fn example(cx: sacp::JrConnectionCx<sacp::role::UntypedLink>) -> Result<(), sacp::Error> {
+/// # async fn example(cx: sacp::JrConnectionCx<sacp::peer::UntypedLink>) -> Result<(), sacp::Error> {
 /// // ✅ Safe: Spawned task runs concurrently
 /// cx.spawn({
 ///     let cx = cx.clone();
@@ -2526,7 +2526,7 @@ impl<T: JrResponsePayload> JrResponse<T> {
     /// # Example: Proxying requests
     ///
     /// ```
-    /// # use sacp::role::UntypedLink;
+    /// # use sacp::peer::UntypedLink;
     /// # use sacp::{JrConnectionBuilder, JrConnectionCx};
     /// # use sacp_test::*;
     /// # async fn example(cx: JrConnectionCx<UntypedLink>) -> Result<(), sacp::Error> {
@@ -2891,7 +2891,7 @@ where
 /// Connecting to an agent via stdio:
 ///
 /// ```no_run
-/// use sacp::role::UntypedLink;
+/// use sacp::peer::UntypedLink;
 /// # use sacp::{ByteStreams};
 /// use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
 ///
@@ -2902,7 +2902,7 @@ where
 /// );
 ///
 /// // Use as a component in a connection
-/// sacp::role::UntypedLink::builder()
+/// sacp::peer::UntypedLink::builder()
 ///     .name("my-client")
 ///     .serve(component)
 ///     .await?;
@@ -2977,7 +2977,7 @@ where
 /// # Example
 ///
 /// ```no_run
-/// # use sacp::role::UntypedLink;
+/// # use sacp::peer::UntypedLink;
 /// # use sacp::{Channel, JrConnectionBuilder};
 /// # async fn example() -> Result<(), sacp::Error> {
 /// // Create a pair of connected channels
