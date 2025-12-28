@@ -2,90 +2,123 @@
 
 //! # sacp -- the Symposium Agent Client Protocol (ACP) SDK
 //!
-//! **sacp** is a Rust SDK for building agents and editors using the [Agent-Client Protocol (ACP)](https://agentclientprotocol.com/).
-//! It makes it easy to build ACP editors and clients -- or, indeed, any JSON-RPC-based application.
+//! **sacp** is a Rust SDK for building [Agent-Client Protocol (ACP)][acp] applications.
+//! ACP is a protocol for communication between AI agents and their clients (IDEs, CLIs, etc.),
+//! enabling features like tool use, permission requests, and streaming responses.
 //!
-//! ## Quick Start
+//! [acp]: https://agentclientprotocol.com/
 //!
-//! Building an ACP agent is straightforward with sacp's type-safe API:
+//! ## What can you build with sacp?
+//!
+//! - **Clients** that talk to ACP agents (like building your own Claude Code interface)
+//! - **Proxies** that add capabilities to existing agents (like adding custom tools via MCP)
+//! - **Agents** that respond to prompts with AI-powered responses
+//!
+//! ## Quick Start: Connecting to an Agent
+//!
+//! The most common use case is connecting to an existing ACP agent as a client.
+//! Here's a minimal example that initializes a connection, creates a session,
+//! and sends a prompt:
 //!
 //! ```no_run
-//! use sacp::link::UntypedLink;
-//! use sacp::{MessageCx, UntypedMessage};
-//! use sacp::schema::{InitializeRequest, InitializeResponse, AgentCapabilities};
-//! use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
+//! use sacp::ClientToAgent;
+//! use sacp::schema::{InitializeRequest, VERSION as PROTOCOL_VERSION};
 //!
-//! # #[tokio::main]
-//! # async fn main() -> Result<(), sacp::Error> {
-//! // Start by creating an agent connection
-//! UntypedLink::builder()
-//! .name("my-agent") // Give it a name for logging purposes
-//! .on_receive_request(async move |initialize: InitializeRequest, request_cx, _cx| {
-//!     // Create one or more request handlers -- these are attempted in order.
-//!     // You can do anything you want in here, but you should eventually
-//!     // respond to the request with `request_cx.respond(...)`:
-//!     request_cx.respond(InitializeResponse {
-//!         protocol_version: initialize.protocol_version,
-//!         agent_capabilities: AgentCapabilities::default(),
-//!         auth_methods: Default::default(),
-//!         agent_info: Default::default(),
-//!         meta: Default::default(),
+//! # async fn run(transport: impl sacp::Component<sacp::AgentToClient>) -> Result<(), sacp::Error> {
+//! ClientToAgent::builder()
+//!     .name("my-client")
+//!     .run_until(transport, async |cx| {
+//!         // Step 1: Initialize the connection
+//!         cx.send_request(InitializeRequest {
+//!             protocol_version: PROTOCOL_VERSION,
+//!             client_capabilities: Default::default(),
+//!             client_info: Default::default(),
+//!             meta: None,
+//!         }).block_task().await?;
+//!
+//!         // Step 2: Create a session and send a prompt
+//!         cx.build_session_cwd()?
+//!             .block_task()
+//!             .run_until(async |mut session| {
+//!                 session.send_prompt("What is 2 + 2?")?;
+//!                 let response = session.read_to_string().await?;
+//!                 println!("{}", response);
+//!                 Ok(())
+//!             })
+//!             .await
 //!     })
-//! }, sacp::on_receive_request!())
-//! .on_receive_message(async move |message: MessageCx, cx| {
-//!     // You can also handle any kind of message:
-//!     message.respond_with_error(sacp::util::internal_error("TODO"), cx)
-//! }, sacp::on_receive_message!())
-//! .serve(sacp::ByteStreams::new(
-//!     tokio::io::stdout().compat_write(),
-//!     tokio::io::stdin().compat(),
-//! ))
-//! .await
+//!     .await
 //! # }
 //! ```
 //!
+//! For a complete working example, see [`yolo_one_shot_client.rs`][yolo].
+//!
+//! [yolo]: https://github.com/symposium-dev/symposium-acp/blob/main/src/sacp/examples/yolo_one_shot_client.rs
+//!
 //! ## Cookbook
 //!
-//! The [`cookbook`] module contains documented patterns for common tasks:
+//! The [`cookbook`] module contains in-depth guides for common tasks:
 //!
-//! - [Roles and peers](cookbook#roles-and-peers) - Understanding `JrLink`, `JrPeer`, and how proxies work
-//! - [Reusable components](cookbook::reusable_components) - Defining agents/proxies with [`Component`]
-//! - [Custom message handlers](cookbook::custom_message_handlers) - Implementing [`JrMessageHandler`]
-//! - [Connecting as a client](cookbook::connecting_as_client) - Using `run_until` to send requests
-//! - [Global MCP server](cookbook::global_mcp_server) - Adding MCP servers to a handler chain
-//! - [Per-session MCP server](cookbook::per_session_mcp_server) - Creating MCP servers per session
+//! ### Building Clients
+//! - [Connecting as a client](cookbook::connecting_as_client) - Send requests and handle responses
+//! - [Handling notifications](cookbook::connecting_as_client) - React to streaming updates
 //!
-//! ## Using the Request Context
+//! ### Building Proxies
+//! - [Global MCP server](cookbook::global_mcp_server) - Add tools that work across all sessions
+//! - [Per-session MCP server](cookbook::per_session_mcp_server) - Add tools with session-specific state
+//! - [Reusable components](cookbook::reusable_components) - Package proxies for composition
 //!
-//! The request context ([`JrRequestCx`]) provided to handlers is not just for responding—it offers several capabilities:
+//! ### Building Agents
+//! - [Reusable components](cookbook::reusable_components) - Structure your agent as a [`Component`]
+//! - [Custom message handlers](cookbook::custom_message_handlers) - Fine-grained control over message routing
 //!
-//! - **Respond to the request:** `cx.respond(response)` sends a response back to the caller
-//! - **Send requests to the other side:** `cx.send_request(request)` initiates a new request
-//! - **Send notifications:** `cx.send_notification(notification)` sends a fire-and-forget message
-//! - **Spawn background tasks:** `cx.spawn(future)` runs work concurrently without blocking the message loop
+//! ## Understanding Links and Peers
 //!
-//! If you need a connection context that's independent of a particular request (for example, to store in a struct for later use),
-//! use `cx.connection_cx()`. This gives you a [`JrConnectionCx`] that can spawn tasks and send messages but isn't tied to
-//! responding to a specific request.
+//! sacp uses Rust's type system to prevent mistakes at compile time. Every connection
+//! has a *link type* that determines what messages you can send:
 //!
-//! ## Learning more
+//! | You are a... | Use this link | You can send to |
+//! |--------------|---------------|-----------------|
+//! | Client | [`ClientToAgent`] | The agent |
+//! | Agent | [`AgentToClient`] | The client |
+//! | Proxy | [`ProxyToConductor`] | Both client and agent |
 //!
-//! You can learn more in the [docs for `JrConnection`](crate::JrConnection) or on our
-//! [GitHub Pages](https://github.com/symposium-dev/symposium-acp) site. For details on
-//! how messages flow through handlers, see [`JrMessageHandler`].
+//! You don't need to understand the full link/peer model to get started—just pick
+//! the link that matches what you're building. See [Roles and peers](cookbook#roles-and-peers)
+//! in the cookbook for the full picture.
 //!
-//! You may also enjoy looking at some of these examples:
+//! ## Working with Request Contexts
 //!
-//! - **[`simple_agent.rs`](https://github.com/symposium-dev/symposium-acp/blob/main/src/sacp/examples/simple_agent.rs)** - Minimal agent implementation
-//! - **[`yolo_one_shot_client.rs`](https://github.com/symposium-dev/symposium-acp/blob/main/src/sacp/examples/yolo_one_shot_client.rs)** - Complete client that spawns an agent and sends a prompt
-//! - **[`elizacp`](https://crates.io/crates/elizacp)** - Full working agent with session management (also useful for testing)
-//! - **[`sacp-conductor`](https://crates.io/crates/sacp-conductor)** - The "conductor" is an ACP agent that composes proxy components with a final agent.
+//! When handling incoming requests, you receive a [`JrRequestCx`] that lets you:
+//!
+//! - **Respond:** `request_cx.respond(response)` sends your response
+//! - **Send requests:** `cx.send_request(request)` initiates a new request to the other side
+//! - **Send notifications:** `cx.send_notification(notification)` sends fire-and-forget messages
+//! - **Spawn tasks:** `cx.spawn(future)` runs background work without blocking the message loop
+//!
+//! For contexts that outlive a single request, use `cx.connection_cx()` to get a
+//! [`JrConnectionCx`] you can store and use later.
+//!
+//! ## Examples
+//!
+//! - [`simple_agent.rs`][simple] - Minimal agent implementation
+//! - [`yolo_one_shot_client.rs`][yolo] - Complete client that spawns an agent and sends a prompt
+//! - [`elizacp`] - Full working agent with session management
+//! - [`sacp-conductor`] - Orchestrates proxy chains with a final agent
+//!
+//! [simple]: https://github.com/symposium-dev/symposium-acp/blob/main/src/sacp/examples/simple_agent.rs
+//! [yolo]: https://github.com/symposium-dev/symposium-acp/blob/main/src/sacp/examples/yolo_one_shot_client.rs
+//! [`elizacp`]: https://crates.io/crates/elizacp
+//! [`sacp-conductor`]: https://crates.io/crates/sacp-conductor
 //!
 //! ## Related Crates
 //!
-//! - **[sacp-proxy](https://crates.io/crates/sacp-proxy)** - Framework for building ACP proxies that extend agent behavior
-//! - **[sacp-tokio](https://crates.io/crates/sacp-tokio)** - Tokio-specific utilities (process spawning, connection management)
-//! - **[sacp-conductor](https://crates.io/crates/sacp-conductor)** - Binary for orchestrating proxy chains
+//! - [`sacp-tokio`] - Tokio utilities for spawning agent processes
+//! - [`sacp-proxy`] - Framework for building proxy components
+//! - [`sacp-conductor`] - Binary for running proxy chains
+//!
+//! [`sacp-tokio`]: https://crates.io/crates/sacp-tokio
+//! [`sacp-proxy`]: https://crates.io/crates/sacp-proxy
 
 /// Capability management for the `_meta.symposium` object
 mod capabilities;
