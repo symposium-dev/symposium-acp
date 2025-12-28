@@ -6,7 +6,7 @@
 
 use elizacp::ElizaAgent;
 use sacp::mcp_server::McpServer;
-use sacp::{AgentRole, ClientToAgent, Component, HasPeer, JrLink, JrResponder, ProxyToConductor};
+use sacp::{AgentPeer, ClientToAgent, Component, HasPeer, JrLink, JrResponder, ProxyToConductor};
 use sacp_conductor::{Conductor, McpBridgeMode, ProxiesAndAgent};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -85,7 +85,7 @@ fn make_mcp_server<'a, Link: JrLink>(
     values: &'a Mutex<Vec<String>>,
 ) -> McpServer<Link, impl JrResponder<Link>>
 where
-    Link: HasPeer<AgentRole>,
+    Link: HasPeer<AgentPeer>,
 {
     #[derive(Serialize, Deserialize, JsonSchema)]
     struct PushInput {

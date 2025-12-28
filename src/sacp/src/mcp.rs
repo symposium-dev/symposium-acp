@@ -1,19 +1,19 @@
 use crate::{
-    HasDefaultPeer, HasPeer, JrLink, JrRole, jsonrpc::JrConnectionBuilder,
-    jsonrpc::handlers::NullHandler, role::RemoteRoleStyle,
+    HasDefaultPeer, HasPeer, JrLink, JrPeer, jsonrpc::JrConnectionBuilder,
+    jsonrpc::handlers::NullHandler, role::RemoteStyle,
 };
 
 /// The MCP client endpoint.
 #[derive(Debug, Default, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct McpClient;
 
-impl JrRole for McpClient {}
+impl JrPeer for McpClient {}
 
 /// The MCP server endpoint.
 #[derive(Debug, Default, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct McpServerEnd;
 
-impl JrRole for McpServerEnd {}
+impl JrPeer for McpServerEnd {}
 
 /// An MCP client's connection to an MCP server.
 #[derive(Debug, Default, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -29,8 +29,8 @@ impl HasDefaultPeer for McpClientToServer {
 }
 
 impl HasPeer<McpServerEnd> for McpClientToServer {
-    fn remote_style(_: McpServerEnd) -> RemoteRoleStyle {
-        RemoteRoleStyle::Counterpart
+    fn remote_style(_: McpServerEnd) -> RemoteStyle {
+        RemoteStyle::Counterpart
     }
 }
 
@@ -55,8 +55,8 @@ impl HasDefaultPeer for McpServerToClient {
 }
 
 impl HasPeer<McpClient> for McpServerToClient {
-    fn remote_style(_: McpClient) -> RemoteRoleStyle {
-        RemoteRoleStyle::Counterpart
+    fn remote_style(_: McpClient) -> RemoteStyle {
+        RemoteStyle::Counterpart
     }
 }
 

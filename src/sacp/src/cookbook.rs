@@ -11,7 +11,7 @@
 //!
 //! ## Peers
 //!
-//! *Peers* ([`JrRole`]) are logical destinations for messages:
+//! *Peers* ([`JrPeer`]) are logical destinations for messages:
 //!
 //! - [`Client`] - The client role (IDE, CLI, etc.)
 //! - [`Agent`] - The agent role (AI-powered component)
@@ -54,7 +54,7 @@
 //! automatically unwrapped.
 //!
 //! [`JrLink`]: crate::role::JrLink
-//! [`JrRole`]: crate::role::JrRole
+//! [`JrPeer`]: crate::role::JrPeer
 //! [`Client`]: crate::Client
 //! [`Agent`]: crate::Agent
 //! [`Conductor`]: crate::Conductor
@@ -336,12 +336,12 @@ pub mod per_session_mcp_server {
     //! ```
     //! use sacp::mcp_server::McpServer;
     //! use sacp::schema::NewSessionRequest;
-    //! use sacp::{AgentRole, ClientRole, Component, ProxyToConductor};
+    //! use sacp::{AgentPeer, ClientPeer, Component, ProxyToConductor};
     //! use sacp::role::ConductorToProxy;
     //!
     //! async fn run_proxy(transport: impl Component<ConductorToProxy>) -> Result<(), sacp::Error> {
     //!     ProxyToConductor::builder()
-    //!         .on_receive_request_from(ClientRole, async |request: NewSessionRequest, request_cx, cx| {
+    //!         .on_receive_request_from(ClientPeer, async |request: NewSessionRequest, request_cx, cx| {
     //!             let cwd = request.cwd.clone();
     //!             let mcp_server = McpServer::builder("session-tools")
     //!                 .tool_fn("get_cwd", "Returns session working directory",
@@ -370,12 +370,12 @@ pub mod per_session_mcp_server {
     //! ```
     //! use sacp::mcp_server::McpServer;
     //! use sacp::schema::NewSessionRequest;
-    //! use sacp::{AgentRole, ClientRole, Component, ProxyToConductor};
+    //! use sacp::{AgentPeer, ClientPeer, Component, ProxyToConductor};
     //! use sacp::role::ConductorToProxy;
     //!
     //! async fn run_proxy(transport: impl Component<ConductorToProxy>) -> Result<(), sacp::Error> {
     //!     ProxyToConductor::builder()
-    //!         .on_receive_request_from(ClientRole, async |request: NewSessionRequest, request_cx, cx| {
+    //!         .on_receive_request_from(ClientPeer, async |request: NewSessionRequest, request_cx, cx| {
     //!             let cwd = request.cwd.clone();
     //!             let mcp_server = McpServer::builder("session-tools")
     //!                 .tool_fn("get_cwd", "Returns session working directory",

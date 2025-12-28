@@ -10,7 +10,7 @@ use sacp::role::ProxyToConductor;
 use sacp::schema::{
     AgentCapabilities, InitializeProxyRequest, InitializeRequest, InitializeResponse,
 };
-use sacp::{ClientRole, Component};
+use sacp::{ClientPeer, Component};
 use sacp_conductor::{Conductor, ProxiesAndAgent};
 use std::sync::Arc;
 use std::sync::Mutex;
@@ -80,13 +80,13 @@ impl Component<ProxyToConductor> for InitComponent {
             .name("init-component")
             // Handle InitializeProxyRequest (we're a proxy)
             .on_receive_request_from(
-                ClientRole,
+                ClientPeer,
                 async move |request: InitializeProxyRequest, request_cx, cx| {
                     *config.received_init_type.lock().expect("unpoisoned") =
                         Some(InitRequestType::InitializeProxy);
 
                     // Forward InitializeRequest (not InitializeProxyRequest) to successor
-                    cx.send_request_to(sacp::AgentRole, request.initialize)
+                    cx.send_request_to(sacp::AgentPeer, request.initialize)
                         .on_receiving_result(async move |response| {
                             let response: InitializeResponse = response?;
                             request_cx.respond(response)
@@ -96,7 +96,7 @@ impl Component<ProxyToConductor> for InitComponent {
             )
             // Handle InitializeRequest (we're the agent)
             .on_receive_request_from(
-                ClientRole,
+                ClientPeer,
                 async move |request: InitializeRequest, request_cx, _cx| {
                     *config2.received_init_type.lock().expect("unpoisoned") =
                         Some(InitRequestType::Initialize);
@@ -271,10 +271,10 @@ impl Component<ProxyToConductor> for BadProxy {
         ProxyToConductor::builder()
             .name("bad-proxy")
             .on_receive_request_from(
-                ClientRole,
+                ClientPeer,
                 async move |request: InitializeProxyRequest, request_cx, cx| {
                     // BUG: forwards InitializeProxyRequest instead of request.initialize
-                    cx.send_request_to(sacp::AgentRole, request)
+                    cx.send_request_to(sacp::AgentPeer, request)
                         .on_receiving_result(async move |response| {
                             let response: InitializeResponse = response?;
                             request_cx.respond(response)

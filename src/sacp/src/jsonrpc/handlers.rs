@@ -1,5 +1,5 @@
 use crate::jsonrpc::{Handled, IntoHandled, JrMessageHandler};
-use crate::role::{HasPeer, JrLink, JrRole};
+use crate::role::{HasPeer, JrLink, JrPeer};
 use crate::{JrConnectionCx, JrNotification, JrRequest, MessageCx, UntypedMessage};
 // Types re-exported from crate root
 use super::JrRequestCx;
@@ -45,7 +45,7 @@ impl<Link: JrLink> JrMessageHandler for NullHandler<Link> {
 /// Handler for typed request messages
 pub struct RequestHandler<
     Link: JrLink,
-    Peer: JrRole,
+    Peer: JrPeer,
     Req: JrRequest = UntypedMessage,
     F = (),
     ToFut = (),
@@ -55,7 +55,7 @@ pub struct RequestHandler<
     phantom: PhantomData<fn(Link, Peer, Req)>,
 }
 
-impl<Link: JrLink, Peer: JrRole, Req: JrRequest, F, ToFut>
+impl<Link: JrLink, Peer: JrPeer, Req: JrRequest, F, ToFut>
     RequestHandler<Link, Peer, Req, F, ToFut>
 {
     /// Creates a new request handler
@@ -68,7 +68,7 @@ impl<Link: JrLink, Peer: JrRole, Req: JrRequest, F, ToFut>
     }
 }
 
-impl<Link: JrLink, Peer: JrRole, Req, F, T, ToFut> JrMessageHandler
+impl<Link: JrLink, Peer: JrPeer, Req, F, T, ToFut> JrMessageHandler
     for RequestHandler<Link, Peer, Req, F, ToFut>
 where
     Link: HasPeer<Peer>,
@@ -172,7 +172,7 @@ where
 /// Handler for typed notification messages
 pub struct NotificationHandler<
     Link: JrLink,
-    Peer: JrRole,
+    Peer: JrPeer,
     Notif: JrNotification = UntypedMessage,
     F = (),
     ToFut = (),
@@ -182,7 +182,7 @@ pub struct NotificationHandler<
     phantom: PhantomData<fn(Link, Peer, Notif)>,
 }
 
-impl<Link: JrLink, Peer: JrRole, Notif: JrNotification, F, ToFut>
+impl<Link: JrLink, Peer: JrPeer, Notif: JrNotification, F, ToFut>
     NotificationHandler<Link, Peer, Notif, F, ToFut>
 {
     /// Creates a new notification handler
@@ -195,7 +195,7 @@ impl<Link: JrLink, Peer: JrRole, Notif: JrNotification, F, ToFut>
     }
 }
 
-impl<Link: JrLink, Peer: JrRole, Notif, F, T, ToFut> JrMessageHandler
+impl<Link: JrLink, Peer: JrPeer, Notif, F, T, ToFut> JrMessageHandler
     for NotificationHandler<Link, Peer, Notif, F, ToFut>
 where
     Link: HasPeer<Peer>,
@@ -290,7 +290,7 @@ where
 /// Handler that handles both requests and notifications of specific types.
 pub struct MessageHandler<
     Link: JrLink,
-    Peer: JrRole,
+    Peer: JrPeer,
     Req: JrRequest = UntypedMessage,
     Notif: JrNotification = UntypedMessage,
     F = (),
@@ -301,7 +301,7 @@ pub struct MessageHandler<
     phantom: PhantomData<fn(Link, Peer, Req, Notif)>,
 }
 
-impl<Link: JrLink, Peer: JrRole, Req: JrRequest, Notif: JrNotification, F, ToFut>
+impl<Link: JrLink, Peer: JrPeer, Req: JrRequest, Notif: JrNotification, F, ToFut>
     MessageHandler<Link, Peer, Req, Notif, F, ToFut>
 {
     /// Creates a new message handler
@@ -314,7 +314,7 @@ impl<Link: JrLink, Peer: JrRole, Req: JrRequest, Notif: JrNotification, F, ToFut
     }
 }
 
-impl<Link: JrLink, Peer: JrRole, Req: JrRequest, Notif: JrNotification, F, T, ToFut>
+impl<Link: JrLink, Peer: JrPeer, Req: JrRequest, Notif: JrNotification, F, T, ToFut>
     JrMessageHandler for MessageHandler<Link, Peer, Req, Notif, F, ToFut>
 where
     Link: HasPeer<Peer>,

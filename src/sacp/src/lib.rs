@@ -48,7 +48,7 @@
 //!
 //! The [`cookbook`] module contains documented patterns for common tasks:
 //!
-//! - [Roles and peers](cookbook#roles-and-peers) - Understanding `JrLink`, `JrRole`, and how proxies work
+//! - [Roles and peers](cookbook#roles-and-peers) - Understanding `JrLink`, `JrPeer`, and how proxies work
 //! - [Reusable components](cookbook::reusable_components) - Defining agents/proxies with [`Component`]
 //! - [Custom message handlers](cookbook::custom_message_handlers) - Implementing [`JrMessageHandler`]
 //! - [Connecting as a client](cookbook::connecting_as_client) - Using `run_until` to send requests
@@ -130,8 +130,8 @@ pub use jsonrpc::{
 };
 
 pub use role::{
-    AgentRole, AgentToClient, ClientRole, ClientToAgent, ConductorRole, HasDefaultPeer, HasPeer,
-    JrLink, JrRole, ProxyToConductor,
+    AgentPeer, AgentToClient, ClientPeer, ClientToAgent, ConductorPeer, HasDefaultPeer, HasPeer,
+    JrLink, JrPeer, ProxyToConductor,
 };
 
 pub use component::{Component, DynComponent};

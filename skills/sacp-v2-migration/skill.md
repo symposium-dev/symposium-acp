@@ -104,7 +104,7 @@ Remove `sacp-proxy` dependency entirely - it's merged into `sacp`. MCP server ty
 | Error | Fix |
 |-------|-----|
 | `expected 3 parameters, found 2` | Add `_cx` as third handler parameter |
-| `trait JrRole is not implemented` | Add role parameter: `JrConnectionCx<YourRole>` |
+| `trait JrPeer is not implemented` | Add role parameter: `JrConnectionCx<YourRole>` |
 | `cannot find type MessageAndCx` | Use `MessageCx` |
 | `method connection_cx not found` | Use `cx` parameter passed to handler |
 | `cannot find to_successor/from_successor` | Use `send_request_to(sacp::Agent, ...)` |

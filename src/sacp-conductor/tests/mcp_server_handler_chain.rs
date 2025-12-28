@@ -11,7 +11,7 @@ use sacp::schema::{
     AgentCapabilities, InitializeRequest, InitializeResponse, NewSessionRequest,
     NewSessionResponse, SessionId,
 };
-use sacp::{AgentRole, ClientRole, Component};
+use sacp::{AgentPeer, ClientPeer, Component};
 use sacp_conductor::{Conductor, ProxiesAndAgent};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -96,7 +96,7 @@ impl Component<ProxyToConductor> for ProxyWithMcpAndHandler {
             .with_mcp_server(mcp_server)
             // Add a NewSessionRequest handler - this should be invoked!
             .on_receive_request_from(
-                ClientRole,
+                ClientPeer,
                 async move |request: NewSessionRequest, request_cx, cx| {
                     // Mark that we were called
                     config
@@ -104,7 +104,7 @@ impl Component<ProxyToConductor> for ProxyWithMcpAndHandler {
                         .store(true, Ordering::SeqCst);
 
                     // Forward to agent and relay response
-                    cx.send_request_to(AgentRole, request).on_receiving_result(
+                    cx.send_request_to(AgentPeer, request).on_receiving_result(
                         async move |result| {
                             let response: NewSessionResponse = result?;
                             request_cx.respond(response)

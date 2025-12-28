@@ -9,7 +9,7 @@ use crate::schema::{
 };
 use crate::util::MatchMessageFrom;
 use crate::{
-    AgentRole, Channel, Component, Handled, HasPeer, JrConnectionCx, JrLink, JrMessageHandler,
+    AgentPeer, Channel, Component, Handled, HasPeer, JrConnectionCx, JrLink, JrMessageHandler,
     JrRequestCx, MessageCx, UntypedMessage,
 };
 use std::sync::Arc;
@@ -35,7 +35,7 @@ pub(super) struct McpActiveSession<Link> {
 
 impl<Link: JrLink> McpActiveSession<Link>
 where
-    Link: HasPeer<AgentRole>,
+    Link: HasPeer<AgentPeer>,
 {
     pub fn new(role: Link, acp_url: String, mcp_connect: Arc<dyn McpServerConnect<Link>>) -> Self {
         Self {
@@ -97,7 +97,7 @@ where
                                 meta: None,
                             },
                         );
-                        outer_cx.send_proxied_message_to(AgentRole, wrapped)
+                        outer_cx.send_proxied_message_to(AgentPeer, wrapped)
                     },
                     crate::on_receive_message!(),
                 )
@@ -212,7 +212,7 @@ where
 
 impl<Link: JrLink> JrMessageHandler for McpActiveSession<Link>
 where
-    Link: HasPeer<AgentRole>,
+    Link: HasPeer<AgentPeer>,
 {
     type Link = Link;
 
@@ -227,23 +227,23 @@ where
     ) -> Result<Handled<MessageCx>, crate::Error> {
         MatchMessageFrom::new(message, &connection_cx)
             // MCP connect requests come from the Agent direction (wrapped in SuccessorMessage)
-            .if_request_from(AgentRole, async |request, request_cx| {
+            .if_request_from(AgentPeer, async |request, request_cx| {
                 self.handle_connect_request(request, request_cx, &connection_cx)
                     .await
             })
             .await
             // MCP over ACP requests come from the Agent direction
-            .if_request_from(AgentRole, async |request, request_cx| {
+            .if_request_from(AgentPeer, async |request, request_cx| {
                 self.handle_mcp_over_acp_request(request, request_cx).await
             })
             .await
             // MCP over ACP notifications come from the Agent direction
-            .if_notification_from(AgentRole, async |notification| {
+            .if_notification_from(AgentPeer, async |notification| {
                 self.handle_mcp_over_acp_notification(notification).await
             })
             .await
             // MCP disconnect notifications come from the Agent direction
-            .if_notification_from(AgentRole, async |notification| {
+            .if_notification_from(AgentPeer, async |notification| {
                 self.handle_mcp_disconnect_notification(notification).await
             })
             .await

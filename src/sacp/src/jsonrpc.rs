@@ -34,8 +34,8 @@ use crate::jsonrpc::responder::SpawnedResponder;
 use crate::jsonrpc::responder::{ChainResponder, JrResponder, NullResponder};
 use crate::jsonrpc::task_actor::{Task, TaskTx};
 use crate::mcp_server::McpServer;
-use crate::role::{HasDefaultPeer, HasPeer, JrLink, JrRole};
-use crate::{AgentRole, ClientRole, Component};
+use crate::role::{HasDefaultPeer, HasPeer, JrLink, JrPeer};
+use crate::{AgentPeer, ClientPeer, Component};
 
 /// Handlers process incoming JSON-RPC messages on a [`JrConnection`].
 ///
@@ -828,7 +828,7 @@ impl<H: JrMessageHandler, R: JrResponder<H::Link>> JrConnectionBuilder<H, R> {
     pub fn on_receive_message_from<
         Req: JrRequest,
         Notif: JrNotification,
-        Peer: JrRole,
+        Peer: JrPeer,
         F,
         T,
         ToFut,
@@ -881,7 +881,7 @@ impl<H: JrMessageHandler, R: JrResponder<H::Link>> JrConnectionBuilder<H, R> {
     ///     request_cx.respond(InitializeResponse::make())
     /// })
     /// ```
-    pub fn on_receive_request_from<Req: JrRequest, Peer: JrRole, F, T, ToFut>(
+    pub fn on_receive_request_from<Req: JrRequest, Peer: JrPeer, F, T, ToFut>(
         self,
         peer: Peer,
         op: F,
@@ -922,7 +922,7 @@ impl<H: JrMessageHandler, R: JrResponder<H::Link>> JrConnectionBuilder<H, R> {
     ///
     /// For the common case of receiving from the default counterpart, use
     /// [`on_receive_notification`](Self::on_receive_notification) instead.
-    pub fn on_receive_notification_from<Notif: JrNotification, Peer: JrRole, F, T, ToFut>(
+    pub fn on_receive_notification_from<Notif: JrNotification, Peer: JrPeer, F, T, ToFut>(
         self,
         peer: Peer,
         op: F,
@@ -971,7 +971,7 @@ impl<H: JrMessageHandler, R: JrResponder<H::Link>> JrConnectionBuilder<H, R> {
     ) -> JrConnectionBuilder<impl JrMessageHandler<Link = Link>, impl JrResponder<Link>>
     where
         H: JrMessageHandler<Link = Link>,
-        Link: HasPeer<ClientRole> + HasPeer<AgentRole>,
+        Link: HasPeer<ClientPeer> + HasPeer<AgentPeer>,
     {
         let (message_handler, mcp_responder) = server.into_handler_and_responder();
         self.with_handler(message_handler)
@@ -1555,7 +1555,7 @@ impl<Link: JrLink> JrConnectionCx<Link> {
     /// The request context's response type matches the request's response type,
     /// enabling type-safe message forwarding.
     pub fn send_proxied_message_to<
-        Peer: JrRole,
+        Peer: JrPeer,
         Req: JrRequest<Response: Send>,
         Notif: JrNotification,
     >(
@@ -1637,7 +1637,7 @@ impl<Link: JrLink> JrConnectionCx<Link> {
     ///
     /// The message will be transformed according to the role's [`SendsToRole`](crate::SendsToRole)
     /// implementation before being sent.
-    pub fn send_request_to<Peer: JrRole, Req: JrRequest>(
+    pub fn send_request_to<Peer: JrPeer, Req: JrRequest>(
         &self,
         peer: Peer,
         request: Req,
@@ -1719,7 +1719,7 @@ impl<Link: JrLink> JrConnectionCx<Link> {
     ///
     /// The message will be transformed according to the role's [`SendsToRole`](crate::SendsToRole)
     /// implementation before being sent.
-    pub fn send_notification_to<Peer: JrRole, N: JrNotification>(
+    pub fn send_notification_to<Peer: JrPeer, N: JrNotification>(
         &self,
         peer: Peer,
         notification: N,

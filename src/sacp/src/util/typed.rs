@@ -22,7 +22,7 @@ use jsonrpcmsg::Params;
 use crate::{
     Handled, HasDefaultPeer, JrConnectionCx, JrMessageHandler, JrNotification, JrRequest,
     JrRequestCx, MessageCx, UntypedMessage,
-    role::{HasPeer, JrLink, JrRole},
+    role::{HasPeer, JrLink, JrPeer},
     util::json_cast,
 };
 
@@ -374,7 +374,7 @@ impl<Link: JrLink> MatchMessageFrom<Link> {
     ///
     /// * `peer` - The peer the message is expected to come from
     /// * `op` - The handler to call if the message matches
-    pub async fn if_request_from<Peer: JrRole, Req: JrRequest, H>(
+    pub async fn if_request_from<Peer: JrPeer, Req: JrRequest, H>(
         mut self,
         peer: Peer,
         op: impl AsyncFnOnce(Req, JrRequestCx<Req::Response>) -> Result<H, crate::Error>,
@@ -431,7 +431,7 @@ impl<Link: JrLink> MatchMessageFrom<Link> {
     ///
     /// * `peer` - The peer the message is expected to come from
     /// * `op` - The handler to call if the message matches
-    pub async fn if_notification_from<Peer: JrRole, N: JrNotification, H>(
+    pub async fn if_notification_from<Peer: JrPeer, N: JrNotification, H>(
         mut self,
         peer: Peer,
         op: impl AsyncFnOnce(N) -> Result<H, crate::Error>,
@@ -468,7 +468,7 @@ impl<Link: JrLink> MatchMessageFrom<Link> {
     ///
     /// * `peer` - The peer the message is expected to come from
     /// * `op` - The handler to call if the message matches
-    pub async fn if_message_from<Peer: JrRole, R: JrRequest, N: JrNotification, H>(
+    pub async fn if_message_from<Peer: JrPeer, R: JrRequest, N: JrNotification, H>(
         mut self,
         peer: Peer,
         op: impl AsyncFnOnce(MessageCx<R, N>) -> Result<H, crate::Error>,
