@@ -1071,7 +1071,7 @@ impl<H: JrMessageHandler, R: JrResponder<H::Link>> JrConnectionBuilder<H, R> {
     ///
     /// # Borrow Checker Considerations
     ///
-    /// You may find that [`MatchMessage`] is a better choice than this method
+    /// You may find that [`MatchMessage`](`crate::util::MatchMessage`) is a better choice than this method
     /// for implementing custom handlers. It offers a very similar API to
     /// [`JrConnectionBuilder`] but is structured to apply each test one at a time
     /// (sequentially) instead of setting them all up at once. This sequential approach
@@ -1106,7 +1106,7 @@ impl<H: JrMessageHandler, R: JrResponder<H::Link>> JrConnectionBuilder<H, R> {
     /// ```
     ///
     /// You can work around this by using `apply()` to process messages one at a time,
-    /// or use [`MatchMessage`] which provides a similar API but applies handlers sequentially:
+    /// or use [`MatchMessage`](`crate::util::MatchMessage`) which provides a similar API but applies handlers sequentially:
     ///
     /// ```ignore
     /// use sacp::{MessageCx, Handled};
@@ -1837,7 +1837,7 @@ impl<Link: JrLink> JrConnectionCx<Link> {
     ///
     /// If they decline to handle the message, then the message is passed to the regular registered handlers.
     ///
-    /// The handler will stay registered until the [`DynamicHandlerRegistration`] is dropped.
+    /// The handler will stay registered until the returned registration guard is dropped.
     pub fn add_dynamic_handler(
         &self,
         handler: impl JrMessageHandler<Link = Link> + 'static,
@@ -1893,11 +1893,10 @@ impl<Link: JrLink> Drop for DynamicHandlerRegistration<Link> {
 ///
 /// 1. **Respond to the request** - Use [`respond`](Self::respond) or
 ///    [`respond_with_result`](Self::respond_with_result) to send the response
-/// 2. **Send other messages** - Use [`connection_cx`](Self::connection_cx) to access the
-///    underlying [`JrConnectionCx`], giving access to
-///    [`send_request`](JrConnectionCx::send_request),
-///    [`send_notification`](JrConnectionCx::send_notification), and
-///    [`spawn`](JrConnectionCx::spawn)
+/// 2. **Send other messages** - Use the [`JrConnectionCx`] parameter passed to your
+///    handler, which provides [`send_request`](`JrConnectionCx::send_request`),
+///    [`send_notification`](`JrConnectionCx::send_notification`), and
+///    [`spawn`](`JrConnectionCx::spawn`)
 ///
 /// # Example
 ///

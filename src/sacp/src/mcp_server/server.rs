@@ -17,10 +17,10 @@ use crate::{
 
 /// An MCP server that can be attached to ACP connections.
 ///
-/// `McpServer` wraps an [`McpServerConnect`] implementation and can be used either:
-/// - As a message handler via [`JrConnectionBuilder::with_handler`], automatically
+/// `McpServer` wraps an [`McpServerConnect`](`super::McpServerConnect`) implementation and can be used either:
+/// - As a message handler via [`JrConnectionBuilder::with_handler`](`crate::JrConnectionBuilder::with_handler`), automatically
 ///   attaching to new sessions
-/// - Manually via [`Self::into_dynamic_handler`] for more control
+/// - Manually for more control
 ///
 /// # Creating an MCP Server
 ///
@@ -33,7 +33,7 @@ use crate::{
 ///     .build();
 /// ```
 ///
-/// Or implement [`McpServerConnect`] for custom server behavior:
+/// Or implement [`McpServerConnect`](`super::McpServerConnect`) for custom server behavior:
 ///
 /// ```rust,ignore
 /// let server = McpServer::new(MyCustomServerConnect);
@@ -65,7 +65,7 @@ impl<Link: JrLink, Responder: JrResponder<Link>> McpServer<Link, Responder>
 where
     Link: HasPeer<AgentPeer>,
 {
-    /// Create an MCP server from something that implements the [`McpServerConnect`] trait.
+    /// Create an MCP server from something that implements the [`McpServerConnect`](`super::McpServerConnect`) trait.
     ///
     /// # See also
     ///

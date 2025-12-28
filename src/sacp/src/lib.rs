@@ -147,7 +147,7 @@ mod session;
 pub use session::*;
 
 /// This is a hack that must be given as the final argument of
-/// [`McpServerBuilder::tool_fn`] when defining tools.
+/// [`McpServerBuilder::tool_fn`](`crate::mcp_server::McpServerBuilder::tool_fn`) when defining tools.
 /// Look away, lest ye be blinded by its vileness!
 ///
 /// Fine, if you MUST know, it's a horrific workaround for not having
@@ -162,7 +162,7 @@ macro_rules! tool_fn_mut {
 }
 
 /// This is a hack that must be given as the final argument of
-/// [`McpServerBuilder::tool_fn`] when defining stateless concurrent tools.
+/// [`McpServerBuilder::tool_fn`](`crate::mcp_server::McpServerBuilder::tool_fn`) when defining stateless concurrent tools.
 /// See [`tool_fn_mut!`] for the gory details.
 #[macro_export]
 macro_rules! tool_fn {
