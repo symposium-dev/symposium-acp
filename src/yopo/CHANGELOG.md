@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [10.0.0](https://github.com/symposium-dev/symposium-acp/compare/yopo-v9.0.0...yopo-v10.0.0) - 2025-12-28
+## [10.0.0-alpha.1](https://github.com/symposium-dev/symposium-acp/compare/yopo-v9.0.0...yopo-v10.0.0-alpha.1) - 2025-12-28
 
 ### Other
 
