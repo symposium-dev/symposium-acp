@@ -1301,14 +1301,41 @@ impl<H: JrMessageHandler, R: JrResponder<H::Link>> JrConnection<H, R> {
     }
 }
 
+/// The payload sent through the response oneshot channel.
+///
+/// Includes the response value and an optional ack channel for dispatch loop
+/// synchronization.
+pub(crate) struct ResponsePayload {
+    /// The response result - either the JSON value or an error.
+    pub(crate) result: Result<serde_json::Value, crate::Error>,
+
+    /// Optional acknowledgment channel for dispatch loop synchronization.
+    ///
+    /// When present, the receiver must send on this channel to signal that
+    /// response processing is complete, allowing the dispatch loop to continue
+    /// to the next message.
+    ///
+    /// This is `None` for error paths where the response is sent directly
+    /// (e.g., when the outgoing channel is broken) rather than through the
+    /// normal dispatch loop flow.
+    pub(crate) ack_tx: Option<oneshot::Sender<()>>,
+}
+
+impl std::fmt::Debug for ResponsePayload {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ResponsePayload")
+            .field("result", &self.result)
+            .field("ack_tx", &self.ack_tx.as_ref().map(|_| "..."))
+            .finish()
+    }
+}
+
 /// Message sent to the incoming actor for reply subscription management.
 enum ReplyMessage {
     /// Subscribe to receive a response for the given request id.
-    /// When a response with this id arrives, it will be sent through the oneshot.
-    Subscribe(
-        jsonrpcmsg::Id,
-        oneshot::Sender<Result<serde_json::Value, crate::Error>>,
-    ),
+    /// When a response with this id arrives, it will be sent through the oneshot
+    /// along with an ack channel that must be signaled when processing is complete.
+    Subscribe(jsonrpcmsg::Id, oneshot::Sender<ResponsePayload>),
 }
 
 impl std::fmt::Debug for ReplyMessage {
@@ -1330,8 +1357,8 @@ enum OutgoingMessage {
         /// parameters for the request
         params: Option<jsonrpcmsg::Params>,
 
-        /// where to send the response when it arrives
-        response_tx: oneshot::Sender<Result<serde_json::Value, crate::Error>>,
+        /// where to send the response when it arrives (includes ack channel)
+        response_tx: oneshot::Sender<ResponsePayload>,
     },
 
     /// Send a notification to the server.
@@ -1675,9 +1702,12 @@ impl<Link: JrLink> JrConnectionCx<Link> {
                         };
 
                         response_tx
-                            .send(Err(crate::util::internal_error(format!(
-                                "failed to send outgoing request `{method}"
-                            ))))
+                            .send(ResponsePayload {
+                                result: Err(crate::util::internal_error(format!(
+                                    "failed to send outgoing request `{method}"
+                                ))),
+                                ack_tx: None,
+                            })
                             .unwrap();
                     }
                 }
@@ -1685,9 +1715,12 @@ impl<Link: JrLink> JrConnectionCx<Link> {
 
             Err(err) => {
                 response_tx
-                    .send(Err(crate::util::internal_error(format!(
-                        "failed to create untyped request for `{method}`: {err}"
-                    ))))
+                    .send(ResponsePayload {
+                        result: Err(crate::util::internal_error(format!(
+                            "failed to create untyped request for `{method}`: {err}"
+                        ))),
+                        ack_tx: None,
+                    })
                     .unwrap();
             }
         }
@@ -2484,7 +2517,7 @@ impl JrNotification for UntypedMessage {}
 pub struct JrResponse<T> {
     method: String,
     task_tx: TaskTx,
-    response_rx: oneshot::Receiver<Result<serde_json::Value, crate::Error>>,
+    response_rx: oneshot::Receiver<ResponsePayload>,
     to_result: Box<dyn Fn(serde_json::Value) -> Result<T, crate::Error> + Send>,
 }
 
@@ -2492,7 +2525,7 @@ impl JrResponse<serde_json::Value> {
     fn new(
         method: String,
         task_tx: mpsc::UnboundedSender<Task>,
-        response_rx: oneshot::Receiver<Result<serde_json::Value, crate::Error>>,
+        response_rx: oneshot::Receiver<ResponsePayload>,
     ) -> Self {
         Self {
             method,
@@ -2648,11 +2681,29 @@ impl<T: JrResponsePayload> JrResponse<T> {
         T: Send,
     {
         match self.response_rx.await {
-            Ok(Ok(json_value)) => match (self.to_result)(json_value) {
-                Ok(value) => Ok(value),
-                Err(err) => Err(err),
-            },
-            Ok(Err(err)) => Err(err),
+            Ok(ResponsePayload {
+                result: Ok(json_value),
+                ack_tx,
+            }) => {
+                // Ack immediately - we're in a spawned task, so the dispatch loop
+                // can continue while we process the value.
+                if let Some(tx) = ack_tx {
+                    let _ = tx.send(());
+                }
+                match (self.to_result)(json_value) {
+                    Ok(value) => Ok(value),
+                    Err(err) => Err(err),
+                }
+            }
+            Ok(ResponsePayload {
+                result: Err(err),
+                ack_tx,
+            }) => {
+                if let Some(tx) = ack_tx {
+                    let _ = tx.send(());
+                }
+                Err(err)
+            }
             Err(err) => Err(crate::util::internal_error(format!(
                 "response to `{}` never received: {}",
                 self.method, err
@@ -2791,9 +2842,38 @@ impl<T: JrResponsePayload> JrResponse<T> {
         T: Send,
     {
         let task_tx = self.task_tx.clone();
-        let block_task = self.block_task();
+        let method = self.method;
+        let response_rx = self.response_rx;
+        let to_result = self.to_result;
         let location = Location::caller();
-        Task::new(location, async move { task(block_task.await).await }).spawn(&task_tx)
+
+        Task::new(location, async move {
+            match response_rx.await {
+                Ok(ResponsePayload { result, ack_tx }) => {
+                    // Convert the result using to_result for Ok values
+                    let typed_result = match result {
+                        Ok(json_value) => to_result(json_value),
+                        Err(err) => Err(err),
+                    };
+
+                    // Run the user's callback
+                    let outcome = task(typed_result).await;
+
+                    // Ack AFTER the callback completes - this is the key difference
+                    // from block_task. The dispatch loop waits for this ack.
+                    if let Some(tx) = ack_tx {
+                        let _ = tx.send(());
+                    }
+
+                    outcome
+                }
+                Err(err) => Err(crate::util::internal_error(format!(
+                    "response to `{}` never received: {}",
+                    method, err
+                ))),
+            }
+        })
+        .spawn(&task_tx)
     }
 }
 

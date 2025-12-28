@@ -49,7 +49,7 @@ pub(super) async fn incoming_protocol_actor<Link: JrLink>(
     // Keys are JSON values because jsonrpcmsg::Id doesn't implement Eq.
     let mut pending_replies: HashMap<
         serde_json::Value,
-        oneshot::Sender<Result<serde_json::Value, crate::Error>>,
+        oneshot::Sender<crate::jsonrpc::ResponsePayload>,
     > = HashMap::new();
 
     while let Some(message_result) = my_rx.next().await {
@@ -129,7 +129,12 @@ pub(super) async fn incoming_protocol_actor<Link: JrLink>(
 
                             let id_json = serde_json::to_value(&id).unwrap();
                             if let Some(sender) = pending_replies.remove(&id_json) {
-                                let send_result = sender.send(result);
+                                // Create the ack channel
+                                let (ack_tx, ack_rx) = oneshot::channel();
+                                let send_result = sender.send(crate::jsonrpc::ResponsePayload {
+                                    result,
+                                    ack_tx: Some(ack_tx),
+                                });
                                 if send_result.is_err() {
                                     tracing::warn!(
                                         ?id,
@@ -138,7 +143,15 @@ pub(super) async fn incoming_protocol_actor<Link: JrLink>(
                                 } else {
                                     tracing::trace!(
                                         ?id,
-                                        "incoming_actor: successfully dispatched response to receiver"
+                                        "incoming_actor: dispatched response, awaiting ack"
+                                    );
+                                    // Wait for the receiver to acknowledge processing is complete.
+                                    // This ensures ordering: the dispatch loop won't process the
+                                    // next message until the response handler has finished.
+                                    let _ = ack_rx.await;
+                                    tracing::trace!(
+                                        ?id,
+                                        "incoming_actor: received ack, continuing dispatch loop"
                                     );
                                 }
                             } else {
