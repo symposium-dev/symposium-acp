@@ -20,7 +20,6 @@ mod dynamic_handler;
 pub(crate) mod handlers;
 mod incoming_actor;
 mod outgoing_actor;
-mod reply_actor;
 pub(crate) mod responder;
 mod task_actor;
 mod transport_actor;
@@ -1287,10 +1286,9 @@ impl<H: JrMessageHandler, R: JrResponder<H::Link>> JrConnection<H, R> {
                         &cx,
                         transport_incoming_rx,
                         dynamic_handler_rx,
-                        reply_tx.clone(),
+                        reply_rx,
                         handler,
                     ),
-                    reply_actor::reply_actor(reply_rx),
                     task_actor::task_actor(new_task_rx, &cx),
                     responder.run(cx.clone()),
                 )?;
@@ -1303,16 +1301,22 @@ impl<H: JrMessageHandler, R: JrResponder<H::Link>> JrConnection<H, R> {
     }
 }
 
-/// Message sent to the reply management actor
+/// Message sent to the incoming actor for reply subscription management.
 enum ReplyMessage {
-    /// Wait for a response to the given id and then send it to the given receiver
+    /// Subscribe to receive a response for the given request id.
+    /// When a response with this id arrives, it will be sent through the oneshot.
     Subscribe(
         jsonrpcmsg::Id,
         oneshot::Sender<Result<serde_json::Value, crate::Error>>,
     ),
+}
 
-    /// Dispatch a response to the given id and value
-    Dispatch(jsonrpcmsg::Id, Result<serde_json::Value, crate::Error>),
+impl std::fmt::Debug for ReplyMessage {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ReplyMessage::Subscribe(id, _) => f.debug_tuple("Subscribe").field(id).finish(),
+        }
+    }
 }
 
 /// Messages send to be serialized over the transport.

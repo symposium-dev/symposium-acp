@@ -1,6 +1,9 @@
 // Types re-exported from crate root
+use std::collections::HashMap;
+
 use futures::StreamExt as _;
 use futures::channel::mpsc;
+use futures::channel::oneshot;
 use futures_concurrency::stream::StreamExt as _;
 use fxhash::FxHashMap;
 use uuid::Uuid;
@@ -17,32 +20,49 @@ use crate::link::JrLink;
 
 use super::Handled;
 
-/// Incoming protocol actor: Routes jsonrpcmsg::Message to reply_actor or handler.
+/// Incoming protocol actor: The central dispatch loop for a connection.
 ///
 /// This actor handles JSON-RPC protocol semantics:
-/// - Routes responses to reply_actor (for request/response correlation)
+/// - Routes responses to pending request awaiters
 /// - Routes requests/notifications to registered handlers
 /// - Converts jsonrpcmsg::Request to UntypedMessage for handlers
+/// - Manages reply subscriptions from outgoing requests
 ///
 /// This is the protocol layer - it has no knowledge of how messages arrived.
 pub(super) async fn incoming_protocol_actor<Link: JrLink>(
     json_rpc_cx: &JrConnectionCx<Link>,
     transport_rx: mpsc::UnboundedReceiver<Result<jsonrpcmsg::Message, crate::Error>>,
     dynamic_handler_rx: mpsc::UnboundedReceiver<DynamicHandlerMessage<Link>>,
-    reply_tx: mpsc::UnboundedSender<ReplyMessage>,
+    reply_rx: mpsc::UnboundedReceiver<ReplyMessage>,
     mut handler: impl JrMessageHandler<Link = Link>,
 ) -> Result<(), crate::Error> {
     let mut my_rx = transport_rx
         .map(IncomingProtocolMsg::Transport)
-        .merge(dynamic_handler_rx.map(IncomingProtocolMsg::DynamicHandler));
+        .merge(dynamic_handler_rx.map(IncomingProtocolMsg::DynamicHandler))
+        .merge(reply_rx.map(IncomingProtocolMsg::Reply));
 
     let mut dynamic_handlers: FxHashMap<Uuid, Box<dyn DynamicHandler<Link>>> = FxHashMap::default();
     let mut pending_messages: Vec<MessageCx> = vec![];
     let mut state = <Link::State>::default();
 
+    // Map from request ID to oneshot sender for response dispatch.
+    // Keys are JSON values because jsonrpcmsg::Id doesn't implement Eq.
+    let mut pending_replies: HashMap<
+        serde_json::Value,
+        oneshot::Sender<Result<serde_json::Value, crate::Error>>,
+    > = HashMap::new();
+
     while let Some(message_result) = my_rx.next().await {
         tracing::trace!(message = ?message_result, actor = "incoming_protocol_actor");
         match message_result {
+            IncomingProtocolMsg::Reply(message) => match message {
+                ReplyMessage::Subscribe(id, sender) => {
+                    tracing::trace!(?id, "incoming_actor: subscribing to response");
+                    let id = serde_json::to_value(&id).unwrap();
+                    pending_replies.insert(id, sender);
+                }
+            },
+
             IncomingProtocolMsg::DynamicHandler(message) => match message {
                 DynamicHandlerMessage::AddDynamicHandler(uuid, mut handler) => {
                     // Before adding the new handler, give it a chance to process
@@ -93,20 +113,39 @@ pub(super) async fn incoming_protocol_actor<Link: JrLink>(
                     jsonrpcmsg::Message::Response(response) => {
                         tracing::trace!(id = ?response.id, has_result = response.result.is_some(), has_error = response.error.is_some(), "Handling response");
                         if let Some(id) = response.id {
-                            if let Some(value) = response.result {
-                                reply_tx
-                                    .unbounded_send(ReplyMessage::Dispatch(id, Ok(value)))
-                                    .map_err(crate::Error::into_internal_error)?;
+                            let result = if let Some(value) = response.result {
+                                Ok(value)
                             } else if let Some(error) = response.error {
                                 // Convert jsonrpcmsg::Error to crate::Error
-                                let acp_error = crate::Error {
+                                Err(crate::Error {
                                     code: error.code,
                                     message: error.message,
                                     data: error.data,
-                                };
-                                reply_tx
-                                    .unbounded_send(ReplyMessage::Dispatch(id, Err(acp_error)))
-                                    .map_err(crate::Error::into_internal_error)?;
+                                })
+                            } else {
+                                // Response with neither result nor error - treat as null result
+                                Ok(serde_json::Value::Null)
+                            };
+
+                            let id_json = serde_json::to_value(&id).unwrap();
+                            if let Some(sender) = pending_replies.remove(&id_json) {
+                                let send_result = sender.send(result);
+                                if send_result.is_err() {
+                                    tracing::warn!(
+                                        ?id,
+                                        "incoming_actor: failed to send response, receiver dropped"
+                                    );
+                                } else {
+                                    tracing::trace!(
+                                        ?id,
+                                        "incoming_actor: successfully dispatched response to receiver"
+                                    );
+                                }
+                            } else {
+                                tracing::warn!(
+                                    ?id,
+                                    "incoming_actor: received response for unknown id, no subscriber found"
+                                );
                             }
                         }
                     }
@@ -126,6 +165,7 @@ pub(super) async fn incoming_protocol_actor<Link: JrLink>(
 enum IncomingProtocolMsg<Link: JrLink> {
     Transport(Result<jsonrpcmsg::Message, crate::Error>),
     DynamicHandler(DynamicHandlerMessage<Link>),
+    Reply(ReplyMessage),
 }
 
 /// Dispatches a JSON-RPC request to the handler.
