@@ -662,7 +662,7 @@ impl<H: JrMessageHandler, R: JrResponder<H::Link>> JrConnectionBuilder<H, R> {
     /// # Ordering
     ///
     /// This callback runs inside the dispatch loop and blocks further message processing
-    /// until it completes. See the [`ordering`](crate::ordering) module for details on
+    /// until it completes. See the [`ordering`](crate::concepts::ordering) module for details on
     /// ordering guarantees and how to avoid deadlocks.
     pub fn on_receive_message<Req, Notif, F, T, ToFut>(
         self,
@@ -733,7 +733,7 @@ impl<H: JrMessageHandler, R: JrResponder<H::Link>> JrConnectionBuilder<H, R> {
     /// # Ordering
     ///
     /// This callback runs inside the dispatch loop and blocks further message processing
-    /// until it completes. See the [`ordering`](crate::ordering) module for details on
+    /// until it completes. See the [`ordering`](crate::concepts::ordering) module for details on
     /// ordering guarantees and how to avoid deadlocks.
     pub fn on_receive_request<Req: JrRequest, F, T, ToFut>(
         self,
@@ -806,7 +806,7 @@ impl<H: JrMessageHandler, R: JrResponder<H::Link>> JrConnectionBuilder<H, R> {
     /// # Ordering
     ///
     /// This callback runs inside the dispatch loop and blocks further message processing
-    /// until it completes. See the [`ordering`](crate::ordering) module for details on
+    /// until it completes. See the [`ordering`](crate::concepts::ordering) module for details on
     /// ordering guarantees and how to avoid deadlocks.
     pub fn on_receive_notification<Notif, F, T, ToFut>(
         self,
@@ -847,7 +847,7 @@ impl<H: JrMessageHandler, R: JrResponder<H::Link>> JrConnectionBuilder<H, R> {
     /// # Ordering
     ///
     /// This callback runs inside the dispatch loop and blocks further message processing
-    /// until it completes. See the [`ordering`](crate::ordering) module for details on
+    /// until it completes. See the [`ordering`](crate::concepts::ordering) module for details on
     /// ordering guarantees and how to avoid deadlocks.
     pub fn on_receive_message_from<
         Req: JrRequest,
@@ -909,7 +909,7 @@ impl<H: JrMessageHandler, R: JrResponder<H::Link>> JrConnectionBuilder<H, R> {
     /// # Ordering
     ///
     /// This callback runs inside the dispatch loop and blocks further message processing
-    /// until it completes. See the [`ordering`](crate::ordering) module for details on
+    /// until it completes. See the [`ordering`](crate::concepts::ordering) module for details on
     /// ordering guarantees and how to avoid deadlocks.
     pub fn on_receive_request_from<Req: JrRequest, Peer: JrPeer, F, T, ToFut>(
         self,
@@ -956,7 +956,7 @@ impl<H: JrMessageHandler, R: JrResponder<H::Link>> JrConnectionBuilder<H, R> {
     /// # Ordering
     ///
     /// This callback runs inside the dispatch loop and blocks further message processing
-    /// until it completes. See the [`ordering`](crate::ordering) module for details on
+    /// until it completes. See the [`ordering`](crate::concepts::ordering) module for details on
     /// ordering guarantees and how to avoid deadlocks.
     pub fn on_receive_notification_from<Notif: JrNotification, Peer: JrPeer, F, T, ToFut>(
         self,
@@ -2788,7 +2788,7 @@ impl<T: JrResponsePayload> JrResponse<T> {
     /// # Ordering
     ///
     /// Like [`on_receiving_result`](Self::on_receiving_result), the callback blocks the
-    /// dispatch loop until it completes. See the [`ordering`](crate::ordering) module
+    /// dispatch loop until it completes. See the [`ordering`](crate::concepts::ordering) module
     /// for details.
     ///
     /// # When to Use
@@ -2864,7 +2864,7 @@ impl<T: JrResponsePayload> JrResponse<T> {
     /// This differs from [`block_task`](Self::block_task), which signals completion immediately
     /// upon receiving the response (before your code processes it).
     ///
-    /// See the [`ordering`](crate::ordering) module for details on ordering guarantees
+    /// See the [`ordering`](crate::concepts::ordering) module for details on ordering guarantees
     /// and how to avoid deadlocks.
     ///
     /// # Error Handling

@@ -204,7 +204,7 @@ where
     /// # Ordering
     ///
     /// This callback blocks the dispatch loop until the session starts and your
-    /// callback completes. See the [`ordering`](crate::ordering) module for details.
+    /// callback completes. See the [`ordering`](crate::concepts::ordering) module for details.
     pub fn on_session_start<F, Fut>(self, op: F) -> Result<(), crate::Error>
     where
         Responder: 'static,
@@ -267,7 +267,7 @@ where
     /// # Ordering
     ///
     /// This callback blocks the dispatch loop until the session starts and your
-    /// callback completes. See the [`ordering`](crate::ordering) module for details.
+    /// callback completes. See the [`ordering`](crate::concepts::ordering) module for details.
     pub fn on_proxy_session_start<F, Fut>(
         self,
         request_cx: JrRequestCx<NewSessionResponse>,
