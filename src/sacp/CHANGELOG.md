@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [10.0.0-alpha.2](https://github.com/symposium-dev/symposium-acp/compare/sacp-v10.0.0-alpha.1...sacp-v10.0.0-alpha.2) - 2025-12-29
+
+### Added
+
+- *(sacp)* add ack mechanism for response dispatch ordering
+
+### Other
+
+- *(sacp)* un-ignore doc examples and make them compile
+- *(sacp)* fix all rustdoc link warnings
+- *(sacp)* reorganize lib.rs and create concepts module
+- *(sacp)* document ordering guarantees for on_* methods
+- *(sacp)* merge reply actor into incoming actor
+- *(sacp)* add ordering module and improve proxy session docs
+- Merge pull request #93 from symposium-dev/release-plz-2025-12-21T18-15-53Z
+
 ## [10.0.0-alpha.1](https://github.com/symposium-dev/symposium-acp/compare/sacp-v9.0.0...sacp-v10.0.0-alpha.1) - 2025-12-28
 
 ### Added
