@@ -47,7 +47,7 @@ use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
 
 use super::{McpContext, McpTool};
 use crate::{
-    AgentPeer, ByteStreams, Component, DynComponent, HasPeer, JrLink,
+    ByteStreams, Component, DynComponent, JrLink,
     jsonrpc::responder::{ChainResponder, JrResponder, NullResponder},
     mcp_server::{
         McpServer, McpServerConnect,
@@ -106,10 +106,7 @@ impl<Link: JrLink> Default for McpServerData<Link> {
     }
 }
 
-impl<Link: JrLink> McpServerBuilder<Link, NullResponder>
-where
-    Link: HasPeer<AgentPeer>,
-{
+impl<Link: JrLink> McpServerBuilder<Link, NullResponder> {
     pub(super) fn new(name: String) -> Self {
         Self {
             name: name,
@@ -120,10 +117,7 @@ where
     }
 }
 
-impl<Link: JrLink, Responder: JrResponder<Link>> McpServerBuilder<Link, Responder>
-where
-    Link: HasPeer<AgentPeer>,
-{
+impl<Link: JrLink, Responder: JrResponder<Link>> McpServerBuilder<Link, Responder> {
     /// Set the server instructions that are provided to the client.
     pub fn instructions(mut self, instructions: impl ToString) -> Self {
         self.data.instructions = Some(instructions.to_string());
@@ -340,20 +334,14 @@ where
     }
 }
 
-struct McpServerBuilt<Link: JrLink>
-where
-    Link: HasPeer<AgentPeer>,
-{
+struct McpServerBuilt<Link: JrLink> {
     #[expect(dead_code)]
     role: Link,
     name: String,
     data: Arc<McpServerData<Link>>,
 }
 
-impl<'scope, Link: JrLink> McpServerConnect<Link> for McpServerBuilt<Link>
-where
-    Link: HasPeer<AgentPeer>,
-{
+impl<'scope, Link: JrLink> McpServerConnect<Link> for McpServerBuilt<Link> {
     fn name(&self) -> String {
         self.name.clone()
     }
@@ -367,18 +355,12 @@ where
 }
 
 /// An MCP server instance connected to the ACP framework.
-pub(crate) struct McpServerConnection<Link: JrLink>
-where
-    Link: HasPeer<AgentPeer>,
-{
+pub(crate) struct McpServerConnection<Link: JrLink> {
     data: Arc<McpServerData<Link>>,
     mcp_cx: McpContext<Link>,
 }
 
-impl<Link: JrLink> Component<crate::mcp::McpServerToClient> for McpServerConnection<Link>
-where
-    Link: HasPeer<AgentPeer>,
-{
+impl<Link: JrLink> Component<crate::mcp::McpServerToClient> for McpServerConnection<Link> {
     async fn serve(
         self,
         client: impl Component<crate::mcp::McpClientToServer>,
@@ -411,10 +393,7 @@ where
     }
 }
 
-impl<Link: JrLink> ServerHandler for McpServerConnection<Link>
-where
-    Link: HasPeer<AgentPeer>,
-{
+impl<Link: JrLink> ServerHandler for McpServerConnection<Link> {
     async fn call_tool(
         &self,
         request: rmcp::model::CallToolRequestParam,

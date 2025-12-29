@@ -5,15 +5,15 @@ use crate::{
 
 /// The MCP client endpoint.
 #[derive(Debug, Default, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct McpClient;
+pub struct McpClientPeer;
 
-impl JrPeer for McpClient {}
+impl JrPeer for McpClientPeer {}
 
 /// The MCP server endpoint.
 #[derive(Debug, Default, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct McpServerEnd;
+pub struct McpServerPeer;
 
-impl JrPeer for McpServerEnd {}
+impl JrPeer for McpServerPeer {}
 
 /// An MCP client's connection to an MCP server.
 #[derive(Debug, Default, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -25,11 +25,11 @@ impl JrLink for McpClientToServer {
 }
 
 impl HasDefaultPeer for McpClientToServer {
-    type DefaultPeer = McpServerEnd;
+    type DefaultPeer = McpServerPeer;
 }
 
-impl HasPeer<McpServerEnd> for McpClientToServer {
-    fn remote_style(_: McpServerEnd) -> RemoteStyle {
+impl HasPeer<McpServerPeer> for McpClientToServer {
+    fn remote_style(_: McpServerPeer) -> RemoteStyle {
         RemoteStyle::Counterpart
     }
 }
@@ -51,11 +51,11 @@ impl JrLink for McpServerToClient {
 }
 
 impl HasDefaultPeer for McpServerToClient {
-    type DefaultPeer = McpClient;
+    type DefaultPeer = McpClientPeer;
 }
 
-impl HasPeer<McpClient> for McpServerToClient {
-    fn remote_style(_: McpClient) -> RemoteStyle {
+impl HasPeer<McpClientPeer> for McpServerToClient {
+    fn remote_style(_: McpClientPeer) -> RemoteStyle {
         RemoteStyle::Counterpart
     }
 }

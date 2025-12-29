@@ -1,5 +1,5 @@
 use futures::{SinkExt as _, StreamExt as _, channel::mpsc};
-use sacp::mcp::{McpClientToServer, McpServerEnd, McpServerToClient};
+use sacp::mcp::{McpClientToServer, McpServerPeer, McpServerToClient};
 use sacp::schema::McpDisconnectNotification;
 use sacp::{Component, DynComponent, MessageCx};
 use tracing::info;
@@ -67,7 +67,7 @@ impl McpBridgeConnectionActor {
             .run_until(async move |mcp_client_cx| {
                 let mut to_mcp_client_rx = to_mcp_client_rx;
                 while let Some(message) = to_mcp_client_rx.next().await {
-                    mcp_client_cx.send_proxied_message_to(McpServerEnd, message)?;
+                    mcp_client_cx.send_proxied_message_to(McpServerPeer, message)?;
                 }
                 Ok(())
             })
