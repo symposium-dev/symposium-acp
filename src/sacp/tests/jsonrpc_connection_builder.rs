@@ -5,8 +5,9 @@
 //! handler claims them.
 
 use sacp::link::UntypedLink;
+use sacp::util::run_until;
 use sacp::{
-    JrConnectionCx, JrMessage, JrNotification, JrRequest, JrRequestCx, JrResponse,
+    Component, JrConnectionCx, JrMessage, JrNotification, JrRequest, JrRequestCx, JrResponse,
     JrResponsePayload,
 };
 use serde::{Deserialize, Serialize};
@@ -622,4 +623,55 @@ async fn test_handler_claims_notification() {
             assert_eq!(received_events[0], "test_event");
         })
         .await;
+}
+
+// ============================================================================
+// Test 6: JrConnectionBuilder implements Component
+// ============================================================================
+
+#[tokio::test]
+async fn test_connection_builder_as_component() -> Result<(), sacp::Error> {
+    // Create duplex streams
+    let (server_stream, client_stream) = tokio::io::duplex(8192);
+    let (server_read, server_write) = tokio::io::split(server_stream);
+    let (client_read, client_write) = tokio::io::split(client_stream);
+
+    // Create a connection builder (server side)
+    let server_builder = UntypedLink::builder().on_receive_request(
+        async |request: FooRequest,
+               request_cx: JrRequestCx<FooResponse>,
+               _cx: JrConnectionCx<UntypedLink>| {
+            request_cx.respond(FooResponse {
+                result: format!("component: {}", request.value),
+            })
+        },
+        sacp::on_receive_request!(),
+    );
+
+    // Create ByteStreams for both sides
+    let server_transport =
+        sacp::ByteStreams::new(server_write.compat_write(), server_read.compat());
+    let client_transport =
+        sacp::ByteStreams::new(client_write.compat_write(), client_read.compat());
+
+    // Use JrConnectionBuilder as a Component via run_until
+    run_until(
+        // This uses Component::serve on JrConnectionBuilder
+        Component::<UntypedLink>::serve(server_builder, server_transport),
+        async move {
+            // Client side
+            UntypedLink::builder()
+                .run_until(client_transport, async |cx| {
+                    let response = recv(cx.send_request(FooRequest {
+                        value: "test".to_string(),
+                    }))
+                    .await?;
+
+                    assert_eq!(response.result, "component: test");
+                    Ok(())
+                })
+                .await
+        },
+    )
+    .await
 }

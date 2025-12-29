@@ -1,6 +1,6 @@
 //! MCP server builder for creating MCP servers.
 
-use std::{pin::pin, sync::Arc};
+use std::{collections::HashSet, pin::pin, sync::Arc};
 
 use futures::{
     SinkExt,
@@ -8,6 +8,34 @@ use futures::{
     future::{BoxFuture, Either},
 };
 use fxhash::FxHashMap;
+
+/// Tracks which tools are enabled.
+///
+/// - `DenyList`: All tools enabled except those in the set (default)
+/// - `AllowList`: Only tools in the set are enabled
+#[derive(Clone, Debug)]
+pub enum EnabledTools {
+    /// All tools enabled except those in the deny set.
+    DenyList(HashSet<String>),
+    /// Only tools in the allow set are enabled.
+    AllowList(HashSet<String>),
+}
+
+impl Default for EnabledTools {
+    fn default() -> Self {
+        EnabledTools::DenyList(HashSet::new())
+    }
+}
+
+impl EnabledTools {
+    /// Check if a tool is enabled.
+    pub fn is_enabled(&self, name: &str) -> bool {
+        match self {
+            EnabledTools::DenyList(deny) => !deny.contains(name),
+            EnabledTools::AllowList(allow) => allow.contains(name),
+        }
+    }
+}
 use rmcp::{
     ErrorData, ServerHandler,
     handler::server::tool::{schema_for_output, schema_for_type},
@@ -19,7 +47,7 @@ use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
 
 use super::{McpContext, McpTool};
 use crate::{
-    AgentPeer, ByteStreams, Component, DynComponent, HasPeer, JrLink,
+    ByteStreams, Component, DynComponent, JrLink,
     jsonrpc::responder::{ChainResponder, JrResponder, NullResponder},
     mcp_server::{
         McpServer, McpServerConnect,
@@ -57,6 +85,7 @@ struct McpServerData<Link: JrLink> {
     instructions: Option<String>,
     tool_models: Vec<rmcp::model::Tool>,
     tools: FxHashMap<String, RegisteredTool<Link>>,
+    enabled_tools: EnabledTools,
 }
 
 /// A registered tool with its metadata.
@@ -72,14 +101,12 @@ impl<Link: JrLink> Default for McpServerData<Link> {
             instructions: None,
             tool_models: Vec::new(),
             tools: FxHashMap::default(),
+            enabled_tools: EnabledTools::default(),
         }
     }
 }
 
-impl<Link: JrLink> McpServerBuilder<Link, NullResponder>
-where
-    Link: HasPeer<AgentPeer>,
-{
+impl<Link: JrLink> McpServerBuilder<Link, NullResponder> {
     pub(super) fn new(name: String) -> Self {
         Self {
             name: name,
@@ -90,10 +117,7 @@ where
     }
 }
 
-impl<Link: JrLink, Responder: JrResponder<Link>> McpServerBuilder<Link, Responder>
-where
-    Link: HasPeer<AgentPeer>,
-{
+impl<Link: JrLink, Responder: JrResponder<Link>> McpServerBuilder<Link, Responder> {
     /// Set the server instructions that are provided to the client.
     pub fn instructions(mut self, instructions: impl ToString) -> Self {
         self.data.instructions = Some(instructions.to_string());
@@ -113,6 +137,60 @@ where
             },
         );
         self
+    }
+
+    /// Disable all tools. After calling this, only tools explicitly enabled
+    /// with [`enable_tool`](Self::enable_tool) will be available.
+    pub fn disable_all_tools(mut self) -> Self {
+        self.data.enabled_tools = EnabledTools::AllowList(HashSet::new());
+        self
+    }
+
+    /// Enable all tools. After calling this, all tools will be available
+    /// except those explicitly disabled with [`disable_tool`](Self::disable_tool).
+    pub fn enable_all_tools(mut self) -> Self {
+        self.data.enabled_tools = EnabledTools::DenyList(HashSet::new());
+        self
+    }
+
+    /// Disable a specific tool by name.
+    ///
+    /// Returns an error if the tool is not registered.
+    pub fn disable_tool(mut self, name: &str) -> Result<Self, crate::Error> {
+        if !self.data.tools.contains_key(name) {
+            return Err(
+                crate::Error::invalid_request().with_data(format!("unknown tool: {}", name))
+            );
+        }
+        match &mut self.data.enabled_tools {
+            EnabledTools::DenyList(deny) => {
+                deny.insert(name.to_string());
+            }
+            EnabledTools::AllowList(allow) => {
+                allow.remove(name);
+            }
+        }
+        Ok(self)
+    }
+
+    /// Enable a specific tool by name.
+    ///
+    /// Returns an error if the tool is not registered.
+    pub fn enable_tool(mut self, name: &str) -> Result<Self, crate::Error> {
+        if !self.data.tools.contains_key(name) {
+            return Err(
+                crate::Error::invalid_request().with_data(format!("unknown tool: {}", name))
+            );
+        }
+        match &mut self.data.enabled_tools {
+            EnabledTools::DenyList(deny) => {
+                deny.remove(name);
+            }
+            EnabledTools::AllowList(allow) => {
+                allow.insert(name.to_string());
+            }
+        }
+        Ok(self)
     }
 
     /// Private fn: adds the tool but also adds a responder that will be
@@ -256,20 +334,14 @@ where
     }
 }
 
-struct McpServerBuilt<Link: JrLink>
-where
-    Link: HasPeer<AgentPeer>,
-{
+struct McpServerBuilt<Link: JrLink> {
     #[expect(dead_code)]
     role: Link,
     name: String,
     data: Arc<McpServerData<Link>>,
 }
 
-impl<'scope, Link: JrLink> McpServerConnect<Link> for McpServerBuilt<Link>
-where
-    Link: HasPeer<AgentPeer>,
-{
+impl<'scope, Link: JrLink> McpServerConnect<Link> for McpServerBuilt<Link> {
     fn name(&self) -> String {
         self.name.clone()
     }
@@ -283,18 +355,12 @@ where
 }
 
 /// An MCP server instance connected to the ACP framework.
-pub(crate) struct McpServerConnection<Link: JrLink>
-where
-    Link: HasPeer<AgentPeer>,
-{
+pub(crate) struct McpServerConnection<Link: JrLink> {
     data: Arc<McpServerData<Link>>,
     mcp_cx: McpContext<Link>,
 }
 
-impl<Link: JrLink> Component<crate::mcp::McpServerToClient> for McpServerConnection<Link>
-where
-    Link: HasPeer<AgentPeer>,
-{
+impl<Link: JrLink> Component<crate::mcp::McpServerToClient> for McpServerConnection<Link> {
     async fn serve(
         self,
         client: impl Component<crate::mcp::McpClientToServer>,
@@ -327,22 +393,27 @@ where
     }
 }
 
-impl<Link: JrLink> ServerHandler for McpServerConnection<Link>
-where
-    Link: HasPeer<AgentPeer>,
-{
+impl<Link: JrLink> ServerHandler for McpServerConnection<Link> {
     async fn call_tool(
         &self,
         request: rmcp::model::CallToolRequestParam,
         context: rmcp::service::RequestContext<rmcp::RoleServer>,
     ) -> Result<CallToolResult, ErrorData> {
-        // Lookup the tool definition, erroring if not found
+        // Lookup the tool definition, erroring if not found or disabled
         let Some(registered) = self.data.tools.get(&request.name[..]) else {
             return Err(rmcp::model::ErrorData::invalid_params(
                 format!("tool `{}` not found", request.name),
                 None,
             ));
         };
+
+        // Treat disabled tools as not found
+        if !self.data.enabled_tools.is_enabled(&request.name) {
+            return Err(rmcp::model::ErrorData::invalid_params(
+                format!("tool `{}` not found", request.name),
+                None,
+            ));
+        }
 
         // Convert input into JSON
         let serde_value = serde_json::to_value(request.arguments).expect("valid json");
@@ -382,10 +453,15 @@ where
         _request: Option<rmcp::model::PaginatedRequestParam>,
         _context: rmcp::service::RequestContext<rmcp::RoleServer>,
     ) -> Result<rmcp::model::ListToolsResult, ErrorData> {
-        // Just return all tools
-        Ok(ListToolsResult::with_all_items(
-            self.data.tool_models.clone(),
-        ))
+        // Return only enabled tools
+        let tools: Vec<_> = self
+            .data
+            .tool_models
+            .iter()
+            .filter(|t| self.data.enabled_tools.is_enabled(&t.name))
+            .cloned()
+            .collect();
+        Ok(ListToolsResult::with_all_items(tools))
     }
 
     fn get_info(&self) -> rmcp::model::ServerInfo {

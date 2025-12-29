@@ -29,6 +29,7 @@
 //!
 //! - [`global_mcp_server`] - Add tools that work across all sessions
 //! - [`per_session_mcp_server`] - Add tools with session-specific state
+//! - [`filtering_tools`] - Enable or disable tools dynamically
 //! - [`reusable_components`] - Package your proxy as a [`Component`] for composition
 //! - [`running_proxies_with_conductor`] - Run your proxy with an agent
 //!
@@ -710,6 +711,109 @@ pub mod per_session_mcp_server {
     //! [`on_proxy_session_start`]: sacp::SessionBuilder::on_proxy_session_start
     //! [`block_task`]: sacp::SessionBuilder::block_task
     //! [`start_session_proxy`]: sacp::SessionBuilder::start_session_proxy
+}
+
+pub mod filtering_tools {
+    //! Pattern: Filtering which tools are available.
+    //!
+    //! Use [`disable_tool`] and [`enable_tool`] to control which tools are
+    //! visible to clients. This is useful when:
+    //!
+    //! - Some tools should only be available in certain configurations
+    //! - You want to conditionally expose tools based on runtime settings
+    //! - You need to restrict access to sensitive tools
+    //!
+    //! # Disabling specific tools (deny-list)
+    //!
+    //! By default, all registered tools are enabled. Use [`disable_tool`] to
+    //! hide specific tools:
+    //!
+    //! ```
+    //! use sacp::mcp_server::McpServer;
+    //! use sacp::ProxyToConductor;
+    //! use schemars::JsonSchema;
+    //! use serde::Deserialize;
+    //!
+    //! #[derive(Debug, Deserialize, JsonSchema)]
+    //! struct Params {}
+    //!
+    //! fn build_server(enable_admin: bool) -> Result<McpServer<ProxyToConductor, impl sacp::JrResponder<ProxyToConductor>>, sacp::Error> {
+    //!     let mut builder = McpServer::builder("my-server")
+    //!         .tool_fn("echo", "Echo a message",
+    //!             async |_p: Params, _cx| Ok("echoed"),
+    //!             sacp::tool_fn!())
+    //!         .tool_fn("admin", "Admin-only tool",
+    //!             async |_p: Params, _cx| Ok("admin action"),
+    //!             sacp::tool_fn!());
+    //!
+    //!     // Conditionally disable the admin tool
+    //!     if !enable_admin {
+    //!         builder = builder.disable_tool("admin")?;
+    //!     }
+    //!
+    //!     Ok(builder.build())
+    //! }
+    //! ```
+    //!
+    //! Disabled tools:
+    //! - Don't appear in `list_tools` responses
+    //! - Return "tool not found" errors if called directly
+    //!
+    //! # Enabling only specific tools (allow-list)
+    //!
+    //! Use [`disable_all_tools`] followed by [`enable_tool`] to create an
+    //! allow-list where only explicitly enabled tools are available:
+    //!
+    //! ```
+    //! use sacp::mcp_server::McpServer;
+    //! use sacp::ProxyToConductor;
+    //! use schemars::JsonSchema;
+    //! use serde::Deserialize;
+    //!
+    //! #[derive(Debug, Deserialize, JsonSchema)]
+    //! struct Params {}
+    //!
+    //! fn build_restricted_server() -> Result<McpServer<ProxyToConductor, impl sacp::JrResponder<ProxyToConductor>>, sacp::Error> {
+    //!     McpServer::builder("restricted-server")
+    //!         .tool_fn("safe", "Safe operation",
+    //!             async |_p: Params, _cx| Ok("safe"),
+    //!             sacp::tool_fn!())
+    //!         .tool_fn("dangerous", "Dangerous operation",
+    //!             async |_p: Params, _cx| Ok("danger!"),
+    //!             sacp::tool_fn!())
+    //!         .tool_fn("experimental", "Experimental feature",
+    //!             async |_p: Params, _cx| Ok("experimental"),
+    //!             sacp::tool_fn!())
+    //!         // Start with all tools disabled
+    //!         .disable_all_tools()
+    //!         // Only enable the safe tool
+    //!         .enable_tool("safe")
+    //!         .map(|b| b.build())
+    //! }
+    //! ```
+    //!
+    //! # Error handling
+    //!
+    //! Both [`enable_tool`] and [`disable_tool`] return `Result` and will error
+    //! if the tool name doesn't match any registered tool. This helps catch typos:
+    //!
+    //! ```
+    //! use sacp::mcp_server::McpServer;
+    //! use sacp::ProxyToConductor;
+    //!
+    //! // This will error because "ech" is not a registered tool
+    //! let result = McpServer::<ProxyToConductor, _>::builder("server")
+    //!     .disable_tool("ech");  // Typo! Should be "echo"
+    //!
+    //! assert!(result.is_err());
+    //! ```
+    //!
+    //! Calling enable/disable on an already enabled/disabled tool is not an error -
+    //! the operations are idempotent.
+    //!
+    //! [`disable_tool`]: sacp::mcp_server::McpServerBuilder::disable_tool
+    //! [`enable_tool`]: sacp::mcp_server::McpServerBuilder::enable_tool
+    //! [`disable_all_tools`]: sacp::mcp_server::McpServerBuilder::disable_all_tools
 }
 
 pub mod running_proxies_with_conductor {

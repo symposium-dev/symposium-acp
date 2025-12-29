@@ -2,7 +2,7 @@ use futures::channel::mpsc;
 use futures::{SinkExt, StreamExt};
 use fxhash::FxHashMap;
 
-use crate::mcp::{McpClientToServer, McpServerEnd};
+use crate::mcp::{McpClientToServer, McpServerPeer};
 use crate::mcp_server::{McpContext, McpServerConnect};
 use crate::schema::{
     McpConnectRequest, McpConnectResponse, McpDisconnectNotification, McpOverAcpMessage,
@@ -105,7 +105,7 @@ where
                     // Messages we pull off this channel were sent from the agent.
                     // Forward them back to the MCP server.
                     while let Some(msg) = mcp_server_rx.next().await {
-                        mcp_cx.send_proxied_message_to(McpServerEnd, msg)?;
+                        mcp_cx.send_proxied_message_to(McpServerPeer, msg)?;
                     }
                     Ok(())
                 })
