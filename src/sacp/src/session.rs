@@ -189,48 +189,70 @@ where
     ///
     /// # Example
     ///
-    /// ```ignore
-    /// cx.build_session(cwd)
+    /// ```
+    /// # use sacp::{ClientToAgent, AgentToClient, Component};
+    /// # use sacp::mcp_server::McpServer;
+    /// # async fn example(transport: impl Component<AgentToClient>) -> Result<(), sacp::Error> {
+    /// # ClientToAgent::builder().run_until(transport, async |cx| {
+    /// # let mcp = McpServer::<ClientToAgent, _>::builder("tools").build();
+    /// cx.build_session_cwd()?
     ///     .with_mcp_server(mcp)?
-    ///     .on_session_start(async |session| {
+    ///     .on_session_start(async |mut session| {
     ///         // Do something with the session
     ///         session.send_prompt("Hello")?;
     ///         let response = session.read_to_string().await?;
     ///         Ok(())
     ///     })?;
     /// // Returns immediately, session runs in background
+    /// # Ok(())
+    /// # }).await?;
+    /// # Ok(())
+    /// # }
     /// ```
+    ///
+    /// # Ordering
+    ///
+    /// This callback blocks the dispatch loop until the session starts and your
+    /// callback completes. See the [`ordering`](crate::concepts::ordering) module for details.
     pub fn on_session_start<F, Fut>(self, op: F) -> Result<(), crate::Error>
     where
         Responder: 'static,
         F: FnOnce(ActiveSession<'static, Link>) -> Fut + Send + 'static,
         Fut: Future<Output = Result<(), crate::Error>> + Send,
     {
-        let connection = self.connection.clone();
-        connection.spawn(async move {
-            let Self {
-                connection,
-                request,
-                dynamic_handler_registrations,
-                responder,
-                block_state: _,
-            } = self;
+        let Self {
+            connection,
+            request,
+            dynamic_handler_registrations,
+            responder,
+            block_state: _,
+        } = self;
 
-            let response = connection
-                .send_request_to(AgentPeer, request)
-                .block_task()
-                .await?;
+        connection
+            .send_request_to(AgentPeer, request)
+            .on_receiving_result({
+                let connection = connection.clone();
+                async move |result| {
+                    let response = result?;
 
-            connection.spawn(responder.run(connection.clone()))?;
+                    connection.spawn(responder.run(connection.clone()))?;
 
-            let active_session =
-                connection.attach_session(response, dynamic_handler_registrations)?;
+                    let active_session =
+                        connection.attach_session(response, dynamic_handler_registrations)?;
 
-            op(active_session).await
-        })
+                    op(active_session).await
+                }
+            })
     }
 
-    /// Spawn a session proxy and run a closure with the session ID.
+    /// Spawn a proxy session and run a closure with the session ID.
+    ///
+    /// A **proxy session** starts the session with the agent and then automatically
+    /// proxies all session updates (prompts, tool calls, etc.) from the agent back
+    /// to the client. You don't need to handle any messages yourself - the proxy
+    /// takes care of forwarding everything. This is useful when you want to inject
+    /// and/or filter prompts coming from the client but otherwise not be involved
+    /// in the session.
     ///
     /// Unlike [`start_session_proxy`](Self::start_session_proxy), this method returns
     /// immediately without blocking the current task. The session handshake, client
@@ -241,15 +263,32 @@ where
     ///
     /// # Example
     ///
-    /// ```ignore
-    /// cx.build_session_from(request)
-    ///     .with_mcp_server(mcp)?
-    ///     .on_proxy_session_start(request_cx, async |session_id| {
-    ///         tracing::info!(%session_id, "Session started");
-    ///         Ok(())
-    ///     })?;
-    /// // Returns immediately, session runs in background
     /// ```
+    /// # use sacp::{ProxyToConductor, ClientPeer, Component};
+    /// # use sacp::link::ConductorToProxy;
+    /// # use sacp::schema::NewSessionRequest;
+    /// # use sacp::mcp_server::McpServer;
+    /// # async fn example(transport: impl Component<ConductorToProxy>) -> Result<(), sacp::Error> {
+    /// ProxyToConductor::builder()
+    ///     .on_receive_request_from(ClientPeer, async |request: NewSessionRequest, request_cx, cx| {
+    ///         let mcp = McpServer::<ProxyToConductor, _>::builder("tools").build();
+    ///         cx.build_session_from(request)
+    ///             .with_mcp_server(mcp)?
+    ///             .on_proxy_session_start(request_cx, async |session_id| {
+    ///                 // Session started
+    ///                 Ok(())
+    ///             })
+    ///     }, sacp::on_receive_request!())
+    ///     .serve(transport)
+    ///     .await?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    ///
+    /// # Ordering
+    ///
+    /// This callback blocks the dispatch loop until the session starts and your
+    /// callback completes. See the [`ordering`](crate::concepts::ordering) module for details.
     pub fn on_proxy_session_start<F, Fut>(
         self,
         request_cx: JrRequestCx<NewSessionResponse>,
@@ -261,40 +300,41 @@ where
         Link: HasPeer<ClientPeer>,
         Responder: 'static,
     {
-        let connection = self.connection.clone();
-        connection.spawn(async move {
-            let Self {
-                connection,
-                request,
-                dynamic_handler_registrations,
-                responder,
-                block_state: _,
-            } = self;
+        let Self {
+            connection,
+            request,
+            dynamic_handler_registrations,
+            responder,
+            block_state: _,
+        } = self;
 
-            // Spawn off the connection and dynamic handlers to run indefinitely
-            connection.spawn(responder.run(connection.clone()))?;
-            dynamic_handler_registrations
-                .into_iter()
-                .for_each(|handler| handler.run_indefinitely());
+        // Spawn off the responder and dynamic handlers to run indefinitely
+        connection.spawn(responder.run(connection.clone()))?;
+        dynamic_handler_registrations
+            .into_iter()
+            .for_each(|handler| handler.run_indefinitely());
 
-            // Send the "new session" request to the agent
-            let response = connection
-                .send_request_to(AgentPeer, request)
-                .block_task()
-                .await?;
+        // Send the "new session" request to the agent
+        connection
+            .send_request_to(AgentPeer, request)
+            .on_receiving_result({
+                let connection = connection.clone();
+                async move |result| {
+                    let response = result?;
 
-            // Extract the session-id from the response and forward
-            // the restback to the client
-            let session_id = response.session_id.clone();
-            request_cx.respond(response)?;
+                    // Extract the session-id from the response and forward
+                    // the response back to the client
+                    let session_id = response.session_id.clone();
+                    request_cx.respond(response)?;
 
-            // Finally, install a dynamic handler to proxy messages from this session
-            connection
-                .add_dynamic_handler(ProxySessionMessages::new(session_id.clone()))?
-                .run_indefinitely();
+                    // Install a dynamic handler to proxy messages from this session
+                    connection
+                        .add_dynamic_handler(ProxySessionMessages::new(session_id.clone()))?
+                        .run_indefinitely();
 
-            op(session_id).await
-        })
+                    op(session_id).await
+                }
+            })
     }
 }
 
@@ -309,7 +349,7 @@ where
     /// [`start_session`](Self::start_session) which block the current task.
     ///
     /// This should not be used from inside a message handler like
-    /// [`JrConnectionBuilder::on_receive_request`] or [`JrMessageHandler`]
+    /// [`JrConnectionBuilder::on_receive_request`](`crate::JrConnectionBuilder::on_receive_request`) or [`JrMessageHandler`]
     /// implementations.
     pub fn block_task(self) -> SessionBuilder<Link, Responder, Blocking> {
         SessionBuilder {
@@ -405,12 +445,17 @@ where
             .map_err(|_| crate::Error::internal_error())
     }
 
-    /// Start a session and proxy all messages between client and agent.
+    /// Start a proxy session that forwards all messages between client and agent.
+    ///
+    /// A **proxy session** starts the session with the agent and then automatically
+    /// proxies all session updates (prompts, tool calls, etc.) from the agent back
+    /// to the client. You don't need to handle any messages yourself - the proxy
+    /// takes care of forwarding everything. This is useful when you want to inject
+    /// and/or filter prompts coming from the client but otherwise not be involved
+    /// in the session.
     ///
     /// This is a convenience method that combines [`start_session`](Self::start_session),
     /// responding to the client, and [`ActiveSession::proxy_remaining_messages`].
-    /// Use this when you want to inject MCP servers into a session but don't need
-    /// to actively interact with it.
     ///
     /// For more control (e.g., to send some messages before proxying), use
     /// [`start_session`](Self::start_session) instead and call

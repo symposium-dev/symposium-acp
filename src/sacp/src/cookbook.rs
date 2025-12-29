@@ -6,6 +6,9 @@
 //! - **Proxies** - Sit between client and agent to add capabilities (like MCP tools)
 //! - **Agents** - Respond to prompts with AI-powered responses
 //!
+//! See the [concepts module][`crate::concepts`] for detailed explanations of
+//! the concepts behind the API.
+//!
 //! # Building Clients
 //!
 //! A client connects to an agent, sends requests, and handles responses. Use
@@ -39,74 +42,17 @@
 //! - [`reusable_components`] - Package your agent as a [`Component`]
 //! - [`custom_message_handlers`] - Fine-grained control over message routing
 //!
-//! # Roles and Peers
-//!
-//! ACP connections are typed by their *link*, which captures both "who I am"
-//! and "who I'm talking to". Links implement [`JrLink`] and determine what
-//! operations are valid on a connection.
-//!
-//! ## Peers
-//!
-//! *Peers* ([`JrPeer`]) are logical destinations for messages:
-//!
-//! - [`ClientPeer`] - The client (IDE, CLI, etc.)
-//! - [`AgentPeer`] - The agent (AI-powered component)
-//!
-//! The crate also defines [`ConductorPeer`] and [`ProxyPeer`], but these are
-//! used internally to manage proxy orchestration; you shouldn't need them
-//! during typical usage.
-//!
-//! Most links have a single implicit peer, but proxies can send to
-//! multiple peers. Use [`send_request_to`] and [`send_notification_to`]
-//! to specify the destination explicitly.
-//!
-//! ## Link Types
-//!
-//! The built-in link types are:
-//!
-//! | Link | Description | Can send to |
-//! |------|-------------|-------------|
-//! | [`ClientToAgent`] | Client's connection to an agent | `AgentPeer` |
-//! | [`AgentToClient`] | Agent's connection to a client | `ClientPeer` |
-//! | [`ProxyToConductor`] | Proxy's connection to the conductor | `ClientPeer`, `AgentPeer` |
-//! | [`ConductorToClient`] | Conductor's connection to a client | `ClientPeer`, `AgentPeer` |
-//! | [`ConductorToProxy`] | Conductor's connection to a proxy | `AgentPeer` |
-//! | [`ConductorToAgent`] | Conductor's connection to the final agent | `AgentPeer` |
-//!
-//! ## Proxies and Multiple Peers
-//!
-//! A proxy sits between client and agent, so it needs to send messages in
-//! both directions. [`ProxyToConductor`] implements `HasPeer<ClientPeer>` and
-//! `HasPeer<AgentPeer>`, allowing it to forward messages appropriately:
-//!
-//! ```ignore
-//! // Forward a request toward the agent
-//! cx.send_request_to(AgentPeer, request).forward_to_request_cx(request_cx)?;
-//!
-//! // Send a notification toward the client
-//! cx.send_notification_to(ClientPeer, notification)?;
-//! ```
-//!
-//! When sending to `AgentPeer` from a proxy, messages are automatically wrapped
-//! in [`SuccessorMessage`] envelopes. When receiving from `AgentPeer`, they're
-//! automatically unwrapped.
-//!
-//! [`JrLink`]: crate::link::JrLink
-//! [`JrPeer`]: crate::peer::JrPeer
-//! [`ClientPeer`]: crate::ClientPeer
-//! [`AgentPeer`]: crate::AgentPeer
-//! [`ConductorPeer`]: crate::ConductorPeer
-//! [`ProxyPeer`]: crate::peer::ProxyPeer
-//! [`ClientToAgent`]: crate::ClientToAgent
-//! [`AgentToClient`]: crate::AgentToClient
-//! [`ProxyToConductor`]: crate::ProxyToConductor
-//! [`ConductorToClient`]: crate::link::ConductorToClient
-//! [`ConductorToProxy`]: crate::link::ConductorToProxy
-//! [`ConductorToAgent`]: crate::link::ConductorToAgent
-//! [`SuccessorMessage`]: crate::schema::SuccessorMessage
-//! [`send_request_to`]: crate::JrConnectionCx::send_request_to
-//! [`send_notification_to`]: crate::JrConnectionCx::send_notification_to
-//! [`Component`]: crate::Component
+//! [`ClientToAgent`]: `crate::ClientToAgent`
+//! [`AgentToClient`]: `crate::AgentToClient`
+//! [`ProxyToConductor`]: `crate::ProxyToConductor`
+//! [`Component`]: `crate::Component`
+//! [`connecting_as_client`]: `crate::cookbook::connecting_as_client`
+//! [`global_mcp_server`]: `crate::cookbook::global_mcp_server`
+//! [`per_session_mcp_server`]: `crate::cookbook::per_session_mcp_server`
+//! [`reusable_components`]: `crate::cookbook::reusable_components`
+//! [`running_proxies_with_conductor`]: `crate::cookbook::running_proxies_with_conductor`
+//! [`building_an_agent`]: `crate::cookbook::building_an_agent`
+//! [`custom_message_handlers`]: `crate::cookbook::custom_message_handlers`
 
 pub mod connecting_as_client {
     //! Pattern: Connecting as a client.

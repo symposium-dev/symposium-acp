@@ -57,80 +57,38 @@
 //!
 //! ## Cookbook
 //!
-//! The [`cookbook`] module contains in-depth guides for common tasks:
+//! The [`cookbook`] module contains practical guides and examples:
 //!
-//! ### Building Clients
-//! - [Connecting as a client](cookbook::connecting_as_client) - Send requests and handle responses
-//! - [Handling notifications](cookbook::connecting_as_client) - React to streaming updates
+//! - [Connecting as a client](cookbook::connecting_as_client)
+//! - [Global MCP server](cookbook::global_mcp_server)
+//! - [Per-session MCP server](cookbook::per_session_mcp_server)
+//! - [...and more!][`cookbook`]
 //!
-//! ### Building Proxies
-//! - [Global MCP server](cookbook::global_mcp_server) - Add tools that work across all sessions
-//! - [Per-session MCP server](cookbook::per_session_mcp_server) - Add tools with session-specific state
-//! - [Reusable components](cookbook::reusable_components) - Package proxies for composition
+//! ## Core Concepts
 //!
-//! ### Building Agents
-//! - [Reusable components](cookbook::reusable_components) - Structure your agent as a [`Component`]
-//! - [Custom message handlers](cookbook::custom_message_handlers) - Fine-grained control over message routing
-//!
-//! ## Understanding Links and Peers
-//!
-//! sacp uses Rust's type system to prevent mistakes at compile time. Every connection
-//! has a *link type* that determines what messages you can send:
-//!
-//! | You are a... | Use this link | You can send to |
-//! |--------------|---------------|-----------------|
-//! | Client | [`ClientToAgent`] | The agent |
-//! | Agent | [`AgentToClient`] | The client |
-//! | Proxy | [`ProxyToConductor`] | Both client and agent |
-//!
-//! You don't need to understand the full link/peer model to get started—just pick
-//! the link that matches what you're building. See [Roles and peers](cookbook#roles-and-peers)
-//! in the cookbook for the full picture.
-//!
-//! ## Working with Request Contexts
-//!
-//! When handling incoming requests, you receive a [`JrRequestCx`] that lets you:
-//!
-//! - **Respond:** `request_cx.respond(response)` sends your response
-//! - **Send requests:** `cx.send_request(request)` initiates a new request to the other side
-//! - **Send notifications:** `cx.send_notification(notification)` sends fire-and-forget messages
-//! - **Spawn tasks:** `cx.spawn(future)` runs background work without blocking the message loop
-//!
-//! For contexts that outlive a single request, use `cx.connection_cx()` to get a
-//! [`JrConnectionCx`] you can store and use later.
-//!
-//! ## Examples
-//!
-//! - [`simple_agent.rs`][simple] - Minimal agent implementation
-//! - [`yolo_one_shot_client.rs`][yolo] - Complete client that spawns an agent and sends a prompt
-//! - [`elizacp`] - Full working agent with session management
-//! - [`sacp-conductor`] - Orchestrates proxy chains with a final agent
-//!
-//! [simple]: https://github.com/symposium-dev/symposium-acp/blob/main/src/sacp/examples/simple_agent.rs
-//! [yolo]: https://github.com/symposium-dev/symposium-acp/blob/main/src/sacp/examples/yolo_one_shot_client.rs
-//! [`elizacp`]: https://crates.io/crates/elizacp
-//! [`sacp-conductor`]: https://crates.io/crates/sacp-conductor
+//! The [`concepts`] module provides detailed explanations of how sacp works,
+//! including connections, sessions, callbacks, ordering guarantees, and more.
 //!
 //! ## Related Crates
 //!
 //! - [`sacp-tokio`] - Tokio utilities for spawning agent processes
-//! - [`sacp-proxy`] - Framework for building proxy components
 //! - [`sacp-conductor`] - Binary for running proxy chains
 //!
 //! [`sacp-tokio`]: https://crates.io/crates/sacp-tokio
-//! [`sacp-proxy`]: https://crates.io/crates/sacp-proxy
+//! [`sacp-conductor`]: https://crates.io/crates/sacp-conductor
 
 /// Capability management for the `_meta.symposium` object
 mod capabilities;
 /// Component abstraction for agents and proxies
 pub mod component;
+/// Core concepts for understanding and using sacp
+pub mod concepts;
 /// Cookbook of common patterns for building ACP components
 pub mod cookbook;
 /// JSON-RPC handler types for building custom message handlers
 pub mod handler;
 /// JSON-RPC connection and handler infrastructure
 mod jsonrpc;
-/// Proxy support for building ACP proxy components
 /// Link types for JSON-RPC connections
 pub mod link;
 /// MCP declarations (minimal)
@@ -189,7 +147,7 @@ mod session;
 pub use session::*;
 
 /// This is a hack that must be given as the final argument of
-/// [`McpServerBuilder::tool_fn`] when defining tools.
+/// [`McpServerBuilder::tool_fn`](`crate::mcp_server::McpServerBuilder::tool_fn`) when defining tools.
 /// Look away, lest ye be blinded by its vileness!
 ///
 /// Fine, if you MUST know, it's a horrific workaround for not having
@@ -204,7 +162,7 @@ macro_rules! tool_fn_mut {
 }
 
 /// This is a hack that must be given as the final argument of
-/// [`McpServerBuilder::tool_fn`] when defining stateless concurrent tools.
+/// [`McpServerBuilder::tool_fn`](`crate::mcp_server::McpServerBuilder::tool_fn`) when defining stateless concurrent tools.
 /// See [`tool_fn_mut!`] for the gory details.
 #[macro_export]
 macro_rules! tool_fn {

@@ -20,7 +20,6 @@ mod dynamic_handler;
 pub(crate) mod handlers;
 mod incoming_actor;
 mod outgoing_actor;
-mod reply_actor;
 pub(crate) mod responder;
 mod task_actor;
 mod transport_actor;
@@ -106,17 +105,29 @@ use crate::{AgentPeer, ClientPeer, Component};
 ///
 /// Most users register handlers using the builder methods on [`JrConnectionBuilder`]:
 ///
-/// ```ignore
-/// Link::builder()
+/// ```
+/// # use sacp::{AgentToClient, ClientToAgent, Component};
+/// # use sacp::schema::{InitializeRequest, InitializeResponse, AgentCapabilities};
+/// # use sacp_test::StatusUpdate;
+/// # async fn example(transport: impl Component<ClientToAgent>) -> Result<(), sacp::Error> {
+/// AgentToClient::builder()
 ///     .on_receive_request(async |req: InitializeRequest, request_cx, cx| {
-///         request_cx.respond(InitializeResponse::make())
+///         request_cx.respond(InitializeResponse {
+///             protocol_version: req.protocol_version,
+///             agent_capabilities: AgentCapabilities::default(),
+///             auth_methods: vec![],
+///             agent_info: None,
+///             meta: None,
+///         })
 ///     }, sacp::on_receive_request!())
-///     .on_receive_notification(async |notif: SessionNotification, cx| {
+///     .on_receive_notification(async |notif: StatusUpdate, cx| {
 ///         // Process notification
 ///         Ok(())
 ///     }, sacp::on_receive_notification!())
 ///     .serve(transport)
 ///     .await?;
+/// # Ok(())
+/// # }
 /// ```
 ///
 /// The type parameter on the closure determines which messages are dispatched to it.
@@ -158,12 +169,23 @@ use crate::{AgentPeer, ClientPeer, Component};
 /// no other messages can be processed. For expensive operations, use [`JrConnectionCx::spawn`]
 /// to run work concurrently:
 ///
-/// ```ignore
-/// cx.spawn(async move {
-///     let result = expensive_operation().await?;
-///     connection_cx.send_notification(result)?;
-///     Ok(())
+/// ```
+/// # use sacp::{ClientToAgent, AgentToClient, Component};
+/// # use sacp_test::{expensive_operation, ProcessComplete};
+/// # async fn example(transport: impl Component<AgentToClient>) -> Result<(), sacp::Error> {
+/// # ClientToAgent::builder().run_until(transport, async |cx| {
+/// cx.spawn({
+///     let connection_cx = cx.clone();
+///     async move {
+///         let result = expensive_operation("data").await?;
+///         connection_cx.send_notification(ProcessComplete { result })?;
+///         Ok(())
+///     }
 /// })?;
+/// # Ok(())
+/// # }).await?;
+/// # Ok(())
+/// # }
 /// ```
 #[allow(async_fn_in_trait)]
 /// A handler for incoming JSON-RPC messages.
@@ -659,6 +681,12 @@ impl<H: JrMessageHandler, R: JrResponder<H::Link>> JrConnectionBuilder<H, R> {
     /// For most use cases, prefer [`on_receive_request`](Self::on_receive_request) or
     /// [`on_receive_notification`](Self::on_receive_notification) which provide cleaner APIs
     /// for handling requests or notifications separately.
+    ///
+    /// # Ordering
+    ///
+    /// This callback runs inside the dispatch loop and blocks further message processing
+    /// until it completes. See the [`ordering`](crate::concepts::ordering) module for details on
+    /// ordering guarantees and how to avoid deadlocks.
     pub fn on_receive_message<Req, Notif, F, T, ToFut>(
         self,
         op: F,
@@ -724,6 +752,12 @@ impl<H: JrMessageHandler, R: JrResponder<H::Link>> JrConnectionBuilder<H, R> {
     ///
     /// `Req` can be either a single request type or an enum of multiple request types.
     /// See the [type-driven dispatch](Self#type-driven-message-dispatch) section for details.
+    ///
+    /// # Ordering
+    ///
+    /// This callback runs inside the dispatch loop and blocks further message processing
+    /// until it completes. See the [`ordering`](crate::concepts::ordering) module for details on
+    /// ordering guarantees and how to avoid deadlocks.
     pub fn on_receive_request<Req: JrRequest, F, T, ToFut>(
         self,
         op: F,
@@ -791,6 +825,12 @@ impl<H: JrMessageHandler, R: JrResponder<H::Link>> JrConnectionBuilder<H, R> {
     ///
     /// `Notif` can be either a single notification type or an enum of multiple notification types.
     /// See the [type-driven dispatch](Self#type-driven-message-dispatch) section for details.
+    ///
+    /// # Ordering
+    ///
+    /// This callback runs inside the dispatch loop and blocks further message processing
+    /// until it completes. See the [`ordering`](crate::concepts::ordering) module for details on
+    /// ordering guarantees and how to avoid deadlocks.
     pub fn on_receive_notification<Notif, F, T, ToFut>(
         self,
         op: F,
@@ -826,6 +866,12 @@ impl<H: JrMessageHandler, R: JrResponder<H::Link>> JrConnectionBuilder<H, R> {
     ///
     /// For the common case of receiving from the default counterpart, use
     /// [`on_receive_message`](Self::on_receive_message) instead.
+    ///
+    /// # Ordering
+    ///
+    /// This callback runs inside the dispatch loop and blocks further message processing
+    /// until it completes. See the [`ordering`](crate::concepts::ordering) module for details on
+    /// ordering guarantees and how to avoid deadlocks.
     pub fn on_receive_message_from<
         Req: JrRequest,
         Notif: JrNotification,
@@ -882,6 +928,12 @@ impl<H: JrMessageHandler, R: JrResponder<H::Link>> JrConnectionBuilder<H, R> {
     ///     request_cx.respond(InitializeResponse::make())
     /// })
     /// ```
+    ///
+    /// # Ordering
+    ///
+    /// This callback runs inside the dispatch loop and blocks further message processing
+    /// until it completes. See the [`ordering`](crate::concepts::ordering) module for details on
+    /// ordering guarantees and how to avoid deadlocks.
     pub fn on_receive_request_from<Req: JrRequest, Peer: JrPeer, F, T, ToFut>(
         self,
         peer: Peer,
@@ -923,6 +975,12 @@ impl<H: JrMessageHandler, R: JrResponder<H::Link>> JrConnectionBuilder<H, R> {
     ///
     /// For the common case of receiving from the default counterpart, use
     /// [`on_receive_notification`](Self::on_receive_notification) instead.
+    ///
+    /// # Ordering
+    ///
+    /// This callback runs inside the dispatch loop and blocks further message processing
+    /// until it completes. See the [`ordering`](crate::concepts::ordering) module for details on
+    /// ordering guarantees and how to avoid deadlocks.
     pub fn on_receive_notification_from<Notif: JrNotification, Peer: JrPeer, F, T, ToFut>(
         self,
         peer: Peer,
@@ -1036,7 +1094,7 @@ impl<H: JrMessageHandler, R: JrResponder<H::Link>> JrConnectionBuilder<H, R> {
     ///
     /// # Borrow Checker Considerations
     ///
-    /// You may find that [`MatchMessage`] is a better choice than this method
+    /// You may find that [`MatchMessage`](`crate::util::MatchMessage`) is a better choice than this method
     /// for implementing custom handlers. It offers a very similar API to
     /// [`JrConnectionBuilder`] but is structured to apply each test one at a time
     /// (sequentially) instead of setting them all up at once. This sequential approach
@@ -1071,7 +1129,7 @@ impl<H: JrMessageHandler, R: JrResponder<H::Link>> JrConnectionBuilder<H, R> {
     /// ```
     ///
     /// You can work around this by using `apply()` to process messages one at a time,
-    /// or use [`MatchMessage`] which provides a similar API but applies handlers sequentially:
+    /// or use [`MatchMessage`](`crate::util::MatchMessage`) which provides a similar API but applies handlers sequentially:
     ///
     /// ```ignore
     /// use sacp::{MessageCx, Handled};
@@ -1105,7 +1163,7 @@ impl<H: JrMessageHandler, R: JrResponder<H::Link>> JrConnectionBuilder<H, R> {
     /// Convenience method to connect to a transport and serve.
     ///
     /// This is equivalent to:
-    /// ```ignore
+    /// ```text
     /// handler_chain.connect_to(transport)?.serve().await
     /// ```
     pub async fn serve(
@@ -1118,7 +1176,7 @@ impl<H: JrMessageHandler, R: JrResponder<H::Link>> JrConnectionBuilder<H, R> {
     /// Convenience method to connect to a transport and run until a closure completes.
     ///
     /// This is equivalent to:
-    /// ```ignore
+    /// ```text
     /// handler_chain.connect_to(transport)?.run_until(main_fn).await
     /// ```
     pub async fn run_until(
@@ -1287,10 +1345,9 @@ impl<H: JrMessageHandler, R: JrResponder<H::Link>> JrConnection<H, R> {
                         &cx,
                         transport_incoming_rx,
                         dynamic_handler_rx,
-                        reply_tx.clone(),
+                        reply_rx,
                         handler,
                     ),
-                    reply_actor::reply_actor(reply_rx),
                     task_actor::task_actor(new_task_rx, &cx),
                     responder.run(cx.clone()),
                 )?;
@@ -1303,16 +1360,49 @@ impl<H: JrMessageHandler, R: JrResponder<H::Link>> JrConnection<H, R> {
     }
 }
 
-/// Message sent to the reply management actor
-enum ReplyMessage {
-    /// Wait for a response to the given id and then send it to the given receiver
-    Subscribe(
-        jsonrpcmsg::Id,
-        oneshot::Sender<Result<serde_json::Value, crate::Error>>,
-    ),
+/// The payload sent through the response oneshot channel.
+///
+/// Includes the response value and an optional ack channel for dispatch loop
+/// synchronization.
+pub(crate) struct ResponsePayload {
+    /// The response result - either the JSON value or an error.
+    pub(crate) result: Result<serde_json::Value, crate::Error>,
 
-    /// Dispatch a response to the given id and value
-    Dispatch(jsonrpcmsg::Id, Result<serde_json::Value, crate::Error>),
+    /// Optional acknowledgment channel for dispatch loop synchronization.
+    ///
+    /// When present, the receiver must send on this channel to signal that
+    /// response processing is complete, allowing the dispatch loop to continue
+    /// to the next message.
+    ///
+    /// This is `None` for error paths where the response is sent directly
+    /// (e.g., when the outgoing channel is broken) rather than through the
+    /// normal dispatch loop flow.
+    pub(crate) ack_tx: Option<oneshot::Sender<()>>,
+}
+
+impl std::fmt::Debug for ResponsePayload {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ResponsePayload")
+            .field("result", &self.result)
+            .field("ack_tx", &self.ack_tx.as_ref().map(|_| "..."))
+            .finish()
+    }
+}
+
+/// Message sent to the incoming actor for reply subscription management.
+enum ReplyMessage {
+    /// Subscribe to receive a response for the given request id.
+    /// When a response with this id arrives, it will be sent through the oneshot
+    /// along with an ack channel that must be signaled when processing is complete.
+    Subscribe(jsonrpcmsg::Id, oneshot::Sender<ResponsePayload>),
+}
+
+impl std::fmt::Debug for ReplyMessage {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ReplyMessage::Subscribe(id, _) => f.debug_tuple("Subscribe").field(id).finish(),
+        }
+    }
 }
 
 /// Messages send to be serialized over the transport.
@@ -1326,8 +1416,8 @@ enum OutgoingMessage {
         /// parameters for the request
         params: Option<jsonrpcmsg::Params>,
 
-        /// where to send the response when it arrives
-        response_tx: oneshot::Sender<Result<serde_json::Value, crate::Error>>,
+        /// where to send the response when it arrives (includes ack channel)
+        response_tx: oneshot::Sender<ResponsePayload>,
     },
 
     /// Send a notification to the server.
@@ -1671,9 +1761,12 @@ impl<Link: JrLink> JrConnectionCx<Link> {
                         };
 
                         response_tx
-                            .send(Err(crate::util::internal_error(format!(
-                                "failed to send outgoing request `{method}"
-                            ))))
+                            .send(ResponsePayload {
+                                result: Err(crate::util::internal_error(format!(
+                                    "failed to send outgoing request `{method}"
+                                ))),
+                                ack_tx: None,
+                            })
                             .unwrap();
                     }
                 }
@@ -1681,9 +1774,12 @@ impl<Link: JrLink> JrConnectionCx<Link> {
 
             Err(err) => {
                 response_tx
-                    .send(Err(crate::util::internal_error(format!(
-                        "failed to create untyped request for `{method}`: {err}"
-                    ))))
+                    .send(ResponsePayload {
+                        result: Err(crate::util::internal_error(format!(
+                            "failed to create untyped request for `{method}`: {err}"
+                        ))),
+                        ack_tx: None,
+                    })
                     .unwrap();
             }
         }
@@ -1764,7 +1860,7 @@ impl<Link: JrLink> JrConnectionCx<Link> {
     ///
     /// If they decline to handle the message, then the message is passed to the regular registered handlers.
     ///
-    /// The handler will stay registered until the [`DynamicHandlerRegistration`] is dropped.
+    /// The handler will stay registered until the returned registration guard is dropped.
     pub fn add_dynamic_handler(
         &self,
         handler: impl JrMessageHandler<Link = Link> + 'static,
@@ -1820,11 +1916,10 @@ impl<Link: JrLink> Drop for DynamicHandlerRegistration<Link> {
 ///
 /// 1. **Respond to the request** - Use [`respond`](Self::respond) or
 ///    [`respond_with_result`](Self::respond_with_result) to send the response
-/// 2. **Send other messages** - Use [`connection_cx`](Self::connection_cx) to access the
-///    underlying [`JrConnectionCx`], giving access to
-///    [`send_request`](JrConnectionCx::send_request),
-///    [`send_notification`](JrConnectionCx::send_notification), and
-///    [`spawn`](JrConnectionCx::spawn)
+/// 2. **Send other messages** - Use the [`JrConnectionCx`] parameter passed to your
+///    handler, which provides [`send_request`](`JrConnectionCx::send_request`),
+///    [`send_notification`](`JrConnectionCx::send_notification`), and
+///    [`spawn`](`JrConnectionCx::spawn`)
 ///
 /// # Example
 ///
@@ -2480,7 +2575,7 @@ impl JrNotification for UntypedMessage {}
 pub struct JrResponse<T> {
     method: String,
     task_tx: TaskTx,
-    response_rx: oneshot::Receiver<Result<serde_json::Value, crate::Error>>,
+    response_rx: oneshot::Receiver<ResponsePayload>,
     to_result: Box<dyn Fn(serde_json::Value) -> Result<T, crate::Error> + Send>,
 }
 
@@ -2488,7 +2583,7 @@ impl JrResponse<serde_json::Value> {
     fn new(
         method: String,
         task_tx: mpsc::UnboundedSender<Task>,
-        response_rx: oneshot::Receiver<Result<serde_json::Value, crate::Error>>,
+        response_rx: oneshot::Receiver<ResponsePayload>,
     ) -> Self {
         Self {
             method,
@@ -2644,11 +2739,29 @@ impl<T: JrResponsePayload> JrResponse<T> {
         T: Send,
     {
         match self.response_rx.await {
-            Ok(Ok(json_value)) => match (self.to_result)(json_value) {
-                Ok(value) => Ok(value),
-                Err(err) => Err(err),
-            },
-            Ok(Err(err)) => Err(err),
+            Ok(ResponsePayload {
+                result: Ok(json_value),
+                ack_tx,
+            }) => {
+                // Ack immediately - we're in a spawned task, so the dispatch loop
+                // can continue while we process the value.
+                if let Some(tx) = ack_tx {
+                    let _ = tx.send(());
+                }
+                match (self.to_result)(json_value) {
+                    Ok(value) => Ok(value),
+                    Err(err) => Err(err),
+                }
+            }
+            Ok(ResponsePayload {
+                result: Err(err),
+                ack_tx,
+            }) => {
+                if let Some(tx) = ack_tx {
+                    let _ = tx.send(());
+                }
+                Err(err)
+            }
             Err(err) => Err(crate::util::internal_error(format!(
                 "response to `{}` never received: {}",
                 self.method, err
@@ -2693,6 +2806,12 @@ impl<T: JrResponsePayload> JrResponse<T> {
     /// # Ok(())
     /// # }
     /// ```
+    ///
+    /// # Ordering
+    ///
+    /// Like [`on_receiving_result`](Self::on_receiving_result), the callback blocks the
+    /// dispatch loop until it completes. See the [`ordering`](crate::concepts::ordering) module
+    /// for details.
     ///
     /// # When to Use
     ///
@@ -2758,11 +2877,17 @@ impl<T: JrResponsePayload> JrResponse<T> {
     /// # }
     /// ```
     ///
-    /// # Event Loop Safety
+    /// # Ordering
     ///
-    /// Unlike [`block_task`](Self::block_task), this method is safe to use in handlers because
-    /// it schedules the task to run later rather than blocking the current task. The event loop
-    /// remains free to process messages, including the response itself.
+    /// The callback runs as a spawned task, but the dispatch loop waits for it to complete
+    /// before processing the next message. This gives you ordering guarantees: no other
+    /// messages will be processed while your callback runs.
+    ///
+    /// This differs from [`block_task`](Self::block_task), which signals completion immediately
+    /// upon receiving the response (before your code processes it).
+    ///
+    /// See the [`ordering`](crate::concepts::ordering) module for details on ordering guarantees
+    /// and how to avoid deadlocks.
     ///
     /// # Error Handling
     ///
@@ -2773,10 +2898,10 @@ impl<T: JrResponsePayload> JrResponse<T> {
     ///
     /// Use this method when:
     /// - You're in a handler callback (not a spawned task)
-    /// - You want to process the response asynchronously
-    /// - You don't need the response value immediately
+    /// - You want ordering guarantees (no other messages processed during your callback)
+    /// - You need to do async work before "releasing" control back to the dispatch loop
     ///
-    /// For spawned tasks where you need linear control flow, consider [`block_task`](Self::block_task).
+    /// For spawned tasks where you don't need ordering guarantees, consider [`block_task`](Self::block_task).
     #[track_caller]
     pub fn on_receiving_result<F>(
         self,
@@ -2787,9 +2912,38 @@ impl<T: JrResponsePayload> JrResponse<T> {
         T: Send,
     {
         let task_tx = self.task_tx.clone();
-        let block_task = self.block_task();
+        let method = self.method;
+        let response_rx = self.response_rx;
+        let to_result = self.to_result;
         let location = Location::caller();
-        Task::new(location, async move { task(block_task.await).await }).spawn(&task_tx)
+
+        Task::new(location, async move {
+            match response_rx.await {
+                Ok(ResponsePayload { result, ack_tx }) => {
+                    // Convert the result using to_result for Ok values
+                    let typed_result = match result {
+                        Ok(json_value) => to_result(json_value),
+                        Err(err) => Err(err),
+                    };
+
+                    // Run the user's callback
+                    let outcome = task(typed_result).await;
+
+                    // Ack AFTER the callback completes - this is the key difference
+                    // from block_task. The dispatch loop waits for this ack.
+                    if let Some(tx) = ack_tx {
+                        let _ = tx.send(());
+                    }
+
+                    outcome
+                }
+                Err(err) => Err(crate::util::internal_error(format!(
+                    "response to `{}` never received: {}",
+                    method, err
+                ))),
+            }
+        })
+        .spawn(&task_tx)
     }
 }
 

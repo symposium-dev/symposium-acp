@@ -23,7 +23,7 @@
 //!
 //! ## Custom MCP Server Implementations
 //!
-//! You can implement [`McpServerConnect`] to create custom MCP servers:
+//! You can implement [`McpServerConnect`](`crate::mcp_server::McpServerConnect`) to create custom MCP servers:
 //!
 //! ```rust,ignore
 //! use sacp::mcp_server::{McpServer, McpServerConnect, McpContext};
