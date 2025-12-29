@@ -20,17 +20,18 @@
 //! Every link type has a `builder()` method that returns a connection builder.
 //! The builder lets you configure handlers, then connect to a transport:
 //!
-//! ```ignore
-//! use sacp::ClientToAgent;
-//!
+//! ```
+//! # use sacp::{ClientToAgent, AgentToClient, Component};
+//! # async fn example(transport: impl Component<AgentToClient>) -> Result<(), sacp::Error> {
 //! ClientToAgent::builder()
 //!     .name("my-client")
-//!     .connect_to(transport)
-//!     .run_until(async |cx| {
+//!     .run_until(transport, async |cx| {
 //!         // Use `cx` to send requests and handle responses
 //!         Ok(())
 //!     })
 //!     .await?;
+//! # Ok(())
+//! # }
 //! ```
 //!
 //! # The Connection Context
@@ -38,18 +39,28 @@
 //! Inside `run_until`, you receive a [`JrConnectionCx`] (connection context) that
 //! lets you interact with the remote peer:
 //!
-//! ```ignore
-//! .run_until(async |cx| {
-//!     // Send a request and wait for the response
-//!     let response = cx.send_request(InitializeRequest { ... })
-//!         .block_task()
-//!         .await?;
-//!
-//!     // Send a notification (fire-and-forget)
-//!     cx.send_notification(SomeNotification { ... })?;
-//!
-//!     Ok(())
+//! ```
+//! # use sacp::{ClientToAgent, AgentToClient, Component};
+//! # use sacp::schema::InitializeRequest;
+//! # use sacp_test::StatusUpdate;
+//! # async fn example(transport: impl Component<AgentToClient>) -> Result<(), sacp::Error> {
+//! # ClientToAgent::builder().run_until(transport, async |cx| {
+//! // Send a request and wait for the response
+//! let response = cx.send_request(InitializeRequest {
+//!     protocol_version: Default::default(),
+//!     client_capabilities: Default::default(),
+//!     client_info: None,
+//!     meta: None,
 //! })
+//!     .block_task()
+//!     .await?;
+//!
+//! // Send a notification (fire-and-forget)
+//! cx.send_notification(StatusUpdate { message: "hello".into() })?;
+//! # Ok(())
+//! # }).await?;
+//! # Ok(())
+//! # }
 //! ```
 //!
 //! # Sending Requests
@@ -61,19 +72,31 @@
 //!
 //! Use `block_task()` when you need the response before continuing:
 //!
-//! ```ignore
-//! let response = cx.send_request(MyRequest { ... })
+//! ```
+//! # use sacp::{ClientToAgent, AgentToClient, Component};
+//! # use sacp_test::MyRequest;
+//! # async fn example(transport: impl Component<AgentToClient>) -> Result<(), sacp::Error> {
+//! # ClientToAgent::builder().run_until(transport, async |cx| {
+//! let response = cx.send_request(MyRequest {})
 //!     .block_task()
 //!     .await?;
 //! // Use response here
+//! # Ok(())
+//! # }).await?;
+//! # Ok(())
+//! # }
 //! ```
 //!
 //! ## Option 2: Schedule a callback
 //!
 //! Use `on_receiving_result()` when you want to handle the response asynchronously:
 //!
-//! ```ignore
-//! cx.send_request(MyRequest { ... })
+//! ```
+//! # use sacp::{ClientToAgent, AgentToClient, Component};
+//! # use sacp_test::MyRequest;
+//! # async fn example(transport: impl Component<AgentToClient>) -> Result<(), sacp::Error> {
+//! # ClientToAgent::builder().run_until(transport, async |cx| {
+//! cx.send_request(MyRequest {})
 //!     .on_receiving_result(async |result| {
 //!         match result {
 //!             Ok(response) => { /* handle success */ }
@@ -82,6 +105,10 @@
 //!         Ok(())
 //!     })?;
 //! // Continues immediately, callback runs when response arrives
+//! # Ok(())
+//! # }).await?;
+//! # Ok(())
+//! # }
 //! ```
 //!
 //! See [Ordering](super::ordering) for important details about how these differ.

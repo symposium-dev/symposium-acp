@@ -8,7 +8,10 @@
 //!
 //! Use the session builder to create a new session:
 //!
-//! ```ignore
+//! ```
+//! # use sacp::{ClientToAgent, AgentToClient, Component};
+//! # async fn example(transport: impl Component<AgentToClient>) -> Result<(), sacp::Error> {
+//! # ClientToAgent::builder().run_until(transport, async |cx| {
 //! cx.build_session_cwd()?          // Use current working directory
 //!     .block_task()                // Mark as blocking
 //!     .run_until(async |session| {
@@ -16,15 +19,26 @@
 //!         Ok(())
 //!     })
 //!     .await?;
+//! # Ok(())
+//! # }).await?;
+//! # Ok(())
+//! # }
 //! ```
 //!
 //! Or specify a custom working directory:
 //!
-//! ```ignore
-//! cx.build_session("/path/to/project")?
+//! ```
+//! # use sacp::{ClientToAgent, AgentToClient, Component};
+//! # async fn example(transport: impl Component<AgentToClient>) -> Result<(), sacp::Error> {
+//! # ClientToAgent::builder().run_until(transport, async |cx| {
+//! cx.build_session("/path/to/project")
 //!     .block_task()
-//!     .run_until(async |session| { ... })
+//!     .run_until(async |session| { Ok(()) })
 //!     .await?;
+//! # Ok(())
+//! # }).await?;
+//! # Ok(())
+//! # }
 //! ```
 //!
 //! # Sending Prompts
@@ -32,7 +46,11 @@
 //! Inside `run_until`, you get an [`ActiveSession`] that lets you interact
 //! with the agent:
 //!
-//! ```ignore
+//! ```
+//! # use sacp::{ClientToAgent, AgentToClient, Component};
+//! # async fn example(transport: impl Component<AgentToClient>) -> Result<(), sacp::Error> {
+//! # ClientToAgent::builder().run_until(transport, async |cx| {
+//! # cx.build_session_cwd()?.block_task()
 //! .run_until(async |mut session| {
 //!     // Send a prompt
 //!     session.send_prompt("What is 2 + 2?")?;
@@ -47,6 +65,11 @@
 //!
 //!     Ok(())
 //! })
+//! # .await?;
+//! # Ok(())
+//! # }).await?;
+//! # Ok(())
+//! # }
 //! ```
 //!
 //! # Adding MCP Servers
@@ -54,12 +77,21 @@
 //! You can attach MCP (Model Context Protocol) servers to a session to provide
 //! tools to the agent:
 //!
-//! ```ignore
+//! ```
+//! # use sacp::{ClientToAgent, AgentToClient, Component};
+//! # use sacp::mcp_server::McpServer;
+//! # async fn example(transport: impl Component<AgentToClient>) -> Result<(), sacp::Error> {
+//! # let my_mcp_server = McpServer::<ClientToAgent, _>::builder("tools").build();
+//! # ClientToAgent::builder().run_until(transport, async |cx| {
 //! cx.build_session_cwd()?
 //!     .with_mcp_server(my_mcp_server)?
 //!     .block_task()
-//!     .run_until(async |session| { ... })
+//!     .run_until(async |session| { Ok(()) })
 //!     .await?;
+//! # Ok(())
+//! # }).await?;
+//! # Ok(())
+//! # }
 //! ```
 //!
 //! See the cookbook for detailed MCP server examples.
@@ -69,15 +101,22 @@
 //! If you're inside an `on_receive_*` callback and need to start a session,
 //! use `on_session_start` instead of `block_task().run_until()`:
 //!
-//! ```ignore
-//! builder.on_receive_request(async |req: NewSessionRequest, request_cx, cx| {
-//!     cx.build_session_from(req)?
-//!         .on_session_start(async |session| {
-//!             // Handle the session
-//!             Ok(())
-//!         })?;
-//!     Ok(())
-//! }, on_receive_request!());
+//! ```
+//! # use sacp::{ClientToAgent, AgentToClient, Component};
+//! # use sacp::schema::NewSessionRequest;
+//! # async fn example(transport: impl Component<AgentToClient>) -> Result<(), sacp::Error> {
+//! ClientToAgent::builder()
+//!     .on_receive_request(async |req: NewSessionRequest, request_cx, cx| {
+//!         cx.build_session_from(req)
+//!             .on_session_start(async |session| {
+//!                 // Handle the session
+//!                 Ok(())
+//!             })?;
+//!         Ok(())
+//!     }, sacp::on_receive_request!())
+//! #   .run_until(transport, async |_| Ok(())).await?;
+//! # Ok(())
+//! # }
 //! ```
 //!
 //! This follows the same ordering guarantees as other `on_*` methods - see

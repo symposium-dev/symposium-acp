@@ -57,15 +57,26 @@
 //!
 //! Use this in spawned tasks where you need to wait for the response:
 //!
-//! ```ignore
-//! cx.spawn(async move {
-//!     // Safe: we're in a spawned task, not blocking the dispatch loop
-//!     let response = cx.send_request(MyRequest { ... })
-//!         .block_task()
-//!         .await?;
-//!     // Process response...
-//!     Ok(())
+//! ```
+//! # use sacp::{ClientToAgent, AgentToClient, Component};
+//! # use sacp_test::MyRequest;
+//! # async fn example(transport: impl Component<AgentToClient>) -> Result<(), sacp::Error> {
+//! # ClientToAgent::builder().run_until(transport, async |cx| {
+//! cx.spawn({
+//!     let cx = cx.clone();
+//!     async move {
+//!         // Safe: we're in a spawned task, not blocking the dispatch loop
+//!         let response = cx.send_request(MyRequest {})
+//!             .block_task()
+//!             .await?;
+//!         // Process response...
+//!         Ok(())
+//!     }
 //! })?;
+//! # Ok(())
+//! # }).await?;
+//! # Ok(())
+//! # }
 //! ```
 //!
 //! The dispatch loop continues immediately after delivering the response.
@@ -75,14 +86,22 @@
 //!
 //! Use this when you need ordering guarantees:
 //!
-//! ```ignore
-//! cx.send_request(MyRequest { ... })
+//! ```
+//! # use sacp::{ClientToAgent, AgentToClient, Component};
+//! # use sacp_test::MyRequest;
+//! # async fn example(transport: impl Component<AgentToClient>) -> Result<(), sacp::Error> {
+//! # ClientToAgent::builder().run_until(transport, async |cx| {
+//! cx.send_request(MyRequest {})
 //!     .on_receiving_result(async |result| {
 //!         // Dispatch loop is blocked until this completes
 //!         let response = result?;
 //!         // Do something with response...
 //!         Ok(())
 //!     })?;
+//! # Ok(())
+//! # }).await?;
+//! # Ok(())
+//! # }
 //! ```
 //!
 //! The dispatch loop waits for your callback to complete before processing
@@ -112,16 +131,23 @@
 //! Methods named `run_until` (like on session builders) run in a spawned task,
 //! so awaiting them won't cause deadlocks:
 //!
-//! ```ignore
+//! ```
+//! # use sacp::{ClientToAgent, AgentToClient, Component};
+//! # async fn example(transport: impl Component<AgentToClient>) -> Result<(), sacp::Error> {
+//! # ClientToAgent::builder().run_until(transport, async |cx| {
 //! cx.build_session_cwd()?
 //!     .block_task()
-//!     .run_until(async |session| {
+//!     .run_until(async |mut session| {
 //!         // Safe to await here - we're in a spawned task
 //!         session.send_prompt("Hello")?;
 //!         let response = session.read_to_string().await?;
 //!         Ok(())
 //!     })
 //!     .await?;
+//! # Ok(())
+//! # }).await?;
+//! # Ok(())
+//! # }
 //! ```
 //!
 //! # Summary

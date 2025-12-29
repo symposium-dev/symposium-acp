@@ -15,9 +15,22 @@
 //!
 //! So when you write:
 //!
-//! ```ignore
+//! ```
+//! # use sacp::{ClientToAgent, AgentToClient, Component};
+//! # use sacp::schema::InitializeRequest;
+//! # async fn example(transport: impl Component<AgentToClient>) -> Result<(), sacp::Error> {
+//! # ClientToAgent::builder().run_until(transport, async |cx| {
 //! // As a client
-//! cx.send_request(InitializeRequest { ... })
+//! cx.send_request(InitializeRequest {
+//!     protocol_version: Default::default(),
+//!     client_capabilities: Default::default(),
+//!     client_info: None,
+//!     meta: None,
+//! });
+//! # Ok(())
+//! # }).await?;
+//! # Ok(())
+//! # }
 //! ```
 //!
 //! The request automatically goes to the agent, because that's the only peer
@@ -36,10 +49,19 @@
 //!
 //! For simple links, the explicit form is equivalent:
 //!
-//! ```ignore
+//! ```
+//! # use sacp::{ClientToAgent, AgentToClient, AgentPeer, Component};
+//! # use sacp_test::MyRequest;
+//! # async fn example(transport: impl Component<AgentToClient>) -> Result<(), sacp::Error> {
+//! # ClientToAgent::builder().run_until(transport, async |cx| {
+//! # let req = MyRequest {};
 //! // These are equivalent for ClientToAgent:
-//! cx.send_request(req)
-//! cx.send_request_to(AgentPeer, req)
+//! cx.send_request(req.clone());
+//! cx.send_request_to(AgentPeer, req);
+//! # Ok(())
+//! # }).await?;
+//! # Ok(())
+//! # }
 //! ```
 //!
 //! # Why Explicit Peers Matter
@@ -52,13 +74,22 @@
 //!
 //! When writing proxy code, you need to specify which direction:
 //!
-//! ```ignore
-//! // Receive a request from the client
-//! builder.on_receive_request_from(ClientPeer, async |req, request_cx, cx| {
-//!     // Forward it to the agent
-//!     cx.send_request_to(AgentPeer, req)
-//!         .forward_to_request_cx(request_cx)
-//! }, on_receive_request!());
+//! ```
+//! # use sacp::{ProxyToConductor, ClientPeer, AgentPeer, Component};
+//! # use sacp::link::ConductorToProxy;
+//! # use sacp_test::MyRequest;
+//! # async fn example(transport: impl Component<ConductorToProxy>) -> Result<(), sacp::Error> {
+//! ProxyToConductor::builder()
+//!     // Receive a request from the client
+//!     .on_receive_request_from(ClientPeer, async |req: MyRequest, request_cx, cx| {
+//!         // Forward it to the agent
+//!         cx.send_request_to(AgentPeer, req)
+//!             .forward_to_request_cx(request_cx)
+//!     }, sacp::on_receive_request!())
+//!     .serve(transport)
+//!     .await?;
+//! # Ok(())
+//! # }
 //! ```
 //!
 //! See [Proxies and Conductors](super::proxies) for more on building proxies.

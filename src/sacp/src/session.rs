@@ -189,16 +189,25 @@ where
     ///
     /// # Example
     ///
-    /// ```ignore
-    /// cx.build_session(cwd)
+    /// ```
+    /// # use sacp::{ClientToAgent, AgentToClient, Component};
+    /// # use sacp::mcp_server::McpServer;
+    /// # async fn example(transport: impl Component<AgentToClient>) -> Result<(), sacp::Error> {
+    /// # ClientToAgent::builder().run_until(transport, async |cx| {
+    /// # let mcp = McpServer::<ClientToAgent, _>::builder("tools").build();
+    /// cx.build_session_cwd()?
     ///     .with_mcp_server(mcp)?
-    ///     .on_session_start(async |session| {
+    ///     .on_session_start(async |mut session| {
     ///         // Do something with the session
     ///         session.send_prompt("Hello")?;
     ///         let response = session.read_to_string().await?;
     ///         Ok(())
     ///     })?;
     /// // Returns immediately, session runs in background
+    /// # Ok(())
+    /// # }).await?;
+    /// # Ok(())
+    /// # }
     /// ```
     ///
     /// # Ordering
@@ -254,14 +263,26 @@ where
     ///
     /// # Example
     ///
-    /// ```ignore
-    /// cx.build_session_from(request)
-    ///     .with_mcp_server(mcp)?
-    ///     .on_proxy_session_start(request_cx, async |session_id| {
-    ///         tracing::info!(%session_id, "Session started");
-    ///         Ok(())
-    ///     })?;
-    /// // Returns immediately, session runs in background
+    /// ```
+    /// # use sacp::{ProxyToConductor, ClientPeer, Component};
+    /// # use sacp::link::ConductorToProxy;
+    /// # use sacp::schema::NewSessionRequest;
+    /// # use sacp::mcp_server::McpServer;
+    /// # async fn example(transport: impl Component<ConductorToProxy>) -> Result<(), sacp::Error> {
+    /// ProxyToConductor::builder()
+    ///     .on_receive_request_from(ClientPeer, async |request: NewSessionRequest, request_cx, cx| {
+    ///         let mcp = McpServer::<ProxyToConductor, _>::builder("tools").build();
+    ///         cx.build_session_from(request)
+    ///             .with_mcp_server(mcp)?
+    ///             .on_proxy_session_start(request_cx, async |session_id| {
+    ///                 // Session started
+    ///                 Ok(())
+    ///             })
+    ///     }, sacp::on_receive_request!())
+    ///     .serve(transport)
+    ///     .await?;
+    /// # Ok(())
+    /// # }
     /// ```
     ///
     /// # Ordering

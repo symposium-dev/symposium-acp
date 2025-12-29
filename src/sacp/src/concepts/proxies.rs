@@ -19,10 +19,15 @@
 //! By default, `ProxyToConductor` forwards all messages it doesn't handle.
 //! This means a minimal proxy that does nothing is just:
 //!
-//! ```ignore
+//! ```
+//! # use sacp::{ProxyToConductor, Component};
+//! # use sacp::link::ConductorToProxy;
+//! # async fn example(transport: impl Component<ConductorToProxy>) -> Result<(), sacp::Error> {
 //! ProxyToConductor::builder()
 //!     .serve(transport)
 //!     .await?;
+//! # Ok(())
+//! # }
 //! ```
 //!
 //! All messages pass through unchanged.
@@ -31,22 +36,27 @@
 //!
 //! To intercept specific messages, use `on_receive_*_from` with explicit peers:
 //!
-//! ```ignore
+//! ```
+//! # use sacp::{ProxyToConductor, ClientPeer, AgentPeer, Component};
+//! # use sacp::link::ConductorToProxy;
+//! # use sacp_test::ProcessRequest;
+//! # async fn example(transport: impl Component<ConductorToProxy>) -> Result<(), sacp::Error> {
 //! ProxyToConductor::builder()
-//!     // Intercept prompts from the client
-//!     .on_receive_request_from(ClientPeer, async |req: PromptRequest, request_cx, cx| {
-//!         // Modify the prompt
-//!         let modified = PromptRequest {
-//!             prompt: format!("Be helpful. {}", req.prompt),
-//!             ..req
+//!     // Intercept requests from the client
+//!     .on_receive_request_from(ClientPeer, async |req: ProcessRequest, request_cx, cx| {
+//!         // Modify the request
+//!         let modified = ProcessRequest {
+//!             data: format!("prefix: {}", req.data),
 //!         };
 //!
 //!         // Forward to agent and relay the response back
 //!         cx.send_request_to(AgentPeer, modified)
 //!             .forward_to_request_cx(request_cx)
-//!     }, on_receive_request!())
+//!     }, sacp::on_receive_request!())
 //!     .serve(transport)
 //!     .await?;
+//! # Ok(())
+//! # }
 //! ```
 //!
 //! Messages you don't handle are forwarded automatically.
@@ -58,27 +68,42 @@
 //!
 //! ## Global MCP Server
 //!
-//! ```ignore
+//! ```
+//! # use sacp::{ProxyToConductor, Component};
+//! # use sacp::link::ConductorToProxy;
+//! # use sacp::mcp_server::McpServer;
+//! # async fn example(transport: impl Component<ConductorToProxy>) -> Result<(), sacp::Error> {
+//! # let my_mcp_server = McpServer::<ProxyToConductor, _>::builder("tools").build();
 //! ProxyToConductor::builder()
-//!     .with_mcp_server(my_mcp_server)?
+//!     .with_mcp_server(my_mcp_server)
 //!     .serve(transport)
 //!     .await?;
+//! # Ok(())
+//! # }
 //! ```
 //!
 //! ## Per-Session MCP Server
 //!
-//! ```ignore
+//! ```
+//! # use sacp::{ProxyToConductor, ClientPeer, Component};
+//! # use sacp::link::ConductorToProxy;
+//! # use sacp::schema::NewSessionRequest;
+//! # use sacp::mcp_server::McpServer;
+//! # async fn example(transport: impl Component<ConductorToProxy>) -> Result<(), sacp::Error> {
 //! ProxyToConductor::builder()
 //!     .on_receive_request_from(ClientPeer, async |req: NewSessionRequest, request_cx, cx| {
-//!         cx.build_session_from(req)?
+//!         let my_mcp_server = McpServer::<ProxyToConductor, _>::builder("tools").build();
+//!         cx.build_session_from(req)
 //!             .with_mcp_server(my_mcp_server)?
 //!             .on_proxy_session_start(request_cx, async |session_id| {
 //!                 // Session started with MCP server attached
 //!                 Ok(())
 //!             })
-//!     }, on_receive_request!())
+//!     }, sacp::on_receive_request!())
 //!     .serve(transport)
 //!     .await?;
+//! # Ok(())
+//! # }
 //! ```
 //!
 //! # The Conductor

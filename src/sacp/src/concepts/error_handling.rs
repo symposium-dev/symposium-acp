@@ -21,26 +21,40 @@
 //! To send an error response to a request (without closing the connection),
 //! use the request context's `respond` method:
 //!
-//! ```ignore
-//! connection.on_receive_request(async |request, request_cx, _cx| {
-//!     if !is_valid(&request) {
-//!         // Send error to peer, keep connection alive
-//!         request_cx.respond(Err(sacp::Error::invalid_params()))?;
-//!         return Ok(());
-//!     }
+//! ```
+//! # use sacp::{ClientToAgent, AgentToClient, Component};
+//! # use sacp_test::{ValidateRequest, ValidateResponse};
+//! # async fn example(transport: impl Component<AgentToClient>) -> Result<(), sacp::Error> {
+//! ClientToAgent::builder()
+//!     .on_receive_request(async |request: ValidateRequest, request_cx, _cx| {
+//!         if request.data.is_empty() {
+//!             // Send error to peer, keep connection alive
+//!             request_cx.respond_with_error(sacp::Error::invalid_params())?;
+//!             return Ok(());
+//!         }
 //!
-//!     // Process valid request...
-//!     request_cx.respond(Ok(response))?;
-//!     Ok(())
-//! });
+//!         // Process valid request...
+//!         request_cx.respond(ValidateResponse { is_valid: true, error: None })?;
+//!         Ok(())
+//!     }, sacp::on_receive_request!())
+//! #   .run_until(transport, async |_| Ok(())).await?;
+//! # Ok(())
+//! # }
 //! ```
 //!
 //! For sending error notifications (one-way error messages), use
 //! [`send_error_notification`][crate::JrConnectionCx::send_error_notification]:
 //!
-//! ```ignore
+//! ```
+//! # use sacp::{ClientToAgent, AgentToClient, Component};
+//! # async fn example(transport: impl Component<AgentToClient>) -> Result<(), sacp::Error> {
+//! # ClientToAgent::builder().run_until(transport, async |cx| {
 //! cx.send_error_notification(sacp::Error::internal_error()
 //!     .with_data("Something went wrong"))?;
+//! # Ok(())
+//! # }).await?;
+//! # Ok(())
+//! # }
 //! ```
 //!
 //! # The `into_internal_error` Helper
@@ -50,16 +64,21 @@
 //! [`Error::into_internal_error`][crate::Error::into_internal_error] method
 //! provides a convenient way to do this:
 //!
-//! ```ignore
+//! ```
 //! use sacp::Error;
 //!
+//! # fn example() -> Result<(), sacp::Error> {
+//! # let data = "hello";
+//! # let path = "/tmp/test.txt";
 //! // Convert any error type to sacp::Error
 //! let value = serde_json::to_value(&data)
 //!     .map_err(Error::into_internal_error)?;
 //!
 //! // Or with a file operation
 //! let contents = std::fs::read_to_string(path)
-//!     .map_err(Error::into_internal_error)?;
+//!     .map_err(Error::into_internal_error);
+//! # Ok(())
+//! # }
 //! ```
 //!
 //! This wraps the original error's message in an internal error, which is
@@ -79,12 +98,12 @@
 //!
 //! You can add context with `.with_data()`:
 //!
-//! ```ignore
-//! sacp::Error::invalid_params()
+//! ```
+//! let error = sacp::Error::invalid_params()
 //!     .with_data(serde_json::json!({
 //!         "field": "timeout",
 //!         "reason": "must be positive"
-//!     }))
+//!     }));
 //! ```
 //!
 //! # Summary

@@ -105,17 +105,29 @@ use crate::{AgentPeer, ClientPeer, Component};
 ///
 /// Most users register handlers using the builder methods on [`JrConnectionBuilder`]:
 ///
-/// ```ignore
-/// Link::builder()
+/// ```
+/// # use sacp::{AgentToClient, ClientToAgent, Component};
+/// # use sacp::schema::{InitializeRequest, InitializeResponse, AgentCapabilities};
+/// # use sacp_test::StatusUpdate;
+/// # async fn example(transport: impl Component<ClientToAgent>) -> Result<(), sacp::Error> {
+/// AgentToClient::builder()
 ///     .on_receive_request(async |req: InitializeRequest, request_cx, cx| {
-///         request_cx.respond(InitializeResponse::make())
+///         request_cx.respond(InitializeResponse {
+///             protocol_version: req.protocol_version,
+///             agent_capabilities: AgentCapabilities::default(),
+///             auth_methods: vec![],
+///             agent_info: None,
+///             meta: None,
+///         })
 ///     }, sacp::on_receive_request!())
-///     .on_receive_notification(async |notif: SessionNotification, cx| {
+///     .on_receive_notification(async |notif: StatusUpdate, cx| {
 ///         // Process notification
 ///         Ok(())
 ///     }, sacp::on_receive_notification!())
 ///     .serve(transport)
 ///     .await?;
+/// # Ok(())
+/// # }
 /// ```
 ///
 /// The type parameter on the closure determines which messages are dispatched to it.
@@ -157,12 +169,23 @@ use crate::{AgentPeer, ClientPeer, Component};
 /// no other messages can be processed. For expensive operations, use [`JrConnectionCx::spawn`]
 /// to run work concurrently:
 ///
-/// ```ignore
-/// cx.spawn(async move {
-///     let result = expensive_operation().await?;
-///     connection_cx.send_notification(result)?;
-///     Ok(())
+/// ```
+/// # use sacp::{ClientToAgent, AgentToClient, Component};
+/// # use sacp_test::{expensive_operation, ProcessComplete};
+/// # async fn example(transport: impl Component<AgentToClient>) -> Result<(), sacp::Error> {
+/// # ClientToAgent::builder().run_until(transport, async |cx| {
+/// cx.spawn({
+///     let connection_cx = cx.clone();
+///     async move {
+///         let result = expensive_operation("data").await?;
+///         connection_cx.send_notification(ProcessComplete { result })?;
+///         Ok(())
+///     }
 /// })?;
+/// # Ok(())
+/// # }).await?;
+/// # Ok(())
+/// # }
 /// ```
 #[allow(async_fn_in_trait)]
 /// A handler for incoming JSON-RPC messages.
@@ -1140,7 +1163,7 @@ impl<H: JrMessageHandler, R: JrResponder<H::Link>> JrConnectionBuilder<H, R> {
     /// Convenience method to connect to a transport and serve.
     ///
     /// This is equivalent to:
-    /// ```ignore
+    /// ```text
     /// handler_chain.connect_to(transport)?.serve().await
     /// ```
     pub async fn serve(
@@ -1153,7 +1176,7 @@ impl<H: JrMessageHandler, R: JrResponder<H::Link>> JrConnectionBuilder<H, R> {
     /// Convenience method to connect to a transport and run until a closure completes.
     ///
     /// This is equivalent to:
-    /// ```ignore
+    /// ```text
     /// handler_chain.connect_to(transport)?.run_until(main_fn).await
     /// ```
     pub async fn run_until(

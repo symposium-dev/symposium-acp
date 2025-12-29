@@ -7,17 +7,22 @@
 //!
 //! Use `on_receive_request` to handle incoming requests that expect a response:
 //!
-//! ```ignore
+//! ```
+//! # use sacp::{ClientToAgent, AgentToClient, Component};
+//! # use sacp_test::{ValidateRequest, ValidateResponse};
+//! # async fn example(transport: impl Component<AgentToClient>) -> Result<(), sacp::Error> {
 //! ClientToAgent::builder()
-//!     .on_receive_request(async |req: PermissionRequest, request_cx, cx| {
-//!         // Decide whether to grant the permission
-//!         let granted = prompt_user(&req).await;
+//!     .on_receive_request(async |req: ValidateRequest, request_cx, cx| {
+//!         // Process the request
+//!         let is_valid = req.data.len() > 0;
 //!
 //!         // Send the response
-//!         request_cx.respond(PermissionResponse { granted })
-//!     }, on_receive_request!())
-//!     .run_until(transport, async |cx| { ... })
+//!         request_cx.respond(ValidateResponse { is_valid, error: None })
+//!     }, sacp::on_receive_request!())
+//!     .run_until(transport, async |cx| { Ok(()) })
 //!     .await?;
+//! # Ok(())
+//! # }
 //! ```
 //!
 //! Your callback receives three arguments:
@@ -30,23 +35,53 @@
 //! Use `on_receive_notification` for fire-and-forget messages that don't need
 //! a response:
 //!
-//! ```ignore
-//! builder.on_receive_notification(async |notif: ProgressNotification, cx| {
-//!     println!("Progress: {}%", notif.percent);
-//!     Ok(())
-//! }, on_receive_notification!());
+//! ```
+//! # use sacp::{ClientToAgent, AgentToClient, Component};
+//! # use sacp_test::StatusUpdate;
+//! # async fn example(transport: impl Component<AgentToClient>) -> Result<(), sacp::Error> {
+//! ClientToAgent::builder()
+//!     .on_receive_notification(async |notif: StatusUpdate, cx| {
+//!         println!("Status: {}", notif.message);
+//!         Ok(())
+//!     }, sacp::on_receive_notification!())
+//! #   .run_until(transport, async |_| Ok(())).await?;
+//! # Ok(())
+//! # }
 //! ```
 //!
 //! # The Request Context
 //!
 //! The [`JrRequestCx`] lets you send a response to the request:
 //!
-//! ```ignore
+//! ```
+//! # use sacp::{ClientToAgent, AgentToClient, Component};
+//! # use sacp_test::{MyRequest, MyResponse};
+//! # async fn example(transport: impl Component<AgentToClient>) -> Result<(), sacp::Error> {
+//! # ClientToAgent::builder()
+//! #   .on_receive_request(async |req: MyRequest, request_cx, cx| {
 //! // Send a successful response
-//! request_cx.respond(MyResponse { ... })?;
+//! request_cx.respond(MyResponse { status: "ok".into() })?;
+//! # Ok(())
+//! #   }, sacp::on_receive_request!())
+//! #   .run_until(transport, async |_| Ok(())).await?;
+//! # Ok(())
+//! # }
+//! ```
 //!
-//! // Or send an error
-//! request_cx.respond_with_error(Error::invalid_params("missing field"))?;
+//! Or send an error:
+//!
+//! ```
+//! # use sacp::{ClientToAgent, AgentToClient, Component};
+//! # use sacp_test::{MyRequest, MyResponse};
+//! # async fn example(transport: impl Component<AgentToClient>) -> Result<(), sacp::Error> {
+//! # ClientToAgent::builder()
+//! #   .on_receive_request(async |req: MyRequest, request_cx, cx| {
+//! request_cx.respond_with_error(sacp::Error::invalid_params())?;
+//! # Ok(())
+//! #   }, sacp::on_receive_request!())
+//! #   .run_until(transport, async |_| Ok(())).await?;
+//! # Ok(())
+//! # }
 //! ```
 //!
 //! You must send exactly one response per request. If your callback returns
@@ -57,17 +92,22 @@
 //! You can register multiple handlers. They're tried in order until one
 //! handles the message:
 //!
-//! ```ignore
-//! builder
-//!     .on_receive_request(async |req: PermissionRequest, request_cx, cx| {
-//!         // Handle permission requests
-//!         request_cx.respond(PermissionResponse { granted: true })
-//!     }, on_receive_request!())
-//!     .on_receive_request(async |req: ToolCallRequest, request_cx, cx| {
-//!         // Handle tool calls
-//!         request_cx.respond(ToolCallResponse { result: "done".into() })
-//!     }, on_receive_request!())
-//!     // ...
+//! ```
+//! # use sacp::{ClientToAgent, AgentToClient, Component};
+//! # use sacp_test::{ValidateRequest, ValidateResponse, ExecuteRequest, ExecuteResponse};
+//! # async fn example(transport: impl Component<AgentToClient>) -> Result<(), sacp::Error> {
+//! ClientToAgent::builder()
+//!     .on_receive_request(async |req: ValidateRequest, request_cx, cx| {
+//!         // Handle validation requests
+//!         request_cx.respond(ValidateResponse { is_valid: true, error: None })
+//!     }, sacp::on_receive_request!())
+//!     .on_receive_request(async |req: ExecuteRequest, request_cx, cx| {
+//!         // Handle execution requests
+//!         request_cx.respond(ExecuteResponse { result: "done".into() })
+//!     }, sacp::on_receive_request!())
+//! #   .run_until(transport, async |_| Ok(())).await?;
+//! # Ok(())
+//! # }
 //! ```
 //!
 //! # Ordering Guarantees
