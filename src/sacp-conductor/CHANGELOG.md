@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [10.0.0-alpha.2](https://github.com/symposium-dev/symposium-acp/compare/sacp-conductor-v10.0.0-alpha.1...sacp-conductor-v10.0.0-alpha.2) - 2025-12-29
+
+### Other
+
+- updated the following local packages: sacp, sacp-tokio
+
 ## [10.0.0-alpha.1](https://github.com/symposium-dev/symposium-acp/compare/sacp-conductor-v9.0.0...sacp-conductor-v10.0.0-alpha.1) - 2025-12-28
 
 ### Added
