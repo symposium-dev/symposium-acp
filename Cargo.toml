@@ -2,6 +2,7 @@
 members = [
     "src/sacp-conductor",
     "src/sacp",
+    "src/sacp-cookbook",
     "src/sacp-derive",
     "src/sacp-tokio",
     "src/sacp-rmcp",

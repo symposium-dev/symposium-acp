@@ -57,12 +57,15 @@
 //!
 //! ## Cookbook
 //!
-//! The [`cookbook`] module contains practical guides and examples:
+//! The [`sacp_cookbook`] crate contains practical guides and examples:
 //!
-//! - [Connecting as a client](cookbook::connecting_as_client)
-//! - [Global MCP server](cookbook::global_mcp_server)
-//! - [Per-session MCP server](cookbook::per_session_mcp_server)
-//! - [...and more!][`cookbook`]
+//! - Connecting as a client
+//! - Global MCP server
+//! - Per-session MCP server with workspace context
+//! - Building agents and reusable components
+//! - Running proxies with the conductor
+//!
+//! [`sacp_cookbook`]: https://docs.rs/sacp-cookbook
 //!
 //! ## Core Concepts
 //!
