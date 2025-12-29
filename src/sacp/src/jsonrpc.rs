@@ -1188,6 +1188,19 @@ impl<H: JrMessageHandler, R: JrResponder<H::Link>> JrConnectionBuilder<H, R> {
     }
 }
 
+impl<H, R> Component<H::Link> for JrConnectionBuilder<H, R>
+where
+    H: JrMessageHandler + 'static,
+    R: JrResponder<H::Link> + 'static,
+{
+    async fn serve(
+        self,
+        client: impl Component<<H::Link as JrLink>::ConnectsTo>,
+    ) -> Result<(), crate::Error> {
+        self.connect_to(client)?.serve().await
+    }
+}
+
 /// A JSON-RPC connection with an active transport.
 ///
 /// This type represents a `JrConnectionBuilder` that has been connected to a transport
