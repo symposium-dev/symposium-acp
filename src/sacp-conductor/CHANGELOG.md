@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [10.0.0-alpha.3](https://github.com/symposium-dev/symposium-acp/compare/sacp-conductor-v10.0.0-alpha.2...sacp-conductor-v10.0.0-alpha.3) - 2025-12-29
+
+### Added
+
+- *(sacp)* add tool enable/disable filtering for MCP servers
+
+### Other
+
+- *(sacp-conductor)* add standalone MCP server tests
+- [**breaking**] make `McpServer` implement component
+
 ## [10.0.0-alpha.2](https://github.com/symposium-dev/symposium-acp/compare/sacp-conductor-v10.0.0-alpha.1...sacp-conductor-v10.0.0-alpha.2) - 2025-12-29
 
 ### Other
