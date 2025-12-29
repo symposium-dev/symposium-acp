@@ -1,0 +1,23 @@
+[package]
+name = "sacp-cookbook"
+version = "10.0.0-alpha.2"
+edition = "2024"
+description = "Cookbook of common patterns for building ACP components"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/symposium-dev/symposium-acp"
+keywords = ["acp", "agent", "proxy", "mcp", "cookbook"]
+categories = ["development-tools"]
+
+[dependencies]
+sacp = { version = "10.0.0-alpha.2", path = "../sacp" }
+sacp-conductor = { version = "10.0.0-alpha.2", path = "../sacp-conductor" }
+sacp-rmcp = { version = "10.0.0-alpha.2", path = "../sacp-rmcp" }
+sacp-tokio = { version = "10.0.0-alpha.2", path = "../sacp-tokio" }
+
+# Re-export common dependencies needed by cookbook examples
+rmcp.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+schemars.workspace = true
+tokio.workspace = true
+tracing.workspace = true
