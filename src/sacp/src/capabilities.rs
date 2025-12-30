@@ -68,28 +68,26 @@ impl MetaCapabilityExt for InitializeRequest {
     }
 
     fn add_meta_capability(mut self, capability: impl MetaCapability) -> Self {
-        let mut meta = self.client_capabilities.meta.take().unwrap_or(json!({}));
+        let meta = self
+            .client_capabilities
+            .meta
+            .get_or_insert_with(Default::default);
 
-        if let Some(obj) = meta.as_object_mut() {
-            let symposium = obj.entry("symposium").or_insert_with(|| json!({}));
+        let symposium = meta.entry("symposium").or_insert_with(|| json!({}));
 
-            if let Some(symposium_obj) = symposium.as_object_mut() {
-                symposium_obj.insert("version".to_string(), json!("1.0"));
-                symposium_obj.insert(capability.key().to_string(), capability.value());
-            }
+        if let Some(symposium_obj) = symposium.as_object_mut() {
+            symposium_obj.insert("version".to_string(), json!("1.0"));
+            symposium_obj.insert(capability.key().to_string(), capability.value());
         }
 
-        self.client_capabilities.meta = Some(meta);
         self
     }
 
     fn remove_meta_capability(mut self, capability: impl MetaCapability) -> Self {
         if let Some(ref mut meta) = self.client_capabilities.meta {
-            if let Some(obj) = meta.as_object_mut() {
-                if let Some(symposium) = obj.get_mut("symposium") {
-                    if let Some(symposium_obj) = symposium.as_object_mut() {
-                        symposium_obj.remove(capability.key());
-                    }
+            if let Some(symposium) = meta.get_mut("symposium") {
+                if let Some(symposium_obj) = symposium.as_object_mut() {
+                    symposium_obj.remove(capability.key());
                 }
             }
         }
@@ -108,28 +106,26 @@ impl MetaCapabilityExt for InitializeResponse {
     }
 
     fn add_meta_capability(mut self, capability: impl MetaCapability) -> Self {
-        let mut meta = self.agent_capabilities.meta.take().unwrap_or(json!({}));
+        let meta = self
+            .agent_capabilities
+            .meta
+            .get_or_insert_with(Default::default);
 
-        if let Some(obj) = meta.as_object_mut() {
-            let symposium = obj.entry("symposium").or_insert_with(|| json!({}));
+        let symposium = meta.entry("symposium").or_insert_with(|| json!({}));
 
-            if let Some(symposium_obj) = symposium.as_object_mut() {
-                symposium_obj.insert("version".to_string(), json!("1.0"));
-                symposium_obj.insert(capability.key().to_string(), capability.value());
-            }
+        if let Some(symposium_obj) = symposium.as_object_mut() {
+            symposium_obj.insert("version".to_string(), json!("1.0"));
+            symposium_obj.insert(capability.key().to_string(), capability.value());
         }
 
-        self.agent_capabilities.meta = Some(meta);
         self
     }
 
     fn remove_meta_capability(mut self, capability: impl MetaCapability) -> Self {
         if let Some(ref mut meta) = self.agent_capabilities.meta {
-            if let Some(obj) = meta.as_object_mut() {
-                if let Some(symposium) = obj.get_mut("symposium") {
-                    if let Some(symposium_obj) = symposium.as_object_mut() {
-                        symposium_obj.remove(capability.key());
-                    }
+            if let Some(symposium) = meta.get_mut("symposium") {
+                if let Some(symposium_obj) = symposium.as_object_mut() {
+                    symposium_obj.remove(capability.key());
                 }
             }
         }
@@ -140,17 +136,12 @@ impl MetaCapabilityExt for InitializeResponse {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::schema::{AgentCapabilities, ClientCapabilities, VERSION};
+    use crate::schema::{AgentCapabilities, ClientCapabilities, ProtocolVersion};
     use serde_json::json;
 
     #[test]
     fn test_add_capability_to_request() {
-        let request = InitializeRequest {
-            protocol_version: VERSION,
-            client_capabilities: ClientCapabilities::default(),
-            meta: None,
-            client_info: None,
-        };
+        let request = InitializeRequest::new(ProtocolVersion::LATEST);
 
         let request = request.add_meta_capability(McpAcpTransport);
 
@@ -163,20 +154,18 @@ mod tests {
 
     #[test]
     fn test_remove_capability_from_request() {
-        let mut client_capabilities = ClientCapabilities::default();
-        client_capabilities.meta = Some(json!({
-            "symposium": {
+        let mut meta = serde_json::Map::new();
+        meta.insert(
+            "symposium".to_string(),
+            json!({
                 "version": "1.0",
                 "mcp_acp_transport": true
-            }
-        }));
+            }),
+        );
+        let client_capabilities = ClientCapabilities::new().meta(meta);
 
-        let request = InitializeRequest {
-            protocol_version: VERSION,
-            client_capabilities,
-            meta: None,
-            client_info: None,
-        };
+        let request = InitializeRequest::new(ProtocolVersion::LATEST)
+            .client_capabilities(client_capabilities);
 
         let request = request.remove_meta_capability(McpAcpTransport);
 
@@ -185,13 +174,7 @@ mod tests {
 
     #[test]
     fn test_add_capability_to_response() {
-        let response = InitializeResponse {
-            protocol_version: VERSION,
-            agent_capabilities: AgentCapabilities::default(),
-            auth_methods: vec![],
-            meta: None,
-            agent_info: None,
-        };
+        let response = InitializeResponse::new(ProtocolVersion::LATEST);
 
         let response = response.add_meta_capability(McpAcpTransport);
 

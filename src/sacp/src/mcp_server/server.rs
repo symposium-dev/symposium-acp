@@ -122,11 +122,9 @@ where
 
     /// Modify the new session request to include this MCP server.
     fn modify_new_session_request(&self, request: &mut NewSessionRequest) {
-        request.mcp_servers.push(crate::schema::McpServer::Http {
-            name: self.connect.name(),
-            url: self.acp_url.clone(),
-            headers: Default::default(),
-        });
+        request.mcp_servers.push(crate::schema::McpServer::Http(
+            crate::schema::McpServerHttp::new(self.connect.name(), self.acp_url.clone()),
+        ));
     }
 }
 

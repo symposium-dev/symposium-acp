@@ -48,12 +48,9 @@ async fn test_scoped_mcp_server_through_session() -> Result<(), sacp::Error> {
         .connect_to(Conductor::new_agent("conductor".to_string(), ProxiesAndAgent::new(ElizaAgent::new()), McpBridgeMode::default()))?
         .run_until(async |cx| {
             // Initialize first
-            cx.send_request(sacp::schema::InitializeRequest {
-                protocol_version: Default::default(),
-                client_capabilities: Default::default(),
-                client_info: None,
-                meta: None,
-            })
+            cx.send_request(sacp::schema::InitializeRequest::new(
+                sacp::schema::ProtocolVersion::LATEST,
+            ))
             .block_task()
             .await?;
 

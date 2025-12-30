@@ -40,18 +40,13 @@ use crate::{
 ///
 /// ```
 /// # use sacp::MessageCx;
-/// # use sacp::schema::{InitializeRequest, InitializeResponse};
+/// # use sacp::schema::{InitializeRequest, InitializeResponse, AgentCapabilities};
 /// # use sacp::util::MatchMessage;
 /// # async fn example(message: MessageCx) -> Result<(), sacp::Error> {
 /// MatchMessage::new(message)
 ///     .if_request(|req: InitializeRequest, request_cx: sacp::JrRequestCx<InitializeResponse>| async move {
-///         let response = InitializeResponse {
-///             protocol_version: req.protocol_version,
-///             agent_capabilities: Default::default(),
-///             auth_methods: vec![],
-///             meta: None,
-///             agent_info: None,
-///         };
+///         let response = InitializeResponse::new(req.protocol_version)
+///             .agent_capabilities(AgentCapabilities::new());
 ///         request_cx.respond(response)
 ///     })
 ///     .await
@@ -290,29 +285,20 @@ impl MatchMessage {
 ///
 /// ```
 /// # use sacp::MessageCx;
-/// # use sacp::schema::{InitializeRequest, InitializeResponse, PromptRequest, PromptResponse};
+/// # use sacp::schema::{InitializeRequest, InitializeResponse, PromptRequest, PromptResponse, AgentCapabilities, StopReason};
 /// # use sacp::util::MatchMessageFrom;
 /// # async fn example(message: MessageCx, cx: &sacp::JrConnectionCx<sacp::AgentToClient>) -> Result<(), sacp::Error> {
 /// MatchMessageFrom::new(message, cx)
 ///     .if_request(|req: InitializeRequest, request_cx: sacp::JrRequestCx<InitializeResponse>| async move {
 ///         // Handle initialization
-///         let response = InitializeResponse {
-///             protocol_version: req.protocol_version,
-///             agent_capabilities: Default::default(),
-///             auth_methods: vec![],
-///             meta: None,
-///             agent_info: None,
-///         };
+///         let response = InitializeResponse::new(req.protocol_version)
+///             .agent_capabilities(AgentCapabilities::new());
 ///         request_cx.respond(response)
 ///     })
 ///     .await
-///     .if_request(|req: PromptRequest, request_cx: sacp::JrRequestCx<PromptResponse>| async move {
+///     .if_request(|_req: PromptRequest, request_cx: sacp::JrRequestCx<PromptResponse>| async move {
 ///         // Handle prompts
-///         let response = PromptResponse {
-///             stop_reason: sacp::schema::StopReason::EndTurn,
-///             meta: None,
-///         };
-///         request_cx.respond(response)
+///         request_cx.respond(PromptResponse::new(StopReason::EndTurn))
 ///     })
 ///     .await
 ///     .otherwise(|message| async move {

@@ -76,7 +76,7 @@ where
         let location = self.location;
         (self.task_fn)(cx).await.map_err(|err| {
             let data = err.data.clone();
-            err.with_data(serde_json::json! {
+            err.data(serde_json::json! {
                 {
                     "spawned_at": format!("{}:{}:{}", location.file(), location.line(), location.column()),
                     "data": data,

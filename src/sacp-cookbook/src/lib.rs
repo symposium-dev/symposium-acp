@@ -61,7 +61,7 @@ pub mod one_shot_prompt {
     //!
     //! ```
     //! use sacp::{ClientToAgent, AgentToClient, Component};
-    //! use sacp::schema::InitializeRequest;
+    //! use sacp::schema::{InitializeRequest, ProtocolVersion};
     //!
     //! async fn ask_agent(
     //!     transport: impl Component<AgentToClient> + 'static,
@@ -72,12 +72,8 @@ pub mod one_shot_prompt {
     //!         .connect_to(transport)?
     //!         .run_until(async |cx| {
     //!             // Initialize the connection
-    //!             cx.send_request(InitializeRequest {
-    //!                 protocol_version: Default::default(),
-    //!                 client_capabilities: Default::default(),
-    //!                 client_info: None,
-    //!                 meta: None,
-    //!             }).block_task().await?;
+    //!             cx.send_request(InitializeRequest::new(ProtocolVersion::LATEST))
+    //!                 .block_task().await?;
     //!
     //!             // Create a session, send prompt, read response
     //!             let mut session = cx.build_session_cwd()?
@@ -135,19 +131,15 @@ pub mod connecting_as_client {
     //!
     //! ```
     //! use sacp::{ClientToAgent, AgentToClient, Component};
-    //! use sacp::schema::InitializeRequest;
+    //! use sacp::schema::{InitializeRequest, ProtocolVersion};
     //!
     //! async fn connect_to_agent(transport: impl Component<AgentToClient>) -> Result<(), sacp::Error> {
     //!     ClientToAgent::builder()
     //!         .name("my-client")
     //!         .run_until(transport, async |cx| {
     //!             // Initialize the connection
-    //!             cx.send_request(InitializeRequest {
-    //!                 protocol_version: Default::default(),
-    //!                 client_capabilities: Default::default(),
-    //!                 client_info: None,
-    //!                 meta: None,
-    //!             }).block_task().await?;
+    //!             cx.send_request(InitializeRequest::new(ProtocolVersion::LATEST))
+    //!                 .block_task().await?;
     //!
     //!             // Create a session and send a prompt
     //!             cx.build_session_cwd()?
@@ -234,7 +226,7 @@ pub mod building_an_agent {
     //! use sacp::link::JrLink;
     //! use sacp::schema::{
     //!     InitializeRequest, InitializeResponse, AgentCapabilities,
-    //!     NewSessionRequest, NewSessionResponse,
+    //!     NewSessionRequest, NewSessionResponse, SessionId,
     //!     PromptRequest, PromptResponse, StopReason,
     //! };
     //!
@@ -243,21 +235,14 @@ pub mod building_an_agent {
     //!         .name("my-agent")
     //!         // Handle initialization
     //!         .on_receive_request(async |req: InitializeRequest, request_cx, _cx| {
-    //!             request_cx.respond(InitializeResponse {
-    //!                 protocol_version: req.protocol_version,
-    //!                 agent_capabilities: AgentCapabilities::default(),
-    //!                 auth_methods: vec![],
-    //!                 agent_info: None,
-    //!                 meta: None,
-    //!             })
+    //!             request_cx.respond(
+    //!                 InitializeResponse::new(req.protocol_version)
+    //!                     .agent_capabilities(AgentCapabilities::new())
+    //!             )
     //!         }, sacp::on_receive_request!())
     //!         // Handle session creation
     //!         .on_receive_request(async |req: NewSessionRequest, request_cx, _cx| {
-    //!             request_cx.respond(NewSessionResponse {
-    //!                 session_id: "session-1".into(),
-    //!                 modes: None,
-    //!                 meta: None,
-    //!             })
+    //!             request_cx.respond(NewSessionResponse::new(SessionId::new("session-1")))
     //!         }, sacp::on_receive_request!())
     //!         // Handle prompts
     //!         .on_receive_request(async |req: PromptRequest, request_cx, cx| {
@@ -265,10 +250,7 @@ pub mod building_an_agent {
     //!             // cx.send_notification(SessionNotification { ... })?;
     //!
     //!             // Return final response
-    //!             request_cx.respond(PromptResponse {
-    //!                 stop_reason: StopReason::EndTurn,
-    //!                 meta: None,
-    //!             })
+    //!             request_cx.respond(PromptResponse::new(StopReason::EndTurn))
     //!         }, sacp::on_receive_request!())
     //!         // Reject unknown messages
     //!         .on_receive_message(async |message: MessageCx, cx: JrConnectionCx<AgentToClient>| {
@@ -378,13 +360,10 @@ pub mod reusable_components {
     //!         AgentToClient::builder()
     //!             .name(&self.name)
     //!             .on_receive_request(async move |req: InitializeRequest, request_cx, _cx| {
-    //!                 request_cx.respond(InitializeResponse {
-    //!                     protocol_version: req.protocol_version,
-    //!                     agent_capabilities: AgentCapabilities::default(),
-    //!                     auth_methods: vec![],
-    //!                     agent_info: None,
-    //!                     meta: None,
-    //!                 })
+    //!                 request_cx.respond(
+    //!                     InitializeResponse::new(req.protocol_version)
+    //!                         .agent_capabilities(AgentCapabilities::new())
+    //!                 )
     //!             }, sacp::on_receive_request!())
     //!             .serve(client)
     //!             .await
@@ -438,13 +417,10 @@ pub mod custom_message_handlers {
     //!     ) -> Result<Handled<MessageCx>, sacp::Error> {
     //!         MatchMessage::new(message)
     //!             .if_request(async |req: InitializeRequest, request_cx| {
-    //!                 request_cx.respond(InitializeResponse {
-    //!                     protocol_version: req.protocol_version,
-    //!                     agent_capabilities: AgentCapabilities::default(),
-    //!                     auth_methods: vec![],
-    //!                     agent_info: None,
-    //!                     meta: None,
-    //!                 })
+    //!                 request_cx.respond(
+    //!                     InitializeResponse::new(req.protocol_version)
+    //!                         .agent_capabilities(AgentCapabilities::new())
+    //!                 )
     //!             })
     //!             .await
     //!             .done()

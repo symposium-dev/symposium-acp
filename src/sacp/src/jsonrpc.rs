@@ -112,13 +112,10 @@ use crate::{AgentPeer, ClientPeer, Component};
 /// # async fn example(transport: impl Component<ClientToAgent>) -> Result<(), sacp::Error> {
 /// AgentToClient::builder()
 ///     .on_receive_request(async |req: InitializeRequest, request_cx, cx| {
-///         request_cx.respond(InitializeResponse {
-///             protocol_version: req.protocol_version,
-///             agent_capabilities: AgentCapabilities::default(),
-///             auth_methods: vec![],
-///             agent_info: None,
-///             meta: None,
-///         })
+///         request_cx.respond(
+///             InitializeResponse::new(req.protocol_version)
+///                 .agent_capabilities(AgentCapabilities::new()),
+///         )
 ///     }, sacp::on_receive_request!())
 ///     .on_receive_notification(async |notif: StatusUpdate, cx| {
 ///         // Process notification

@@ -9,7 +9,7 @@ use sacp::link::{AgentToClient, ProxyToConductor};
 use sacp::mcp_server::McpServer;
 use sacp::schema::{
     AgentCapabilities, InitializeRequest, InitializeResponse, NewSessionRequest,
-    NewSessionResponse, SessionId,
+    NewSessionResponse, ProtocolVersion, SessionId,
 };
 use sacp::{AgentPeer, ClientPeer, Component};
 use sacp_conductor::{Conductor, ProxiesAndAgent};
@@ -130,23 +130,18 @@ impl Component<AgentToClient> for SimpleAgent {
             .name("simple-agent")
             .on_receive_request(
                 async |request: InitializeRequest, request_cx, _cx| {
-                    request_cx.respond(InitializeResponse {
-                        protocol_version: request.protocol_version,
-                        agent_capabilities: AgentCapabilities::default(),
-                        auth_methods: vec![],
-                        meta: None,
-                        agent_info: None,
-                    })
+                    request_cx.respond(
+                        InitializeResponse::new(request.protocol_version)
+                            .agent_capabilities(AgentCapabilities::new()),
+                    )
                 },
                 sacp::on_receive_request!(),
             )
             .on_receive_request(
                 async |_request: NewSessionRequest, request_cx, _cx| {
-                    request_cx.respond(NewSessionResponse {
-                        session_id: SessionId(Arc::from(uuid::Uuid::new_v4().to_string())),
-                        modes: None,
-                        meta: None,
-                    })
+                    request_cx.respond(NewSessionResponse::new(SessionId::new(
+                        uuid::Uuid::new_v4().to_string(),
+                    )))
                 },
                 sacp::on_receive_request!(),
             )
@@ -197,21 +192,12 @@ async fn test_new_session_handler_invoked_with_mcp_server() -> Result<(), sacp::
 
     run_test(vec![proxy], agent, async |editor_cx| {
         // Initialize first
-        let _init_response = recv(editor_cx.send_request(InitializeRequest {
-            protocol_version: Default::default(),
-            client_capabilities: Default::default(),
-            meta: None,
-            client_info: None,
-        }))
-        .await?;
+        let _init_response =
+            recv(editor_cx.send_request(InitializeRequest::new(ProtocolVersion::LATEST))).await?;
 
         // Create a new session - this should trigger the handler in the proxy
-        let session_response = recv(editor_cx.send_request(NewSessionRequest {
-            cwd: PathBuf::from("/tmp"),
-            mcp_servers: vec![],
-            meta: None,
-        }))
-        .await?;
+        let session_response =
+            recv(editor_cx.send_request(NewSessionRequest::new(PathBuf::from("/tmp")))).await?;
 
         // Verify we got a valid session ID
         assert!(

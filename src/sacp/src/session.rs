@@ -40,14 +40,7 @@ where
 {
     /// Session builder for a new session request.
     pub fn build_session(&self, cwd: impl AsRef<Path>) -> SessionBuilder<Link, NullResponder> {
-        SessionBuilder::new(
-            self,
-            NewSessionRequest {
-                cwd: cwd.as_ref().to_owned(),
-                mcp_servers: Default::default(),
-                meta: Default::default(),
-            },
-        )
+        SessionBuilder::new(self, NewSessionRequest::new(cwd.as_ref()))
     }
 
     /// Session builder using the current working directory.
@@ -58,7 +51,7 @@ where
     /// Returns an error if the current directory cannot be determined.
     pub fn build_session_cwd(&self) -> Result<SessionBuilder<Link, NullResponder>, crate::Error> {
         let cwd = std::env::current_dir().map_err(|e| {
-            crate::Error::internal_error().with_data(format!("cannot get current directory: {e}"))
+            crate::Error::internal_error().data(format!("cannot get current directory: {e}"))
         })?;
         Ok(self.build_session(cwd))
     }
@@ -93,6 +86,7 @@ where
             session_id,
             modes,
             meta,
+            ..
         } = response;
 
         let (update_tx, update_rx) = mpsc::unbounded();
@@ -494,7 +488,7 @@ where
     update_rx: mpsc::UnboundedReceiver<SessionMessage>,
     update_tx: mpsc::UnboundedSender<SessionMessage>,
     modes: Option<SessionModeState>,
-    meta: Option<serde_json::Value>,
+    meta: Option<serde_json::Map<String, serde_json::Value>>,
     connection: JrConnectionCx<Link>,
 
     /// Registration for the handler that routes session messages to `update_rx`.
@@ -538,7 +532,7 @@ where
     }
 
     /// Access meta data from session response.
-    pub fn meta(&self) -> &Option<serde_json::Value> {
+    pub fn meta(&self) -> &Option<serde_json::Map<String, serde_json::Value>> {
         &self.meta
     }
 
@@ -547,11 +541,9 @@ where
     /// Useful when you need to forward the session response to a client
     /// after doing some processing.
     pub fn response(&self) -> NewSessionResponse {
-        NewSessionResponse {
-            session_id: self.session_id.clone(),
-            modes: self.modes.clone(),
-            meta: self.meta.clone(),
-        }
+        NewSessionResponse::new(self.session_id.clone())
+            .modes(self.modes.clone())
+            .meta(self.meta.clone())
     }
 
     /// Access the underlying connection context used to communicate with the agent.
@@ -565,16 +557,13 @@ where
         self.connection
             .send_request_to(
                 AgentPeer,
-                PromptRequest {
-                    session_id: self.session_id.clone(),
-                    prompt: vec![prompt.to_string().into()],
-                    meta: None,
-                },
+                PromptRequest::new(self.session_id.clone(), vec![prompt.to_string().into()]),
             )
             .on_receiving_result(async move |result| {
                 let PromptResponse {
                     stop_reason,
                     meta: _,
+                    ..
                 } = result?;
 
                 update_tx
@@ -609,6 +598,7 @@ where
                         SessionUpdate::AgentMessageChunk(ContentChunk {
                             content: ContentBlock::Text(text),
                             meta: _,
+                            ..
                         }) => {
                             output.push_str(&text.text);
                             Ok(())

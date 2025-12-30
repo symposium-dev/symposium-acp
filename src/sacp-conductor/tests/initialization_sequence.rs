@@ -9,6 +9,7 @@ use elizacp::ElizaAgent;
 use sacp::link::ProxyToConductor;
 use sacp::schema::{
     AgentCapabilities, InitializeProxyRequest, InitializeRequest, InitializeResponse,
+    ProtocolVersion,
 };
 use sacp::{ClientPeer, Component};
 use sacp_conductor::{Conductor, ProxiesAndAgent};
@@ -102,13 +103,8 @@ impl Component<ProxyToConductor> for InitComponent {
                         Some(InitRequestType::Initialize);
 
                     // We're the final component, just respond
-                    let response = InitializeResponse {
-                        protocol_version: request.protocol_version,
-                        agent_capabilities: AgentCapabilities::default(),
-                        auth_methods: vec![],
-                        meta: None,
-                        agent_info: None,
-                    };
+                    let response = InitializeResponse::new(request.protocol_version)
+                        .agent_capabilities(AgentCapabilities::new());
 
                     request_cx.respond(response)
                 },
@@ -152,13 +148,8 @@ async fn test_single_component_gets_initialize_request() -> Result<(), sacp::Err
     // Single component (agent) should receive InitializeRequest - we use ElizaAgent
     // which properly handles InitializeRequest
     run_test_with_components(vec![], async |editor_cx| {
-        let init_response = recv(editor_cx.send_request(InitializeRequest {
-            protocol_version: Default::default(),
-            client_capabilities: Default::default(),
-            meta: None,
-            client_info: None,
-        }))
-        .await;
+        let init_response =
+            recv(editor_cx.send_request(InitializeRequest::new(ProtocolVersion::LATEST))).await;
 
         assert!(
             init_response.is_ok(),
@@ -180,13 +171,8 @@ async fn test_two_components_proxy_gets_initialize_proxy() -> Result<(), sacp::E
     let component1 = InitConfig::new();
 
     run_test_with_components(vec![InitComponent::new(&component1)], async |editor_cx| {
-        let init_response = recv(editor_cx.send_request(InitializeRequest {
-            protocol_version: Default::default(),
-            client_capabilities: Default::default(),
-            meta: None,
-            client_info: None,
-        }))
-        .await;
+        let init_response =
+            recv(editor_cx.send_request(InitializeRequest::new(ProtocolVersion::LATEST))).await;
 
         assert!(
             init_response.is_ok(),
@@ -223,13 +209,8 @@ async fn test_three_components_all_proxies_get_initialize_proxy() -> Result<(), 
             InitComponent::new(&component2),
         ],
         async |editor_cx| {
-            let init_response = recv(editor_cx.send_request(InitializeRequest {
-                protocol_version: Default::default(),
-                client_capabilities: Default::default(),
-                meta: None,
-                client_info: None,
-            }))
-            .await;
+            let init_response =
+                recv(editor_cx.send_request(InitializeRequest::new(ProtocolVersion::LATEST))).await;
 
             assert!(
                 init_response.is_ok(),
@@ -324,13 +305,8 @@ async fn test_conductor_rejects_initialize_proxy_forwarded_to_agent() -> Result<
         vec![sacp::DynComponent::new(BadProxy)],
         sacp::DynComponent::new(ElizaAgent::new()),
         async |editor_cx| {
-            let init_response = recv(editor_cx.send_request(InitializeRequest {
-                protocol_version: Default::default(),
-                client_capabilities: Default::default(),
-                meta: None,
-                client_info: None,
-            }))
-            .await;
+            let init_response =
+                recv(editor_cx.send_request(InitializeRequest::new(ProtocolVersion::LATEST))).await;
 
             if let Err(err) = init_response {
                 assert!(
@@ -370,13 +346,8 @@ async fn test_conductor_rejects_initialize_proxy_forwarded_to_proxy() -> Result<
         ],
         sacp::DynComponent::new(ElizaAgent::new()), // Agent
         async |editor_cx| {
-            let init_response = recv(editor_cx.send_request(InitializeRequest {
-                protocol_version: Default::default(),
-                client_capabilities: Default::default(),
-                meta: None,
-                client_info: None,
-            }))
-            .await;
+            let init_response =
+                recv(editor_cx.send_request(InitializeRequest::new(ProtocolVersion::LATEST))).await;
 
             // The error may come through recv() or bubble up through the test harness
             if let Err(err) = init_response {

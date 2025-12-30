@@ -169,15 +169,10 @@ impl AcpAgent {
         sacp::Error,
     > {
         match &self.server {
-            sacp::schema::McpServer::Stdio {
-                command,
-                args,
-                env,
-                name: _,
-            } => {
-                let mut cmd = tokio::process::Command::new(command);
-                cmd.args(args);
-                for env_var in env {
+            sacp::schema::McpServer::Stdio(stdio) => {
+                let mut cmd = tokio::process::Command::new(&stdio.command);
+                cmd.args(&stdio.args);
+                for env_var in &stdio.env {
                     cmd.env(&env_var.name, &env_var.value);
                 }
                 cmd.stdin(std::process::Stdio::piped())
@@ -201,11 +196,14 @@ impl AcpAgent {
 
                 Ok((child_stdin, child_stdout, child_stderr, child))
             }
-            sacp::schema::McpServer::Http { .. } => Err(sacp::util::internal_error(
+            sacp::schema::McpServer::Http(_) => Err(sacp::util::internal_error(
                 "HTTP transport not yet supported by AcpAgent",
             )),
-            sacp::schema::McpServer::Sse { .. } => Err(sacp::util::internal_error(
+            sacp::schema::McpServer::Sse(_) => Err(sacp::util::internal_error(
                 "SSE transport not yet supported by AcpAgent",
+            )),
+            _ => Err(sacp::util::internal_error(
+                "Unknown MCP server transport type",
             )),
         }
     }
@@ -383,11 +381,7 @@ impl AcpAgent {
         // Parse leading FOO=bar arguments as environment variables
         for (i, arg) in args.iter().enumerate() {
             if let Some((name, value)) = parse_env_var(arg) {
-                env.push(sacp::schema::EnvVariable {
-                    name,
-                    value,
-                    meta: None,
-                });
+                env.push(sacp::schema::EnvVariable::new(name, value));
                 command_idx = i + 1;
             } else {
                 break;
@@ -411,12 +405,11 @@ impl AcpAgent {
             .to_string();
 
         Ok(AcpAgent {
-            server: sacp::schema::McpServer::Stdio {
-                name,
-                command,
-                args: cmd_args,
-                env,
-            },
+            server: sacp::schema::McpServer::Stdio(
+                sacp::schema::McpServerStdio::new(name, command)
+                    .args(cmd_args)
+                    .env(env),
+            ),
             debug_callback: None,
         })
     }
@@ -480,16 +473,11 @@ mod tests {
     fn test_parse_simple_command() {
         let agent = AcpAgent::from_str("python agent.py").unwrap();
         match agent.server {
-            sacp::schema::McpServer::Stdio {
-                name,
-                command,
-                args,
-                env,
-            } => {
-                assert_eq!(name, "python");
-                assert_eq!(command, PathBuf::from("python"));
-                assert_eq!(args, vec!["agent.py"]);
-                assert_eq!(env, vec![]);
+            sacp::schema::McpServer::Stdio(stdio) => {
+                assert_eq!(stdio.name, "python");
+                assert_eq!(stdio.command, PathBuf::from("python"));
+                assert_eq!(stdio.args, vec!["agent.py"]);
+                assert!(stdio.env.is_empty());
             }
             _ => panic!("Expected Stdio variant"),
         }
@@ -499,16 +487,11 @@ mod tests {
     fn test_parse_command_with_args() {
         let agent = AcpAgent::from_str("node server.js --port 8080 --verbose").unwrap();
         match agent.server {
-            sacp::schema::McpServer::Stdio {
-                name,
-                command,
-                args,
-                env,
-            } => {
-                assert_eq!(name, "node");
-                assert_eq!(command, PathBuf::from("node"));
-                assert_eq!(args, vec!["server.js", "--port", "8080", "--verbose"]);
-                assert_eq!(env, vec![]);
+            sacp::schema::McpServer::Stdio(stdio) => {
+                assert_eq!(stdio.name, "node");
+                assert_eq!(stdio.command, PathBuf::from("node"));
+                assert_eq!(stdio.args, vec!["server.js", "--port", "8080", "--verbose"]);
+                assert!(stdio.env.is_empty());
             }
             _ => panic!("Expected Stdio variant"),
         }
@@ -518,16 +501,11 @@ mod tests {
     fn test_parse_command_with_quotes() {
         let agent = AcpAgent::from_str(r#"python "my agent.py" --name "Test Agent""#).unwrap();
         match agent.server {
-            sacp::schema::McpServer::Stdio {
-                name,
-                command,
-                args,
-                env,
-            } => {
-                assert_eq!(name, "python");
-                assert_eq!(command, PathBuf::from("python"));
-                assert_eq!(args, vec!["my agent.py", "--name", "Test Agent"]);
-                assert_eq!(env, vec![]);
+            sacp::schema::McpServer::Stdio(stdio) => {
+                assert_eq!(stdio.name, "python");
+                assert_eq!(stdio.command, PathBuf::from("python"));
+                assert_eq!(stdio.args, vec!["my agent.py", "--name", "Test Agent"]);
+                assert!(stdio.env.is_empty());
             }
             _ => panic!("Expected Stdio variant"),
         }
@@ -544,16 +522,11 @@ mod tests {
         }"#;
         let agent = AcpAgent::from_str(json).unwrap();
         match agent.server {
-            sacp::schema::McpServer::Stdio {
-                name,
-                command,
-                args,
-                env,
-            } => {
-                assert_eq!(name, "my-agent");
-                assert_eq!(command, PathBuf::from("/usr/bin/python"));
-                assert_eq!(args, vec!["agent.py", "--verbose"]);
-                assert_eq!(env, vec![]);
+            sacp::schema::McpServer::Stdio(stdio) => {
+                assert_eq!(stdio.name, "my-agent");
+                assert_eq!(stdio.command, PathBuf::from("/usr/bin/python"));
+                assert_eq!(stdio.args, vec!["agent.py", "--verbose"]);
+                assert!(stdio.env.is_empty());
             }
             _ => panic!("Expected Stdio variant"),
         }
@@ -569,10 +542,10 @@ mod tests {
         }"#;
         let agent = AcpAgent::from_str(json).unwrap();
         match agent.server {
-            sacp::schema::McpServer::Http { name, url, headers } => {
-                assert_eq!(name, "remote-agent");
-                assert_eq!(url, "https://example.com/agent");
-                assert_eq!(headers, vec![]);
+            sacp::schema::McpServer::Http(http) => {
+                assert_eq!(http.name, "remote-agent");
+                assert_eq!(http.url, "https://example.com/agent");
+                assert!(http.headers.is_empty());
             }
             _ => panic!("Expected Http variant"),
         }

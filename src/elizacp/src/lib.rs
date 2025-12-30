@@ -78,16 +78,10 @@ impl ElizaAgent {
         tracing::debug!("New session request with cwd: {:?}", request.cwd);
 
         // Generate a new session ID
-        let session_id = SessionId(Arc::from(uuid::Uuid::new_v4().to_string()));
+        let session_id = SessionId::new(uuid::Uuid::new_v4().to_string());
         self.create_session(&session_id, request.mcp_servers);
 
-        let response = NewSessionResponse {
-            session_id,
-            modes: None,
-            meta: None,
-        };
-
-        request_cx.respond(response)
+        request_cx.respond(NewSessionResponse::new(session_id))
     }
 
     async fn handle_load_session(
@@ -100,12 +94,7 @@ impl ElizaAgent {
         // For Eliza, we just create a fresh session with no MCP servers
         self.create_session(&request.session_id, vec![]);
 
-        let response = LoadSessionResponse {
-            modes: None,
-            meta: None,
-        };
-
-        request_cx.respond(response)
+        request_cx.respond(LoadSessionResponse::new())
     }
 
     /// Process the prompt and send response - this runs in a spawned task
@@ -171,20 +160,13 @@ impl ElizaAgent {
             ?final_response,
             "Eliza sending SessionNotification"
         );
-        cx.send_notification(SessionNotification {
-            session_id: session_id.clone(),
-            update: SessionUpdate::AgentMessageChunk(ContentChunk {
-                content: final_response.into(),
-                meta: None,
-            }),
-            meta: None,
-        })?;
+        cx.send_notification(SessionNotification::new(
+            session_id.clone(),
+            SessionUpdate::AgentMessageChunk(ContentChunk::new(final_response.into())),
+        ))?;
 
         // Complete the request
-        request_cx.respond(PromptResponse {
-            stop_reason: StopReason::EndTurn,
-            meta: None,
-        })
+        request_cx.respond(PromptResponse::new(StopReason::EndTurn))
     }
 
     /// Helper function to execute an operation with an MCP client
@@ -213,34 +195,33 @@ impl ElizaAgent {
         let mcp_server = mcp_servers
             .iter()
             .find(|server| match server {
-                McpServer::Stdio { name, .. } => name == server_name,
-                McpServer::Http { name, .. } => name == server_name,
-                McpServer::Sse { name, .. } => name == server_name,
+                McpServer::Stdio(stdio) => stdio.name == server_name,
+                McpServer::Http(http) => http.name == server_name,
+                McpServer::Sse(sse) => sse.name == server_name,
+                _ => false,
             })
             .ok_or_else(|| anyhow::anyhow!("MCP server '{}' not found", server_name))?;
 
         // Spawn MCP client based on server type
         match mcp_server {
-            McpServer::Stdio {
-                command, args, env, ..
-            } => {
+            McpServer::Stdio(stdio) => {
                 tracing::debug!(
-                    command = ?command,
-                    args = ?args,
+                    command = ?stdio.command,
+                    args = ?stdio.args,
                     server_name = %server_name,
                     "Starting MCP client"
                 );
 
                 // Create MCP client by spawning the process
                 let mcp_client = ()
-                    .serve(TokioChildProcess::new(Command::new(command).configure(
-                        |cmd| {
-                            cmd.args(args);
-                            for env_var in env {
+                    .serve(TokioChildProcess::new(
+                        Command::new(&stdio.command).configure(|cmd| {
+                            cmd.args(&stdio.args);
+                            for env_var in &stdio.env {
                                 cmd.env(&env_var.name, &env_var.value);
                             }
-                        },
-                    ))?)
+                        }),
+                    )?)
                     .await?;
 
                 tracing::debug!("MCP client connected");
@@ -250,18 +231,18 @@ impl ElizaAgent {
 
                 Ok(result)
             }
-            McpServer::Http { url, .. } => {
+            McpServer::Http(http) => {
                 use rmcp::transport::StreamableHttpClientTransport;
 
                 tracing::debug!(
-                    url = %url,
+                    url = %http.url,
                     server_name = %server_name,
                     "Starting HTTP MCP client"
                 );
 
                 // Create HTTP MCP client
                 let mcp_client =
-                    ().serve(StreamableHttpClientTransport::from_uri(url.as_str()))
+                    ().serve(StreamableHttpClientTransport::from_uri(http.url.as_str()))
                         .await?;
 
                 tracing::debug!("HTTP MCP client connected");
@@ -271,7 +252,8 @@ impl ElizaAgent {
 
                 Ok(result)
             }
-            McpServer::Sse { .. } => Err(anyhow::anyhow!("SSE MCP servers not yet supported")),
+            McpServer::Sse(_) => Err(anyhow::anyhow!("SSE MCP servers not yet supported")),
+            _ => Err(anyhow::anyhow!("Unknown MCP server type")),
         }
     }
 
@@ -394,18 +376,10 @@ impl Component<sacp::link::AgentToClient> for ElizaAgent {
                 async |initialize: InitializeRequest, request_cx, _cx| {
                     tracing::debug!("Received initialize request");
 
-                    request_cx.respond(InitializeResponse {
-                        protocol_version: initialize.protocol_version,
-                        agent_capabilities: AgentCapabilities {
-                            load_session: Default::default(),
-                            prompt_capabilities: Default::default(),
-                            mcp_capabilities: Default::default(),
-                            meta: Default::default(),
-                        },
-                        auth_methods: Default::default(),
-                        agent_info: Default::default(),
-                        meta: Default::default(),
-                    })
+                    request_cx.respond(
+                        InitializeResponse::new(initialize.protocol_version)
+                            .agent_capabilities(AgentCapabilities::new()),
+                    )
                 },
                 sacp::on_receive_request!(),
             )

@@ -69,12 +69,9 @@ async fn test_acp_agent_debug_callback() -> Result<(), Box<dyn std::error::Error
         })
         .run_until(transport, async |client_cx| {
             // Send an initialize request
-            let _init_response = recv(client_cx.send_request(InitializeRequest {
-                protocol_version: Default::default(),
-                client_capabilities: Default::default(),
-                meta: None,
-                client_info: None,
-            }))
+            let _init_response = recv(client_cx.send_request(InitializeRequest::new(
+                sacp::schema::ProtocolVersion::LATEST,
+            )))
             .await?;
 
             Ok(())
