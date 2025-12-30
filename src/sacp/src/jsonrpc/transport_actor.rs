@@ -55,7 +55,7 @@ pub(super) async fn transport_outgoing_lines_actor(
                         // Convert crate::Error to jsonrpcmsg::Error
                         let acp_error = crate::Error::internal_error();
                         let jsonrpc_error = jsonrpcmsg::Error {
-                            code: acp_error.code,
+                            code: acp_error.code.into(),
                             message: acp_error.message,
                             data: acp_error.data,
                         };
@@ -106,13 +106,11 @@ pub(super) async fn transport_incoming_lines_actor(
             }
             Err(_) => {
                 transport_tx
-                    .unbounded_send(Err(crate::Error::parse_error().with_data(
-                        serde_json::json!(
-                            {
-                                "line": &line
-                            }
-                        ),
-                    )))
+                    .unbounded_send(Err(crate::Error::parse_error().data(serde_json::json!(
+                        {
+                            "line": &line
+                        }
+                    ))))
                     .map_err(crate::Error::into_internal_error)?;
             }
         }

@@ -117,11 +117,7 @@ pub(super) async fn incoming_protocol_actor<Link: JrLink>(
                                 Ok(value)
                             } else if let Some(error) = response.error {
                                 // Convert jsonrpcmsg::Error to crate::Error
-                                Err(crate::Error {
-                                    code: error.code,
-                                    message: error.message,
-                                    data: error.data,
-                                })
+                                Err(crate::Error::new(error.code, error.message).data(error.data))
                             } else {
                                 // Response with neither result nor error - treat as null result
                                 Ok(serde_json::Value::Null)
@@ -265,7 +261,7 @@ async fn dispatch_request<Link: JrLink>(
         tracing::debug!(method = ?request.method, "Rejecting message");
         let method = message_cx.method().to_string();
         message_cx.respond_with_error(
-            crate::Error::method_not_found().with_data(method),
+            crate::Error::method_not_found().data(method),
             json_rpc_cx.clone(),
         )
     }

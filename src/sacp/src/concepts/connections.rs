@@ -41,17 +41,12 @@
 //!
 //! ```
 //! # use sacp::{ClientToAgent, AgentToClient, Component};
-//! # use sacp::schema::InitializeRequest;
+//! # use sacp::schema::{InitializeRequest, ProtocolVersion};
 //! # use sacp_test::StatusUpdate;
 //! # async fn example(transport: impl Component<AgentToClient>) -> Result<(), sacp::Error> {
 //! # ClientToAgent::builder().run_until(transport, async |cx| {
 //! // Send a request and wait for the response
-//! let response = cx.send_request(InitializeRequest {
-//!     protocol_version: Default::default(),
-//!     client_capabilities: Default::default(),
-//!     client_info: None,
-//!     meta: None,
-//! })
+//! let response = cx.send_request(InitializeRequest::new(ProtocolVersion::LATEST))
 //!     .block_task()
 //!     .await?;
 //!

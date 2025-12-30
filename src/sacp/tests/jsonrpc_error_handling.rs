@@ -212,7 +212,7 @@ async fn test_unknown_method() {
                     assert!(result.is_err());
                     if let Err(err) = result {
                         // Should be "method not found" or similar error
-                        assert!(err.code < 0); // JSON-RPC error codes are negative
+                        assert!(matches!(err.code, sacp::ErrorCode::MethodNotFound));
                     }
                     Ok(())
                 })
@@ -272,10 +272,7 @@ async fn test_handler_returns_error() {
                        request_cx: JrRequestCx<SimpleResponse>,
                        _connection_cx: JrConnectionCx<UntypedLink>| {
                     // Explicitly return an error
-                    request_cx.respond_with_error(sacp::Error::new((
-                        -32000,
-                        "This is an intentional error".to_string(),
-                    )))
+                    request_cx.respond_with_error(sacp::Error::internal_error())
                 },
                 sacp::on_receive_request!(),
             );
@@ -298,8 +295,7 @@ async fn test_handler_returns_error() {
                     // Should get the error the handler returned
                     assert!(result.is_err());
                     if let Err(err) = result {
-                        assert_eq!(err.code, -32000);
-                        assert_eq!(err.message, "This is an intentional error");
+                        assert!(matches!(err.code, sacp::ErrorCode::InternalError));
                     }
                     Ok(())
                 })
@@ -385,7 +381,7 @@ async fn test_missing_required_params() {
                     // Should get invalid_params error
                     assert!(result.is_err());
                     if let Err(err) = result {
-                        assert_eq!(err.code, -32602); // JSONRPC_INVALID_PARAMS
+                        assert!(matches!(err.code, sacp::ErrorCode::InvalidParams)); // JSONRPC_INVALID_PARAMS
                     }
                     Ok(())
                 })

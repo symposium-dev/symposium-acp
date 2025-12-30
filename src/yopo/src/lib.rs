@@ -5,8 +5,8 @@
 use sacp::ClientToAgent;
 use sacp::schema::{
     AudioContent, ContentBlock, EmbeddedResourceResource, ImageContent, InitializeRequest,
-    RequestPermissionOutcome, RequestPermissionRequest, RequestPermissionResponse,
-    SessionNotification, TextContent, VERSION as PROTOCOL_VERSION,
+    ProtocolVersion, RequestPermissionOutcome, RequestPermissionRequest, RequestPermissionResponse,
+    SelectedPermissionOutcome, SessionNotification, TextContent,
 };
 use sacp::util::MatchMessage;
 use sacp::{Component, Handled, MessageCx, UntypedMessage};
@@ -27,11 +27,7 @@ use std::path::PathBuf;
 /// use yopo::content_block_to_string;
 /// use sacp::schema::{ContentBlock, TextContent};
 ///
-/// let block = ContentBlock::Text(TextContent {
-///     annotations: None,
-///     text: "Hello".to_string(),
-///     meta: None,
-/// });
+/// let block = ContentBlock::Text(TextContent::new("Hello".to_string()));
 /// assert_eq!(content_block_to_string(&block), "Hello");
 /// ```
 pub fn content_block_to_string(block: &ContentBlock) -> String {
@@ -47,7 +43,9 @@ pub fn content_block_to_string(block: &ContentBlock) -> String {
         ContentBlock::Resource(resource) => match &resource.resource {
             EmbeddedResourceResource::TextResourceContents(text) => text.uri.clone(),
             EmbeddedResourceResource::BlobResourceContents(blob) => blob.uri.clone(),
+            _ => "[Unknown resource type]".to_string(),
         },
+        _ => "[Unknown content type]".to_string(),
     }
 }
 
@@ -104,12 +102,7 @@ pub async fn prompt_with_callback(
         .run_until(|cx: sacp::JrConnectionCx<ClientToAgent>| async move {
             // Initialize the agent
             let _init_response = cx
-                .send_request(InitializeRequest {
-                    protocol_version: PROTOCOL_VERSION,
-                    client_capabilities: Default::default(),
-                    client_info: None,
-                    meta: None,
-                })
+                .send_request(InitializeRequest::new(ProtocolVersion::LATEST))
                 .block_task()
                 .await?;
 
@@ -152,16 +145,18 @@ pub async fn prompt_with_callback(
                                         | sacp::schema::PermissionOptionKind::AllowAlways => true,
                                         sacp::schema::PermissionOptionKind::RejectOnce
                                         | sacp::schema::PermissionOptionKind::RejectAlways => false,
+                                        _ => false,
                                     })
-                                    .map(|option| RequestPermissionOutcome::Selected {
-                                        option_id: option.id.clone(),
+                                    .map(|option| {
+                                        RequestPermissionOutcome::Selected(
+                                            SelectedPermissionOutcome::new(
+                                                option.option_id.clone(),
+                                            ),
+                                        )
                                     })
                                     .unwrap_or(RequestPermissionOutcome::Cancelled);
 
-                                request_cx.respond(RequestPermissionResponse {
-                                    outcome,
-                                    meta: None,
-                                })?;
+                                request_cx.respond(RequestPermissionResponse::new(outcome))?;
 
                                 Ok(())
                             })
@@ -175,6 +170,7 @@ pub async fn prompt_with_callback(
                         sacp::schema::StopReason::MaxTurnRequests => todo!(),
                         sacp::schema::StopReason::Refusal => todo!(),
                         sacp::schema::StopReason::Cancelled => todo!(),
+                        _ => todo!(),
                     },
                     _ => todo!(),
                 }

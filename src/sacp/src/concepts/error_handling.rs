@@ -50,7 +50,7 @@
 //! # async fn example(transport: impl Component<AgentToClient>) -> Result<(), sacp::Error> {
 //! # ClientToAgent::builder().run_until(transport, async |cx| {
 //! cx.send_error_notification(sacp::Error::internal_error()
-//!     .with_data("Something went wrong"))?;
+//!     .data("Something went wrong"))?;
 //! # Ok(())
 //! # }).await?;
 //! # Ok(())
@@ -96,11 +96,11 @@
 //! - [`Error::invalid_params()`][crate::Error::invalid_params] - Bad parameters
 //! - [`Error::internal_error()`][crate::Error::internal_error] - Server error
 //!
-//! You can add context with `.with_data()`:
+//! You can add context with `.data()`:
 //!
 //! ```
 //! let error = sacp::Error::invalid_params()
-//!     .with_data(serde_json::json!({
+//!     .data(serde_json::json!({
 //!         "field": "timeout",
 //!         "reason": "must be positive"
 //!     }));

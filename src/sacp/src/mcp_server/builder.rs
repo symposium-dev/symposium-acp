@@ -158,9 +158,7 @@ impl<Link: JrLink, Responder: JrResponder<Link>> McpServerBuilder<Link, Responde
     /// Returns an error if the tool is not registered.
     pub fn disable_tool(mut self, name: &str) -> Result<Self, crate::Error> {
         if !self.data.tools.contains_key(name) {
-            return Err(
-                crate::Error::invalid_request().with_data(format!("unknown tool: {}", name))
-            );
+            return Err(crate::Error::invalid_request().data(format!("unknown tool: {}", name)));
         }
         match &mut self.data.enabled_tools {
             EnabledTools::DenyList(deny) => {
@@ -178,9 +176,7 @@ impl<Link: JrLink, Responder: JrResponder<Link>> McpServerBuilder<Link, Responde
     /// Returns an error if the tool is not registered.
     pub fn enable_tool(mut self, name: &str) -> Result<Self, crate::Error> {
         if !self.data.tools.contains_key(name) {
-            return Err(
-                crate::Error::invalid_request().with_data(format!("unknown tool: {}", name))
-            );
+            return Err(crate::Error::invalid_request().data(format!("unknown tool: {}", name)));
         }
         match &mut self.data.enabled_tools {
             EnabledTools::DenyList(deny) => {
@@ -535,7 +531,7 @@ fn make_erased_mcp_tool<'s, Link: JrLink, M: McpTool<Link> + 's>(
 /// Convert a [`crate::Error`] into an [`rmcp::ErrorData`].
 fn to_rmcp_error(error: crate::Error) -> rmcp::ErrorData {
     rmcp::ErrorData {
-        code: rmcp::model::ErrorCode(error.code),
+        code: rmcp::model::ErrorCode(error.code.into()),
         message: error.message.into(),
         data: error.data,
     }

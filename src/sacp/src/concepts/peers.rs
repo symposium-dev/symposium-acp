@@ -17,16 +17,11 @@
 //!
 //! ```
 //! # use sacp::{ClientToAgent, AgentToClient, Component};
-//! # use sacp::schema::InitializeRequest;
+//! # use sacp::schema::{InitializeRequest, ProtocolVersion};
 //! # async fn example(transport: impl Component<AgentToClient>) -> Result<(), sacp::Error> {
 //! # ClientToAgent::builder().run_until(transport, async |cx| {
 //! // As a client
-//! cx.send_request(InitializeRequest {
-//!     protocol_version: Default::default(),
-//!     client_capabilities: Default::default(),
-//!     client_info: None,
-//!     meta: None,
-//! });
+//! cx.send_request(InitializeRequest::new(ProtocolVersion::LATEST));
 //! # Ok(())
 //! # }).await?;
 //! # Ok(())

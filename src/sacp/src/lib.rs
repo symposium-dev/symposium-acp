@@ -22,19 +22,15 @@
 //!
 //! ```no_run
 //! use sacp::ClientToAgent;
-//! use sacp::schema::{InitializeRequest, VERSION as PROTOCOL_VERSION};
+//! use sacp::schema::{InitializeRequest, ProtocolVersion};
 //!
 //! # async fn run(transport: impl sacp::Component<sacp::AgentToClient>) -> Result<(), sacp::Error> {
 //! ClientToAgent::builder()
 //!     .name("my-client")
 //!     .run_until(transport, async |cx| {
 //!         // Step 1: Initialize the connection
-//!         cx.send_request(InitializeRequest {
-//!             protocol_version: PROTOCOL_VERSION,
-//!             client_capabilities: Default::default(),
-//!             client_info: Default::default(),
-//!             meta: None,
-//!         }).block_task().await?;
+//!         cx.send_request(InitializeRequest::new(ProtocolVersion::LATEST))
+//!             .block_task().await?;
 //!
 //!         // Step 2: Create a session and send a prompt
 //!         cx.build_session_cwd()?

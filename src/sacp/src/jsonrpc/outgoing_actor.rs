@@ -68,7 +68,7 @@ pub(super) async fn outgoing_protocol_actor(
                 tracing::warn!(?id, ?error, "Sending error response");
                 // Convert crate::Error to jsonrpcmsg::Error
                 let jsonrpc_error = jsonrpcmsg::Error {
-                    code: error.code,
+                    code: error.code.into(),
                     message: error.message,
                     data: error.data,
                 };
@@ -80,7 +80,7 @@ pub(super) async fn outgoing_protocol_actor(
             OutgoingMessage::Error { error } => {
                 // Convert crate::Error to jsonrpcmsg::Error
                 let jsonrpc_error = jsonrpcmsg::Error {
-                    code: error.code,
+                    code: error.code.into(),
                     message: error.message,
                     data: error.data,
                 };

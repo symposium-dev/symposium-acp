@@ -971,7 +971,7 @@ where
             .if_request(async |_request: InitializeProxyRequest, request_cx| {
                 request_cx.respond_with_error(
                     sacp::Error::invalid_request()
-                        .with_data("initialize/proxy requests are only sent by the conductor"),
+                        .data("initialize/proxy requests are only sent by the conductor"),
                 )
             })
             .await
@@ -1021,7 +1021,7 @@ where
             .if_request(async |_request: InitializeProxyRequest, request_cx| {
                 request_cx.respond_with_error(
                     sacp::Error::invalid_request()
-                        .with_data("initialize/proxy requests are only sent by the conductor"),
+                        .data("initialize/proxy requests are only sent by the conductor"),
                 )
             })
             .await
@@ -1514,8 +1514,7 @@ impl ConductorLink for ConductorToClient {
         instantiator: Self::Instantiator,
         responder: &mut ConductorResponder<Self>,
     ) -> Result<MessageCx, sacp::Error> {
-        let invalid_request =
-            || Error::invalid_request().with_data("expected `initialize` request");
+        let invalid_request = || Error::invalid_request().data("expected `initialize` request");
 
         // Not yet initialized - expect an initialize request.
         // Error if we get anything else.
@@ -1614,8 +1613,7 @@ impl ConductorLink for ConductorToConductor {
         instantiator: Self::Instantiator,
         responder: &mut ConductorResponder<Self>,
     ) -> Result<MessageCx, sacp::Error> {
-        let invalid_request =
-            || Error::invalid_request().with_data("expected `initialize` request");
+        let invalid_request = || Error::invalid_request().data("expected `initialize` request");
 
         // Not yet initialized - expect an InitializeProxy request.
         // Error if we get anything else.

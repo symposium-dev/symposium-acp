@@ -401,7 +401,7 @@ impl JrLink for ProxyToConductor {
         // Handle various special messages:
         let result = MatchMessageFrom::new(message, &cx)
             .if_request_from(ClientPeer, async |_req: InitializeRequest, request_cx| {
-                request_cx.respond_with_error(crate::Error::invalid_request().with_data(format!(
+                request_cx.respond_with_error(crate::Error::invalid_request().data(format!(
                     "proxies must be initialized with `{}`",
                     METHOD_INITIALIZE_PROXY
                 )))

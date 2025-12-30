@@ -6,7 +6,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 
 use futures::{SinkExt, channel::mpsc};
-use sacp::schema::McpServer;
+use sacp::schema::{McpServer, McpServerHttp, McpServerStdio};
 use sacp::{self, JrLink};
 use sacp::{JrConnectionCx, MessageCx};
 use tokio::net::TcpListener;
@@ -67,17 +67,20 @@ impl McpBridgeListeners {
     ) -> Result<(), sacp::Error> {
         use sacp::schema::McpServer;
 
-        let McpServer::Http { name, url, headers } = mcp_server else {
+        let McpServer::Http(http) = mcp_server else {
             return Ok(());
         };
 
-        if !url.starts_with("acp:") {
+        if !http.url.starts_with("acp:") {
             return Ok(());
         }
 
-        if !headers.is_empty() {
+        if !http.headers.is_empty() {
             return Err(sacp::Error::internal_error());
         }
+
+        let name = &http.name;
+        let url = &http.url;
 
         info!(
             server_name = name,
@@ -114,22 +117,24 @@ impl McpBridgeListeners {
         info!(acp_url = acp_url, tcp_port, "Bound listener for MCP bridge");
 
         let new_server = match mcp_bridge_mode {
-            crate::McpBridgeMode::Stdio { conductor_command } => McpServer::Stdio {
-                name: server_name.to_string(),
-                command: PathBuf::from(&conductor_command[0]),
-                args: conductor_command[1..]
-                    .iter()
-                    .cloned()
-                    .chain(vec!["mcp".to_string(), format!("{tcp_port}")])
-                    .collect(),
-                env: Default::default(),
-            },
+            crate::McpBridgeMode::Stdio { conductor_command } => McpServer::Stdio(
+                McpServerStdio::new(
+                    server_name.to_string(),
+                    PathBuf::from(&conductor_command[0]),
+                )
+                .args(
+                    conductor_command[1..]
+                        .iter()
+                        .cloned()
+                        .chain(vec!["mcp".to_string(), format!("{tcp_port}")])
+                        .collect::<Vec<_>>(),
+                ),
+            ),
 
-            crate::McpBridgeMode::Http => McpServer::Http {
-                name: server_name.to_string(),
-                url: format!("http://localhost:{tcp_port}"),
-                headers: vec![],
-            },
+            crate::McpBridgeMode::Http => McpServer::Http(McpServerHttp::new(
+                server_name.to_string(),
+                format!("http://localhost:{tcp_port}"),
+            )),
         };
 
         // remember for later

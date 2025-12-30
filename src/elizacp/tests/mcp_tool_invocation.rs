@@ -5,8 +5,8 @@ use expect_test::expect;
 use sacp::Component;
 use sacp::link::UntypedLink;
 use sacp::schema::{
-    ContentBlock, InitializeRequest, McpServer, NewSessionRequest, PromptRequest,
-    SessionNotification, TextContent,
+    ContentBlock, InitializeRequest, McpServer, McpServerStdio, NewSessionRequest, PromptRequest,
+    ProtocolVersion, SessionNotification, TextContent,
 };
 use sacp_test::test_binaries;
 use std::path::PathBuf;
@@ -61,41 +61,29 @@ async fn test_elizacp_mcp_tool_call() -> Result<(), sacp::Error> {
         })
         .run_until(transport, async |client_cx| {
             // Initialize
-            let _init_response = recv(client_cx.send_request(InitializeRequest {
-                protocol_version: Default::default(),
-                client_capabilities: Default::default(),
-                meta: None,
-                client_info: None,
-            }))
-            .await?;
+            let _init_response =
+                recv(client_cx.send_request(InitializeRequest::new(ProtocolVersion::LATEST)))
+                    .await?;
 
             // Create session with an MCP server
             // Use the mcp-echo-server from sacp-test (pre-built binary)
             let mcp_server_binary = test_binaries::mcp_echo_server_binary();
-            let session_response = recv(client_cx.send_request(NewSessionRequest {
-                cwd: PathBuf::from("/tmp"),
-                mcp_servers: vec![McpServer::Stdio {
-                    name: "test".to_string(),
-                    command: mcp_server_binary,
-                    args: vec![],
-                    env: vec![],
-                }],
-                meta: None,
-            }))
+            let session_response = recv(client_cx.send_request(
+                NewSessionRequest::new(PathBuf::from("/tmp")).mcp_servers(vec![McpServer::Stdio(
+                    McpServerStdio::new("test".to_string(), mcp_server_binary),
+                )]),
+            ))
             .await?;
 
             let session_id = session_response.session_id;
 
             // Send a prompt to invoke the MCP tool
-            let _prompt_response = recv(client_cx.send_request(PromptRequest {
-                session_id: session_id.clone(),
-                prompt: vec![ContentBlock::Text(TextContent {
-                    annotations: None,
-                    text: r#"Use tool test::echo with {"message": "Hello from test!"}"#.to_string(),
-                    meta: None,
-                })],
-                meta: None,
-            }))
+            let _prompt_response = recv(client_cx.send_request(PromptRequest::new(
+                session_id.clone(),
+                vec![ContentBlock::Text(TextContent::new(
+                    r#"Use tool test::echo with {"message": "Hello from test!"}"#.to_string(),
+                ))],
+            )))
             .await?;
 
             Ok(())

@@ -27,6 +27,7 @@ impl JrMessage for ClientRequest {
             ClientRequest::SetSessionModeRequest(_) => "session/set_mode",
             ClientRequest::PromptRequest(_) => "session/prompt",
             ClientRequest::ExtMethodRequest(ext) => &ext.method,
+            _ => "_unknown",
         }
     }
 
@@ -46,10 +47,10 @@ impl JrMessage for ClientRequest {
                 // Check for extension methods (prefixed with underscore)
                 if let Some(custom_method) = method.strip_prefix('_') {
                     json_cast(params).map(|ext_req: crate::schema::ExtRequest| {
-                        ClientRequest::ExtMethodRequest(crate::schema::ExtRequest {
-                            method: custom_method.to_string().into(),
-                            params: ext_req.params,
-                        })
+                        ClientRequest::ExtMethodRequest(crate::schema::ExtRequest::new(
+                            custom_method.to_string(),
+                            ext_req.params,
+                        ))
                     })
                 } else {
                     return None;
@@ -70,6 +71,7 @@ impl JrMessage for ClientNotification {
         match self {
             ClientNotification::CancelNotification(_) => "session/cancel",
             ClientNotification::ExtNotification(ext) => &ext.method,
+            _ => "_unknown",
         }
     }
 
@@ -84,10 +86,10 @@ impl JrMessage for ClientNotification {
                 // Check for extension notifications (prefixed with underscore)
                 if let Some(custom_method) = method.strip_prefix('_') {
                     json_cast(params).map(|ext_notif: crate::schema::ExtNotification| {
-                        ClientNotification::ExtNotification(crate::schema::ExtNotification {
-                            method: custom_method.to_string().into(),
-                            params: ext_notif.params,
-                        })
+                        ClientNotification::ExtNotification(crate::schema::ExtNotification::new(
+                            custom_method.to_string(),
+                            ext_notif.params,
+                        ))
                     })
                 } else {
                     return None;
@@ -117,6 +119,7 @@ impl JrMessage for AgentRequest {
             AgentRequest::WaitForTerminalExitRequest(_) => "terminal/wait_for_exit",
             AgentRequest::KillTerminalCommandRequest(_) => "terminal/kill",
             AgentRequest::ExtMethodRequest(ext) => &ext.method,
+            _ => "_unknown",
         }
     }
 
@@ -142,10 +145,10 @@ impl JrMessage for AgentRequest {
                 // Check for extension methods (prefixed with underscore)
                 if let Some(custom_method) = method.strip_prefix('_') {
                     json_cast(params).map(|ext_req: crate::schema::ExtRequest| {
-                        AgentRequest::ExtMethodRequest(crate::schema::ExtRequest {
-                            method: custom_method.to_string().into(),
-                            params: ext_req.params,
-                        })
+                        AgentRequest::ExtMethodRequest(crate::schema::ExtRequest::new(
+                            custom_method.to_string(),
+                            ext_req.params,
+                        ))
                     })
                 } else {
                     return None;
@@ -166,6 +169,7 @@ impl JrMessage for AgentNotification {
         match self {
             AgentNotification::SessionNotification(_) => "session/update",
             AgentNotification::ExtNotification(ext) => &ext.method,
+            _ => "_unknown",
         }
     }
 
@@ -180,10 +184,10 @@ impl JrMessage for AgentNotification {
                 // Check for extension notifications (prefixed with underscore)
                 if let Some(custom_method) = method.strip_prefix('_') {
                     json_cast(params).map(|ext_notif: crate::schema::ExtNotification| {
-                        AgentNotification::ExtNotification(crate::schema::ExtNotification {
-                            method: custom_method.to_string().into(),
-                            params: ext_notif.params,
-                        })
+                        AgentNotification::ExtNotification(crate::schema::ExtNotification::new(
+                            custom_method.to_string(),
+                            ext_notif.params,
+                        ))
                     })
                 } else {
                     return None;
