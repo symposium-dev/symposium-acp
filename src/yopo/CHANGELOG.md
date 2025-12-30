@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [10.0.0-alpha.4](https://github.com/symposium-dev/symposium-acp/compare/yopo-v10.0.0-alpha.3...yopo-v10.0.0-alpha.4) - 2025-12-30
+
+### Added
+
+- *(deps)* [**breaking**] upgrade agent-client-protocol-schema to 0.10.5
+
 ## [10.0.0-alpha.3](https://github.com/symposium-dev/symposium-acp/compare/yopo-v10.0.0-alpha.2...yopo-v10.0.0-alpha.3) - 2025-12-29
 
 ### Other
