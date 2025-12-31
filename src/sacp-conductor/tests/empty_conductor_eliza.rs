@@ -45,7 +45,7 @@ impl Component<AgentToClient> for MockEliza {
         self,
         client: impl Component<sacp::link::ClientToAgent>,
     ) -> Result<(), sacp::Error> {
-        Component::<AgentToClient>::serve(elizacp::ElizaAgent::new(), client).await
+        Component::<AgentToClient>::serve(elizacp::ElizaAgent::new(true), client).await
     }
 }
 
@@ -91,7 +91,7 @@ async fn test_conductor_with_empty_conductor_and_eliza() -> Result<(), sacp::Err
         // Empty conductor should not modify the response, so we expect
         // the standard eliza response without any prefix
         expect_test::expect![[r#"
-            "Hello. How are you feeling today?"
+            "Greetings. What brings you here today?"
         "#]]
         .assert_debug_eq(&result);
 

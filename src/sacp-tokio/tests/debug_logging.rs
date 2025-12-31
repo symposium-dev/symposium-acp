@@ -3,8 +3,8 @@
 use sacp::Component;
 use sacp::link::UntypedLink;
 use sacp::schema::InitializeRequest;
-use sacp_tokio::{AcpAgent, LineDirection};
-use std::str::FromStr;
+use sacp_test::test_binaries::elizacp;
+use sacp_tokio::LineDirection;
 use std::sync::{Arc, Mutex};
 
 /// Test helper to receive a JSON-RPC response
@@ -45,7 +45,7 @@ async fn test_acp_agent_debug_callback() -> Result<(), Box<dyn std::error::Error
     let debug_log = DebugLog::default();
 
     // Create an agent that runs elizacp
-    let agent = AcpAgent::from_str("cargo run -p elizacp")?.with_debug({
+    let agent = elizacp().with_debug({
         let debug_log = debug_log.clone();
         move |line, direction| {
             debug_log.log(line, direction);

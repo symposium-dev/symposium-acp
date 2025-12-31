@@ -24,7 +24,8 @@ futures.workspace = true
 rand = "0.9"
 regex = "1.12"
 rmcp = { workspace = true, features = ["client", "transport-child-process", "transport-streamable-http-client-reqwest"] }
-serde.workspace = true
+serde = { workspace = true, features = ["derive"] }
+toml = "0.8"
 serde_json.workspace = true
 tokio.workspace = true
 tokio-util.workspace = true
@@ -32,6 +33,8 @@ tracing.workspace = true
 tracing-subscriber.workspace = true
 uuid.workspace = true
 sacp-tokio = { version = "10.0.0", path = "../sacp-tokio" }
+ratatui = "0.30.0"
+crossterm = "0.29.0"
 
 [dev-dependencies]
 expect-test.workspace = true

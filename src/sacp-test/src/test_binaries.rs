@@ -59,6 +59,16 @@ pub fn elizacp_binary() -> PathBuf {
     path
 }
 
+/// Returns an AcpAgent configured for elizacp in deterministic mode.
+pub fn elizacp() -> sacp_tokio::AcpAgent {
+    sacp_tokio::AcpAgent::from_args([
+        elizacp_binary().to_string_lossy().to_string(),
+        "--deterministic".to_string(),
+        "acp".to_string(),
+    ])
+    .expect("failed to create elizacp agent")
+}
+
 /// Returns the path to the mcp-echo-server binary, asserting it exists.
 pub fn mcp_echo_server_binary() -> PathBuf {
     let path = debug_binary("mcp-echo-server");

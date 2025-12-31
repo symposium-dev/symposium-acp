@@ -1,3 +1,4 @@
+pub mod chat;
 pub mod eliza;
 
 use anyhow::Result;
@@ -24,25 +25,26 @@ struct SessionData {
 #[derive(Clone)]
 pub struct ElizaAgent {
     sessions: Arc<Mutex<HashMap<SessionId, SessionData>>>,
+    deterministic: bool,
 }
 
 impl ElizaAgent {
-    pub fn new() -> Self {
+    pub fn new(deterministic: bool) -> Self {
         Self {
             sessions: Arc::new(Mutex::new(HashMap::new())),
+            deterministic,
         }
     }
 
     fn create_session(&self, session_id: &SessionId, mcp_servers: Vec<McpServer>) {
         let mcp_server_count = mcp_servers.len();
+        let eliza = if self.deterministic {
+            Eliza::new_deterministic()
+        } else {
+            Eliza::new()
+        };
         let mut sessions = self.sessions.lock().unwrap();
-        sessions.insert(
-            session_id.clone(),
-            SessionData {
-                eliza: Eliza::new(),
-                mcp_servers,
-            },
-        );
+        sessions.insert(session_id.clone(), SessionData { eliza, mcp_servers });
         tracing::info!(
             "Created session: {} with {} MCP servers",
             session_id,

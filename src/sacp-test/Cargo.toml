@@ -11,6 +11,7 @@ path = "src/bin/mcp_echo_server.rs"
 
 [dependencies]
 sacp = { version = "10.0.0", path = "../sacp" }
+sacp-tokio = { version = "10.0.0", path = "../sacp-tokio" }
 yopo = { version = "10.0.0", path = "../yopo" }
 rmcp = { workspace = true, features = ["server"] }
 schemars.workspace = true

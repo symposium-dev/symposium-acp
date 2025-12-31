@@ -136,7 +136,7 @@ impl MetaCapabilityExt for InitializeResponse {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::schema::{AgentCapabilities, ClientCapabilities, ProtocolVersion};
+    use crate::schema::{ClientCapabilities, ProtocolVersion};
     use serde_json::json;
 
     #[test]

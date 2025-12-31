@@ -75,7 +75,7 @@ impl Component<AgentToClient> for ElizacpAgentComponent {
 
         tokio::spawn(async move {
             if let Err(e) =
-                Component::<AgentToClient>::serve(elizacp::ElizaAgent::new(), elizacp_transport)
+                Component::<AgentToClient>::serve(elizacp::ElizaAgent::new(true), elizacp_transport)
                     .await
             {
                 tracing::error!("Elizacp error: {}", e);

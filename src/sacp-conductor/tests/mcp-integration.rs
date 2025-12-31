@@ -73,7 +73,7 @@ async fn test_proxy_provides_mcp_tools_stdio() -> Result<(), sacp::Error> {
         McpBridgeMode::Stdio {
             conductor_command: conductor_command(),
         },
-        ProxiesAndAgent::new(ElizaAgent::new()).proxy(mcp_integration::proxy::ProxyComponent),
+        ProxiesAndAgent::new(ElizaAgent::new(true)).proxy(mcp_integration::proxy::ProxyComponent),
         async |editor_cx| {
             // Send initialization request
             let init_response =
@@ -113,7 +113,7 @@ async fn test_proxy_provides_mcp_tools_stdio() -> Result<(), sacp::Error> {
 async fn test_proxy_provides_mcp_tools_http() -> Result<(), sacp::Error> {
     run_test_with_mode(
         McpBridgeMode::Http,
-        ProxiesAndAgent::new(ElizaAgent::new()).proxy(mcp_integration::proxy::ProxyComponent),
+        ProxiesAndAgent::new(ElizaAgent::new(true)).proxy(mcp_integration::proxy::ProxyComponent),
         async |editor_cx| {
             // Send initialization request
             let init_response =
@@ -177,7 +177,8 @@ async fn test_agent_handles_prompt() -> Result<(), sacp::Error> {
         )
         .connect_to(Conductor::new_agent(
             "mcp-integration-conductor".to_string(),
-            ProxiesAndAgent::new(ElizaAgent::new()).proxy(mcp_integration::proxy::ProxyComponent),
+            ProxiesAndAgent::new(ElizaAgent::new(true))
+                .proxy(mcp_integration::proxy::ProxyComponent),
             Default::default(),
         ))?
         .run_until(async |editor_cx| {
