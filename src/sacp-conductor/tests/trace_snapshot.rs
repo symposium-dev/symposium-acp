@@ -380,7 +380,7 @@ async fn test_trace_snapshot() -> Result<(), sacp::Error> {
                         "sessionId": String("session:0"),
                         "update": Object {
                             "content": Object {
-                                "text": String("Greetings. What brings you here today?"),
+                                "text": String("How do you do. Please state your problem."),
                                 "type": String("text"),
                             },
                             "sessionUpdate": String("agent_message_chunk"),
@@ -412,7 +412,7 @@ async fn test_trace_snapshot() -> Result<(), sacp::Error> {
                         "sessionId": String("session:0"),
                         "update": Object {
                             "content": Object {
-                                "text": String(">Greetings. What brings you here today?"),
+                                "text": String(">How do you do. Please state your problem."),
                                 "type": String("text"),
                             },
                             "sessionUpdate": String("agent_message_chunk"),

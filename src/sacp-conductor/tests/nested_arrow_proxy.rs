@@ -57,7 +57,7 @@ async fn test_conductor_with_two_external_arrow_proxies() -> Result<(), sacp::Er
         .await?;
 
         expect_test::expect![[r#"
-            ">>Greetings. What brings you here today?"
+            ">>How do you do. Please state your problem."
         "#]]
         .assert_debug_eq(&result);
 

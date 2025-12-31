@@ -91,7 +91,7 @@ async fn test_conductor_with_empty_conductor_and_eliza() -> Result<(), sacp::Err
         // Empty conductor should not modify the response, so we expect
         // the standard eliza response without any prefix
         expect_test::expect![[r#"
-            "Greetings. What brings you here today?"
+            "How do you do. Please state your problem."
         "#]]
         .assert_debug_eq(&result);
 

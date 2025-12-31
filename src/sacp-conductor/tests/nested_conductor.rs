@@ -126,7 +126,7 @@ async fn test_nested_conductor_with_arrow_proxies() -> Result<(), sacp::Error> {
         tracing::debug!(?result, "Received response from nested conductor chain");
 
         expect_test::expect![[r#"
-            ">>Greetings. What brings you here today?"
+            ">>How do you do. Please state your problem."
         "#]]
         .assert_debug_eq(&result);
 
@@ -191,7 +191,7 @@ async fn test_nested_conductor_with_external_arrow_proxies() -> Result<(), sacp:
         tracing::debug!(?result, "Received response from nested conductor chain");
 
         expect_test::expect![[r#"
-            ">>Greetings. What brings you here today?"
+            ">>How do you do. Please state your problem."
         "#]]
         .assert_debug_eq(&result);
 
