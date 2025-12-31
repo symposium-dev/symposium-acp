@@ -1,0 +1,125 @@
+name: Release Binaries
+
+on:
+  push:
+    tags:
+      - 'elizacp-v*'
+      - 'yopo-v*'
+      - 'sacp-conductor-v*'
+      - 'sacp-tee-v*'
+      - 'sacp-trace-viewer-v*'
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    name: Build ${{ matrix.binary }} for ${{ matrix.target }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # x86_64
+          - target: x86_64-unknown-linux-gnu
+            os: ubuntu-latest
+            archive: tar.gz
+          - target: x86_64-apple-darwin
+            os: macos-latest
+            archive: tar.gz
+          - target: x86_64-pc-windows-msvc
+            os: windows-latest
+            archive: zip
+          # aarch64
+          - target: aarch64-unknown-linux-gnu
+            os: ubuntu-latest
+            archive: tar.gz
+            cross: true
+          - target: aarch64-apple-darwin
+            os: macos-latest
+            archive: tar.gz
+          - target: aarch64-pc-windows-msvc
+            os: windows-latest
+            archive: zip
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+      - name: Extract binary name and version from tag
+        id: extract
+        shell: bash
+        run: |
+          # Tag format: {binary}-v{version}
+          TAG="${GITHUB_REF#refs/tags/}"
+          BINARY="${TAG%-v*}"
+          VERSION="${TAG#*-}"
+          echo "tag=$TAG" >> $GITHUB_OUTPUT
+          echo "binary=$BINARY" >> $GITHUB_OUTPUT
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "Extracted: binary=$BINARY, version=$VERSION"
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Install cross-compilation tools (Linux aarch64)
+        if: matrix.cross
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-aarch64-linux-gnu
+          echo "CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc" >> $GITHUB_ENV
+
+      - name: Build binary
+        run: cargo build --release --package ${{ steps.extract.outputs.binary }} --target ${{ matrix.target }}
+
+      - name: Package (Unix)
+        if: matrix.archive == 'tar.gz'
+        shell: bash
+        run: |
+          BINARY="${{ steps.extract.outputs.binary }}"
+          VERSION="${{ steps.extract.outputs.version }}"
+          TARGET="${{ matrix.target }}"
+          ARCHIVE_NAME="${BINARY}-${TARGET}-${VERSION}.tar.gz"
+
+          cd target/$TARGET/release
+          tar -czvf "../../../$ARCHIVE_NAME" "$BINARY"
+          cd ../../..
+          echo "ARCHIVE_NAME=$ARCHIVE_NAME" >> $GITHUB_ENV
+
+      - name: Package (Windows)
+        if: matrix.archive == 'zip'
+        shell: pwsh
+        run: |
+          $BINARY = "${{ steps.extract.outputs.binary }}"
+          $VERSION = "${{ steps.extract.outputs.version }}"
+          $TARGET = "${{ matrix.target }}"
+          $ARCHIVE_NAME = "${BINARY}-${TARGET}-${VERSION}.zip"
+
+          Compress-Archive -Path "target\$TARGET\release\$BINARY.exe" -DestinationPath $ARCHIVE_NAME
+          echo "ARCHIVE_NAME=$ARCHIVE_NAME" >> $env:GITHUB_ENV
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.extract.outputs.binary }}-${{ matrix.target }}
+          path: ${{ env.ARCHIVE_NAME }}
+          retention-days: 1
+
+  release:
+    name: Upload to Release
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Upload to GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/**/*

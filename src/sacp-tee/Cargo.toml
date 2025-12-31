@@ -8,6 +8,10 @@ repository = "https://github.com/symposium-dev/symposium-acp"
 keywords = ["acp", "agent", "debugging", "proxy", "logging"]
 categories = ["development-tools", "development-tools::debugging"]
 
+[[bin]]
+name = "sacp-tee"
+path = "src/main.rs"
+
 [dependencies]
 anyhow.workspace = true
 chrono.workspace = true
