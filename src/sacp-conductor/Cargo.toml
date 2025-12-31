@@ -8,6 +8,10 @@ repository = "https://github.com/symposium-dev/symposium-acp"
 keywords = ["acp", "agent", "conductor", "ai"]
 categories = ["development-tools"]
 
+[[bin]]
+name = "sacp-conductor"
+path = "src/main.rs"
+
 [features]
 test-support = []
 
