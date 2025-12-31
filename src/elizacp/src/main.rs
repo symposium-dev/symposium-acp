@@ -46,6 +46,21 @@ struct Args {
     /// Enable debug logging
     #[arg(short, long)]
     debug: bool,
+
+    /// Use deterministic responses (fixed seed for testing)
+    #[arg(long)]
+    deterministic: bool,
+
+    #[command(subcommand)]
+    command: Command,
+}
+
+#[derive(clap::Subcommand, Debug)]
+enum Command {
+    /// Run as ACP agent over stdio
+    Acp,
+    /// Run interactive chat TUI
+    Chat,
 }
 
 #[tokio::main]
@@ -68,10 +83,17 @@ async fn main() -> Result<()> {
         )
         .init();
 
-    tracing::info!("Elizacp starting");
-
-    // Run the Eliza agent
-    ElizaAgent::new().serve(sacp_tokio::Stdio::new()).await?;
+    match args.command {
+        Command::Chat => {
+            return elizacp::chat::run(args.deterministic);
+        }
+        Command::Acp => {
+            tracing::info!("Elizacp starting");
+            ElizaAgent::new(args.deterministic)
+                .serve(sacp_tokio::Stdio::new())
+                .await?;
+        }
+    }
 
     Ok(())
 }

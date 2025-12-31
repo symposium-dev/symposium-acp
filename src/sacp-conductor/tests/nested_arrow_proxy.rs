@@ -15,7 +15,7 @@
 //! Run `just prep-tests` before running this test.
 
 use sacp_conductor::{Conductor, ProxiesAndAgent};
-use sacp_test::test_binaries::{arrow_proxy_example, elizacp_binary};
+use sacp_test::test_binaries::{arrow_proxy_example, elizacp};
 use sacp_tokio::AcpAgent;
 use tokio::io::duplex;
 use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
@@ -26,7 +26,7 @@ async fn test_conductor_with_two_external_arrow_proxies() -> Result<(), sacp::Er
     // Uses pre-built binaries to avoid cargo run races during `cargo test --all`
     let arrow_proxy1 = AcpAgent::from_args([arrow_proxy_example().to_string_lossy().to_string()])?;
     let arrow_proxy2 = AcpAgent::from_args([arrow_proxy_example().to_string_lossy().to_string()])?;
-    let eliza = AcpAgent::from_args([elizacp_binary().to_string_lossy().to_string()])?;
+    let eliza = elizacp();
 
     // Create duplex streams for editor <-> conductor communication
     let (editor_write, conductor_read) = duplex(8192);
@@ -57,7 +57,7 @@ async fn test_conductor_with_two_external_arrow_proxies() -> Result<(), sacp::Er
         .await?;
 
         expect_test::expect![[r#"
-            ">>Hello. How are you feeling today?"
+            ">>How do you do. Please state your problem."
         "#]]
         .assert_debug_eq(&result);
 

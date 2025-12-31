@@ -23,7 +23,7 @@ use sacp::Component;
 use sacp::link::{AgentToClient, ProxyToConductor};
 use sacp_conductor::{Conductor, ProxiesAndAgent};
 use sacp_test::arrow_proxy::run_arrow_proxy;
-use sacp_test::test_binaries::{arrow_proxy_example, conductor_binary, elizacp_binary};
+use sacp_test::test_binaries::{arrow_proxy_example, conductor_binary, elizacp};
 use sacp_tokio::AcpAgent;
 use tokio::io::duplex;
 use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
@@ -50,7 +50,7 @@ impl Component<AgentToClient> for MockEliza {
         self,
         client: impl Component<sacp::link::ClientToAgent>,
     ) -> Result<(), sacp::Error> {
-        Component::<AgentToClient>::serve(elizacp::ElizaAgent::new(), client).await
+        Component::<AgentToClient>::serve(elizacp::ElizaAgent::new(true), client).await
     }
 }
 
@@ -126,7 +126,7 @@ async fn test_nested_conductor_with_arrow_proxies() -> Result<(), sacp::Error> {
         tracing::debug!(?result, "Received response from nested conductor chain");
 
         expect_test::expect![[r#"
-            ">>Hello. How are you feeling today?"
+            ">>How do you do. Please state your problem."
         "#]]
         .assert_debug_eq(&result);
 
@@ -160,7 +160,7 @@ async fn test_nested_conductor_with_external_arrow_proxies() -> Result<(), sacp:
         &arrow_proxy_path,
         &arrow_proxy_path,
     ])?;
-    let eliza = AcpAgent::from_args([elizacp_binary().to_string_lossy().to_string()])?;
+    let eliza = elizacp();
 
     // Create duplex streams for editor <-> conductor communication
     let (editor_write, conductor_read) = duplex(8192);
@@ -191,7 +191,7 @@ async fn test_nested_conductor_with_external_arrow_proxies() -> Result<(), sacp:
         tracing::debug!(?result, "Received response from nested conductor chain");
 
         expect_test::expect![[r#"
-            ">>Hello. How are you feeling today?"
+            ">>How do you do. Please state your problem."
         "#]]
         .assert_debug_eq(&result);
 

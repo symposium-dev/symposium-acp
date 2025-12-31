@@ -130,7 +130,7 @@ async fn run_test_with_components(
         .with_spawned(|_cx| async move {
             Conductor::new_agent(
                 "conductor".to_string(),
-                ProxiesAndAgent::new(ElizaAgent::new()).proxies(proxies),
+                ProxiesAndAgent::new(ElizaAgent::new(true)).proxies(proxies),
                 Default::default(),
             )
             .run(sacp::ByteStreams::new(
@@ -303,7 +303,7 @@ async fn test_conductor_rejects_initialize_proxy_forwarded_to_agent() -> Result<
     // The conductor should reject this with an error.
     let result = run_bad_proxy_test(
         vec![sacp::DynComponent::new(BadProxy)],
-        sacp::DynComponent::new(ElizaAgent::new()),
+        sacp::DynComponent::new(ElizaAgent::new(true)),
         async |editor_cx| {
             let init_response =
                 recv(editor_cx.send_request(InitializeRequest::new(ProtocolVersion::LATEST))).await;
@@ -344,7 +344,7 @@ async fn test_conductor_rejects_initialize_proxy_forwarded_to_proxy() -> Result<
             sacp::DynComponent::new(BadProxy),
             sacp::DynComponent::new(InitComponent::new(&InitConfig::new())), // This proxy will receive the bad request
         ],
-        sacp::DynComponent::new(ElizaAgent::new()), // Agent
+        sacp::DynComponent::new(ElizaAgent::new(true)), // Agent
         async |editor_cx| {
             let init_response =
                 recv(editor_cx.send_request(InitializeRequest::new(ProtocolVersion::LATEST))).await;

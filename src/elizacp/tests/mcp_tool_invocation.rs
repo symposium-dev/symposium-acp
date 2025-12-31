@@ -52,7 +52,7 @@ async fn test_elizacp_mcp_tool_call() -> Result<(), sacp::Error> {
             sacp::on_receive_notification!(),
         )
         .with_spawned(|_cx| async move {
-            ElizaAgent::new()
+            ElizaAgent::new(true)
                 .serve(sacp::ByteStreams::new(
                     elizacp_out.compat_write(),
                     elizacp_in.compat(),

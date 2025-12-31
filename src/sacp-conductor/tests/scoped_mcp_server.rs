@@ -20,7 +20,7 @@ use std::sync::Mutex;
 async fn test_scoped_mcp_server_through_proxy() -> Result<(), sacp::Error> {
     let conductor = Conductor::new_agent(
         "conductor".to_string(),
-        ProxiesAndAgent::new(ElizaAgent::new()).proxy(ScopedProxy),
+        ProxiesAndAgent::new(ElizaAgent::new(true)).proxy(ScopedProxy),
         Default::default(),
     );
 
@@ -45,7 +45,7 @@ async fn test_scoped_mcp_server_through_proxy() -> Result<(), sacp::Error> {
 #[tokio::test]
 async fn test_scoped_mcp_server_through_session() -> Result<(), sacp::Error> {
     ClientToAgent::builder()
-        .connect_to(Conductor::new_agent("conductor".to_string(), ProxiesAndAgent::new(ElizaAgent::new()), McpBridgeMode::default()))?
+        .connect_to(Conductor::new_agent("conductor".to_string(), ProxiesAndAgent::new(ElizaAgent::new(true)), McpBridgeMode::default()))?
         .run_until(async |cx| {
             // Initialize first
             cx.send_request(sacp::schema::InitializeRequest::new(
