@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [10.0.1](https://github.com/symposium-dev/symposium-acp/compare/sacp-conductor-v10.0.0...sacp-conductor-v10.0.1) - 2025-12-31
+
+### Other
+
+- Merge pull request #109 from nikomatsakis/ci-binaries
+- add binary releases for CLI tools
+
 ## [10.0.0-alpha.4](https://github.com/symposium-dev/symposium-acp/compare/sacp-conductor-v10.0.0-alpha.3...sacp-conductor-v10.0.0-alpha.4) - 2025-12-30
 
 ### Added

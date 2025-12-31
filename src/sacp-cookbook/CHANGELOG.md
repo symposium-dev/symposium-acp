@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [10.0.1](https://github.com/symposium-dev/symposium-acp/compare/sacp-cookbook-v10.0.0...sacp-cookbook-v10.0.1) - 2025-12-31
+
+### Other
+
+- updated the following local packages: sacp, sacp-tokio, sacp-conductor, sacp-rmcp
+
 ## [10.0.0-alpha.4](https://github.com/symposium-dev/symposium-acp/compare/sacp-cookbook-v10.0.0-alpha.3...sacp-cookbook-v10.0.0-alpha.4) - 2025-12-30
 
 ### Added

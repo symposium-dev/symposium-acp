@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [10.1.0](https://github.com/symposium-dev/symposium-acp/compare/sacp-v10.0.0...sacp-v10.1.0) - 2025-12-31
+
+### Added
+
+- *(elizacp)* implement Eliza algorithm based on the original style
+
 ## [10.0.0-alpha.4](https://github.com/symposium-dev/symposium-acp/compare/sacp-v10.0.0-alpha.3...sacp-v10.0.0-alpha.4) - 2025-12-30
 
 ### Added

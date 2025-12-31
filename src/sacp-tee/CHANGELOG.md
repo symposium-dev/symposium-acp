@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [10.0.1](https://github.com/symposium-dev/symposium-acp/compare/sacp-tee-v10.0.0...sacp-tee-v10.0.1) - 2025-12-31
+
+### Other
+
+- add binary releases for CLI tools
+
 ## [10.0.0-alpha.4](https://github.com/symposium-dev/symposium-acp/compare/sacp-tee-v10.0.0-alpha.3...sacp-tee-v10.0.0-alpha.4) - 2025-12-30
 
 ### Other
