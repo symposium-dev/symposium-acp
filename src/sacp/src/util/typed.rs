@@ -55,7 +55,7 @@ use crate::{
 ///             MessageCx::Request(_, request_cx) => {
 ///                 request_cx.respond_with_error(sacp::util::internal_error("unknown method"))
 ///             }
-///             MessageCx::Notification(_) => Ok(()),
+///             MessageCx::Notification(_) | MessageCx::Response(_, _) => Ok(()),
 ///         }
 ///     })
 ///     .await
@@ -134,7 +134,7 @@ impl MatchMessage {
                         }),
                     }
                 }
-                MessageCx::Notification(_) => Ok(Handled::No {
+                MessageCx::Notification(_) | MessageCx::Response(_, _) => Ok(Handled::No {
                     message: message_cx,
                     retry,
                 }),
@@ -188,7 +188,7 @@ impl MatchMessage {
                         }),
                     }
                 }
-                MessageCx::Request(_, _) => Ok(Handled::No {
+                MessageCx::Request(_, _) | MessageCx::Response(_, _) => Ok(Handled::No {
                     message: message_cx,
                     retry,
                 }),
@@ -305,7 +305,7 @@ impl MatchMessage {
 ///         // Fallback for unrecognized messages
 ///         match message {
 ///             MessageCx::Request(_, request_cx) => request_cx.respond_with_error(sacp::util::internal_error("unknown method")),
-///             MessageCx::Notification(_) => Ok(()),
+///             MessageCx::Notification(_) | MessageCx::Response(_, _) => Ok(()),
 ///         }
 ///     })
 ///     .await

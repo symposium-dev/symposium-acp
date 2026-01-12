@@ -159,7 +159,7 @@ where
                             }
                         }
 
-                        MessageCx::Notification(..) => Ok(Handled::No {
+                        MessageCx::Notification(..) | MessageCx::Response(..) => Ok(Handled::No {
                             message: message_cx,
                             retry: false,
                         }),
@@ -277,7 +277,7 @@ where
                             }
                         }
 
-                        MessageCx::Request(..) => Ok(Handled::No {
+                        MessageCx::Request(..) | MessageCx::Response(..) => Ok(Handled::No {
                             message: message_cx,
                             retry: false,
                         }),
@@ -383,6 +383,16 @@ where
                                     message: MessageCx::Notification(untyped),
                                     retry,
                                 })
+                            }
+                            Handled::No {
+                                message: MessageCx::Response(_, _),
+                                ..
+                            } => {
+                                // Response variants are filtered out by into_typed_message_cx,
+                                // so this branch should never be reached
+                                unreachable!(
+                                    "Response variants should not appear in typed message handler"
+                                )
                             }
                         }
                     }

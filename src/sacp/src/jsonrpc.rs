@@ -340,6 +340,10 @@ impl<H: JrMessageHandler> JrMessageHandler for &mut H {
 ///         MessageCx::Notification(notif) => {
 ///             Ok(())
 ///         }
+///         MessageCx::Response(result, request_cx) => {
+///             // Forward response to its destination
+///             request_cx.respond_with_result(result)
+///         }
 ///     }
 /// }, sacp::on_receive_message!())
 /// # .serve(sacp_test::MockTransport).await?;
@@ -650,6 +654,7 @@ impl<H: JrMessageHandler, R: JrResponder<H::Link>> JrConnectionBuilder<H, R> {
     ///
     /// - `MessageCx::Request(request, request_cx)` - A request with its response context
     /// - `MessageCx::Notification(notification)` - A notification
+    /// - `MessageCx::Response(result, request_cx)` - A response to a request we sent
     ///
     /// # Example
     ///
@@ -667,6 +672,10 @@ impl<H: JrMessageHandler, R: JrResponder<H::Link>> JrConnectionBuilder<H, R> {
     ///         MessageCx::Notification(notif) => {
     ///             // Handle notification (no response needed)
     ///             Ok(())
+    ///         }
+    ///         MessageCx::Response(result, request_cx) => {
+    ///             // Forward response to its destination
+    ///             request_cx.respond_with_result(result)
     ///         }
     ///     }
     /// }, sacp::on_receive_message!())
@@ -1672,6 +1681,10 @@ impl<Link: JrLink> JrConnectionCx<Link> {
                 .send_request_to(peer, request)
                 .forward_to_request_cx(request_cx),
             MessageCx::Notification(notification) => self.send_notification_to(peer, notification),
+            MessageCx::Response(result, request_cx) => {
+                // Responses are forwarded directly to their destination
+                request_cx.respond_with_result(result)
+            }
         }
     }
 
@@ -2210,17 +2223,30 @@ pub enum MessageCx<Req: JrRequest = UntypedMessage, Notif: JrMessage = UntypedMe
 
     /// Incoming notification.
     Notification(Notif),
+
+    /// Incoming response to a request we sent.
+    ///
+    /// The first field is the response result (success or error from the remote).
+    /// The second field is the context for forwarding the response to its destination
+    /// (typically a waiting oneshot channel).
+    Response(
+        Result<Req::Response, crate::Error>,
+        JrRequestCx<Req::Response>,
+    ),
 }
 
 impl<Req: JrRequest, Notif: JrMessage> MessageCx<Req, Notif> {
     /// Map the request and notification types to new types.
+    ///
+    /// Note: Response variants are passed through unchanged since they don't
+    /// contain a parseable message payload.
     pub fn map<Req1, Notif1>(
         self,
         map_request: impl FnOnce(Req, JrRequestCx<Req::Response>) -> (Req1, JrRequestCx<Req1::Response>),
         map_notification: impl FnOnce(Notif) -> Notif1,
     ) -> MessageCx<Req1, Notif1>
     where
-        Req1: JrRequest<Response: Send>,
+        Req1: JrRequest<Response = Req::Response>,
         Notif1: JrMessage,
     {
         match self {
@@ -2232,6 +2258,7 @@ impl<Req: JrRequest, Notif: JrMessage> MessageCx<Req, Notif> {
                 let new_notification = map_notification(notification);
                 MessageCx::Notification(new_notification)
             }
+            MessageCx::Response(result, cx) => MessageCx::Response(result, cx),
         }
     }
 
@@ -2240,6 +2267,8 @@ impl<Req: JrRequest, Notif: JrMessage> MessageCx<Req, Notif> {
     /// If this message is a request, this error becomes the reply to the request.
     ///
     /// If this message is a notification, the error is sent as a notification.
+    ///
+    /// If this message is a response, the error is forwarded to the waiting handler.
     pub fn respond_with_error<Link: JrLink>(
         self,
         error: crate::Error,
@@ -2248,12 +2277,16 @@ impl<Req: JrRequest, Notif: JrMessage> MessageCx<Req, Notif> {
         match self {
             MessageCx::Request(_, request_cx) => request_cx.respond_with_error(error),
             MessageCx::Notification(_) => cx.send_error_notification(error),
+            MessageCx::Response(_, request_cx) => request_cx.respond_with_error(error),
         }
     }
 
     /// Convert to a `JrRequestCx` that expects a JSON value
     /// and which checks (dynamically) that the JSON value it receives
     /// can be converted to `T`.
+    ///
+    /// Note: Response variants cannot be erased since their payload is already
+    /// parsed. This returns an error for Response variants.
     pub fn erase_to_json(self) -> Result<MessageCx, crate::Error> {
         match self {
             MessageCx::Request(response, request_cx) => Ok(MessageCx::Request(
@@ -2263,18 +2296,29 @@ impl<Req: JrRequest, Notif: JrMessage> MessageCx<Req, Notif> {
             MessageCx::Notification(notification) => {
                 Ok(MessageCx::Notification(notification.to_untyped_message()?))
             }
+            MessageCx::Response(_, _) => Err(crate::util::internal_error(
+                "cannot erase Response variant to JSON",
+            )),
         }
     }
 
     /// Convert the message in self to an untyped message.
+    ///
+    /// Note: Response variants don't have an untyped message representation.
+    /// This returns an error for Response variants.
     pub fn to_untyped_message(&self) -> Result<UntypedMessage, crate::Error> {
         match self {
             MessageCx::Request(request, _) => request.to_untyped_message(),
             MessageCx::Notification(notification) => notification.to_untyped_message(),
+            MessageCx::Response(_, _) => Err(crate::util::internal_error(
+                "Response variant has no untyped message representation",
+            )),
         }
     }
 
     /// Convert self to an untyped message context.
+    ///
+    /// Note: Response variants cannot be converted. This returns an error for Response variants.
     pub fn into_untyped_message_cx(self) -> Result<MessageCx, crate::Error> {
         match self {
             MessageCx::Request(request, request_cx) => Ok(MessageCx::Request(
@@ -2284,22 +2328,30 @@ impl<Req: JrRequest, Notif: JrMessage> MessageCx<Req, Notif> {
             MessageCx::Notification(notification) => {
                 Ok(MessageCx::Notification(notification.to_untyped_message()?))
             }
+            MessageCx::Response(_, _) => Err(crate::util::internal_error(
+                "cannot convert Response variant to untyped message context",
+            )),
         }
     }
 
-    /// Returns the request ID if this is a request, None if notification.
+    /// Returns the request ID if this is a request or response, None if notification.
     pub fn id(&self) -> Option<serde_json::Value> {
         match self {
             MessageCx::Request(_, cx) => Some(cx.id()),
             MessageCx::Notification(_) => None,
+            MessageCx::Response(_, cx) => Some(cx.id()),
         }
     }
 
-    /// Returns the method of the message (only available for UntypedMessage).
+    /// Returns the method of the message.
+    ///
+    /// For requests and notifications, this is the method from the message payload.
+    /// For responses, this is the method of the original request.
     pub fn method(&self) -> &str {
         match self {
             MessageCx::Request(msg, _) => msg.method(),
             MessageCx::Notification(msg) => msg.method(),
+            MessageCx::Response(_, cx) => cx.method(),
         }
     }
 }
@@ -2362,22 +2414,37 @@ impl MessageCx {
                     }
                 }
             }
+
+            // Response variants pass through - they're handled separately via response matchers
+            MessageCx::Response(result, cx) => Ok(Err(MessageCx::Response(result, cx))),
         }
     }
 
-    /// True if this message has a session-id field
+    /// True if this message has a field with the given name.
+    ///
+    /// Returns `false` for Response variants.
     pub fn has_field(&self, field_name: &str) -> bool {
-        self.message().params().get(field_name).is_some()
+        self.message()
+            .and_then(|m| m.params().get(field_name))
+            .is_some()
     }
 
-    /// Extract the ACP session-id from this message (if any).
+    /// Returns true if this message has a session-id field.
+    ///
+    /// Returns `false` for Response variants.
     pub(crate) fn has_session_id(&self) -> bool {
         self.has_field("sessionId")
     }
 
     /// Extract the ACP session-id from this message (if any).
+    ///
+    /// Returns `Ok(None)` for Response variants.
     pub(crate) fn get_session_id(&self) -> Result<Option<SessionId>, crate::Error> {
-        let value = match self.message().params().get("sessionId") {
+        let message = match self.message() {
+            Some(m) => m,
+            None => return Ok(None),
+        };
+        let value = match message.params().get("sessionId") {
             Some(value) => value,
             None => return Ok(None),
         };
@@ -2402,6 +2469,7 @@ impl MessageCx {
                 Some(Err(err)) => Err(err),
                 None => Ok(Err(MessageCx::Notification(msg))),
             },
+            MessageCx::Response(..) => Ok(Err(self)),
         }
     }
 
@@ -2424,20 +2492,26 @@ impl MessageCx {
                 }
             }
             MessageCx::Notification(..) => Ok(Err(self)),
+            MessageCx::Response(..) => Ok(Err(self)),
         }
     }
 }
 
 impl<M: JrRequest + JrNotification> MessageCx<M, M> {
-    /// Returns the message of the message (only available for UntypedMessage).
-    pub fn message(&self) -> &M {
+    /// Returns the message payload for requests and notifications.
+    ///
+    /// Returns `None` for Response variants since they don't contain a message payload.
+    pub fn message(&self) -> Option<&M> {
         match self {
-            MessageCx::Request(msg, _) => msg,
-            MessageCx::Notification(msg) => msg,
+            MessageCx::Request(msg, _) => Some(msg),
+            MessageCx::Notification(msg) => Some(msg),
+            MessageCx::Response(_, _) => None,
         }
     }
 
     /// Map the request/notification message.
+    ///
+    /// Response variants pass through unchanged.
     pub(crate) fn try_map_message(
         self,
         map_message: impl FnOnce(M) -> Result<M, crate::Error>,
@@ -2447,6 +2521,7 @@ impl<M: JrRequest + JrNotification> MessageCx<M, M> {
             MessageCx::Notification(notification) => {
                 Ok(MessageCx::<M, M>::Notification(map_message(notification)?))
             }
+            MessageCx::Response(result, cx) => Ok(MessageCx::Response(result, cx)),
         }
     }
 }

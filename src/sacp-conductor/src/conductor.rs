@@ -467,6 +467,15 @@ where
                 // Regular ACP notification
                 Ok((crate::trace::Protocol::Acp, untyped.method, untyped.params))
             }
+            sacp::MessageCx::Response(_, _) => {
+                // Response variants don't have trace info in the same format
+                // Return a placeholder - tracing should use the original request info
+                Ok((
+                    crate::trace::Protocol::Acp,
+                    "<response>".to_string(),
+                    serde_json::Value::Null,
+                ))
+            }
         }
     }
 
@@ -621,7 +630,7 @@ where
             } => {
                 tracing::debug!(
                     ?source_component_index,
-                    message_method = ?message.message().method(),
+                    message_method = ?message.method(),
                     "Conductor: AgentToClient received"
                 );
                 if let Err(e) = self.trace_agent_to_client(source_component_index, &message) {
@@ -767,6 +776,10 @@ where
                 source_component_index,
                 notification,
             ),
+            MessageCx::Response(result, request_cx) => {
+                // Forward response to its destination
+                request_cx.respond_with_result(result)
+            }
         }
     }
 
@@ -1417,6 +1430,10 @@ impl<Link: JrLink> JrConnectionCxExt<Link> for JrConnectionCx<Link> {
                 .send_request_to(peer, request)
                 .forward_response_via(conductor_tx, request_cx),
             MessageCx::Notification(notification) => self.send_notification_to(peer, notification),
+            MessageCx::Response(result, request_cx) => {
+                // Forward response to its destination
+                request_cx.respond_with_result(result)
+            }
         }
     }
 }
@@ -1583,14 +1600,14 @@ impl ConductorLink for ConductorToClient {
         conductor_tx: &mut mpsc::Sender<ConductorMessage>,
     ) -> Result<Handled<MessageCx>, sacp::Error> {
         tracing::debug!(
-            method = ?message.message().method(),
+            method = ?message.method(),
             "ConductorToClient::handle_message"
         );
         MatchMessageFrom::new(message, &cx)
             // Any incoming messages from the client are client-to-agent messages targeting the first component.
             .if_message_from(ClientPeer, async move |message: MessageCx| {
                 tracing::debug!(
-                    method = ?message.message().method(),
+                    method = ?message.method(),
                     "ConductorToClient::handle_message - matched Client"
                 );
                 Conductor::<Self>::incoming_message_from_client(conductor_tx, message).await
@@ -1660,7 +1677,7 @@ impl ConductorLink for ConductorToConductor {
         conductor_tx: &mut mpsc::Sender<ConductorMessage>,
     ) -> Result<Handled<MessageCx>, sacp::Error> {
         tracing::debug!(
-            method = ?message.message().method(),
+            method = ?message.method(),
             "ConductorToConductor::handle_message"
         );
         MatchMessageFrom::new(message, &cx)
@@ -1669,7 +1686,7 @@ impl ConductorLink for ConductorToConductor {
                 // (RemoteRoleStyle::Successor strips the SuccessorMessage envelope).
                 async |message: MessageCx| {
                     tracing::debug!(
-                        method = ?message.message().method(),
+                        method = ?message.method(),
                         "ConductorToConductor::handle_message - matched Agent"
                     );
                     let mut conductor_tx = conductor_tx.clone();
@@ -1680,7 +1697,7 @@ impl ConductorLink for ConductorToConductor {
             // Any incoming messages from the client are client-to-agent messages targeting the first component.
             .if_message_from(ClientPeer, async |message: MessageCx| {
                 tracing::debug!(
-                    method = ?message.message().method(),
+                    method = ?message.method(),
                     "ConductorToConductor::handle_message - matched Client"
                 );
                 let mut conductor_tx = conductor_tx.clone();

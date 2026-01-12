@@ -141,7 +141,10 @@ impl RemoteStyle {
         tracing::trace!("handle_incoming_message: Successor style, unwrapping SuccessorMessage");
         // The outer message has method="_proxy/successor" and params containing the inner message.
         // We need to deserialize the params (not the whole message) to extract the inner UntypedMessage.
-        let SuccessorMessage { message, meta } = json_cast(message_cx.message().params())?;
+        let untyped_message = message_cx.message().ok_or_else(|| {
+            crate::util::internal_error("Response variant cannot be unwrapped as SuccessorMessage")
+        })?;
+        let SuccessorMessage { message, meta } = json_cast(untyped_message.params())?;
         let successor_message_cx = message_cx.try_map_message(|_| Ok(message))?;
         tracing::trace!(
             unwrapped_method = %successor_message_cx.method(),
@@ -487,6 +490,11 @@ impl JrLink for ProxyToConductor {
                 }
                 MessageCx::Notification(notif) => {
                     cx.send_notification_to(AgentPeer, notif)?;
+                    Ok(Handled::Yes)
+                }
+                MessageCx::Response(result, request_cx) => {
+                    // Forward response to its destination
+                    request_cx.respond_with_result(result)?;
                     Ok(Handled::Yes)
                 }
             },

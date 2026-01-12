@@ -177,6 +177,14 @@ impl JrMessageHandler for TeeHandler {
                     retry: false,
                 })
             }
+            MessageCx::Response(result, request_cx) => {
+                // Response variants pass through - they'll be logged when the
+                // request they're responding to was wrapped above
+                Ok(Handled::No {
+                    message: MessageCx::Response(result, request_cx),
+                    retry: false,
+                })
+            }
         }
     }
 }
