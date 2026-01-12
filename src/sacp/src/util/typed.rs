@@ -598,6 +598,59 @@ impl<Link: JrLink> MatchMessageFrom<Link> {
         self
     }
 
+    /// Try to handle the message as a response to a request of type `Req`.
+    ///
+    /// If the message is a `Response` variant and the method matches `Req`, the handler
+    /// is called with the result (which may be `Ok` or `Err`) and a typed request context.
+    ///
+    /// Unlike requests and notifications, responses don't need peer-specific transforms
+    /// (they don't have the `SuccessorMessage` envelope structure), so this method
+    /// delegates directly to [`MatchMessage::if_response_to`].
+    pub async fn if_response_to<Req: JrRequest, H>(
+        mut self,
+        op: impl AsyncFnOnce(
+            Result<Req::Response, crate::Error>,
+            JrRequestCx<Req::Response>,
+        ) -> Result<H, crate::Error>,
+    ) -> Self
+    where
+        H: crate::IntoHandled<(
+                Result<Req::Response, crate::Error>,
+                JrRequestCx<Req::Response>,
+            )>,
+    {
+        if let Ok(Handled::No { message, retry: _ }) = self.state {
+            self.state = MatchMessage::new(message)
+                .if_response_to::<Req, H>(op)
+                .await
+                .done();
+        }
+        self
+    }
+
+    /// Try to handle the message as a successful response to a request of type `Req`.
+    ///
+    /// If the message is a `Response` variant with an `Ok` result and the method matches `Req`,
+    /// the handler is called with the parsed response and a typed request context.
+    /// Error responses are passed through without calling the handler.
+    ///
+    /// This is a convenience wrapper around [`if_response_to`](Self::if_response_to).
+    pub async fn if_ok_response_to<Req: JrRequest, H>(
+        mut self,
+        op: impl AsyncFnOnce(Req::Response, JrRequestCx<Req::Response>) -> Result<H, crate::Error>,
+    ) -> Self
+    where
+        H: crate::IntoHandled<(Req::Response, JrRequestCx<Req::Response>)>,
+    {
+        if let Ok(Handled::No { message, retry: _ }) = self.state {
+            self.state = MatchMessage::new(message)
+                .if_ok_response_to::<Req, H>(op)
+                .await
+                .done();
+        }
+        self
+    }
+
     /// Complete matching, returning `Handled::No` if no match was found.
     pub fn done(self) -> Result<Handled<MessageCx>, crate::Error> {
         match self.state {
