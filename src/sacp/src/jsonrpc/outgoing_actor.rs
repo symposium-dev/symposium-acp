@@ -46,7 +46,11 @@ pub(super) async fn outgoing_protocol_actor(
 
                 // Record where the reply should be sent once it arrives.
                 reply_tx
-                    .unbounded_send(ReplyMessage::Subscribe(id.clone(), response_rx))
+                    .unbounded_send(ReplyMessage::Subscribe {
+                        id: id.clone(),
+                        method: method.clone(),
+                        sender: response_rx,
+                    })
                     .map_err(crate::Error::into_internal_error)?;
 
                 jsonrpcmsg::Message::Request(jsonrpcmsg::Request::new_v2(method, params, Some(id)))

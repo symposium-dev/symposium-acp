@@ -45,21 +45,22 @@ pub(super) async fn incoming_protocol_actor<Link: JrLink>(
     let mut pending_messages: Vec<MessageCx> = vec![];
     let mut state = <Link::State>::default();
 
-    // Map from request ID to oneshot sender for response dispatch.
+    // Map from request ID to (method, sender) for response dispatch.
     // Keys are JSON values because jsonrpcmsg::Id doesn't implement Eq.
+    // The method is stored to allow routing responses through typed handlers.
     let mut pending_replies: HashMap<
         serde_json::Value,
-        oneshot::Sender<crate::jsonrpc::ResponsePayload>,
+        (String, oneshot::Sender<crate::jsonrpc::ResponsePayload>),
     > = HashMap::new();
 
     while let Some(message_result) = my_rx.next().await {
         tracing::trace!(message = ?message_result, actor = "incoming_protocol_actor");
         match message_result {
             IncomingProtocolMsg::Reply(message) => match message {
-                ReplyMessage::Subscribe(id, sender) => {
-                    tracing::trace!(?id, "incoming_actor: subscribing to response");
+                ReplyMessage::Subscribe { id, method, sender } => {
+                    tracing::trace!(?id, %method, "incoming_actor: subscribing to response");
                     let id = serde_json::to_value(&id).unwrap();
-                    pending_replies.insert(id, sender);
+                    pending_replies.insert(id, (method, sender));
                 }
             },
 
@@ -124,7 +125,7 @@ pub(super) async fn incoming_protocol_actor<Link: JrLink>(
                             };
 
                             let id_json = serde_json::to_value(&id).unwrap();
-                            if let Some(sender) = pending_replies.remove(&id_json) {
+                            if let Some((_method, sender)) = pending_replies.remove(&id_json) {
                                 // Create the ack channel
                                 let (ack_tx, ack_rx) = oneshot::channel();
                                 let send_result = sender.send(crate::jsonrpc::ResponsePayload {

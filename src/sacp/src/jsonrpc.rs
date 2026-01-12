@@ -1413,13 +1413,22 @@ enum ReplyMessage {
     /// Subscribe to receive a response for the given request id.
     /// When a response with this id arrives, it will be sent through the oneshot
     /// along with an ack channel that must be signaled when processing is complete.
-    Subscribe(jsonrpcmsg::Id, oneshot::Sender<ResponsePayload>),
+    /// The method name is stored to allow routing responses through typed handlers.
+    Subscribe {
+        id: jsonrpcmsg::Id,
+        method: String,
+        sender: oneshot::Sender<ResponsePayload>,
+    },
 }
 
 impl std::fmt::Debug for ReplyMessage {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            ReplyMessage::Subscribe(id, _) => f.debug_tuple("Subscribe").field(id).finish(),
+            ReplyMessage::Subscribe { id, method, .. } => f
+                .debug_struct("Subscribe")
+                .field("id", id)
+                .field("method", method)
+                .finish(),
         }
     }
 }
