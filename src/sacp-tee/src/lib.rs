@@ -180,6 +180,10 @@ impl JrMessageHandler for TeeHandler {
             MessageCx::Response(result, request_cx) => {
                 // Response variants pass through - they'll be logged when the
                 // request they're responding to was wrapped above
+                //
+                // TODO: Consider logging responses directly here instead of via
+                // wrap_params, which would simplify the code and make response
+                // logging more explicit.
                 Ok(Handled::No {
                     message: MessageCx::Response(result, request_cx),
                     retry: false,

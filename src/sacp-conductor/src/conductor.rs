@@ -435,15 +435,17 @@ where
                 let untyped = request.to_untyped_message()?;
 
                 // Try to parse as MCP-over-ACP request
-                if let Some(Ok(mcp_req)) = <McpOverAcpMessage<UntypedMessage>>::parse_message(
-                    &untyped.method,
-                    &untyped.params,
-                ) {
-                    return Ok((
-                        crate::trace::Protocol::Mcp,
-                        mcp_req.message.method,
-                        mcp_req.message.params,
-                    ));
+                if <McpOverAcpMessage<UntypedMessage>>::matches_method(&untyped.method) {
+                    if let Ok(mcp_req) = <McpOverAcpMessage<UntypedMessage>>::parse_message(
+                        &untyped.method,
+                        &untyped.params,
+                    ) {
+                        return Ok((
+                            crate::trace::Protocol::Mcp,
+                            mcp_req.message.method,
+                            mcp_req.message.params,
+                        ));
+                    }
                 }
 
                 // Regular ACP request
@@ -453,28 +455,24 @@ where
                 let untyped = notification.to_untyped_message()?;
 
                 // Try to parse as MCP-over-ACP notification
-                if let Some(Ok(mcp_notif)) = <McpOverAcpMessage<UntypedMessage>>::parse_message(
-                    &untyped.method,
-                    &untyped.params,
-                ) {
-                    return Ok((
-                        crate::trace::Protocol::Mcp,
-                        mcp_notif.message.method,
-                        mcp_notif.message.params,
-                    ));
+                if <McpOverAcpMessage<UntypedMessage>>::matches_method(&untyped.method) {
+                    if let Ok(mcp_notif) = <McpOverAcpMessage<UntypedMessage>>::parse_message(
+                        &untyped.method,
+                        &untyped.params,
+                    ) {
+                        return Ok((
+                            crate::trace::Protocol::Mcp,
+                            mcp_notif.message.method,
+                            mcp_notif.message.params,
+                        ));
+                    }
                 }
 
                 // Regular ACP notification
                 Ok((crate::trace::Protocol::Acp, untyped.method, untyped.params))
             }
             sacp::MessageCx::Response(_, _) => {
-                // Response variants don't have trace info in the same format
-                // Return a placeholder - tracing should use the original request info
-                Ok((
-                    crate::trace::Protocol::Acp,
-                    "<response>".to_string(),
-                    serde_json::Value::Null,
-                ))
+                panic!("Response variants should not reach extract_trace_info")
             }
         }
     }
@@ -776,9 +774,8 @@ where
                 source_component_index,
                 notification,
             ),
-            MessageCx::Response(result, request_cx) => {
-                // Forward response to its destination
-                request_cx.respond_with_result(result)
+            MessageCx::Response(_, _) => {
+                panic!("Response variants should not reach send_message_to_predecessor_of")
             }
         }
     }
@@ -1430,9 +1427,8 @@ impl<Link: JrLink> JrConnectionCxExt<Link> for JrConnectionCx<Link> {
                 .send_request_to(peer, request)
                 .forward_response_via(conductor_tx, request_cx),
             MessageCx::Notification(notification) => self.send_notification_to(peer, notification),
-            MessageCx::Response(result, request_cx) => {
-                // Forward response to its destination
-                request_cx.respond_with_result(result)
+            MessageCx::Response(_, _) => {
+                panic!("Response variants should not reach send_proxied_message_to_via")
             }
         }
     }
@@ -1539,19 +1535,19 @@ impl ConductorLink for ConductorToClient {
             message.respond_with_error(invalid_request(), client.clone())?;
             return Err(invalid_request());
         };
-        let Some(result) = InitializeRequest::parse_message(request.method(), request.params())
-        else {
+        if !InitializeRequest::matches_method(request.method()) {
             request_cx.respond_with_error(invalid_request())?;
             return Err(invalid_request());
-        };
+        }
 
-        let init_request = match result {
-            Ok(r) => r,
-            Err(error) => {
-                request_cx.respond_with_error(error)?;
-                return Err(invalid_request());
-            }
-        };
+        let init_request =
+            match InitializeRequest::parse_message(request.method(), request.params()) {
+                Ok(r) => r,
+                Err(error) => {
+                    request_cx.respond_with_error(error)?;
+                    return Err(invalid_request());
+                }
+            };
 
         // Instantiate proxies and agent
         let (modified_req, proxy_components, agent_component) = instantiator
@@ -1638,20 +1634,19 @@ impl ConductorLink for ConductorToConductor {
             message.respond_with_error(invalid_request(), client_cx.clone())?;
             return Err(invalid_request());
         };
-        let Some(result) =
-            InitializeProxyRequest::parse_message(request.method(), request.params())
-        else {
+        if !InitializeProxyRequest::matches_method(request.method()) {
             request_cx.respond_with_error(invalid_request())?;
             return Err(invalid_request());
-        };
+        }
 
-        let InitializeProxyRequest { initialize } = match result {
-            Ok(r) => r,
-            Err(error) => {
-                request_cx.respond_with_error(error)?;
-                return Err(invalid_request());
-            }
-        };
+        let InitializeProxyRequest { initialize } =
+            match InitializeProxyRequest::parse_message(request.method(), request.params()) {
+                Ok(r) => r,
+                Err(error) => {
+                    request_cx.respond_with_error(error)?;
+                    return Err(invalid_request());
+                }
+            };
 
         tracing::debug!("ensure_initialized: InitializeProxyRequest (proxy mode)");
 
