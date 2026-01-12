@@ -227,13 +227,39 @@ impl MatchMessage {
                         Handled::No {
                             message: typed_message_cx,
                             retry: message_retry,
-                        } => match typed_message_cx.into_untyped_message_cx() {
-                            Ok(untyped) => Ok(Handled::No {
+                        } => {
+                            let untyped = match typed_message_cx {
+                                MessageCx::Request(request, request_cx) => {
+                                    match request.to_untyped_message() {
+                                        Ok(untyped) => {
+                                            MessageCx::Request(untyped, request_cx.erase_to_json())
+                                        }
+                                        Err(err) => return Self { state: Err(err) },
+                                    }
+                                }
+                                MessageCx::Notification(notification) => {
+                                    match notification.to_untyped_message() {
+                                        Ok(untyped) => MessageCx::Notification(untyped),
+                                        Err(err) => return Self { state: Err(err) },
+                                    }
+                                }
+                                MessageCx::Response(result, request_cx) => {
+                                    let method = request_cx.method();
+                                    let untyped_result = match result {
+                                        Ok(response) => match response.into_json(method) {
+                                            Ok(json) => Ok(json),
+                                            Err(err) => return Self { state: Err(err) },
+                                        },
+                                        Err(err) => Err(err),
+                                    };
+                                    MessageCx::Response(untyped_result, request_cx.erase_to_json())
+                                }
+                            };
+                            Ok(Handled::No {
                                 message: untyped,
                                 retry: retry | message_retry,
-                            }),
-                            Err(err) => Err(err),
-                        },
+                            })
+                        }
                     },
                     Err(err) => Err(err),
                 },

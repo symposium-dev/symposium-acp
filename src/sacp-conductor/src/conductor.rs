@@ -472,7 +472,10 @@ where
                 Ok((crate::trace::Protocol::Acp, untyped.method, untyped.params))
             }
             sacp::MessageCx::Response(_, _) => {
-                panic!("Response variants should not reach extract_trace_info")
+                // Responses are traced separately via trace_response
+                return Err(sacp::util::internal_error(
+                    "Response variants should use trace_response",
+                ));
             }
         }
     }
@@ -774,9 +777,7 @@ where
                 source_component_index,
                 notification,
             ),
-            MessageCx::Response(_, _) => {
-                panic!("Response variants should not reach send_message_to_predecessor_of")
-            }
+            MessageCx::Response(result, request_cx) => request_cx.respond_with_result(result),
         }
     }
 
@@ -1427,9 +1428,7 @@ impl<Link: JrLink> JrConnectionCxExt<Link> for JrConnectionCx<Link> {
                 .send_request_to(peer, request)
                 .forward_response_via(conductor_tx, request_cx),
             MessageCx::Notification(notification) => self.send_notification_to(peer, notification),
-            MessageCx::Response(_, _) => {
-                panic!("Response variants should not reach send_proxied_message_to_via")
-            }
+            MessageCx::Response(result, request_cx) => request_cx.respond_with_result(result),
         }
     }
 }
