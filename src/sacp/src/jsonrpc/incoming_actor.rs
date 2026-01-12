@@ -125,32 +125,19 @@ pub(super) async fn incoming_protocol_actor<Link: JrLink>(
                             };
 
                             let id_json = serde_json::to_value(&id).unwrap();
-                            if let Some((_method, sender)) = pending_replies.remove(&id_json) {
-                                // Create the ack channel
-                                let (ack_tx, ack_rx) = oneshot::channel();
-                                let send_result = sender.send(crate::jsonrpc::ResponsePayload {
+                            if let Some((method, sender)) = pending_replies.remove(&id_json) {
+                                // Route the response through the handler chain
+                                dispatch_response(
+                                    json_rpc_cx,
+                                    id,
+                                    method,
                                     result,
-                                    ack_tx: Some(ack_tx),
-                                });
-                                if send_result.is_err() {
-                                    tracing::warn!(
-                                        ?id,
-                                        "incoming_actor: failed to send response, receiver dropped"
-                                    );
-                                } else {
-                                    tracing::trace!(
-                                        ?id,
-                                        "incoming_actor: dispatched response, awaiting ack"
-                                    );
-                                    // Wait for the receiver to acknowledge processing is complete.
-                                    // This ensures ordering: the dispatch loop won't process the
-                                    // next message until the response handler has finished.
-                                    let _ = ack_rx.await;
-                                    tracing::trace!(
-                                        ?id,
-                                        "incoming_actor: received ack, continuing dispatch loop"
-                                    );
-                                }
+                                    sender,
+                                    &mut dynamic_handlers,
+                                    &mut handler,
+                                    &mut state,
+                                )
+                                .await?;
                             } else {
                                 tracing::warn!(
                                     ?id,
@@ -265,5 +252,93 @@ async fn dispatch_request<Link: JrLink>(
             crate::Error::method_not_found().data(method),
             json_rpc_cx.clone(),
         )
+    }
+}
+
+/// Dispatches a JSON-RPC response through the handler chain.
+///
+/// This allows handlers to intercept and process responses before they reach
+/// the awaiting code. The default behavior is to forward the response to the
+/// local awaiter via the oneshot channel.
+async fn dispatch_response<Link: JrLink>(
+    json_rpc_cx: &JrConnectionCx<Link>,
+    id: jsonrpcmsg::Id,
+    method: String,
+    result: Result<serde_json::Value, crate::Error>,
+    sender: oneshot::Sender<crate::jsonrpc::ResponsePayload>,
+    dynamic_handlers: &mut FxHashMap<Uuid, Box<dyn DynamicHandler<Link>>>,
+    handler: &mut impl JrMessageHandler<Link = Link>,
+    state: &mut Link::State,
+) -> Result<(), crate::Error> {
+    // Create a MessageCx::Response with a JrRequestCx that routes to the oneshot
+    let request_cx = JrRequestCx::new_for_response(method.clone(), id.clone(), sender);
+    let mut message_cx = MessageCx::Response(result, request_cx);
+
+    // First, apply the handlers given by the user.
+    match handler
+        .handle_message(message_cx, json_rpc_cx.clone())
+        .await?
+    {
+        Handled::Yes => {
+            tracing::trace!(%method, ?id, handler = ?handler.describe_chain(), "Response handled");
+            return Ok(());
+        }
+
+        Handled::No {
+            message: m,
+            retry: _,
+        } => {
+            tracing::trace!(%method, ?id, handler = ?handler.describe_chain(), "Handler declined response");
+            message_cx = m;
+        }
+    }
+
+    // Next, apply any dynamic handlers.
+    for dynamic_handler in dynamic_handlers.values_mut() {
+        match dynamic_handler
+            .dyn_handle_message(message_cx, json_rpc_cx.clone())
+            .await?
+        {
+            Handled::Yes => {
+                tracing::trace!(%method, ?id, handler = ?dynamic_handler.dyn_describe_chain(), "Response handled");
+                return Ok(());
+            }
+
+            Handled::No {
+                message: m,
+                retry: _,
+            } => {
+                tracing::trace!(%method, ?id, handler = ?dynamic_handler.dyn_describe_chain(), "Handler declined response");
+                message_cx = m;
+            }
+        }
+    }
+
+    // Finally, apply the default handler for the role.
+    match Link::default_message_handler(message_cx, json_rpc_cx.clone(), state).await? {
+        Handled::Yes => {
+            tracing::trace!(%method, ?id, handler = "default", "Response handled");
+            return Ok(());
+        }
+        Handled::No {
+            message: m,
+            retry: _,
+        } => {
+            message_cx = m;
+        }
+    }
+
+    // If no handler processed the response, forward it to the awaiter.
+    // This is the default behavior - responses should reach their intended recipient.
+    match message_cx {
+        MessageCx::Response(result, request_cx) => {
+            tracing::trace!(%method, ?id, "Forwarding response to awaiter");
+            request_cx.respond_with_result(result)
+        }
+        _ => {
+            // This shouldn't happen - handlers shouldn't transform Response into something else
+            tracing::warn!(%method, ?id, "Response was transformed into non-response message");
+            Ok(())
+        }
     }
 }

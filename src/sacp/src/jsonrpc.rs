@@ -2032,6 +2032,33 @@ impl JrRequestCx<serde_json::Value> {
         }
     }
 
+    /// Create a new request context for routing a response to a local awaiter.
+    ///
+    /// When `respond_with_result` is called, the response is sent through the oneshot
+    /// channel to the code that originally sent the request.
+    pub(crate) fn new_for_response(
+        method: String,
+        id: jsonrpcmsg::Id,
+        sender: oneshot::Sender<ResponsePayload>,
+    ) -> Self {
+        Self {
+            method,
+            id,
+            send_fn: SendBoxFnOnce::new(
+                move |response: Result<serde_json::Value, crate::Error>| {
+                    sender
+                        .send(ResponsePayload {
+                            result: response,
+                            ack_tx: None,
+                        })
+                        .map_err(|_| {
+                            crate::util::internal_error("failed to send response, receiver dropped")
+                        })
+                },
+            ),
+        }
+    }
+
     /// Cast this request context to a different response type.
     ///
     /// The provided type `T` will be serialized to JSON before sending.

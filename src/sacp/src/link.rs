@@ -125,6 +125,13 @@ impl RemoteStyle {
             RemoteStyle::Successor => (),
         }
 
+        // Response variants pass through without unwrapping - they don't have the
+        // SuccessorMessage envelope structure. The method is stored in the JrRequestCx.
+        if matches!(message_cx, MessageCx::Response(_, _)) {
+            tracing::trace!("handle_incoming_message: Response variant, passing through");
+            return handle_message(message_cx, connection_cx).await;
+        }
+
         let method = message_cx.method();
         if method != METHOD_SUCCESSOR_MESSAGE {
             tracing::trace!(
