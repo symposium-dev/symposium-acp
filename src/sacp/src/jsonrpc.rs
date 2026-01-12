@@ -1964,20 +1964,17 @@ impl<Link: JrLink> Drop for DynamicHandlerRegistration<Link> {
 /// section for more details.
 #[must_use]
 pub struct JrRequestCx<T: JrResponsePayload = serde_json::Value> {
-    /// The context to use to send outgoing messages and replies.
-    message_tx: OutgoingMessageTx,
     /// The method of the request.
     method: String,
 
     /// The `id` of the message we are replying to.
     id: jsonrpcmsg::Id,
 
-    /// Function to send the response `T` to a request with the given method and id.
-    make_json: SendBoxFnOnce<
-        'static,
-        (String, Result<T, crate::Error>),
-        Result<serde_json::Value, crate::Error>,
-    >,
+    /// Function to send the response to its destination.
+    ///
+    /// For incoming requests: serializes to JSON and sends over the wire.
+    /// For incoming responses: sends to the waiting oneshot channel.
+    send_fn: SendBoxFnOnce<'static, (Result<T, crate::Error>,), Result<(), crate::Error>>,
 }
 
 impl<T: JrResponsePayload> std::fmt::Debug for JrRequestCx<T> {
@@ -1991,17 +1988,31 @@ impl<T: JrResponsePayload> std::fmt::Debug for JrRequestCx<T> {
 }
 
 impl JrRequestCx<serde_json::Value> {
-    /// Create a new method context.
+    /// Create a new request context for an incoming request.
+    ///
+    /// The response will be serialized to JSON and sent over the wire.
     fn new(message_tx: OutgoingMessageTx, method: String, id: jsonrpcmsg::Id) -> Self {
+        let id_clone = id.clone();
         Self {
-            message_tx,
             method,
             id,
-            make_json: SendBoxFnOnce::new(move |_method, value| value),
+            send_fn: SendBoxFnOnce::new(
+                move |response: Result<serde_json::Value, crate::Error>| {
+                    send_raw_message(
+                        &message_tx,
+                        OutgoingMessage::Response {
+                            id: id_clone,
+                            response,
+                        },
+                    )
+                },
+            ),
         }
     }
 
-    /// Cast this request context to a different response type
+    /// Cast this request context to a different response type.
+    ///
+    /// The provided type `T` will be serialized to JSON before sending.
     pub fn cast<T: JrResponsePayload>(self) -> JrRequestCx<T> {
         self.wrap_params(move |method, value| match value {
             Ok(value) => T::into_json(value, &method),
@@ -2032,30 +2043,30 @@ impl<T: JrResponsePayload> JrRequestCx<T> {
         self.wrap_params(|method, value| T::from_value(&method, value?))
     }
 
-    /// Return a new JrResponse that expects a response of type U and serializes it.
+    /// Return a new JrRequestCx with a different method name.
     pub fn wrap_method(self, method: String) -> JrRequestCx<T> {
         JrRequestCx {
-            message_tx: self.message_tx,
             method,
             id: self.id,
-            make_json: self.make_json,
+            send_fn: self.send_fn,
         }
     }
 
-    /// Return a new JrResponse that expects a response of type U and serializes it.
+    /// Return a new JrRequestCx that expects a response of type U.
     ///
-    /// `wrap_fn` will be invoked with the method name and the result of the wrapped function.
+    /// `wrap_fn` will be invoked with the method name and the result to transform
+    /// type `U` into type `T` before sending.
     pub fn wrap_params<U: JrResponsePayload>(
         self,
         wrap_fn: impl FnOnce(&str, Result<U, crate::Error>) -> Result<T, crate::Error> + Send + 'static,
     ) -> JrRequestCx<U> {
+        let method = self.method.clone();
         JrRequestCx {
-            message_tx: self.message_tx,
             method: self.method,
             id: self.id,
-            make_json: SendBoxFnOnce::new(move |method: String, input: Result<U, crate::Error>| {
+            send_fn: SendBoxFnOnce::new(move |input: Result<U, crate::Error>| {
                 let t_value = wrap_fn(&method, input);
-                self.make_json.call(method, t_value)
+                self.send_fn.call(t_value)
             }),
         }
     }
@@ -2066,14 +2077,7 @@ impl<T: JrResponsePayload> JrRequestCx<T> {
         response: Result<T, crate::Error>,
     ) -> Result<(), crate::Error> {
         tracing::debug!(id = ?self.id, "respond called");
-        let json = self.make_json.call_tuple((self.method.clone(), response));
-        send_raw_message(
-            &self.message_tx,
-            OutgoingMessage::Response {
-                id: self.id,
-                response: json,
-            },
-        )
+        self.send_fn.call(response)
     }
 
     /// Respond to the JSON-RPC request with a value.
