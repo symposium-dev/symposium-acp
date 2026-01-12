@@ -1,4 +1,4 @@
-use crate::jsonrpc::{Handled, IntoHandled, JrMessageHandler};
+use crate::jsonrpc::{Handled, IntoHandled, JrMessageHandler, JrResponsePayload};
 use crate::link::{HasPeer, JrLink};
 use crate::peer::JrPeer;
 use crate::{JrConnectionCx, JrNotification, JrRequest, MessageCx, UntypedMessage};
@@ -389,14 +389,21 @@ where
                                 })
                             }
                             Handled::No {
-                                message: MessageCx::Response(_, _),
-                                ..
+                                message: MessageCx::Response(result, request_cx),
+                                retry,
                             } => {
-                                // Response variants are filtered out by into_typed_message_cx,
-                                // so this branch should never be reached
-                                unreachable!(
-                                    "Response variants should not appear in typed message handler"
-                                )
+                                let method = request_cx.method();
+                                let untyped_result = match result {
+                                    Ok(response) => response.into_json(method).map(Ok),
+                                    Err(err) => Ok(Err(err)),
+                                }?;
+                                Ok(Handled::No {
+                                    message: MessageCx::Response(
+                                        untyped_result,
+                                        request_cx.erase_to_json(),
+                                    ),
+                                    retry,
+                                })
                             }
                         }
                     }

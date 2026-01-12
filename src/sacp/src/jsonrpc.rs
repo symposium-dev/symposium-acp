@@ -2459,8 +2459,40 @@ impl MessageCx {
                 }
             }
 
-            // Response variants pass through - they're handled separately via response matchers
-            MessageCx::Response(result, cx) => Ok(Err(MessageCx::Response(result, cx))),
+            MessageCx::Response(result, cx) => {
+                let method = cx.method();
+                tracing::debug!(
+                    response_type = std::any::type_name::<Req::Response>(),
+                    ?method,
+                    "MessageHandler::handle_response"
+                );
+                if !Req::matches_method(method) {
+                    tracing::trace!("MessageHandler::handle_response: method doesn't match");
+                    Ok(Err(MessageCx::Response(result, cx)))
+                } else {
+                    // Parse the response result
+                    let typed_result = match result {
+                        Ok(value) => {
+                            match <Req::Response as JrResponsePayload>::from_value(method, value) {
+                                Ok(parsed) => Ok(parsed),
+                                Err(err) => {
+                                    tracing::trace!(
+                                        ?err,
+                                        "MessageHandler::handle_response: parse errored"
+                                    );
+                                    return Err(err);
+                                }
+                            }
+                        }
+                        Err(err) => Err(err),
+                    };
+                    tracing::trace!(
+                        ?typed_result,
+                        "MessageHandler::handle_response: parse completed"
+                    );
+                    Ok(Ok(MessageCx::Response(typed_result, cx.cast())))
+                }
+            }
         }
     }
 
