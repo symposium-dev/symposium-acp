@@ -104,34 +104,38 @@ impl MatchMessage {
         {
             self.state = match message_cx {
                 MessageCx::Request(untyped_request, untyped_request_cx) => {
-                    match Req::parse_message(untyped_request.method(), untyped_request.params()) {
-                        Some(Ok(typed_request)) => {
-                            let typed_request_cx = untyped_request_cx.cast();
-                            match op(typed_request, typed_request_cx).await {
-                                Ok(result) => match result.into_handled() {
-                                    Handled::Yes => Ok(Handled::Yes),
-                                    Handled::No {
-                                        message: (request, request_cx),
-                                        retry: request_retry,
-                                    } => match request.to_untyped_message() {
-                                        Ok(untyped) => Ok(Handled::No {
-                                            message: MessageCx::Request(
-                                                untyped,
-                                                request_cx.erase_to_json(),
-                                            ),
-                                            retry: retry | request_retry,
-                                        }),
-                                        Err(err) => Err(err),
-                                    },
-                                },
-                                Err(err) => Err(err),
-                            }
-                        }
-                        Some(Err(err)) => Err(err),
-                        None => Ok(Handled::No {
+                    if !Req::matches_method(untyped_request.method()) {
+                        Ok(Handled::No {
                             message: MessageCx::Request(untyped_request, untyped_request_cx),
                             retry,
-                        }),
+                        })
+                    } else {
+                        match Req::parse_message(untyped_request.method(), untyped_request.params())
+                        {
+                            Ok(typed_request) => {
+                                let typed_request_cx = untyped_request_cx.cast();
+                                match op(typed_request, typed_request_cx).await {
+                                    Ok(result) => match result.into_handled() {
+                                        Handled::Yes => Ok(Handled::Yes),
+                                        Handled::No {
+                                            message: (request, request_cx),
+                                            retry: request_retry,
+                                        } => match request.to_untyped_message() {
+                                            Ok(untyped) => Ok(Handled::No {
+                                                message: MessageCx::Request(
+                                                    untyped,
+                                                    request_cx.erase_to_json(),
+                                                ),
+                                                retry: retry | request_retry,
+                                            }),
+                                            Err(err) => Err(err),
+                                        },
+                                    },
+                                    Err(err) => Err(err),
+                                }
+                            }
+                            Err(err) => Err(err),
+                        }
                     }
                 }
                 MessageCx::Notification(_) | MessageCx::Response(_, _) => Ok(Handled::No {
@@ -161,31 +165,34 @@ impl MatchMessage {
         {
             self.state = match message_cx {
                 MessageCx::Notification(untyped_notification) => {
-                    match N::parse_message(
-                        untyped_notification.method(),
-                        untyped_notification.params(),
-                    ) {
-                        Some(Ok(typed_notification)) => match op(typed_notification).await {
-                            Ok(result) => match result.into_handled() {
-                                Handled::Yes => Ok(Handled::Yes),
-                                Handled::No {
-                                    message: notification,
-                                    retry: notification_retry,
-                                } => match notification.to_untyped_message() {
-                                    Ok(untyped) => Ok(Handled::No {
-                                        message: MessageCx::Notification(untyped),
-                                        retry: retry | notification_retry,
-                                    }),
-                                    Err(err) => Err(err),
-                                },
-                            },
-                            Err(err) => Err(err),
-                        },
-                        Some(Err(err)) => Err(err),
-                        None => Ok(Handled::No {
+                    if !N::matches_method(untyped_notification.method()) {
+                        Ok(Handled::No {
                             message: MessageCx::Notification(untyped_notification),
                             retry,
-                        }),
+                        })
+                    } else {
+                        match N::parse_message(
+                            untyped_notification.method(),
+                            untyped_notification.params(),
+                        ) {
+                            Ok(typed_notification) => match op(typed_notification).await {
+                                Ok(result) => match result.into_handled() {
+                                    Handled::Yes => Ok(Handled::Yes),
+                                    Handled::No {
+                                        message: notification,
+                                        retry: notification_retry,
+                                    } => match notification.to_untyped_message() {
+                                        Ok(untyped) => Ok(Handled::No {
+                                            message: MessageCx::Notification(untyped),
+                                            retry: retry | notification_retry,
+                                        }),
+                                        Err(err) => Err(err),
+                                    },
+                                },
+                                Err(err) => Err(err),
+                            },
+                            Err(err) => Err(err),
+                        }
                     }
                 }
                 MessageCx::Request(_, _) | MessageCx::Response(_, _) => Ok(Handled::No {
@@ -267,9 +274,8 @@ impl MatchMessage {
         {
             self.state = match message_cx {
                 MessageCx::Response(result, request_cx) => {
-                    // Check if the method matches by using parse_message with dummy params.
-                    // If parse_message returns Some, the method matches (even if parsing fails).
-                    if Req::parse_message(request_cx.method(), &serde_json::Value::Null).is_none() {
+                    // Check if the request type matches this method
+                    if !Req::matches_method(request_cx.method()) {
                         // Method doesn't match, return unhandled
                         Ok(Handled::No {
                             message: MessageCx::Response(result, request_cx),
@@ -294,9 +300,7 @@ impl MatchMessage {
                                 } => {
                                     // Convert typed result back to untyped
                                     let untyped_result = match result {
-                                        Ok(response) => {
-                                            response.into_json(request_cx.method()).map_err(|e| e)
-                                        }
+                                        Ok(response) => response.into_json(request_cx.method()),
                                         Err(err) => Err(err),
                                     };
                                     Ok(Handled::No {
@@ -776,14 +780,15 @@ impl<Link: JrLink> TypeNotification<Link> {
     ) -> Self {
         self.state = Some(match self.state.take().expect("valid state") {
             TypeNotificationState::Unhandled(method, params) => {
-                match N::parse_message(&method, &params) {
-                    Some(Ok(request)) => TypeNotificationState::Handled(op(request).await),
-
-                    Some(Err(err)) => {
-                        TypeNotificationState::Handled(self.cx.send_error_notification(err))
+                if !N::matches_method(&method) {
+                    TypeNotificationState::Unhandled(method, params)
+                } else {
+                    match N::parse_message(&method, &params) {
+                        Ok(request) => TypeNotificationState::Handled(op(request).await),
+                        Err(err) => {
+                            TypeNotificationState::Handled(self.cx.send_error_notification(err))
+                        }
                     }
-
-                    None => TypeNotificationState::Unhandled(method, params),
                 }
             }
 

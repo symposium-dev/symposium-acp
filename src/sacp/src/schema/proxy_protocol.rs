@@ -28,6 +28,10 @@ pub struct SuccessorMessage<M: JrMessage = UntypedMessage> {
 }
 
 impl<M: JrMessage> JrMessage for SuccessorMessage<M> {
+    fn matches_method(method: &str) -> bool {
+        method == METHOD_SUCCESSOR_MESSAGE
+    }
+
     fn method(&self) -> &str {
         METHOD_SUCCESSOR_MESSAGE
     }
@@ -42,21 +46,19 @@ impl<M: JrMessage> JrMessage for SuccessorMessage<M> {
         )
     }
 
-    fn parse_message(method: &str, params: &impl Serialize) -> Option<Result<Self, crate::Error>> {
+    fn parse_message(method: &str, params: &impl Serialize) -> Result<Self, crate::Error> {
         if method != METHOD_SUCCESSOR_MESSAGE {
-            return None;
+            return Err(crate::Error::method_not_found());
         }
-        match crate::util::json_cast::<_, SuccessorMessage<UntypedMessage>>(params) {
-            Ok(outer) => match M::parse_message(&outer.message.method, &outer.message.params) {
-                Some(Ok(inner)) => Some(Ok(SuccessorMessage {
-                    message: inner,
-                    meta: outer.meta,
-                })),
-                Some(Err(err)) => Some(Err(err)),
-                None => None,
-            },
-            Err(err) => Some(Err(err)),
+        let outer = crate::util::json_cast::<_, SuccessorMessage<UntypedMessage>>(params)?;
+        if !M::matches_method(&outer.message.method) {
+            return Err(crate::Error::method_not_found());
         }
+        let inner = M::parse_message(&outer.message.method, &outer.message.params)?;
+        Ok(SuccessorMessage {
+            message: inner,
+            meta: outer.meta,
+        })
     }
 }
 
@@ -135,6 +137,10 @@ pub struct McpOverAcpMessage<M = UntypedMessage> {
 }
 
 impl<M: JrMessage> JrMessage for McpOverAcpMessage<M> {
+    fn matches_method(method: &str) -> bool {
+        method == METHOD_MCP_MESSAGE
+    }
+
     fn method(&self) -> &str {
         METHOD_MCP_MESSAGE
     }
@@ -151,22 +157,20 @@ impl<M: JrMessage> JrMessage for McpOverAcpMessage<M> {
         )
     }
 
-    fn parse_message(method: &str, params: &impl Serialize) -> Option<Result<Self, crate::Error>> {
+    fn parse_message(method: &str, params: &impl Serialize) -> Result<Self, crate::Error> {
         if method != METHOD_MCP_MESSAGE {
-            return None;
+            return Err(crate::Error::method_not_found());
         }
-        match crate::util::json_cast::<_, McpOverAcpMessage<UntypedMessage>>(params) {
-            Ok(outer) => match M::parse_message(&outer.message.method, &outer.message.params) {
-                Some(Ok(inner)) => Some(Ok(McpOverAcpMessage {
-                    connection_id: outer.connection_id,
-                    message: inner,
-                    meta: outer.meta,
-                })),
-                Some(Err(err)) => Some(Err(err)),
-                None => None,
-            },
-            Err(err) => Some(Err(err)),
+        let outer = crate::util::json_cast::<_, McpOverAcpMessage<UntypedMessage>>(params)?;
+        if !M::matches_method(&outer.message.method) {
+            return Err(crate::Error::method_not_found());
         }
+        let inner = M::parse_message(&outer.message.method, &outer.message.params)?;
+        Ok(McpOverAcpMessage {
+            connection_id: outer.connection_id,
+            message: inner,
+            meta: outer.meta,
+        })
     }
 }
 

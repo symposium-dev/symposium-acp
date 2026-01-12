@@ -303,9 +303,10 @@ impl<H: JrMessageHandler> JrMessageHandler for &mut H {
 ///
 /// // Implement JrRequest for your enum
 /// # impl JrMessage for MyRequests {
+/// #     fn matches_method(_method: &str) -> bool { false }
 /// #     fn method(&self) -> &str { "myRequests" }
 /// #     fn to_untyped_message(&self) -> Result<UntypedMessage, sacp::Error> { todo!() }
-/// #     fn parse_message(_method: &str, _params: &impl serde::Serialize) -> Option<Result<Self, sacp::Error>> { None }
+/// #     fn parse_message(_method: &str, _params: &impl serde::Serialize) -> Result<Self, sacp::Error> { Err(sacp::Error::method_not_found()) }
 /// # }
 /// impl JrRequest for MyRequests { type Response = serde_json::Value; }
 ///
@@ -2154,19 +2155,20 @@ impl<T: JrResponsePayload> JrRequestCx<T> {
 /// which will implement both `JrMessage` and the respective trait. See [`JrRequest`] and
 /// [`JrNotification`] for examples.
 pub trait JrMessage: 'static + Debug + Sized + Send + Clone {
+    /// Check if this message type matches the given method name.
+    fn matches_method(method: &str) -> bool;
+
     /// The method name for the message.
     fn method(&self) -> &str;
 
     /// Convert this message into an untyped message.
     fn to_untyped_message(&self) -> Result<UntypedMessage, crate::Error>;
 
-    /// Attempt to parse this type from a method name and parameters.
+    /// Parse this type from a method name and parameters.
     ///
-    /// Returns:
-    /// - `None` if this type does not recognize the method name
-    /// - `Some(Ok(value))` if the method is recognized and deserialization succeeds
-    /// - `Some(Err(error))` if the method is recognized but deserialization fails
-    fn parse_message(method: &str, params: &impl Serialize) -> Option<Result<Self, crate::Error>>;
+    /// Returns an error if the method doesn't match or deserialization fails.
+    /// Callers should use `matches_method` first to check if this type handles the method.
+    fn parse_message(method: &str, params: &impl Serialize) -> Result<Self, crate::Error>;
 }
 
 /// Defines the "payload" of a successful response to a JSON-RPC request.
@@ -2180,6 +2182,7 @@ pub trait JrMessage: 'static + Debug + Sized + Send + Clone {
 /// use serde::{Serialize, Deserialize};
 ///
 /// #[derive(Debug, Serialize, Deserialize, JrResponsePayload)]
+/// #[response(method = "_hello")]
 /// struct HelloResponse {
 ///     greeting: String,
 /// }
@@ -2410,18 +2413,22 @@ impl MessageCx {
                     message = ?message,
                     "MessageHandler::handle_request"
                 );
-                match Req::parse_message(&message.method, &message.params) {
-                    Some(Ok(req)) => {
-                        tracing::trace!(?req, "MessageHandler::handle_request: parse completed");
-                        Ok(Ok(MessageCx::Request(req, request_cx.cast())))
-                    }
-                    Some(Err(err)) => {
-                        tracing::trace!(?err, "MessageHandler::handle_request: parse errored");
-                        return Err(err);
-                    }
-                    None => {
-                        tracing::trace!("MessageHandler::handle_request: parse failed");
-                        Ok(Err(MessageCx::Request(message, request_cx)))
+                if !Req::matches_method(&message.method) {
+                    tracing::trace!("MessageHandler::handle_request: method doesn't match");
+                    Ok(Err(MessageCx::Request(message, request_cx)))
+                } else {
+                    match Req::parse_message(&message.method, &message.params) {
+                        Ok(req) => {
+                            tracing::trace!(
+                                ?req,
+                                "MessageHandler::handle_request: parse completed"
+                            );
+                            Ok(Ok(MessageCx::Request(req, request_cx.cast())))
+                        }
+                        Err(err) => {
+                            tracing::trace!(?err, "MessageHandler::handle_request: parse errored");
+                            Err(err)
+                        }
                     }
                 }
             }
@@ -2432,21 +2439,22 @@ impl MessageCx {
                     message = ?message,
                     "MessageHandler::handle_notification"
                 );
-                match Notif::parse_message(&message.method, &message.params) {
-                    Some(Ok(notif)) => {
-                        tracing::trace!(
-                            ?notif,
-                            "MessageHandler::handle_notification: parse completed"
-                        );
-                        Ok(Ok(MessageCx::Notification(notif)))
-                    }
-                    Some(Err(err)) => {
-                        tracing::trace!(?err, "MessageHandler: parse errored");
-                        Err(err)
-                    }
-                    None => {
-                        tracing::trace!("MessageHandler: parse failed");
-                        Ok(Err(MessageCx::Notification(message)))
+                if !Notif::matches_method(&message.method) {
+                    tracing::trace!("MessageHandler::handle_notification: method doesn't match");
+                    Ok(Err(MessageCx::Notification(message)))
+                } else {
+                    match Notif::parse_message(&message.method, &message.params) {
+                        Ok(notif) => {
+                            tracing::trace!(
+                                ?notif,
+                                "MessageHandler::handle_notification: parse completed"
+                            );
+                            Ok(Ok(MessageCx::Notification(notif)))
+                        }
+                        Err(err) => {
+                            tracing::trace!(?err, "MessageHandler: parse errored");
+                            Err(err)
+                        }
                     }
                 }
             }
@@ -2500,11 +2508,15 @@ impl MessageCx {
     ) -> Result<Result<N, MessageCx>, crate::Error> {
         match self {
             MessageCx::Request(..) => Ok(Err(self)),
-            MessageCx::Notification(msg) => match N::parse_message(&msg.method, &msg.params) {
-                Some(Ok(n)) => Ok(Ok(n)),
-                Some(Err(err)) => Err(err),
-                None => Ok(Err(MessageCx::Notification(msg))),
-            },
+            MessageCx::Notification(msg) => {
+                if !N::matches_method(&msg.method) {
+                    return Ok(Err(MessageCx::Notification(msg)));
+                }
+                match N::parse_message(&msg.method, &msg.params) {
+                    Ok(n) => Ok(Ok(n)),
+                    Err(err) => Err(err),
+                }
+            }
             MessageCx::Response(..) => Ok(Err(self)),
         }
     }
@@ -2521,10 +2533,12 @@ impl MessageCx {
     ) -> Result<Result<(Req, JrRequestCx<Req::Response>), MessageCx>, crate::Error> {
         match self {
             MessageCx::Request(msg, request_cx) => {
+                if !Req::matches_method(&msg.method) {
+                    return Ok(Err(MessageCx::Request(msg, request_cx)));
+                }
                 match Req::parse_message(&msg.method, &msg.params) {
-                    Some(Ok(req)) => Ok(Ok((req, request_cx.cast()))),
-                    Some(Err(err)) => Err(err),
-                    None => Ok(Err(MessageCx::Request(msg, request_cx))),
+                    Ok(req) => Ok(Ok((req, request_cx.cast()))),
+                    Err(err) => Err(err),
                 }
             }
             MessageCx::Notification(..) => Ok(Err(self)),
@@ -2598,6 +2612,11 @@ impl UntypedMessage {
 }
 
 impl JrMessage for UntypedMessage {
+    fn matches_method(_method: &str) -> bool {
+        // UntypedMessage matches any method - it's the untyped fallback
+        true
+    }
+
     fn method(&self) -> &str {
         &self.method
     }
@@ -2606,8 +2625,8 @@ impl JrMessage for UntypedMessage {
         Ok(self.clone())
     }
 
-    fn parse_message(method: &str, params: &impl Serialize) -> Option<Result<Self, crate::Error>> {
-        Some(UntypedMessage::new(method, params))
+    fn parse_message(method: &str, params: &impl Serialize) -> Result<Self, crate::Error> {
+        UntypedMessage::new(method, params)
     }
 }
 

@@ -15,6 +15,7 @@
 //! }
 //!
 //! #[derive(Debug, Serialize, Deserialize, JrResponsePayload)]
+//! #[response(method = "_hello")]
 //! struct HelloResponse {
 //!     greeting: String,
 //! }
@@ -38,7 +39,7 @@
 
 use proc_macro::TokenStream;
 use quote::quote;
-use syn::{parse_macro_input, DeriveInput, Expr, Lit, Path, Type};
+use syn::{DeriveInput, Expr, Lit, Path, Type, parse_macro_input};
 
 /// Derive macro for implementing `JrRequest` and `JrMessage` traits.
 ///
@@ -69,6 +70,10 @@ pub fn derive_jr_request(input: TokenStream) -> TokenStream {
 
     let expanded = quote! {
         impl #krate::JrMessage for #name {
+            fn matches_method(method: &str) -> bool {
+                method == #method
+            }
+
             fn method(&self) -> &str {
                 #method
             }
@@ -80,11 +85,11 @@ pub fn derive_jr_request(input: TokenStream) -> TokenStream {
             fn parse_message(
                 method: &str,
                 params: &impl serde::Serialize,
-            ) -> Option<Result<Self, #krate::Error>> {
+            ) -> Result<Self, #krate::Error> {
                 if method != #method {
-                    return None;
+                    return Err(#krate::Error::method_not_found());
                 }
-                Some(#krate::util::json_cast(params))
+                #krate::util::json_cast(params)
             }
         }
 
@@ -125,6 +130,10 @@ pub fn derive_jr_notification(input: TokenStream) -> TokenStream {
 
     let expanded = quote! {
         impl #krate::JrMessage for #name {
+            fn matches_method(method: &str) -> bool {
+                method == #method
+            }
+
             fn method(&self) -> &str {
                 #method
             }
@@ -136,11 +145,11 @@ pub fn derive_jr_notification(input: TokenStream) -> TokenStream {
             fn parse_message(
                 method: &str,
                 params: &impl serde::Serialize,
-            ) -> Option<Result<Self, #krate::Error>> {
+            ) -> Result<Self, #krate::Error> {
                 if method != #method {
-                    return None;
+                    return Err(#krate::Error::method_not_found());
                 }
-                Some(#krate::util::json_cast(params))
+                #krate::util::json_cast(params)
             }
         }
 
@@ -154,7 +163,7 @@ pub fn derive_jr_notification(input: TokenStream) -> TokenStream {
 ///
 /// # Attributes
 ///
-/// - `#[response(crate = crate)]` - for use within sacp (optional)
+/// - `#[response(crate = crate)]` - for use within sacp crate
 ///
 /// # Example
 ///
@@ -169,7 +178,10 @@ pub fn derive_jr_response_payload(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as DeriveInput);
     let name = &input.ident;
 
-    let krate = parse_response_attrs(&input).unwrap_or_else(|_| default_crate_path());
+    let krate = match parse_response_attrs(&input) {
+        Ok(attrs) => attrs,
+        Err(e) => return e.to_compile_error().into(),
+    };
 
     let expanded = quote! {
         impl #krate::JrResponsePayload for #name {
@@ -303,12 +315,13 @@ fn parse_notification_attrs(input: &DeriveInput) -> syn::Result<(String, Path)> 
 }
 
 fn parse_response_attrs(input: &DeriveInput) -> syn::Result<Path> {
+    let mut krate: Option<Path> = None;
+
     for attr in &input.attrs {
         if !attr.path().is_ident("response") {
             continue;
         }
 
-        let mut krate: Option<Path> = None;
         attr.parse_nested_meta(|meta| {
             if meta.path.is_ident("crate") {
                 let value: Expr = meta.value()?.parse()?;
@@ -321,11 +334,7 @@ fn parse_response_attrs(input: &DeriveInput) -> syn::Result<Path> {
 
             Err(meta.error("unknown attribute"))
         })?;
-
-        if let Some(k) = krate {
-            return Ok(k);
-        }
     }
 
-    Ok(default_crate_path())
+    Ok(krate.unwrap_or_else(default_crate_path))
 }

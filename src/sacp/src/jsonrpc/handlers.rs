@@ -110,51 +110,54 @@ where
                                 message = ?message,
                                 "RequestHandler::handle_request"
                             );
-                            match Req::parse_message(&message.method, &message.params) {
-                                Some(Ok(req)) => {
-                                    tracing::trace!(
-                                        ?req,
-                                        "RequestHandler::handle_request: parse completed"
-                                    );
-                                    let typed_request_cx = request_cx.cast();
-                                    let result = (self.to_future_hack)(
-                                        &mut self.handler,
-                                        req,
-                                        typed_request_cx,
-                                        connection_cx,
-                                    )
-                                    .await?;
-                                    match result.into_handled() {
-                                        Handled::Yes => Ok(Handled::Yes),
-                                        Handled::No {
-                                            message: (request, request_cx),
-                                            retry,
-                                        } => {
-                                            // Handler returned the request back, convert to untyped
-                                            let untyped = request.to_untyped_message()?;
-                                            Ok(Handled::No {
-                                                message: MessageCx::Request(
-                                                    untyped,
-                                                    request_cx.erase_to_json(),
-                                                ),
+                            if !Req::matches_method(&message.method) {
+                                tracing::trace!(
+                                    "RequestHandler::handle_request: method doesn't match"
+                                );
+                                Ok(Handled::No {
+                                    message: MessageCx::Request(message, request_cx),
+                                    retry: false,
+                                })
+                            } else {
+                                match Req::parse_message(&message.method, &message.params) {
+                                    Ok(req) => {
+                                        tracing::trace!(
+                                            ?req,
+                                            "RequestHandler::handle_request: parse completed"
+                                        );
+                                        let typed_request_cx = request_cx.cast();
+                                        let result = (self.to_future_hack)(
+                                            &mut self.handler,
+                                            req,
+                                            typed_request_cx,
+                                            connection_cx,
+                                        )
+                                        .await?;
+                                        match result.into_handled() {
+                                            Handled::Yes => Ok(Handled::Yes),
+                                            Handled::No {
+                                                message: (request, request_cx),
                                                 retry,
-                                            })
+                                            } => {
+                                                // Handler returned the request back, convert to untyped
+                                                let untyped = request.to_untyped_message()?;
+                                                Ok(Handled::No {
+                                                    message: MessageCx::Request(
+                                                        untyped,
+                                                        request_cx.erase_to_json(),
+                                                    ),
+                                                    retry,
+                                                })
+                                            }
                                         }
                                     }
-                                }
-                                Some(Err(err)) => {
-                                    tracing::trace!(
-                                        ?err,
-                                        "RequestHandler::handle_request: parse errored"
-                                    );
-                                    Err(err)
-                                }
-                                None => {
-                                    tracing::trace!("RequestHandler::handle_request: parse failed");
-                                    Ok(Handled::No {
-                                        message: MessageCx::Request(message, request_cx),
-                                        retry: false,
-                                    })
+                                    Err(err) => {
+                                        tracing::trace!(
+                                            ?err,
+                                            "RequestHandler::handle_request: parse errored"
+                                        );
+                                        Err(err)
+                                    }
                                 }
                             }
                         }
@@ -231,48 +234,49 @@ where
                                 message = ?message,
                                 "NotificationHandler::handle_message"
                             );
-                            match Notif::parse_message(&message.method, &message.params) {
-                                Some(Ok(notif)) => {
-                                    tracing::trace!(
-                                        ?notif,
-                                        "NotificationHandler::handle_notification: parse completed"
-                                    );
-                                    let result = (self.to_future_hack)(
-                                        &mut self.handler,
-                                        notif,
-                                        connection_cx,
-                                    )
-                                    .await?;
-                                    match result.into_handled() {
-                                        Handled::Yes => Ok(Handled::Yes),
-                                        Handled::No {
-                                            message: (notification, _cx),
-                                            retry,
-                                        } => {
-                                            // Handler returned the notification back, convert to untyped
-                                            let untyped = notification.to_untyped_message()?;
-                                            Ok(Handled::No {
-                                                message: MessageCx::Notification(untyped),
+                            if !Notif::matches_method(&message.method) {
+                                tracing::trace!(
+                                    "NotificationHandler::handle_notification: method doesn't match"
+                                );
+                                Ok(Handled::No {
+                                    message: MessageCx::Notification(message),
+                                    retry: false,
+                                })
+                            } else {
+                                match Notif::parse_message(&message.method, &message.params) {
+                                    Ok(notif) => {
+                                        tracing::trace!(
+                                            ?notif,
+                                            "NotificationHandler::handle_notification: parse completed"
+                                        );
+                                        let result = (self.to_future_hack)(
+                                            &mut self.handler,
+                                            notif,
+                                            connection_cx,
+                                        )
+                                        .await?;
+                                        match result.into_handled() {
+                                            Handled::Yes => Ok(Handled::Yes),
+                                            Handled::No {
+                                                message: (notification, _cx),
                                                 retry,
-                                            })
+                                            } => {
+                                                // Handler returned the notification back, convert to untyped
+                                                let untyped = notification.to_untyped_message()?;
+                                                Ok(Handled::No {
+                                                    message: MessageCx::Notification(untyped),
+                                                    retry,
+                                                })
+                                            }
                                         }
                                     }
-                                }
-                                Some(Err(err)) => {
-                                    tracing::trace!(
-                                        ?err,
-                                        "NotificationHandler::handle_notification: parse errored"
-                                    );
-                                    Err(err)
-                                }
-                                None => {
-                                    tracing::trace!(
-                                        "NotificationHandler::handle_notification: parse failed"
-                                    );
-                                    Ok(Handled::No {
-                                        message: MessageCx::Notification(message),
-                                        retry: false,
-                                    })
+                                    Err(err) => {
+                                        tracing::trace!(
+                                            ?err,
+                                            "NotificationHandler::handle_notification: parse errored"
+                                        );
+                                        Err(err)
+                                    }
                                 }
                             }
                         }

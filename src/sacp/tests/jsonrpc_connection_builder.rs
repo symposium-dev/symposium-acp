@@ -34,6 +34,10 @@ struct FooRequest {
 }
 
 impl JrMessage for FooRequest {
+    fn matches_method(method: &str) -> bool {
+        method == "foo"
+    }
+
     fn method(&self) -> &str {
         "foo"
     }
@@ -42,14 +46,11 @@ impl JrMessage for FooRequest {
         sacp::UntypedMessage::new(self.method(), self)
     }
 
-    fn parse_message(
-        method: &str,
-        params: &impl serde::Serialize,
-    ) -> Option<Result<Self, sacp::Error>> {
-        if method != "foo" {
-            return None;
+    fn parse_message(method: &str, params: &impl serde::Serialize) -> Result<Self, sacp::Error> {
+        if !Self::matches_method(method) {
+            return Err(sacp::Error::method_not_found());
         }
-        Some(sacp::util::json_cast(params))
+        sacp::util::json_cast(params)
     }
 }
 
@@ -78,6 +79,10 @@ struct BarRequest {
 }
 
 impl JrMessage for BarRequest {
+    fn matches_method(method: &str) -> bool {
+        method == "bar"
+    }
+
     fn method(&self) -> &str {
         "bar"
     }
@@ -86,14 +91,11 @@ impl JrMessage for BarRequest {
         sacp::UntypedMessage::new(self.method(), self)
     }
 
-    fn parse_message(
-        method: &str,
-        params: &impl serde::Serialize,
-    ) -> Option<Result<Self, sacp::Error>> {
-        if method != "bar" {
-            return None;
+    fn parse_message(method: &str, params: &impl serde::Serialize) -> Result<Self, sacp::Error> {
+        if !Self::matches_method(method) {
+            return Err(sacp::Error::method_not_found());
         }
-        Some(sacp::util::json_cast(params))
+        sacp::util::json_cast(params)
     }
 }
 
@@ -208,6 +210,10 @@ struct TrackRequest {
 }
 
 impl JrMessage for TrackRequest {
+    fn matches_method(method: &str) -> bool {
+        method == "track"
+    }
+
     fn method(&self) -> &str {
         "track"
     }
@@ -216,14 +222,11 @@ impl JrMessage for TrackRequest {
         sacp::UntypedMessage::new(self.method(), self)
     }
 
-    fn parse_message(
-        method: &str,
-        params: &impl serde::Serialize,
-    ) -> Option<Result<Self, sacp::Error>> {
-        if method != "track" {
-            return None;
+    fn parse_message(method: &str, params: &impl serde::Serialize) -> Result<Self, sacp::Error> {
+        if !Self::matches_method(method) {
+            return Err(sacp::Error::method_not_found());
         }
-        Some(sacp::util::json_cast(params))
+        sacp::util::json_cast(params)
     }
 }
 
@@ -325,6 +328,10 @@ struct Method1Request {
 }
 
 impl JrMessage for Method1Request {
+    fn matches_method(method: &str) -> bool {
+        method == "method1"
+    }
+
     fn method(&self) -> &str {
         "method1"
     }
@@ -333,14 +340,11 @@ impl JrMessage for Method1Request {
         sacp::UntypedMessage::new(self.method(), self)
     }
 
-    fn parse_message(
-        method: &str,
-        params: &impl serde::Serialize,
-    ) -> Option<Result<Self, sacp::Error>> {
-        if method != "method1" {
-            return None;
+    fn parse_message(method: &str, params: &impl serde::Serialize) -> Result<Self, sacp::Error> {
+        if !Self::matches_method(method) {
+            return Err(sacp::Error::method_not_found());
         }
-        Some(sacp::util::json_cast(params))
+        sacp::util::json_cast(params)
     }
 }
 
@@ -354,6 +358,10 @@ struct Method2Request {
 }
 
 impl JrMessage for Method2Request {
+    fn matches_method(method: &str) -> bool {
+        method == "method2"
+    }
+
     fn method(&self) -> &str {
         "method2"
     }
@@ -362,14 +370,11 @@ impl JrMessage for Method2Request {
         sacp::UntypedMessage::new(self.method(), self)
     }
 
-    fn parse_message(
-        method: &str,
-        params: &impl serde::Serialize,
-    ) -> Option<Result<Self, sacp::Error>> {
-        if method != "method2" {
-            return None;
+    fn parse_message(method: &str, params: &impl serde::Serialize) -> Result<Self, sacp::Error> {
+        if !Self::matches_method(method) {
+            return Err(sacp::Error::method_not_found());
         }
-        Some(sacp::util::json_cast(params))
+        sacp::util::json_cast(params)
     }
 }
 
@@ -535,6 +540,10 @@ struct EventNotification {
 }
 
 impl JrMessage for EventNotification {
+    fn matches_method(method: &str) -> bool {
+        method == "event"
+    }
+
     fn method(&self) -> &str {
         "event"
     }
@@ -543,14 +552,11 @@ impl JrMessage for EventNotification {
         sacp::UntypedMessage::new(self.method(), self)
     }
 
-    fn parse_message(
-        method: &str,
-        params: &impl serde::Serialize,
-    ) -> Option<Result<Self, sacp::Error>> {
-        if method != "event" {
-            return None;
+    fn parse_message(method: &str, params: &impl serde::Serialize) -> Result<Self, sacp::Error> {
+        if !Self::matches_method(method) {
+            return Err(sacp::Error::method_not_found());
         }
-        Some(sacp::util::json_cast(params))
+        sacp::util::json_cast(params)
     }
 }
 
