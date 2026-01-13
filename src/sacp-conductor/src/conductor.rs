@@ -132,11 +132,11 @@ use sacp::{
     },
 };
 use sacp::{
-    JrConnectionBuilder, JrConnectionCx, JrLink, JrNotification, JrPeer, JrRequest, JrRequestCx,
+    JrConnectionBuilder, JrConnectionCx, JrLink, JrNotification, JrRequest, JrRequestCx,
     JrResponse, MessageCx, UntypedMessage,
 };
 use sacp::{
-    JrMessageHandler, JrResponder, JrResponsePayload,
+    JrMessageHandler, JrResponder,
     schema::{InitializeProxyRequest, InitializeRequest, NewSessionRequest},
     util::MatchMessageFrom,
 };
@@ -249,7 +249,6 @@ impl<Link: ConductorLink> Conductor<Link> {
             proxies: Default::default(),
             successor: Arc::new(sacp::util::internal_error("successor not initialized")),
             trace_writer: self.trace_writer,
-            pending_requests: Default::default(),
             link: self.link,
         };
 
@@ -284,11 +283,19 @@ impl<Link: ConductorLink> Conductor<Link> {
         conductor_tx: &mut mpsc::Sender<ConductorMessage>,
         message: MessageCx,
     ) -> Result<(), sacp::Error> {
-        conductor_tx
-            .send(ConductorMessage::ClientToAgent {
+        let conductor_message = match message {
+            MessageCx::Response(result, request_cx) => {
+                ConductorMessage::ForwardResponseFromClient { request_cx, result }
+            }
+
+            _ => ConductorMessage::ClientToAgent {
                 target_component_index: 0,
                 message,
-            })
+            },
+        };
+
+        conductor_tx
+            .send(conductor_message)
             .await
             .map_err(sacp::util::internal_error)
     }
@@ -297,11 +304,19 @@ impl<Link: ConductorLink> Conductor<Link> {
         conductor_tx: &mut mpsc::Sender<ConductorMessage>,
         message: MessageCx,
     ) -> Result<(), sacp::Error> {
-        conductor_tx
-            .send(ConductorMessage::AgentToClient {
+        let conductor_message = match message {
+            MessageCx::Response(result, request_cx) => {
+                ConductorMessage::ForwardResponseFromSuccessor { request_cx, result }
+            }
+
+            _ => ConductorMessage::AgentToClient {
                 source_component_index: SourceComponentIndex::Successor,
                 message,
-            })
+            },
+        };
+
+        conductor_tx
+            .send(conductor_message)
             .await
             .map_err(sacp::util::internal_error)
     }
@@ -377,9 +392,6 @@ where
 
     /// Optional trace writer for sequence diagram visualization.
     trace_writer: Option<crate::trace::TraceWriter>,
-
-    /// Tracks pending requests for response tracing: id -> (from, to)
-    pending_requests: HashMap<String, (String, String)>,
 
     /// Defines what sort of link we have
     link: Link,
@@ -499,13 +511,18 @@ where
 
         let (protocol, method, params) = Self::extract_trace_info(message)?;
 
+        tracing::debug!(
+            id_key = ?message.id(),
+            ?from,
+            ?to,
+            ?method,
+            ?params,
+            "trace_client_to_agent"
+        );
+
         let writer = self.trace_writer.as_mut().unwrap();
         match message.id() {
             Some(id) => {
-                // Track pending request for response correlation
-                let id_key = id.to_string();
-                self.pending_requests
-                    .insert(id_key, (from.clone(), to.clone()));
                 writer.request(protocol, from, to, id, &method, None, params);
             }
             None => {
@@ -540,13 +557,18 @@ where
 
         let (protocol, method, params) = Self::extract_trace_info(message)?;
 
+        tracing::debug!(
+            id_key = ?message.id(),
+            ?from,
+            ?to,
+            ?method,
+            ?params,
+            "trace_agent_to_client"
+        );
+
         let writer = self.trace_writer.as_mut().unwrap();
         match message.id() {
             Some(id) => {
-                // Track pending request for response correlation
-                let id_key = id.to_string();
-                self.pending_requests
-                    .insert(id_key, (from.clone(), to.clone()));
                 writer.request(protocol, from, to, id, &method, None, params);
             }
             None => {
@@ -561,22 +583,36 @@ where
         &mut self,
         request_cx: &sacp::JrRequestCx<serde_json::Value>,
         result: &Result<serde_json::Value, sacp::Error>,
+        from: ComponentIndex,
+        to: ComponentIndex,
     ) {
-        let Some(writer) = &mut self.trace_writer else {
+        if self.trace_writer.is_none() {
             return;
-        };
+        }
 
         let id = request_cx.id();
-        let id_key = id.to_string();
 
-        // Look up the original request's from/to (response goes in reverse)
-        if let Some((original_from, original_to)) = self.pending_requests.remove(&id_key) {
-            let (is_error, payload) = match result {
-                Ok(v) => (false, v.clone()),
-                Err(e) => (true, serde_json::json!({ "error": e.to_string() })),
-            };
-            // Response goes from original_to back to original_from
-            writer.response(&original_to, &original_from, id, is_error, payload);
+        tracing::debug!(?id, ?from, ?to, ?result, "trace_response");
+
+        let (is_error, payload) = match result {
+            Ok(v) => (false, v.clone()),
+            Err(e) => (true, serde_json::json!({ "error": e.to_string() })),
+        };
+
+        let from_name = self.component_index_name(from);
+        let to_name = self.component_index_name(to);
+
+        // Response goes from `to` back to `from` (reverse of the request direction)
+        let writer = self.trace_writer.as_mut().unwrap();
+        writer.response(&to_name, &from_name, id, is_error, payload);
+    }
+
+    /// Convert a ComponentIndex to a trace-friendly name.
+    fn component_index_name(&self, index: ComponentIndex) -> String {
+        match index {
+            ComponentIndex::Client => "client".to_string(),
+            ComponentIndex::Proxy(i) => format!("proxy:{}", i),
+            ComponentIndex::Successor => "agent".to_string(),
         }
     }
 
@@ -737,8 +773,45 @@ where
             // Forward a response back to the original request context.
             // This ensures responses are processed in order with notifications by
             // going through the central conductor queue.
-            ConductorMessage::ForwardResponse { request_cx, result } => {
-                self.trace_response(&request_cx, &result);
+            ConductorMessage::ForwardResponse {
+                request_cx,
+                result,
+                from,
+                to,
+            } => {
+                self.trace_response(&request_cx, &result, from, to);
+                request_cx.respond_with_result(result)
+            }
+
+            // Response from the client - compute from/to here where we have proxy count.
+            ConductorMessage::ForwardResponseFromClient { request_cx, result } => {
+                let is_successor_response = request_cx
+                    .method()
+                    .starts_with(sacp::schema::METHOD_SUCCESSOR_MESSAGE);
+                let (from, to) = if is_successor_response {
+                    // Request was from successor to client, response goes back
+                    (ComponentIndex::Client, ComponentIndex::Successor)
+                } else {
+                    // Request was from first proxy (or successor if no proxies) to client
+                    let to = if self.proxies.is_empty() {
+                        ComponentIndex::Successor
+                    } else {
+                        ComponentIndex::Proxy(0)
+                    };
+                    (ComponentIndex::Client, to)
+                };
+                self.trace_response(&request_cx, &result, from, to);
+                request_cx.respond_with_result(result)
+            }
+
+            // Response from successor (in proxy mode) - compute from/to here.
+            ConductorMessage::ForwardResponseFromSuccessor { request_cx, result } => {
+                let to = if self.proxies.is_empty() {
+                    ComponentIndex::Client
+                } else {
+                    ComponentIndex::Proxy(self.proxies.len() - 1)
+                };
+                self.trace_response(&request_cx, &result, ComponentIndex::Successor, to);
                 request_cx.respond_with_result(result)
             }
         }
@@ -771,7 +844,7 @@ where
         match message {
             MessageCx::Request(request, request_cx) => self
                 .send_request_to_predecessor_of(client, source_component_index, request)
-                .forward_response_via(&self.conductor_tx, request_cx),
+                .forward_to_request_cx(request_cx),
             MessageCx::Notification(notification) => self.send_notification_to_predecessor_of(
                 client,
                 source_component_index,
@@ -911,7 +984,8 @@ where
     ) -> Result<(), sacp::Error> {
         assert!(self.proxies.is_empty());
 
-        info!(proxy_count = proxy_components.len(), "spawn_proxies");
+        let num_proxies = proxy_components.len();
+        info!(proxy_count = num_proxies, "spawn_proxies");
 
         // Spawn each proxy component
         for (component_index, dyn_component) in proxy_components.into_iter().enumerate() {
@@ -947,13 +1021,45 @@ where
                             let mut conductor_tx = self.conductor_tx.clone();
                             async move |message_cx: MessageCx<UntypedMessage, UntypedMessage>,
                                         _cx| {
-                                conductor_tx
-                                    .send(ConductorMessage::AgentToClient {
+                                let message = match message_cx {
+                                    MessageCx::Response(result, request_cx) => {
+                                        // Determine direction based on whether this was a SuccessorMessage
+                                        let is_successor_response = request_cx
+                                            .method()
+                                            .starts_with(sacp::schema::METHOD_SUCCESSOR_MESSAGE);
+                                        let (from, to) = if is_successor_response {
+                                            // Response from proxy's successor to proxy
+                                            let from = if component_index + 1 >= num_proxies {
+                                                ComponentIndex::Successor
+                                            } else {
+                                                ComponentIndex::Proxy(component_index + 1)
+                                            };
+                                            (from, ComponentIndex::Proxy(component_index))
+                                        } else {
+                                            // Response from proxy's predecessor to proxy
+                                            let from = if component_index == 0 {
+                                                ComponentIndex::Client
+                                            } else {
+                                                ComponentIndex::Proxy(component_index - 1)
+                                            };
+                                            (from, ComponentIndex::Proxy(component_index))
+                                        };
+                                        ConductorMessage::ForwardResponse {
+                                            request_cx,
+                                            result,
+                                            from,
+                                            to,
+                                        }
+                                    }
+                                    _ => ConductorMessage::AgentToClient {
                                         source_component_index: SourceComponentIndex::Proxy(
                                             component_index,
                                         ),
                                         message: message_cx,
-                                    })
+                                    },
+                                };
+                                conductor_tx
+                                    .send(message)
                                     .await
                                     .map_err(sacp::util::internal_error)
                             }
@@ -996,24 +1102,15 @@ where
                 // request to its successor.
                 self.proxies[target_component_index]
                     .send_request(InitializeProxyRequest::from(request))
-                    .on_receiving_result({
-                        let conductor_tx = self.conductor_tx.clone();
-                        async move |result| {
-                            tracing::debug!(?result, "got initialize_proxy response from proxy");
-                            request_cx
-                                .respond_with_result_via(&conductor_tx, result)
-                                .await
-                        }
+                    .on_receiving_result(async move |result| {
+                        tracing::debug!(?result, "got initialize_proxy response from proxy");
+                        request_cx.respond_with_result(result)
                     })
             })
             .await
             .otherwise(async |message| {
                 // Otherwise, just send the message along "as is".
-                self.proxies[target_component_index].send_proxied_message_to_via(
-                    AgentPeer,
-                    &self.conductor_tx,
-                    message,
-                )
+                self.proxies[target_component_index].send_proxied_message_to(AgentPeer, message)
             })
             .await
     }
@@ -1052,7 +1149,7 @@ where
 
                 agent_cx
                     .send_request(request)
-                    .forward_response_via(&self.conductor_tx, request_cx)
+                    .forward_to_request_cx(request_cx)
             })
             .await
             .if_request(
@@ -1095,10 +1192,25 @@ where
             .await
             .otherwise(async |message| {
                 // Otherwise, just send the message along "as is".
-                agent_cx.send_proxied_message_to_via(AgentPeer, &self.conductor_tx, message)
+                agent_cx.send_proxied_message_to(AgentPeer, message)
             })
             .await
     }
+}
+
+/// Identifies a component in the conductor's chain for tracing purposes.
+///
+/// Used to track message sources and destinations through the proxy chain.
+#[derive(Debug, Clone, Copy)]
+pub enum ComponentIndex {
+    /// The client (editor) at the start of the chain.
+    Client,
+
+    /// A proxy component at the given index.
+    Proxy(usize),
+
+    /// The successor (agent in agent mode, outer conductor in proxy mode).
+    Successor,
 }
 
 /// Identifies the source of an agent-to-client message.
@@ -1399,87 +1511,25 @@ pub enum ConductorMessage {
     ForwardResponse {
         request_cx: JrRequestCx<serde_json::Value>,
         result: Result<serde_json::Value, sacp::Error>,
+        /// The component the response came from
+        from: ComponentIndex,
+        /// The component the response is going to
+        to: ComponentIndex,
     },
-}
 
-trait JrConnectionCxExt<Link: JrLink> {
-    fn send_proxied_message_to_via<Peer: JrPeer>(
-        &self,
-        peer: Peer,
-        conductor_tx: &mpsc::Sender<ConductorMessage>,
-        message: MessageCx,
-    ) -> Result<(), sacp::Error>
-    where
-        Link: sacp::HasPeer<Peer>;
-}
+    /// Forward a response that arrived from the client.
+    /// The central handler computes from/to based on the method and proxy count.
+    ForwardResponseFromClient {
+        request_cx: JrRequestCx<serde_json::Value>,
+        result: Result<serde_json::Value, sacp::Error>,
+    },
 
-impl<Link: JrLink> JrConnectionCxExt<Link> for JrConnectionCx<Link> {
-    fn send_proxied_message_to_via<Peer: JrPeer>(
-        &self,
-        peer: Peer,
-        conductor_tx: &mpsc::Sender<ConductorMessage>,
-        message: MessageCx,
-    ) -> Result<(), sacp::Error>
-    where
-        Link: sacp::HasPeer<Peer>,
-    {
-        match message {
-            MessageCx::Request(request, request_cx) => self
-                .send_request_to(peer, request)
-                .forward_response_via(conductor_tx, request_cx),
-            MessageCx::Notification(notification) => self.send_notification_to(peer, notification),
-            MessageCx::Response(result, request_cx) => request_cx.respond_with_result(result),
-        }
-    }
-}
-
-trait JrRequestCxExt<T: JrResponsePayload> {
-    async fn respond_with_result_via(
-        self,
-        conductor_tx: &mpsc::Sender<ConductorMessage>,
-        result: Result<T, sacp::Error>,
-    ) -> Result<(), sacp::Error>;
-}
-
-impl<T: JrResponsePayload> JrRequestCxExt<T> for JrRequestCx<T> {
-    async fn respond_with_result_via(
-        self,
-        conductor_tx: &mpsc::Sender<ConductorMessage>,
-        result: Result<T, sacp::Error>,
-    ) -> Result<(), sacp::Error> {
-        let result = result.and_then(|response| response.into_json(self.method()));
-        conductor_tx
-            .clone()
-            .send(ConductorMessage::ForwardResponse {
-                request_cx: self.erase_to_json(),
-                result,
-            })
-            .await
-            .map_err(|e| sacp::util::internal_error(format!("Failed to send response: {}", e)))
-    }
-}
-
-pub trait JrResponseExt<T: JrResponsePayload> {
-    fn forward_response_via(
-        self,
-        conductor_tx: &mpsc::Sender<ConductorMessage>,
-        request_cx: JrRequestCx<T>,
-    ) -> Result<(), sacp::Error>;
-}
-
-impl<T: JrResponsePayload> JrResponseExt<T> for JrResponse<T> {
-    fn forward_response_via(
-        self,
-        conductor_tx: &mpsc::Sender<ConductorMessage>,
-        request_cx: JrRequestCx<T>,
-    ) -> Result<(), sacp::Error> {
-        let conductor_tx = conductor_tx.clone();
-        self.on_receiving_result(async move |result| {
-            request_cx
-                .respond_with_result_via(&conductor_tx, result)
-                .await
-        })
-    }
+    /// Forward a response that arrived from the successor (in proxy mode).
+    /// The central handler computes from/to based on the proxy count.
+    ForwardResponseFromSuccessor {
+        request_cx: JrRequestCx<serde_json::Value>,
+        result: Result<serde_json::Value, sacp::Error>,
+    },
 }
 
 /// Trait implemented for the two links the conductor can use:
@@ -1562,12 +1612,31 @@ impl ConductorLink for ConductorToClient {
                 .on_receive_message(
                     {
                         let mut conductor_tx = responder.conductor_tx.clone();
+                        let num_proxies = proxy_components.len();
                         async move |message_cx: MessageCx, _cx| {
-                            conductor_tx
-                                .send(ConductorMessage::AgentToClient {
+                            let message = match message_cx {
+                                MessageCx::Response(result, request_cx) => {
+                                    // Response to a request we sent to the agent.
+                                    // It's from the last proxy (or client) to the agent.
+                                    let from = if num_proxies == 0 {
+                                        ComponentIndex::Client
+                                    } else {
+                                        ComponentIndex::Proxy(num_proxies - 1)
+                                    };
+                                    ConductorMessage::ForwardResponse {
+                                        request_cx,
+                                        result,
+                                        from,
+                                        to: ComponentIndex::Successor,
+                                    }
+                                }
+                                _ => ConductorMessage::AgentToClient {
                                     source_component_index: SourceComponentIndex::Successor,
                                     message: message_cx,
-                                })
+                                },
+                            };
+                            conductor_tx
+                                .send(message)
                                 .await
                                 .map_err(sacp::util::internal_error)
                         }
@@ -1728,15 +1797,11 @@ impl ConductorSuccessor<ConductorToConductor> for () {
         &self,
         message: MessageCx,
         conductor_cx: JrConnectionCx<ConductorToConductor>,
-        responder: &'a mut ConductorResponder<ConductorToConductor>,
+        _responder: &'a mut ConductorResponder<ConductorToConductor>,
     ) -> BoxFuture<'a, Result<(), sacp::Error>> {
         Box::pin(async move {
             debug!("Proxy mode: forwarding successor message to conductor's successor");
-            conductor_cx.send_proxied_message_to_via(
-                AgentPeer,
-                &mut responder.conductor_tx,
-                message,
-            )
+            conductor_cx.send_proxied_message_to(AgentPeer, message)
         })
     }
 }
