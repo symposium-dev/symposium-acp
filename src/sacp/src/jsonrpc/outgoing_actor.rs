@@ -1,7 +1,6 @@
 // Types re-exported from crate root
 use futures::StreamExt as _;
 use futures::channel::mpsc;
-use uuid::Uuid;
 
 use crate::jsonrpc::OutgoingMessage;
 use crate::jsonrpc::ReplyMessage;
@@ -20,7 +19,6 @@ pub(crate) fn send_raw_message(
 /// Outgoing protocol actor: Converts application-level OutgoingMessage to protocol-level jsonrpcmsg::Message.
 ///
 /// This actor handles JSON-RPC protocol semantics:
-/// - Assigns unique IDs to outgoing requests
 /// - Subscribes to reply_actor for response correlation
 /// - Converts OutgoingMessage variants to jsonrpcmsg::Message
 ///
@@ -36,20 +34,17 @@ pub(super) async fn outgoing_protocol_actor(
         // Create the message to be sent over the transport
         let json_rpc_message = match message {
             OutgoingMessage::Request {
+                id,
                 method,
                 params,
-                response_tx: response_rx,
+                response_tx,
             } => {
-                // Generate a fresh UUID to use for the request id
-                let uuid = Uuid::new_v4();
-                let id = jsonrpcmsg::Id::String(uuid.to_string());
-
                 // Record where the reply should be sent once it arrives.
                 reply_tx
                     .unbounded_send(ReplyMessage::Subscribe {
                         id: id.clone(),
                         method: method.clone(),
-                        sender: response_rx,
+                        sender: response_tx,
                     })
                     .map_err(crate::Error::into_internal_error)?;
 
