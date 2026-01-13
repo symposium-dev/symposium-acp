@@ -132,8 +132,8 @@ use sacp::{
     },
 };
 use sacp::{
-    JrConnectionBuilder, JrConnectionCx, JrLink, JrNotification, JrRequest, JrRequestCx,
-    JrResponse, MessageCx, UntypedMessage,
+    JrConnectionBuilder, JrConnectionCx, JrLink, JrNotification, JrRequest, JrResponse,
+    JrResponseCx, MessageCx, UntypedMessage,
 };
 use sacp::{
     JrMessageHandler, JrResponder,
@@ -284,8 +284,11 @@ impl<Link: ConductorLink> Conductor<Link> {
         message: MessageCx,
     ) -> Result<(), sacp::Error> {
         let conductor_message = match message {
-            MessageCx::Response(result, request_cx) => {
-                ConductorMessage::ForwardResponseFromClient { request_cx, result }
+            MessageCx::Response(result, response_cx) => {
+                ConductorMessage::ForwardResponseFromClient {
+                    response_cx,
+                    result,
+                }
             }
 
             _ => ConductorMessage::ClientToAgent {
@@ -305,8 +308,11 @@ impl<Link: ConductorLink> Conductor<Link> {
         message: MessageCx,
     ) -> Result<(), sacp::Error> {
         let conductor_message = match message {
-            MessageCx::Response(result, request_cx) => {
-                ConductorMessage::ForwardResponseFromSuccessor { request_cx, result }
+            MessageCx::Response(result, response_cx) => {
+                ConductorMessage::ForwardResponseFromSuccessor {
+                    response_cx,
+                    result,
+                }
             }
 
             _ => ConductorMessage::AgentToClient {
@@ -581,7 +587,7 @@ where
     /// Trace a response to a previous request.
     fn trace_response(
         &mut self,
-        request_cx: &sacp::JrRequestCx<serde_json::Value>,
+        response_cx: &sacp::JrResponseCx<serde_json::Value>,
         result: &Result<serde_json::Value, sacp::Error>,
         from: ComponentIndex,
         to: ComponentIndex,
@@ -590,7 +596,7 @@ where
             return;
         }
 
-        let id = request_cx.id();
+        let id = response_cx.id();
 
         tracing::debug!(?id, ?from, ?to, ?result, "trace_response");
 
@@ -770,22 +776,25 @@ where
                 self.send_notification_to_predecessor_of(client, self.proxies.len(), notification)
             }
 
-            // Forward a response back to the original request context.
+            // Forward a response back to the original response context.
             // This ensures responses are processed in order with notifications by
             // going through the central conductor queue.
             ConductorMessage::ForwardResponse {
-                request_cx,
+                response_cx,
                 result,
                 from,
                 to,
             } => {
-                self.trace_response(&request_cx, &result, from, to);
-                request_cx.respond_with_result(result)
+                self.trace_response(&response_cx, &result, from, to);
+                response_cx.respond_with_result(result)
             }
 
             // Response from the client - compute from/to here where we have proxy count.
-            ConductorMessage::ForwardResponseFromClient { request_cx, result } => {
-                let is_successor_response = request_cx
+            ConductorMessage::ForwardResponseFromClient {
+                response_cx,
+                result,
+            } => {
+                let is_successor_response = response_cx
                     .method()
                     .starts_with(sacp::schema::METHOD_SUCCESSOR_MESSAGE);
                 let (from, to) = if is_successor_response {
@@ -800,19 +809,22 @@ where
                     };
                     (ComponentIndex::Client, to)
                 };
-                self.trace_response(&request_cx, &result, from, to);
-                request_cx.respond_with_result(result)
+                self.trace_response(&response_cx, &result, from, to);
+                response_cx.respond_with_result(result)
             }
 
             // Response from successor (in proxy mode) - compute from/to here.
-            ConductorMessage::ForwardResponseFromSuccessor { request_cx, result } => {
+            ConductorMessage::ForwardResponseFromSuccessor {
+                response_cx,
+                result,
+            } => {
                 let to = if self.proxies.is_empty() {
                     ComponentIndex::Client
                 } else {
                     ComponentIndex::Proxy(self.proxies.len() - 1)
                 };
-                self.trace_response(&request_cx, &result, ComponentIndex::Successor, to);
-                request_cx.respond_with_result(result)
+                self.trace_response(&response_cx, &result, ComponentIndex::Successor, to);
+                response_cx.respond_with_result(result)
             }
         }
     }
@@ -1022,9 +1034,9 @@ where
                             async move |message_cx: MessageCx<UntypedMessage, UntypedMessage>,
                                         _cx| {
                                 let message = match message_cx {
-                                    MessageCx::Response(result, request_cx) => {
+                                    MessageCx::Response(result, response_cx) => {
                                         // Determine direction based on whether this was a SuccessorMessage
-                                        let is_successor_response = request_cx
+                                        let is_successor_response = response_cx
                                             .method()
                                             .starts_with(sacp::schema::METHOD_SUCCESSOR_MESSAGE);
                                         let (from, to) = if is_successor_response {
@@ -1045,7 +1057,7 @@ where
                                             (from, ComponentIndex::Proxy(component_index))
                                         };
                                         ConductorMessage::ForwardResponse {
-                                            request_cx,
+                                            response_cx,
                                             result,
                                             from,
                                             to,
@@ -1499,7 +1511,7 @@ pub enum ConductorMessage {
         notification: McpDisconnectNotification,
     },
 
-    /// Forward a response back to a request context.
+    /// Forward a response back to a response context.
     ///
     /// This variant avoids a subtle race condition by preserving the
     /// order of responses vis-a-vis notifications and requests. Whenever a new message
@@ -1509,7 +1521,7 @@ pub enum ConductorMessage {
     /// The invariant we must ensure in particular is that any requests or notifications
     /// that arrive BEFORE the response will be processed first.
     ForwardResponse {
-        request_cx: JrRequestCx<serde_json::Value>,
+        response_cx: JrResponseCx<serde_json::Value>,
         result: Result<serde_json::Value, sacp::Error>,
         /// The component the response came from
         from: ComponentIndex,
@@ -1520,14 +1532,14 @@ pub enum ConductorMessage {
     /// Forward a response that arrived from the client.
     /// The central handler computes from/to based on the method and proxy count.
     ForwardResponseFromClient {
-        request_cx: JrRequestCx<serde_json::Value>,
+        response_cx: JrResponseCx<serde_json::Value>,
         result: Result<serde_json::Value, sacp::Error>,
     },
 
     /// Forward a response that arrived from the successor (in proxy mode).
     /// The central handler computes from/to based on the proxy count.
     ForwardResponseFromSuccessor {
-        request_cx: JrRequestCx<serde_json::Value>,
+        response_cx: JrResponseCx<serde_json::Value>,
         result: Result<serde_json::Value, sacp::Error>,
     },
 }
@@ -1615,7 +1627,7 @@ impl ConductorLink for ConductorToClient {
                         let num_proxies = proxy_components.len();
                         async move |message_cx: MessageCx, _cx| {
                             let message = match message_cx {
-                                MessageCx::Response(result, request_cx) => {
+                                MessageCx::Response(result, response_cx) => {
                                     // Response to a request we sent to the agent.
                                     // It's from the last proxy (or client) to the agent.
                                     let from = if num_proxies == 0 {
@@ -1624,7 +1636,7 @@ impl ConductorLink for ConductorToClient {
                                         ComponentIndex::Proxy(num_proxies - 1)
                                     };
                                     ConductorMessage::ForwardResponse {
-                                        request_cx,
+                                        response_cx,
                                         result,
                                         from,
                                         to: ComponentIndex::Successor,

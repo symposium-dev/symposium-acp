@@ -13,6 +13,7 @@ use crate::UntypedMessage;
 use crate::jsonrpc::JrConnectionCx;
 use crate::jsonrpc::JrMessageHandler;
 use crate::jsonrpc::JrRequestCx;
+use crate::jsonrpc::JrResponseCx;
 use crate::jsonrpc::ReplyMessage;
 use crate::jsonrpc::dynamic_handler::DynamicHandler;
 use crate::jsonrpc::dynamic_handler::DynamicHandlerMessage;
@@ -270,9 +271,9 @@ async fn dispatch_response<Link: JrLink>(
     handler: &mut impl JrMessageHandler<Link = Link>,
     state: &mut Link::State,
 ) -> Result<(), crate::Error> {
-    // Create a MessageCx::Response with a JrRequestCx that routes to the oneshot
-    let request_cx = JrRequestCx::new_for_response(method.clone(), id.clone(), sender);
-    let mut message_cx = MessageCx::Response(result, request_cx);
+    // Create a MessageCx::Response with a JrResponseCx that routes to the oneshot
+    let response_cx = JrResponseCx::new(method.clone(), id.clone(), sender);
+    let mut message_cx = MessageCx::Response(result, response_cx);
 
     // First, apply the handlers given by the user.
     match handler

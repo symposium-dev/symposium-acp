@@ -2038,33 +2038,6 @@ impl JrRequestCx<serde_json::Value> {
         }
     }
 
-    /// Create a new request context for routing a response to a local awaiter.
-    ///
-    /// When `respond_with_result` is called, the response is sent through the oneshot
-    /// channel to the code that originally sent the request.
-    pub(crate) fn new_for_response(
-        method: String,
-        id: jsonrpcmsg::Id,
-        sender: oneshot::Sender<ResponsePayload>,
-    ) -> Self {
-        Self {
-            method,
-            id,
-            send_fn: SendBoxFnOnce::new(
-                move |response: Result<serde_json::Value, crate::Error>| {
-                    sender
-                        .send(ResponsePayload {
-                            result: response,
-                            ack_tx: None,
-                        })
-                        .map_err(|_| {
-                            crate::util::internal_error("failed to send response, receiver dropped")
-                        })
-                },
-            ),
-        }
-    }
-
     /// Cast this request context to a different response type.
     ///
     /// The provided type `T` will be serialized to JSON before sending.
@@ -2144,6 +2117,138 @@ impl<T: JrResponsePayload> JrRequestCx<T> {
     /// Respond to the JSON-RPC request with an error.
     pub fn respond_with_error(self, error: crate::Error) -> Result<(), crate::Error> {
         tracing::debug!(id = ?self.id, ?error, "respond_with_error called");
+        self.respond_with_result(Err(error))
+    }
+}
+
+/// Context for handling an incoming JSON-RPC response.
+///
+/// This is the response-side counterpart to [`JrRequestCx`]. While `JrRequestCx` handles
+/// incoming requests (where you send a response over the wire), `JrResponseCx` handles
+/// incoming responses (where you route the response to a local task waiting for it).
+///
+/// Both are fundamentally "sinks" that push the message through a `send_fn`, but they
+/// represent different points in the message lifecycle and carry different metadata.
+#[must_use]
+pub struct JrResponseCx<T: JrResponsePayload = serde_json::Value> {
+    /// The method of the original request.
+    method: String,
+
+    /// The `id` of the original request.
+    id: jsonrpcmsg::Id,
+
+    /// Function to send the response to the waiting task.
+    send_fn: SendBoxFnOnce<'static, (Result<T, crate::Error>,), Result<(), crate::Error>>,
+}
+
+impl<T: JrResponsePayload> std::fmt::Debug for JrResponseCx<T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("JrResponseCx")
+            .field("method", &self.method)
+            .field("id", &self.id)
+            .field("response_type", &std::any::type_name::<T>())
+            .finish()
+    }
+}
+
+impl JrResponseCx<serde_json::Value> {
+    /// Create a new response context for routing a response to a local awaiter.
+    ///
+    /// When `respond_with_result` is called, the response is sent through the oneshot
+    /// channel to the code that originally sent the request.
+    pub(crate) fn new(
+        method: String,
+        id: jsonrpcmsg::Id,
+        sender: oneshot::Sender<ResponsePayload>,
+    ) -> Self {
+        Self {
+            method,
+            id,
+            send_fn: SendBoxFnOnce::new(
+                move |response: Result<serde_json::Value, crate::Error>| {
+                    sender
+                        .send(ResponsePayload {
+                            result: response,
+                            ack_tx: None,
+                        })
+                        .map_err(|_| {
+                            crate::util::internal_error("failed to send response, receiver dropped")
+                        })
+                },
+            ),
+        }
+    }
+
+    /// Cast this response context to a different response type.
+    ///
+    /// The provided type `T` will be serialized to JSON before sending.
+    pub fn cast<T: JrResponsePayload>(self) -> JrResponseCx<T> {
+        self.wrap_params(move |method, value| match value {
+            Ok(value) => T::into_json(value, &method),
+            Err(e) => Err(e),
+        })
+    }
+}
+
+impl<T: JrResponsePayload> JrResponseCx<T> {
+    /// Method of the original request
+    pub fn method(&self) -> &str {
+        &self.method
+    }
+
+    /// ID of the original request as a JSON value
+    pub fn id(&self) -> serde_json::Value {
+        crate::util::id_to_json(&self.id)
+    }
+
+    /// Convert to a `JrResponseCx` that expects a JSON value
+    /// and which checks (dynamically) that the JSON value it receives
+    /// can be converted to `T`.
+    pub fn erase_to_json(self) -> JrResponseCx<serde_json::Value> {
+        self.wrap_params(|method, value| T::from_value(&method, value?))
+    }
+
+    /// Return a new JrResponseCx that expects a response of type U.
+    ///
+    /// `wrap_fn` will be invoked with the method name and the result to transform
+    /// type `U` into type `T` before sending.
+    fn wrap_params<U: JrResponsePayload>(
+        self,
+        wrap_fn: impl FnOnce(&str, Result<U, crate::Error>) -> Result<T, crate::Error> + Send + 'static,
+    ) -> JrResponseCx<U> {
+        let method = self.method.clone();
+        JrResponseCx {
+            method: self.method,
+            id: self.id,
+            send_fn: SendBoxFnOnce::new(move |input: Result<U, crate::Error>| {
+                let t_value = wrap_fn(&method, input);
+                self.send_fn.call(t_value)
+            }),
+        }
+    }
+
+    /// Complete the response by sending the result to the waiting task.
+    pub fn respond_with_result(
+        self,
+        response: Result<T, crate::Error>,
+    ) -> Result<(), crate::Error> {
+        tracing::debug!(id = ?self.id, "response routed to awaiter");
+        self.send_fn.call(response)
+    }
+
+    /// Complete the response by sending a value to the waiting task.
+    pub fn respond(self, response: T) -> Result<(), crate::Error> {
+        self.respond_with_result(Ok(response))
+    }
+
+    /// Complete the response by sending an internal error to the waiting task.
+    pub fn respond_with_internal_error(self, message: impl ToString) -> Result<(), crate::Error> {
+        self.respond_with_error(crate::util::internal_error(message))
+    }
+
+    /// Complete the response by sending an error to the waiting task.
+    pub fn respond_with_error(self, error: crate::Error) -> Result<(), crate::Error> {
+        tracing::debug!(id = ?self.id, ?error, "error routed to awaiter");
         self.respond_with_result(Err(error))
     }
 }
@@ -2271,7 +2376,7 @@ pub enum MessageCx<Req: JrRequest = UntypedMessage, Notif: JrMessage = UntypedMe
     /// (typically a waiting oneshot channel).
     Response(
         Result<Req::Response, crate::Error>,
-        JrRequestCx<Req::Response>,
+        JrResponseCx<Req::Response>,
     ),
 }
 
