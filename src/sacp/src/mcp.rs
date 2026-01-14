@@ -1,19 +1,29 @@
 use crate::{
-    HasDefaultPeer, HasPeer, JrLink, JrPeer, jsonrpc::JrConnectionBuilder,
-    jsonrpc::handlers::NullHandler, link::RemoteStyle,
+    HasDefaultPeer, HasPeer, JrLink, JrPeer,
+    jsonrpc::{JrConnectionBuilder, handlers::NullHandler},
+    link::RemoteStyle,
+    peer::PeerId,
 };
 
 /// The MCP client endpoint.
 #[derive(Debug, Default, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct McpClientPeer;
 
-impl JrPeer for McpClientPeer {}
+impl JrPeer for McpClientPeer {
+    fn peer_id(&self) -> PeerId {
+        PeerId::from_singleton(self)
+    }
+}
 
 /// The MCP server endpoint.
 #[derive(Debug, Default, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct McpServerPeer;
 
-impl JrPeer for McpServerPeer {}
+impl JrPeer for McpServerPeer {
+    fn peer_id(&self) -> PeerId {
+        PeerId::from_singleton(self)
+    }
+}
 
 /// An MCP client's connection to an MCP server.
 #[derive(Debug, Default, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]

@@ -18,8 +18,15 @@ use crate::jsonrpc::ReplyMessage;
 use crate::jsonrpc::dynamic_handler::DynamicHandler;
 use crate::jsonrpc::dynamic_handler::DynamicHandlerMessage;
 use crate::link::JrLink;
+use crate::peer::PeerId;
 
 use super::Handled;
+
+struct PendingReply {
+    method: String,
+    peer_id: PeerId,
+    sender: oneshot::Sender<crate::jsonrpc::ResponsePayload>,
+}
 
 /// Incoming protocol actor: The central dispatch loop for a connection.
 ///
@@ -49,19 +56,28 @@ pub(super) async fn incoming_protocol_actor<Link: JrLink>(
     // Map from request ID to (method, sender) for response dispatch.
     // Keys are JSON values because jsonrpcmsg::Id doesn't implement Eq.
     // The method is stored to allow routing responses through typed handlers.
-    let mut pending_replies: HashMap<
-        serde_json::Value,
-        (String, oneshot::Sender<crate::jsonrpc::ResponsePayload>),
-    > = HashMap::new();
+    let mut pending_replies: HashMap<serde_json::Value, PendingReply> = HashMap::new();
 
     while let Some(message_result) = my_rx.next().await {
         tracing::trace!(message = ?message_result, actor = "incoming_protocol_actor");
         match message_result {
             IncomingProtocolMsg::Reply(message) => match message {
-                ReplyMessage::Subscribe { id, method, sender } => {
+                ReplyMessage::Subscribe {
+                    id,
+                    peer_id,
+                    method,
+                    sender,
+                } => {
                     tracing::trace!(?id, %method, "incoming_actor: subscribing to response");
                     let id = serde_json::to_value(&id).unwrap();
-                    pending_replies.insert(id, (method, sender));
+                    pending_replies.insert(
+                        id,
+                        PendingReply {
+                            method,
+                            peer_id,
+                            sender,
+                        },
+                    );
                 }
             },
 
@@ -126,14 +142,13 @@ pub(super) async fn incoming_protocol_actor<Link: JrLink>(
                             };
 
                             let id_json = serde_json::to_value(&id).unwrap();
-                            if let Some((method, sender)) = pending_replies.remove(&id_json) {
+                            if let Some(pending_reply) = pending_replies.remove(&id_json) {
                                 // Route the response through the handler chain
                                 dispatch_response(
                                     json_rpc_cx,
                                     id,
-                                    method,
+                                    pending_reply,
                                     result,
-                                    sender,
                                     &mut dynamic_handlers,
                                     &mut handler,
                                     &mut state,
@@ -264,15 +279,20 @@ async fn dispatch_request<Link: JrLink>(
 async fn dispatch_response<Link: JrLink>(
     json_rpc_cx: &JrConnectionCx<Link>,
     id: jsonrpcmsg::Id,
-    method: String,
+    pending_reply: PendingReply,
     result: Result<serde_json::Value, crate::Error>,
-    sender: oneshot::Sender<crate::jsonrpc::ResponsePayload>,
     dynamic_handlers: &mut FxHashMap<Uuid, Box<dyn DynamicHandler<Link>>>,
     handler: &mut impl JrMessageHandler<Link = Link>,
     state: &mut Link::State,
 ) -> Result<(), crate::Error> {
+    let PendingReply {
+        method,
+        peer_id,
+        sender,
+    } = pending_reply;
+
     // Create a MessageCx::Response with a JrResponseCx that routes to the oneshot
-    let response_cx = JrResponseCx::new(method.clone(), id.clone(), sender);
+    let response_cx = JrResponseCx::new(method.clone(), id.clone(), peer_id, sender);
     let mut message_cx = MessageCx::Response(result, response_cx);
 
     // First, apply the handlers given by the user.

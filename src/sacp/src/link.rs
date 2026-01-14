@@ -77,7 +77,7 @@ pub trait HasPeer<Peer: JrPeer>: JrLink {
 }
 
 /// Describes how messages are transformed when sent to a remote peer.
-#[derive(Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum RemoteStyle {
     /// Pass each message through exactly as it is.

@@ -35,23 +35,26 @@ pub(super) async fn outgoing_protocol_actor(
         let json_rpc_message = match message {
             OutgoingMessage::Request {
                 id,
+                peer_id,
                 method,
-                params,
+                untyped,
                 response_tx,
             } => {
                 // Record where the reply should be sent once it arrives.
                 reply_tx
                     .unbounded_send(ReplyMessage::Subscribe {
                         id: id.clone(),
-                        method: method.clone(),
+                        peer_id,
+                        method: method,
                         sender: response_tx,
                     })
                     .map_err(crate::Error::into_internal_error)?;
 
-                jsonrpcmsg::Message::Request(jsonrpcmsg::Request::new_v2(method, params, Some(id)))
+                jsonrpcmsg::Message::Request(untyped.into_jsonrpc_msg(Some(id))?)
             }
-            OutgoingMessage::Notification { method, params } => {
-                jsonrpcmsg::Message::Request(jsonrpcmsg::Request::new_v2(method, params, None))
+            OutgoingMessage::Notification { untyped } => {
+                let msg = untyped.into_jsonrpc_msg(None)?;
+                jsonrpcmsg::Message::Request(msg)
             }
             OutgoingMessage::Response {
                 id,

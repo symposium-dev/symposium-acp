@@ -22,7 +22,7 @@ use jsonrpcmsg::Params;
 use crate::{
     Handled, HasDefaultPeer, JrConnectionCx, JrMessageHandler, JrNotification, JrRequest,
     JrRequestCx, JrResponseCx, JrResponsePayload, MessageCx, UntypedMessage,
-    link::{HasPeer, JrLink},
+    link::{self, HasPeer, JrLink},
     peer::JrPeer,
     util::json_cast,
 };
@@ -519,17 +519,16 @@ impl<Link: JrLink> MatchMessageFrom<Link> {
         H: crate::IntoHandled<(Req, JrRequestCx<Req::Response>)>,
     {
         if let Ok(Handled::No { message, retry: _ }) = self.state {
-            let remote_style = Link::remote_style(peer);
-            self.state = remote_style
-                .handle_incoming_message(
-                    message,
-                    self.cx.clone(),
-                    async |message_cx, _connection_cx| {
-                        // Delegate to MatchMessage for parsing
-                        MatchMessage::new(message_cx).if_request(op).await.done()
-                    },
-                )
-                .await;
+            self.state = link::handle_incoming_message::<Link, Peer>(
+                peer,
+                message,
+                self.cx.clone(),
+                async |message_cx, _connection_cx| {
+                    // Delegate to MatchMessage for parsing
+                    MatchMessage::new(message_cx).if_request(op).await.done()
+                },
+            )
+            .await;
         }
         self
     }
@@ -576,20 +575,19 @@ impl<Link: JrLink> MatchMessageFrom<Link> {
         H: crate::IntoHandled<N>,
     {
         if let Ok(Handled::No { message, retry: _ }) = self.state {
-            let remote_style = Link::remote_style(peer);
-            self.state = remote_style
-                .handle_incoming_message(
-                    message,
-                    self.cx.clone(),
-                    async |message_cx, _connection_cx| {
-                        // Delegate to MatchMessage for parsing
-                        MatchMessage::new(message_cx)
-                            .if_notification(op)
-                            .await
-                            .done()
-                    },
-                )
-                .await;
+            self.state = link::handle_incoming_message::<Link, Peer>(
+                peer,
+                message,
+                self.cx.clone(),
+                async |message_cx, _connection_cx| {
+                    // Delegate to MatchMessage for parsing
+                    MatchMessage::new(message_cx)
+                        .if_notification(op)
+                        .await
+                        .done()
+                },
+            )
+            .await;
         }
         self
     }
@@ -613,17 +611,16 @@ impl<Link: JrLink> MatchMessageFrom<Link> {
         H: crate::IntoHandled<MessageCx<R, N>>,
     {
         if let Ok(Handled::No { message, retry: _ }) = self.state {
-            let remote_style = Link::remote_style(peer);
-            self.state = remote_style
-                .handle_incoming_message(
-                    message,
-                    self.cx.clone(),
-                    async |message_cx, _connection_cx| {
-                        // Delegate to MatchMessage for parsing
-                        MatchMessage::new(message_cx).if_message(op).await.done()
-                    },
-                )
-                .await;
+            self.state = link::handle_incoming_message::<Link, Peer>(
+                peer,
+                message,
+                self.cx.clone(),
+                async |message_cx, _connection_cx| {
+                    // Delegate to MatchMessage for parsing
+                    MatchMessage::new(message_cx).if_message(op).await.done()
+                },
+            )
+            .await;
         }
         self
     }
@@ -666,19 +663,93 @@ impl<Link: JrLink> MatchMessageFrom<Link> {
     ///
     /// This is a convenience wrapper around [`if_response_to`](Self::if_response_to).
     pub async fn if_ok_response_to<Req: JrRequest, H>(
-        mut self,
+        self,
         op: impl AsyncFnOnce(Req::Response, JrResponseCx<Req::Response>) -> Result<H, crate::Error>,
     ) -> Self
     where
+        Link: HasDefaultPeer,
         H: crate::IntoHandled<(Req::Response, JrResponseCx<Req::Response>)>,
     {
+        self.if_ok_response_to_from::<Req, Link::DefaultPeer, H>(<Link::DefaultPeer>::default(), op)
+            .await
+    }
+
+    /// Try to handle the message as a response to a request of type `Req` from a specific peer.
+    ///
+    /// If the message is a `Response` variant, the method matches `Req`, and the `peer_id`
+    /// matches the expected peer, the handler is called with the result and a typed response context.
+    ///
+    /// This is used to filter responses by the peer they came from, which is important
+    /// in proxy scenarios where responses might arrive from multiple peers.
+    pub async fn if_response_to_from<Req: JrRequest, Peer: JrPeer, H>(
+        mut self,
+        peer: Peer,
+        op: impl AsyncFnOnce(
+            Result<Req::Response, crate::Error>,
+            JrResponseCx<Req::Response>,
+        ) -> Result<H, crate::Error>,
+    ) -> Self
+    where
+        Link: HasPeer<Peer>,
+        H: crate::IntoHandled<(
+                Result<Req::Response, crate::Error>,
+                JrResponseCx<Req::Response>,
+            )>,
+    {
         if let Ok(Handled::No { message, retry: _ }) = self.state {
-            self.state = MatchMessage::new(message)
-                .if_ok_response_to::<Req, H>(op)
-                .await
-                .done();
+            self.state = link::handle_incoming_message::<Link, Peer>(
+                peer,
+                message,
+                self.cx.clone(),
+                async |message_cx, _connection_cx| {
+                    // Delegate to MatchMessage for parsing
+                    MatchMessage::new(message_cx)
+                        .if_response_to::<Req, H>(op)
+                        .await
+                        .done()
+                },
+            )
+            .await;
         }
         self
+    }
+
+    /// Try to handle the message as a successful response to a request of type `Req` from a specific peer.
+    ///
+    /// This is a convenience wrapper around [`if_response_to_from`](Self::if_response_to_from)
+    /// for the common case where you only care about successful responses.
+    pub async fn if_ok_response_to_from<Req: JrRequest, Peer: JrPeer, H>(
+        self,
+        peer: Peer,
+        op: impl AsyncFnOnce(Req::Response, JrResponseCx<Req::Response>) -> Result<H, crate::Error>,
+    ) -> Self
+    where
+        Link: HasPeer<Peer>,
+        H: crate::IntoHandled<(Req::Response, JrResponseCx<Req::Response>)>,
+    {
+        self.if_response_to_from::<Req, Peer, _>(
+            peer,
+            async move |result, response_cx| match result {
+                Ok(response) => {
+                    let handler_result = op(response, response_cx).await?;
+                    match handler_result.into_handled() {
+                        Handled::Yes => Ok(Handled::Yes),
+                        Handled::No {
+                            message: (resp, cx),
+                            retry,
+                        } => Ok(Handled::No {
+                            message: (Ok(resp), cx),
+                            retry,
+                        }),
+                    }
+                }
+                Err(err) => Ok(Handled::No {
+                    message: (Err(err), response_cx),
+                    retry: false,
+                }),
+            },
+        )
+        .await
     }
 
     /// Complete matching, returning `Handled::No` if no match was found.
