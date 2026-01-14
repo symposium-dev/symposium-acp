@@ -2317,7 +2317,7 @@ pub trait JrMessage: 'static + Debug + Sized + Send + Clone {
 ///     greeting: String,
 /// }
 /// ```
-pub trait JrResponsePayload: 'static + Debug + Sized + Send {
+pub trait JrResponsePayload: 'static + Debug + Sized + Send + Clone {
     /// Convert this message into a JSON value.
     fn into_json(self, method: &str) -> Result<serde_json::Value, crate::Error>;
 
@@ -2533,30 +2533,27 @@ impl MessageCx {
     /// * `Ok(Ok(typed))` if this is a request/notification of the given types
     /// * `Ok(Err(self))` if not
     /// * `Err` if has the correct method for the given types but parsing fails
+    #[tracing::instrument(skip(self), fields(Request = ?std::any::type_name::<Req>(), Notif = ?std::any::type_name::<Notif>()), level = "trace", ret)]
     pub(crate) fn into_typed_message_cx<Req: JrRequest, Notif: JrNotification>(
         self,
     ) -> Result<Result<MessageCx<Req, Notif>, MessageCx>, crate::Error> {
+        tracing::debug!(
+            message = ?self,
+            "into_typed_message_cx"
+        );
         match self {
             MessageCx::Request(message, request_cx) => {
-                tracing::debug!(
-                    request_type = std::any::type_name::<Req>(),
-                    message = ?message,
-                    "MessageHandler::handle_request"
-                );
                 if !Req::matches_method(&message.method) {
-                    tracing::trace!("MessageHandler::handle_request: method doesn't match");
+                    tracing::trace!("method doesn't match");
                     Ok(Err(MessageCx::Request(message, request_cx)))
                 } else {
                     match Req::parse_message(&message.method, &message.params) {
                         Ok(req) => {
-                            tracing::trace!(
-                                ?req,
-                                "MessageHandler::handle_request: parse completed"
-                            );
+                            tracing::trace!(?req, "parsed ok");
                             Ok(Ok(MessageCx::Request(req, request_cx.cast())))
                         }
                         Err(err) => {
-                            tracing::trace!(?err, "MessageHandler::handle_request: parse errored");
+                            tracing::trace!(?err, "parse error");
                             Err(err)
                         }
                     }
@@ -2564,25 +2561,17 @@ impl MessageCx {
             }
 
             MessageCx::Notification(message) => {
-                tracing::debug!(
-                    notification_type = std::any::type_name::<Notif>(),
-                    message = ?message,
-                    "MessageHandler::handle_notification"
-                );
                 if !Notif::matches_method(&message.method) {
-                    tracing::trace!("MessageHandler::handle_notification: method doesn't match");
+                    tracing::trace!("method doesn't match");
                     Ok(Err(MessageCx::Notification(message)))
                 } else {
                     match Notif::parse_message(&message.method, &message.params) {
                         Ok(notif) => {
-                            tracing::trace!(
-                                ?notif,
-                                "MessageHandler::handle_notification: parse completed"
-                            );
+                            tracing::trace!(?notif, "parse ok");
                             Ok(Ok(MessageCx::Notification(notif)))
                         }
                         Err(err) => {
-                            tracing::trace!(?err, "MessageHandler: parse errored");
+                            tracing::trace!(?err, "parse error");
                             Err(err)
                         }
                     }
@@ -2591,35 +2580,29 @@ impl MessageCx {
 
             MessageCx::Response(result, cx) => {
                 let method = cx.method();
-                tracing::debug!(
-                    response_type = std::any::type_name::<Req::Response>(),
-                    ?method,
-                    "MessageHandler::handle_response"
-                );
                 if !Req::matches_method(method) {
-                    tracing::trace!("MessageHandler::handle_response: method doesn't match");
+                    tracing::trace!("method doesn't match");
                     Ok(Err(MessageCx::Response(result, cx)))
                 } else {
                     // Parse the response result
                     let typed_result = match result {
                         Ok(value) => {
                             match <Req::Response as JrResponsePayload>::from_value(method, value) {
-                                Ok(parsed) => Ok(parsed),
+                                Ok(parsed) => {
+                                    tracing::trace!(?parsed, "parse ok");
+                                    Ok(parsed)
+                                }
                                 Err(err) => {
-                                    tracing::trace!(
-                                        ?err,
-                                        "MessageHandler::handle_response: parse errored"
-                                    );
+                                    tracing::trace!(?err, "parse error");
                                     return Err(err);
                                 }
                             }
                         }
-                        Err(err) => Err(err),
+                        Err(err) => {
+                            tracing::trace!("error, passthrough");
+                            Err(err)
+                        }
                     };
-                    tracing::trace!(
-                        ?typed_result,
-                        "MessageHandler::handle_response: parse completed"
-                    );
                     Ok(Ok(MessageCx::Response(typed_result, cx.cast())))
                 }
             }

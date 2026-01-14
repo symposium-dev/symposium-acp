@@ -13,7 +13,7 @@ struct HelloRequest {
     name: String,
 }
 
-#[derive(Debug, Serialize, Deserialize, JrResponsePayload)]
+#[derive(Debug, Clone, Serialize, Deserialize, JrResponsePayload)]
 struct HelloResponse {
     greeting: String,
 }

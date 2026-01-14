@@ -19,7 +19,7 @@ impl<L: link::JrLink> Component<L> for MockTransport {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MyRequest {}
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MyResponse {
     pub status: String,
 }
@@ -29,7 +29,7 @@ pub struct ProcessRequest {
     pub data: String,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProcessResponse {
     pub result: String,
 }
@@ -42,7 +42,7 @@ pub struct AnalyzeRequest {
     pub data: String,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AnalysisStarted {
     pub job_id: u32,
 }
@@ -52,7 +52,7 @@ pub struct QueryRequest {
     pub id: u64,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct QueryResponse {
     pub data: String,
 }
@@ -62,7 +62,7 @@ pub struct ValidateRequest {
     pub data: String,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ValidateResponse {
     pub is_valid: bool,
     pub error: Option<String>,
@@ -71,7 +71,7 @@ pub struct ValidateResponse {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ExecuteRequest {}
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ExecuteResponse {
     pub result: String,
 }
@@ -79,7 +79,7 @@ pub struct ExecuteResponse {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OtherRequest {}
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OtherResponse {
     pub value: String,
 }

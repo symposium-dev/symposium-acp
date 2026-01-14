@@ -15,7 +15,7 @@ pub trait JrPeer: Debug + Clone + Send + Sync + 'static + Eq + Ord + Hash + Defa
 #[non_exhaustive]
 pub enum PeerId {
     /// Singleton peer identified by type-id.
-    TypeId(TypeId),
+    TypeId(&'static str, TypeId),
 }
 
 impl PeerId {
@@ -25,7 +25,7 @@ impl PeerId {
     /// outside of this crate in a useful way.
     pub(crate) fn from_singleton<Peer: JrPeer>(peer: &Peer) -> PeerId {
         assert_eq!(size_of_val(peer), 0);
-        PeerId::TypeId(TypeId::of::<Peer>())
+        PeerId::TypeId(std::any::type_name::<Peer>(), TypeId::of::<Peer>())
     }
 }
 

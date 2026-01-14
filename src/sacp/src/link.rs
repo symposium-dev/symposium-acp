@@ -10,7 +10,7 @@ use agent_client_protocol_schema::{NewSessionRequest, NewSessionResponse, Sessio
 use crate::{
     Handled, JrConnectionCx, JrMessage, JrMessageHandler, MessageCx, UntypedMessage,
     jsonrpc::{JrConnectionBuilder, handlers::NullHandler},
-    peer::{AgentPeer, ClientPeer, ConductorPeer, JrPeer, ProxyPeer, UntypedPeer},
+    peer::{AgentPeer, ClientPeer, ConductorPeer, JrPeer, UntypedPeer},
     schema::{
         InitializeProxyRequest, InitializeRequest, METHOD_INITIALIZE_PROXY,
         METHOD_SUCCESSOR_MESSAGE, SuccessorMessage,
@@ -83,6 +83,9 @@ pub enum RemoteStyle {
     /// Pass each message through exactly as it is.
     Counterpart,
 
+    /// Only messages not wrapped in successor.
+    Predecessor,
+
     /// Wrap messages in a [`SuccessorMessage`] envelope.
     Successor,
 }
@@ -93,7 +96,7 @@ impl RemoteStyle {
         msg: M,
     ) -> Result<UntypedMessage, crate::Error> {
         match self {
-            RemoteStyle::Counterpart => msg.to_untyped_message(),
+            RemoteStyle::Counterpart | RemoteStyle::Predecessor => msg.to_untyped_message(),
             RemoteStyle::Successor => SuccessorMessage {
                 message: msg,
                 meta: None,
@@ -117,7 +120,9 @@ where
 {
     tracing::trace!(
         method = %message_cx.method(),
-        role = std::any::type_name::<Link>(),
+        link = std::any::type_name::<Link>(),
+        peer = ?peer,
+        ?message_cx,
         "handle_incoming_message: enter"
     );
 
@@ -132,6 +137,12 @@ where
     // on the request that was sent to determine which peer it was
     // directed at (and therefore which peer sent us the response).
     if let MessageCx::Response(_, response_cx) = &message_cx {
+        tracing::trace!(
+            response_peer = ?response_cx.peer_id(),
+            peer = ?peer.peer_id(),
+            "handle_incoming_message: response"
+        );
+
         if response_cx.peer_id() == peer.peer_id() {
             return handle_message(message_cx, connection_cx).await;
         } else {
@@ -148,6 +159,11 @@ where
         RemoteStyle::Counterpart => {
             // "Counterpart" is the default peer, no special checks required.
             tracing::trace!("handle_incoming_message: Counterpart style, passing through");
+            return handle_message(message_cx, connection_cx).await;
+        }
+        RemoteStyle::Predecessor => {
+            // "Predecessor" is the default peer, no special checks required.
+            tracing::trace!("handle_incoming_message: Predecessor style, passing through");
             if method != METHOD_SUCCESSOR_MESSAGE {
                 return handle_message(message_cx, connection_cx).await;
             } else {
@@ -323,6 +339,10 @@ impl JrLink for ConductorToClient {
     type State = ();
 }
 
+impl HasDefaultPeer for ConductorToClient {
+    type DefaultPeer = ClientPeer;
+}
+
 impl HasPeer<ClientPeer> for ConductorToClient {
     fn remote_style(_end: ClientPeer) -> RemoteStyle {
         RemoteStyle::Counterpart
@@ -346,6 +366,12 @@ impl JrLink for ConductorToConductor {
     type State = ();
 }
 
+impl HasPeer<ConductorPeer> for ConductorToConductor {
+    fn remote_style(_end: ConductorPeer) -> RemoteStyle {
+        RemoteStyle::Counterpart
+    }
+}
+
 impl HasPeer<AgentPeer> for ConductorToConductor {
     fn remote_style(_end: AgentPeer) -> RemoteStyle {
         RemoteStyle::Successor
@@ -354,7 +380,7 @@ impl HasPeer<AgentPeer> for ConductorToConductor {
 
 impl HasPeer<ClientPeer> for ConductorToConductor {
     fn remote_style(_end: ClientPeer) -> RemoteStyle {
-        RemoteStyle::Counterpart
+        RemoteStyle::Predecessor
     }
 }
 
@@ -377,13 +403,7 @@ impl JrLink for ConductorToProxy {
 }
 
 impl HasDefaultPeer for ConductorToProxy {
-    type DefaultPeer = ProxyPeer;
-}
-
-impl HasPeer<ProxyPeer> for ConductorToProxy {
-    fn remote_style(_end: ProxyPeer) -> RemoteStyle {
-        RemoteStyle::Counterpart
-    }
+    type DefaultPeer = AgentPeer;
 }
 
 impl HasPeer<AgentPeer> for ConductorToProxy {
@@ -606,7 +626,7 @@ impl HasPeer<ConductorPeer> for ProxyToConductor {
 
 impl HasPeer<ClientPeer> for ProxyToConductor {
     fn remote_style(_end: ClientPeer) -> RemoteStyle {
-        RemoteStyle::Counterpart
+        RemoteStyle::Predecessor
     }
 }
 
