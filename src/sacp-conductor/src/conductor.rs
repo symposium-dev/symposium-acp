@@ -577,15 +577,6 @@ where
         Ok(())
     }
 
-    /// Convert a ComponentIndex to a trace-friendly name.
-    fn component_index_name(&self, index: ComponentIndex) -> String {
-        match index {
-            ComponentIndex::Client => "client".to_string(),
-            ComponentIndex::Proxy(i) => format!("proxy:{}", i),
-            ComponentIndex::Successor => "agent".to_string(),
-        }
-    }
-
     /// Recursively spawns components and builds the proxy chain.
     ///
     /// This function implements the recursive chain building pattern:
