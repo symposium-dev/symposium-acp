@@ -1,5 +1,5 @@
 use crate::jsonrpc::{Handled, IntoHandled, JrMessageHandler, JrResponsePayload};
-use crate::link::{HasPeer, JrLink};
+use crate::link::{HasPeer, JrLink, handle_incoming_message};
 use crate::peer::JrPeer;
 use crate::{JrConnectionCx, JrNotification, JrRequest, MessageCx, UntypedMessage};
 // Types re-exported from crate root
@@ -97,79 +97,76 @@ where
         message_cx: MessageCx,
         connection_cx: JrConnectionCx<Link>,
     ) -> Result<Handled<MessageCx>, crate::Error> {
-        let remote_style = Link::remote_style(Peer::default());
-        remote_style
-            .handle_incoming_message(
-                message_cx,
-                connection_cx,
-                async |message_cx, connection_cx| {
-                    match message_cx {
-                        MessageCx::Request(message, request_cx) => {
-                            tracing::debug!(
-                                request_type = std::any::type_name::<Req>(),
-                                message = ?message,
-                                "RequestHandler::handle_request"
-                            );
-                            if !Req::matches_method(&message.method) {
-                                tracing::trace!(
-                                    "RequestHandler::handle_request: method doesn't match"
-                                );
-                                Ok(Handled::No {
-                                    message: MessageCx::Request(message, request_cx),
-                                    retry: false,
-                                })
-                            } else {
-                                match Req::parse_message(&message.method, &message.params) {
-                                    Ok(req) => {
-                                        tracing::trace!(
-                                            ?req,
-                                            "RequestHandler::handle_request: parse completed"
-                                        );
-                                        let typed_request_cx = request_cx.cast();
-                                        let result = (self.to_future_hack)(
-                                            &mut self.handler,
-                                            req,
-                                            typed_request_cx,
-                                            connection_cx,
-                                        )
-                                        .await?;
-                                        match result.into_handled() {
-                                            Handled::Yes => Ok(Handled::Yes),
-                                            Handled::No {
-                                                message: (request, request_cx),
+        handle_incoming_message::<Link, Peer>(
+            Peer::default(),
+            message_cx,
+            connection_cx,
+            async |message_cx, connection_cx| {
+                match message_cx {
+                    MessageCx::Request(message, request_cx) => {
+                        tracing::debug!(
+                            request_type = std::any::type_name::<Req>(),
+                            message = ?message,
+                            "RequestHandler::handle_request"
+                        );
+                        if !Req::matches_method(&message.method) {
+                            tracing::trace!("RequestHandler::handle_request: method doesn't match");
+                            Ok(Handled::No {
+                                message: MessageCx::Request(message, request_cx),
+                                retry: false,
+                            })
+                        } else {
+                            match Req::parse_message(&message.method, &message.params) {
+                                Ok(req) => {
+                                    tracing::trace!(
+                                        ?req,
+                                        "RequestHandler::handle_request: parse completed"
+                                    );
+                                    let typed_request_cx = request_cx.cast();
+                                    let result = (self.to_future_hack)(
+                                        &mut self.handler,
+                                        req,
+                                        typed_request_cx,
+                                        connection_cx,
+                                    )
+                                    .await?;
+                                    match result.into_handled() {
+                                        Handled::Yes => Ok(Handled::Yes),
+                                        Handled::No {
+                                            message: (request, request_cx),
+                                            retry,
+                                        } => {
+                                            // Handler returned the request back, convert to untyped
+                                            let untyped = request.to_untyped_message()?;
+                                            Ok(Handled::No {
+                                                message: MessageCx::Request(
+                                                    untyped,
+                                                    request_cx.erase_to_json(),
+                                                ),
                                                 retry,
-                                            } => {
-                                                // Handler returned the request back, convert to untyped
-                                                let untyped = request.to_untyped_message()?;
-                                                Ok(Handled::No {
-                                                    message: MessageCx::Request(
-                                                        untyped,
-                                                        request_cx.erase_to_json(),
-                                                    ),
-                                                    retry,
-                                                })
-                                            }
+                                            })
                                         }
                                     }
-                                    Err(err) => {
-                                        tracing::trace!(
-                                            ?err,
-                                            "RequestHandler::handle_request: parse errored"
-                                        );
-                                        Err(err)
-                                    }
+                                }
+                                Err(err) => {
+                                    tracing::trace!(
+                                        ?err,
+                                        "RequestHandler::handle_request: parse errored"
+                                    );
+                                    Err(err)
                                 }
                             }
                         }
-
-                        MessageCx::Notification(..) | MessageCx::Response(..) => Ok(Handled::No {
-                            message: message_cx,
-                            retry: false,
-                        }),
                     }
-                },
-            )
-            .await
+
+                    MessageCx::Notification(..) | MessageCx::Response(..) => Ok(Handled::No {
+                        message: message_cx,
+                        retry: false,
+                    }),
+                }
+            },
+        )
+        .await
     }
 }
 
@@ -221,74 +218,73 @@ where
         message_cx: MessageCx,
         connection_cx: JrConnectionCx<Link>,
     ) -> Result<Handled<MessageCx>, crate::Error> {
-        let remote_style = Link::remote_style(Peer::default());
-        remote_style
-            .handle_incoming_message(
-                message_cx,
-                connection_cx,
-                async |message_cx, connection_cx| {
-                    match message_cx {
-                        MessageCx::Notification(message) => {
-                            tracing::debug!(
-                                request_type = std::any::type_name::<Notif>(),
-                                message = ?message,
-                                "NotificationHandler::handle_message"
+        handle_incoming_message::<Link, Peer>(
+            Peer::default(),
+            message_cx,
+            connection_cx,
+            async |message_cx, connection_cx| {
+                match message_cx {
+                    MessageCx::Notification(message) => {
+                        tracing::debug!(
+                            request_type = std::any::type_name::<Notif>(),
+                            message = ?message,
+                            "NotificationHandler::handle_message"
+                        );
+                        if !Notif::matches_method(&message.method) {
+                            tracing::trace!(
+                                "NotificationHandler::handle_notification: method doesn't match"
                             );
-                            if !Notif::matches_method(&message.method) {
-                                tracing::trace!(
-                                    "NotificationHandler::handle_notification: method doesn't match"
-                                );
-                                Ok(Handled::No {
-                                    message: MessageCx::Notification(message),
-                                    retry: false,
-                                })
-                            } else {
-                                match Notif::parse_message(&message.method, &message.params) {
-                                    Ok(notif) => {
-                                        tracing::trace!(
-                                            ?notif,
-                                            "NotificationHandler::handle_notification: parse completed"
-                                        );
-                                        let result = (self.to_future_hack)(
-                                            &mut self.handler,
-                                            notif,
-                                            connection_cx,
-                                        )
-                                        .await?;
-                                        match result.into_handled() {
-                                            Handled::Yes => Ok(Handled::Yes),
-                                            Handled::No {
-                                                message: (notification, _cx),
+                            Ok(Handled::No {
+                                message: MessageCx::Notification(message),
+                                retry: false,
+                            })
+                        } else {
+                            match Notif::parse_message(&message.method, &message.params) {
+                                Ok(notif) => {
+                                    tracing::trace!(
+                                        ?notif,
+                                        "NotificationHandler::handle_notification: parse completed"
+                                    );
+                                    let result = (self.to_future_hack)(
+                                        &mut self.handler,
+                                        notif,
+                                        connection_cx,
+                                    )
+                                    .await?;
+                                    match result.into_handled() {
+                                        Handled::Yes => Ok(Handled::Yes),
+                                        Handled::No {
+                                            message: (notification, _cx),
+                                            retry,
+                                        } => {
+                                            // Handler returned the notification back, convert to untyped
+                                            let untyped = notification.to_untyped_message()?;
+                                            Ok(Handled::No {
+                                                message: MessageCx::Notification(untyped),
                                                 retry,
-                                            } => {
-                                                // Handler returned the notification back, convert to untyped
-                                                let untyped = notification.to_untyped_message()?;
-                                                Ok(Handled::No {
-                                                    message: MessageCx::Notification(untyped),
-                                                    retry,
-                                                })
-                                            }
+                                            })
                                         }
                                     }
-                                    Err(err) => {
-                                        tracing::trace!(
-                                            ?err,
-                                            "NotificationHandler::handle_notification: parse errored"
-                                        );
-                                        Err(err)
-                                    }
+                                }
+                                Err(err) => {
+                                    tracing::trace!(
+                                        ?err,
+                                        "NotificationHandler::handle_notification: parse errored"
+                                    );
+                                    Err(err)
                                 }
                             }
                         }
-
-                        MessageCx::Request(..) | MessageCx::Response(..) => Ok(Handled::No {
-                            message: message_cx,
-                            retry: false,
-                        }),
                     }
-                },
-            )
-            .await
+
+                    MessageCx::Request(..) | MessageCx::Response(..) => Ok(Handled::No {
+                        message: message_cx,
+                        retry: false,
+                    }),
+                }
+            },
+        )
+        .await
     }
 }
 
@@ -348,73 +344,66 @@ where
         message_cx: MessageCx,
         connection_cx: JrConnectionCx<Link>,
     ) -> Result<Handled<MessageCx>, crate::Error> {
-        let remote_style = Link::remote_style(Peer::default());
-        remote_style
-            .handle_incoming_message(
-                message_cx,
-                connection_cx,
-                async |message_cx, connection_cx| match message_cx
-                    .into_typed_message_cx::<Req, Notif>()?
-                {
-                    Ok(typed_message_cx) => {
-                        let result = (self.to_future_hack)(
-                            &mut self.handler,
-                            typed_message_cx,
-                            connection_cx,
-                        )
-                        .await?;
-                        match result.into_handled() {
-                            Handled::Yes => Ok(Handled::Yes),
-                            Handled::No {
-                                message: MessageCx::Request(request, request_cx),
+        handle_incoming_message::<Link, Peer>(
+            Peer::default(),
+            message_cx,
+            connection_cx,
+            async |message_cx, connection_cx| match message_cx
+                .into_typed_message_cx::<Req, Notif>()?
+            {
+                Ok(typed_message_cx) => {
+                    let result =
+                        (self.to_future_hack)(&mut self.handler, typed_message_cx, connection_cx)
+                            .await?;
+                    match result.into_handled() {
+                        Handled::Yes => Ok(Handled::Yes),
+                        Handled::No {
+                            message: MessageCx::Request(request, request_cx),
+                            retry,
+                        } => {
+                            let untyped = request.to_untyped_message()?;
+                            Ok(Handled::No {
+                                message: MessageCx::Request(untyped, request_cx.erase_to_json()),
                                 retry,
-                            } => {
-                                let untyped = request.to_untyped_message()?;
-                                Ok(Handled::No {
-                                    message: MessageCx::Request(
-                                        untyped,
-                                        request_cx.erase_to_json(),
-                                    ),
-                                    retry,
-                                })
-                            }
-                            Handled::No {
-                                message: MessageCx::Notification(notification),
+                            })
+                        }
+                        Handled::No {
+                            message: MessageCx::Notification(notification),
+                            retry,
+                        } => {
+                            let untyped = notification.to_untyped_message()?;
+                            Ok(Handled::No {
+                                message: MessageCx::Notification(untyped),
                                 retry,
-                            } => {
-                                let untyped = notification.to_untyped_message()?;
-                                Ok(Handled::No {
-                                    message: MessageCx::Notification(untyped),
-                                    retry,
-                                })
-                            }
-                            Handled::No {
-                                message: MessageCx::Response(result, request_cx),
+                            })
+                        }
+                        Handled::No {
+                            message: MessageCx::Response(result, request_cx),
+                            retry,
+                        } => {
+                            let method = request_cx.method();
+                            let untyped_result = match result {
+                                Ok(response) => response.into_json(method).map(Ok),
+                                Err(err) => Ok(Err(err)),
+                            }?;
+                            Ok(Handled::No {
+                                message: MessageCx::Response(
+                                    untyped_result,
+                                    request_cx.erase_to_json(),
+                                ),
                                 retry,
-                            } => {
-                                let method = request_cx.method();
-                                let untyped_result = match result {
-                                    Ok(response) => response.into_json(method).map(Ok),
-                                    Err(err) => Ok(Err(err)),
-                                }?;
-                                Ok(Handled::No {
-                                    message: MessageCx::Response(
-                                        untyped_result,
-                                        request_cx.erase_to_json(),
-                                    ),
-                                    retry,
-                                })
-                            }
+                            })
                         }
                     }
+                }
 
-                    Err(message_cx) => Ok(Handled::No {
-                        message: message_cx,
-                        retry: false,
-                    }),
-                },
-            )
-            .await
+                Err(message_cx) => Ok(Handled::No {
+                    message: message_cx,
+                    retry: false,
+                }),
+            },
+        )
+        .await
     }
 }
 

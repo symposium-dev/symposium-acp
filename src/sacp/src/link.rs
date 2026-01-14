@@ -101,81 +101,115 @@ impl RemoteStyle {
             .to_untyped_message(),
         }
     }
+}
 
-    pub(crate) async fn handle_incoming_message<R: JrLink>(
-        &self,
-        message_cx: MessageCx,
-        connection_cx: JrConnectionCx<R>,
-        handle_message: impl AsyncFnOnce(
-            MessageCx,
-            JrConnectionCx<R>,
-        ) -> Result<Handled<MessageCx>, crate::Error>,
-    ) -> Result<Handled<MessageCx>, crate::Error> {
-        tracing::trace!(
-            ?self,
-            method = %message_cx.method(),
-            role = std::any::type_name::<R>(),
-            "handle_incoming_message: enter"
-        );
-        match self {
-            RemoteStyle::Counterpart => {
-                tracing::trace!("handle_incoming_message: Counterpart style, passing through");
-                return handle_message(message_cx, connection_cx).await;
-            }
-            RemoteStyle::Successor => (),
-        }
+pub(crate) async fn handle_incoming_message<Link: JrLink, Peer: JrPeer>(
+    peer: Peer,
+    message_cx: MessageCx,
+    connection_cx: JrConnectionCx<Link>,
+    handle_message: impl AsyncFnOnce(
+        MessageCx,
+        JrConnectionCx<Link>,
+    ) -> Result<Handled<MessageCx>, crate::Error>,
+) -> Result<Handled<MessageCx>, crate::Error>
+where
+    Link: HasPeer<Peer>,
+{
+    tracing::trace!(
+        method = %message_cx.method(),
+        role = std::any::type_name::<Link>(),
+        "handle_incoming_message: enter"
+    );
 
-        // Response variants pass through without unwrapping - they don't have the
-        // SuccessorMessage envelope structure. The method is stored in the JrRequestCx.
-        if matches!(message_cx, MessageCx::Response(_, _)) {
-            tracing::trace!("handle_incoming_message: Response variant, passing through");
+    // Responses are different from other messages.
+    //
+    // For normal incoming messages, mesages from non-default
+    // peers are tagged with special method names and carry
+    // special payload that have be "unwrapped".
+    //
+    // For responses, the payload is untouched. The response
+    // carries an `id` and we use this `id` to look up information
+    // on the request that was sent to determine which peer it was
+    // directed at (and therefore which peer sent us the response).
+    if let MessageCx::Response(_, response_cx) = &message_cx {
+        if response_cx.peer_id() == peer.peer_id() {
             return handle_message(message_cx, connection_cx).await;
-        }
-
-        let method = message_cx.method();
-        if method != METHOD_SUCCESSOR_MESSAGE {
-            tracing::trace!(
-                method,
-                expected = METHOD_SUCCESSOR_MESSAGE,
-                "handle_incoming_message: Successor style but method doesn't match, returning Handled::No"
-            );
+        } else {
             return Ok(Handled::No {
                 message: message_cx,
                 retry: false,
             });
         }
+    }
 
-        tracing::trace!("handle_incoming_message: Successor style, unwrapping SuccessorMessage");
-        // The outer message has method="_proxy/successor" and params containing the inner message.
-        // We need to deserialize the params (not the whole message) to extract the inner UntypedMessage.
-        let untyped_message = message_cx.message().ok_or_else(|| {
-            crate::util::internal_error("Response variant cannot be unwrapped as SuccessorMessage")
-        })?;
-        let SuccessorMessage { message, meta } = json_cast(untyped_message.params())?;
-        let successor_message_cx = message_cx.try_map_message(|_| Ok(message))?;
-        tracing::trace!(
-            unwrapped_method = %successor_message_cx.method(),
-            "handle_incoming_message: unwrapped to inner message"
-        );
-        match handle_message(successor_message_cx, connection_cx).await? {
-            Handled::Yes => {
-                tracing::trace!("handle_incoming_message: inner handler returned Handled::Yes");
-                Ok(Handled::Yes)
+    // Handle other messages by looking at the 'remote style'
+    let method = message_cx.method();
+    match <Link as HasPeer<Peer>>::remote_style(peer) {
+        RemoteStyle::Counterpart => {
+            // "Counterpart" is the default peer, no special checks required.
+            tracing::trace!("handle_incoming_message: Counterpart style, passing through");
+            if method != METHOD_SUCCESSOR_MESSAGE {
+                return handle_message(message_cx, connection_cx).await;
+            } else {
+                // Methods coming from the successor are not coming from
+                // our counterpart.
+                return Ok(Handled::No {
+                    message: message_cx,
+                    retry: false,
+                });
+            }
+        }
+        RemoteStyle::Successor => {
+            // Successor style means we have to look for a special method name.
+            if method != METHOD_SUCCESSOR_MESSAGE {
+                tracing::trace!(
+                    method,
+                    expected = METHOD_SUCCESSOR_MESSAGE,
+                    "handle_incoming_message: Successor style but method doesn't match, returning Handled::No"
+                );
+                return Ok(Handled::No {
+                    message: message_cx,
+                    retry: false,
+                });
             }
 
-            Handled::No {
-                message: successor_message_cx,
-                retry,
-            } => {
-                tracing::trace!(
-                    "handle_incoming_message: inner handler returned Handled::No, re-wrapping"
-                );
-                Ok(Handled::No {
-                    message: successor_message_cx.try_map_message(|message| {
-                        SuccessorMessage { message, meta }.to_untyped_message()
-                    })?,
+            tracing::trace!(
+                "handle_incoming_message: Successor style, unwrapping SuccessorMessage"
+            );
+
+            // The outer message has method="_proxy/successor" and params containing the inner message.
+            // We need to deserialize the params (not the whole message) to extract the inner UntypedMessage.
+            let untyped_message = message_cx.message().ok_or_else(|| {
+                crate::util::internal_error(
+                    "Response variant cannot be unwrapped as SuccessorMessage",
+                )
+            })?;
+            let SuccessorMessage { message, meta } = json_cast(untyped_message.params())?;
+            let successor_message_cx = message_cx.try_map_message(|_| Ok(message))?;
+            tracing::trace!(
+                unwrapped_method = %successor_message_cx.method(),
+                "handle_incoming_message: unwrapped to inner message"
+            );
+            match handle_message(successor_message_cx, connection_cx).await? {
+                Handled::Yes => {
+                    tracing::trace!("handle_incoming_message: inner handler returned Handled::Yes");
+                    Ok(Handled::Yes)
+                }
+
+                Handled::No {
+                    message: successor_message_cx,
                     retry,
-                })
+                } => {
+                    tracing::trace!(
+                        "handle_incoming_message: inner handler returned Handled::No, re-wrapping"
+                    );
+                    Ok(Handled::No {
+                        message: successor_message_cx.try_map_message(|message| {
+                            SuccessorMessage { message, meta }.to_untyped_message()
+                        })?,
+                        retry,
+                    })
+                }
             }
         }
     }

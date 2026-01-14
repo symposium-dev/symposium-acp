@@ -123,7 +123,7 @@ pub use jsonrpc::{
 
 pub use link::{AgentToClient, ClientToAgent, HasDefaultPeer, HasPeer, JrLink, ProxyToConductor};
 
-pub use peer::{AgentPeer, ClientPeer, ConductorPeer, JrPeer};
+pub use peer::{AgentPeer, ClientPeer, ConductorPeer, JrPeer, PeerId};
 
 pub use component::{Component, DynComponent};
 

@@ -2070,11 +2070,6 @@ impl<T: JrResponsePayload> JrRequestCx<T> {
         crate::util::id_to_json(&self.id)
     }
 
-    /// Peer ID of the request/response where it came from
-    pub fn peer_id(&self) -> serde_json::Value {
-        crate::util::id_to_json(&self.id)
-    }
-
     /// Convert to a `JrRequestCx` that expects a JSON value
     /// and which checks (dynamically) that the JSON value it receives
     /// can be converted to `T`.
@@ -2220,6 +2215,13 @@ impl<T: JrResponsePayload> JrResponseCx<T> {
     /// ID of the original request as a JSON value
     pub fn id(&self) -> serde_json::Value {
         crate::util::id_to_json(&self.id)
+    }
+
+    /// The peer to which the original request was sent.
+    ///
+    /// This is the peer from which we expect to receive the response.
+    pub fn peer_id(&self) -> PeerId {
+        self.peer_id.clone()
     }
 
     /// Convert to a `JrResponseCx` that expects a JSON value
