@@ -395,9 +395,5 @@ async fn initialize_conductor<Link: ConductorLink>(
         conductor = conductor.with_trace_writer(writer);
     }
 
-    conductor
-        .into_connection_builder()
-        .connect_to(stdio)?
-        .serve()
-        .await
+    conductor.run(stdio).await
 }

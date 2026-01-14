@@ -236,9 +236,11 @@ impl<Link: ConductorLink> Conductor<Link> {
         self
     }
 
-    pub fn into_connection_builder(
+    /// Run the conductor with a transport.
+    pub async fn run(
         self,
-    ) -> JrConnectionBuilder<impl JrMessageHandler<Link = Link>, impl JrResponder<Link>> {
+        transport: impl Component<Link::ConnectsTo> + 'static,
+    ) -> Result<(), sacp::Error> {
         let (conductor_tx, conductor_rx) = mpsc::channel(128 /* chosen arbitrarily */);
 
         let responder = ConductorResponder {
@@ -260,25 +262,9 @@ impl<Link: ConductorLink> Conductor<Link> {
         })
         .name(self.name)
         .with_responder(responder)
-    }
-
-    /// Convenience method to run the conductor with a transport.
-    ///
-    /// This is equivalent to:
-    /// ```ignore
-    /// conductor.into_connection_builder()
-    ///     .connect_to(transport)
-    ///     .serve()
-    ///     .await
-    /// ```
-    pub async fn run(
-        self,
-        transport: impl Component<Link::ConnectsTo> + 'static,
-    ) -> Result<(), sacp::Error> {
-        self.into_connection_builder()
-            .connect_to(transport)?
-            .serve()
-            .await
+        .connect_to(transport)?
+        .serve()
+        .await
     }
 
     async fn incoming_message_from_client(

@@ -226,8 +226,8 @@ sacp-conductor agent --trace ./trace.jsons "proxy1" "proxy2" "agent"
 ```rust
 Conductor::new(name, components, mcp_bridge_mode)
     .trace_to("./trace.jsons")
-    .into_connection_builder()
-    // ...
+    .run(transport)
+    .await
 ```
 
 **Implementation:**
