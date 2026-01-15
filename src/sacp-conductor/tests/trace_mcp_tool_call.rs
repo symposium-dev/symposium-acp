@@ -176,10 +176,7 @@ impl EventNormalizer {
                     n.params = self.normalize_json(n.params);
                     TraceEvent::Notification(n)
                 }
-                TraceEvent::Trace(mut t) => {
-                    t.ts = 0.0;
-                    TraceEvent::Trace(t)
-                }
+                _ => panic!("unknown trace event type"),
             })
             .collect()
     }

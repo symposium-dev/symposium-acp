@@ -242,7 +242,19 @@ impl<Link: ConductorLink> Conductor<Link> {
         let (conductor_tx, conductor_rx) = mpsc::channel(128 /* chosen arbitrarily */);
 
         // Set up tracing if enabled - spawn writer task and get handle
-        let trace_handle = self.trace_writer.map(crate::trace::spawn_trace_writer);
+        let trace_handle;
+        let trace_future: BoxFuture<'static, Result<(), sacp::Error>>;
+        match self.trace_writer.map(|w| w.spawn()) {
+            Some((h, f)) => {
+                trace_handle = Some(h);
+                trace_future = Box::pin(f);
+            }
+
+            None => {
+                trace_handle = None;
+                trace_future = Box::pin(std::future::ready(Ok(())));
+            }
+        }
 
         let responder = ConductorResponder {
             conductor_rx,
@@ -253,28 +265,20 @@ impl<Link: ConductorLink> Conductor<Link> {
             mcp_bridge_mode: self.mcp_bridge_mode,
             proxies: Default::default(),
             successor: Arc::new(sacp::util::internal_error("successor not initialized")),
-            trace_handle: trace_handle.as_ref().map(|(handle, _)| handle.clone()),
+            trace_handle: trace_handle,
             link: self.link,
         };
 
-        let builder = JrConnectionBuilder::new_with(ConductorMessageHandler {
+        JrConnectionBuilder::new_with(ConductorMessageHandler {
             conductor_tx,
             link: self.link,
         })
         .name(self.name)
-        .with_responder(responder);
-
-        // Spawn the trace writer task if tracing is enabled
-        match trace_handle {
-            Some((_, trace_future)) => {
-                builder
-                    .with_spawned(|_cx| trace_future)
-                    .connect_to(transport)?
-                    .serve()
-                    .await
-            }
-            None => builder.connect_to(transport)?.serve().await,
-        }
+        .with_responder(responder)
+        .with_spawned(|_cx| trace_future)
+        .connect_to(transport)?
+        .serve()
+        .await
     }
 
     async fn incoming_message_from_client(
@@ -706,6 +710,29 @@ where
         Ok(message)
     }
 
+    /// Wrap a proxy component with tracing if tracing is enabled.
+    ///
+    /// Returns the component unchanged if tracing is disabled.
+    fn trace_proxy<L: sacp::JrLink, Cx: sacp::JrLink>(
+        &self,
+        cx: &sacp::JrConnectionCx<Cx>,
+        predecessor_index: ComponentIndex,
+        proxy_index: ComponentIndex,
+        successor_index: ComponentIndex,
+        component: sacp::DynComponent<L>,
+    ) -> sacp::DynComponent<L> {
+        match &self.trace_handle {
+            Some(trace_handle) => trace_handle.bridge_proxy(
+                cx,
+                predecessor_index,
+                proxy_index,
+                successor_index,
+                component,
+            ),
+            None => component,
+        }
+    }
+
     /// Spawn proxy components and add them to the proxies list.
     fn spawn_proxies(
         &mut self,
@@ -787,27 +814,14 @@ where
                     sacp::on_receive_message!(),
                 );
 
-            // If we will be tracing, wrap the component in a tracing bridge
-            let connect_component = match &self.trace_handle {
-                Some(trace_handle) => {
-                    // Determine the left side name: previous proxy if any, otherwise "client"
-                    let left_name = if component_index > 0 {
-                        format!("proxy:{}", component_index - 1)
-                    } else {
-                        "client".to_string()
-                    };
-                    // First proxy (index 0) is an edge - outgoing requests go to client
-                    let is_edge = component_index == 0;
-                    trace_handle.bridge(
-                        &cx,
-                        left_name,
-                        format!("proxy:{}", component_index),
-                        dyn_component,
-                        is_edge,
-                    )
-                }
-                None => dyn_component,
-            };
+            // First proxy (index 0) is an edge - outgoing requests go to client
+            let connect_component = self.trace_proxy(
+                &cx,
+                ComponentIndex::predecessor_of(component_index),
+                ComponentIndex::Proxy(component_index),
+                ComponentIndex::successor_of(component_index, num_proxies),
+                dyn_component,
+            );
 
             let proxy_cx = cx
                 .spawn_connection(connection_builder.connect_to(connect_component)?, |c| {
@@ -955,7 +969,26 @@ pub enum ComponentIndex {
     Proxy(usize),
 
     /// The successor (agent in agent mode, outer conductor in proxy mode).
-    Successor,
+    Agent,
+}
+
+impl ComponentIndex {
+    /// Return the index for the predecessor of `proxy_index`, which might be `Client`.
+    pub fn predecessor_of(proxy_index: usize) -> Self {
+        match proxy_index.checked_sub(1) {
+            Some(p_i) => ComponentIndex::Proxy(p_i),
+            None => ComponentIndex::Client,
+        }
+    }
+
+    /// Return the index for the predecessor of `proxy_index`, which might be `Client`.
+    pub fn successor_of(proxy_index: usize, num_proxies: usize) -> Self {
+        if proxy_index == num_proxies {
+            ComponentIndex::Agent
+        } else {
+            ComponentIndex::Proxy(proxy_index + 1)
+        }
+    }
 }
 
 /// Identifies the source of an agent-to-client message.
@@ -965,11 +998,11 @@ pub enum ComponentIndex {
 /// 2. From the conductor's own successor in a larger proxy chain (when in proxy mode)
 #[derive(Debug, Clone, Copy)]
 pub enum SourceComponentIndex {
-    /// Message from the conductor's agent or successor.
-    Successor,
-
     /// Message from a specific component at the given index in the managed chain.
     Proxy(usize),
+
+    /// Message from the conductor's agent or successor.
+    Successor,
 }
 
 /// Trait for lazy proxy instantiation (proxy mode).
@@ -1325,23 +1358,6 @@ impl ConductorLink for ConductorToClient {
         // Spawn the agent component
         debug!(?agent_component, "spawning agent");
 
-        // If tracing is enabled, wrap the agent component with a tracing bridge
-        let agent_component = match &responder.trace_handle {
-            Some(trace_handle) => {
-                // Determine the left side name: last proxy if any, otherwise "client"
-                let num_proxies = proxy_components.len();
-                let left_name = if num_proxies > 0 {
-                    format!("proxy:{}", num_proxies - 1)
-                } else {
-                    "client".to_string()
-                };
-                // Agent bridge always traces outgoing requests/notifications
-                // (they go to a real destination: last proxy or client)
-                trace_handle.bridge(&client, left_name, "agent", agent_component, true)
-            }
-            None => agent_component,
-        };
-
         let agent_cx = client.spawn_connection(
             ConductorToAgent::builder()
                 .name("conductor-to-agent")
@@ -1491,6 +1507,7 @@ impl ConductorLink for ConductorToConductor {
 }
 
 pub trait ConductorSuccessor<Link: ConductorLink>: Send + Sync + 'static {
+    /// Send a message to the successor.
     fn send_message<'a>(
         &self,
         message: MessageCx,

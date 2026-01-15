@@ -8,12 +8,17 @@ use std::io::{BufWriter, Write};
 use std::path::Path;
 use std::time::Instant;
 
-use sacp::jsonrpcmsg;
+use fxhash::FxHashMap;
+use sacp::schema::{McpOverAcpMessage, SuccessorMessage};
+use sacp::{JrMessage, UntypedMessage, jsonrpcmsg};
 use serde::{Deserialize, Serialize};
+
+use crate::ComponentIndex;
 
 /// A trace event representing message flow between components.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
+#[non_exhaustive]
 pub enum TraceEvent {
     /// A JSON-RPC request from one component to another.
     Request(RequestEvent),
@@ -23,14 +28,12 @@ pub enum TraceEvent {
 
     /// A JSON-RPC notification (no response expected).
     Notification(NotificationEvent),
-
-    /// A tracing log line from a component.
-    Trace(TraceLogEvent),
 }
 
 /// Protocol type for messages.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
+#[non_exhaustive]
 pub enum Protocol {
     /// Standard ACP protocol messages.
     Acp,
@@ -40,6 +43,7 @@ pub enum Protocol {
 
 /// A JSON-RPC request from one component to another.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[non_exhaustive]
 pub struct RequestEvent {
     /// Monotonic timestamp (seconds since trace start).
     pub ts: f64,
@@ -69,6 +73,7 @@ pub struct RequestEvent {
 
 /// A JSON-RPC response to a prior request.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[non_exhaustive]
 pub struct ResponseEvent {
     /// Monotonic timestamp (seconds since trace start).
     pub ts: f64,
@@ -91,6 +96,7 @@ pub struct ResponseEvent {
 
 /// A JSON-RPC notification (no response expected).
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[non_exhaustive]
 pub struct NotificationEvent {
     /// Monotonic timestamp (seconds since trace start).
     pub ts: f64,
@@ -115,37 +121,6 @@ pub struct NotificationEvent {
     pub params: serde_json::Value,
 }
 
-/// A tracing log line from a component.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct TraceLogEvent {
-    /// Monotonic timestamp (seconds since trace start).
-    pub ts: f64,
-
-    /// Which component emitted this log.
-    pub component: String,
-
-    /// Log level.
-    pub level: TraceLevel,
-
-    /// Log message.
-    pub message: String,
-
-    /// Optional structured fields from tracing spans.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub fields: Option<serde_json::Map<String, serde_json::Value>>,
-}
-
-/// Log level for trace events.
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
-pub enum TraceLevel {
-    Trace,
-    Debug,
-    Info,
-    Warn,
-    Error,
-}
-
 /// Trait for destinations that can receive trace events.
 pub trait WriteEvent: Send + 'static {
     /// Write a trace event to the destination.
@@ -153,7 +128,7 @@ pub trait WriteEvent: Send + 'static {
 }
 
 /// Writes trace events as newline-delimited JSON to a `Write` impl.
-pub struct EventWriter<W> {
+pub(crate) struct EventWriter<W> {
     writer: W,
 }
 
@@ -184,6 +159,21 @@ impl WriteEvent for futures::channel::mpsc::UnboundedSender<TraceEvent> {
 pub struct TraceWriter {
     dest: Box<dyn WriteEvent>,
     start_time: Instant,
+
+    /// When we trace a request, we store its id along with the
+    /// details here. When we see responses, we try to match them up.
+    request_details: FxHashMap<serde_json::Value, RequestDetails>,
+}
+
+struct RequestDetails {
+    #[expect(dead_code)]
+    protocol: Protocol,
+
+    #[expect(dead_code)]
+    method: String,
+
+    request_from: ComponentIndex,
+    request_to: ComponentIndex,
 }
 
 impl TraceWriter {
@@ -192,6 +182,7 @@ impl TraceWriter {
         Self {
             dest: Box::new(dest),
             start_time: Instant::now(),
+            request_details: Default::default(),
         }
     }
 
@@ -206,32 +197,41 @@ impl TraceWriter {
     }
 
     /// Get the elapsed time since trace start, in seconds.
-    pub fn elapsed(&self) -> f64 {
+    fn elapsed(&self) -> f64 {
         self.start_time.elapsed().as_secs_f64()
     }
 
     /// Write a trace event.
-    pub fn write_event(&mut self, event: &TraceEvent) {
+    fn write_event(&mut self, event: &TraceEvent) {
         // Ignore errors - tracing should not break the conductor
         let _ = self.dest.write_event(event);
     }
 
     /// Write a request event.
-    pub fn request(
+    fn request(
         &mut self,
         protocol: Protocol,
-        from: impl Into<String>,
-        to: impl Into<String>,
+        from: ComponentIndex,
+        to: ComponentIndex,
         id: serde_json::Value,
-        method: impl Into<String>,
+        method: String,
         session: Option<String>,
         params: serde_json::Value,
     ) {
+        self.request_details.insert(
+            id.clone(),
+            RequestDetails {
+                protocol,
+                method: method.clone(),
+                request_from: from,
+                request_to: to,
+            },
+        );
         self.write_event(&TraceEvent::Request(RequestEvent {
             ts: self.elapsed(),
             protocol,
-            from: from.into(),
-            to: to.into(),
+            from: format!("{from:?}"),
+            to: format!("{to:?}"),
             id,
             method: method.into(),
             session,
@@ -240,18 +240,18 @@ impl TraceWriter {
     }
 
     /// Write a response event.
-    pub fn response(
+    fn response(
         &mut self,
-        from: impl Into<String>,
-        to: impl Into<String>,
+        from: ComponentIndex,
+        to: ComponentIndex,
         id: serde_json::Value,
         is_error: bool,
         payload: serde_json::Value,
     ) {
         self.write_event(&TraceEvent::Response(ResponseEvent {
             ts: self.elapsed(),
-            from: from.into(),
-            to: to.into(),
+            from: format!("{from:?}"),
+            to: format!("{to:?}"),
             id,
             is_error,
             payload,
@@ -259,11 +259,11 @@ impl TraceWriter {
     }
 
     /// Write a notification event.
-    pub fn notification(
+    fn notification(
         &mut self,
         protocol: Protocol,
-        from: impl Into<String>,
-        to: impl Into<String>,
+        from: ComponentIndex,
+        to: ComponentIndex,
         method: impl Into<String>,
         session: Option<String>,
         params: serde_json::Value,
@@ -271,8 +271,8 @@ impl TraceWriter {
         self.write_event(&TraceEvent::Notification(NotificationEvent {
             ts: self.elapsed(),
             protocol,
-            from: from.into(),
-            to: to.into(),
+            from: format!("{from:?}"),
+            to: format!("{to:?}"),
             method: method.into(),
             session,
             params,
@@ -280,54 +280,112 @@ impl TraceWriter {
     }
 
     /// Write a trace log event.
-    pub fn trace_log(
-        &mut self,
-        component: impl Into<String>,
-        level: TraceLevel,
-        message: impl Into<String>,
-        fields: Option<serde_json::Map<String, serde_json::Value>>,
-    ) {
-        self.write_event(&TraceEvent::Trace(TraceLogEvent {
-            ts: self.elapsed(),
-            component: component.into(),
-            level,
-            message: message.into(),
-            fields,
-        }));
-    }
 
     /// Trace a raw JSON-RPC message being sent from one component to another.
-    pub fn trace_message(&mut self, from: &str, to: &str, message: &jsonrpcmsg::Message) {
+    fn trace_message(&mut self, traced_message: TracedMessage) {
+        let TracedMessage {
+            predecessor_index,
+            proxy_index,
+            successor_index,
+            incoming,
+            message,
+        } = traced_message;
+
+        // We get every message going into or out of a proxy. This includes
+        // a fair number of duplicates: for example, if proxy P0 sends to P1,
+        // we'll get it as an *outgoing* message from P0 and an *incoming* message to P1.
+        // So we want to keep just one copy.
+        //
+        // We retain:
+        //
+        // * Incoming requests/notifications targeting a PROXY.
+        // * Incoming requests/notifications targeting the AGENT.
+
         match message {
             jsonrpcmsg::Message::Request(req) => {
-                let is_notification = req.id.is_none();
-                let (protocol, method, params) = extract_message_info(&req.method, &req.params);
+                let MessageInfo {
+                    successor,
+                    id,
+                    protocol,
+                    method,
+                    params,
+                } = MessageInfo::from_req(req);
 
-                if is_notification {
-                    self.notification(protocol, from, to, method, None, params);
-                } else {
-                    let id = req
-                        .id
-                        .as_ref()
-                        .map(id_to_json)
-                        .unwrap_or(serde_json::Value::Null);
-                    self.request(protocol, from, to, id, method, None, params);
+                let (from, to) = match (successor, incoming, successor_index) {
+                    // An incoming request/notification to a proxy from its predecessor.
+                    (Successor(false), Incoming(true), _) => (predecessor_index, proxy_index),
+
+                    // An incoming request/notification to a proxy from its successor.
+                    (Successor(true), Incoming(true), _) => (successor_index, proxy_index),
+
+                    // An outgoing request/notification to a proxy to its successor
+                    // *and* its successor is not a proxy. (If its successor is a proxy,
+                    // we ignore it, because we'll also see the message in "incoming" form).
+                    (Successor(true), Incoming(false), ComponentIndex::Agent) => {
+                        (proxy_index, successor_index)
+                    }
+
+                    _ => return,
+                };
+
+                match id {
+                    Some(id) => {
+                        self.request(protocol, from, to, id_to_json(&id), method, None, params)
+                    }
+                    None => {
+                        self.notification(protocol, from, to, method, None, params);
+                    }
                 }
             }
             jsonrpcmsg::Message::Response(resp) => {
-                let id = resp
-                    .id
-                    .as_ref()
-                    .map(id_to_json)
-                    .unwrap_or(serde_json::Value::Null);
-                let (is_error, payload) = match (&resp.result, &resp.error) {
-                    (Some(result), _) => (false, result.clone()),
-                    (_, Some(error)) => (true, serde_json::to_value(error).unwrap_or_default()),
-                    (None, None) => (false, serde_json::Value::Null),
-                };
-                self.response(from, to, id, is_error, payload);
+                // Lookup the response by its id.
+                // All of the messages we are intercepting go to our proxies,
+                // and we always assign them globally unique
+                if let Some(id) = resp.id {
+                    let id = id_to_json(&id);
+                    if let Some(RequestDetails {
+                        protocol: _,
+                        method: _,
+                        request_from,
+                        request_to,
+                    }) = self.request_details.remove(&id)
+                    {
+                        let (is_error, payload) = match (&resp.result, &resp.error) {
+                            (Some(result), _) => (false, result.clone()),
+                            (_, Some(error)) => {
+                                (true, serde_json::to_value(error).unwrap_or_default())
+                            }
+                            (None, None) => (false, serde_json::Value::Null),
+                        };
+                        self.response(request_to, request_from, id, is_error, payload);
+                    }
+                }
             }
         }
+    }
+
+    /// Spawn a trace writer task.
+    ///
+    /// Returns a `TraceHandle` that can be cloned and used from multiple tasks,
+    /// and a future that should be spawned (e.g., via `with_spawned`).
+    pub(crate) fn spawn(
+        mut self: TraceWriter,
+    ) -> (
+        TraceHandle,
+        impl std::future::Future<Output = Result<(), sacp::Error>>,
+    ) {
+        use futures::StreamExt;
+
+        let (tx, mut rx) = futures::channel::mpsc::unbounded();
+
+        let future = async move {
+            while let Some(event) = rx.next().await {
+                self.trace_message(event);
+            }
+            Ok(())
+        };
+
+        (TraceHandle { tx }, future)
     }
 }
 
@@ -335,83 +393,32 @@ impl TraceWriter {
 ///
 /// Create with [`spawn_trace_writer`], then clone and pass to bridges.
 #[derive(Clone)]
-pub struct TraceHandle {
-    tx: futures::channel::mpsc::UnboundedSender<TraceEvent>,
-    start_time: Instant,
+pub(crate) struct TraceHandle {
+    tx: futures::channel::mpsc::UnboundedSender<TracedMessage>,
 }
 
 impl TraceHandle {
-    /// Send a trace event.
-    pub fn send(&self, event: TraceEvent) {
-        let _ = self.tx.unbounded_send(event);
-    }
-
-    /// Get the elapsed time since trace start, in seconds.
-    pub fn elapsed(&self) -> f64 {
-        self.start_time.elapsed().as_secs_f64()
-    }
-
     /// Trace a raw JSON-RPC message being sent from one component to another.
-    pub fn trace_message(&self, from: &str, to: &str, message: &jsonrpcmsg::Message) {
-        let ts = self.elapsed();
-        let event = match message {
-            jsonrpcmsg::Message::Request(req) => {
-                let is_notification = req.id.is_none();
-                let (protocol, method, params) = extract_message_info(&req.method, &req.params);
-
-                if is_notification {
-                    TraceEvent::Notification(NotificationEvent {
-                        ts,
-                        protocol,
-                        from: from.to_string(),
-                        to: to.to_string(),
-                        method,
-                        session: None,
-                        params,
-                    })
-                } else {
-                    let id = req
-                        .id
-                        .as_ref()
-                        .map(id_to_json)
-                        .unwrap_or(serde_json::Value::Null);
-                    TraceEvent::Request(RequestEvent {
-                        ts,
-                        protocol,
-                        from: from.to_string(),
-                        to: to.to_string(),
-                        id,
-                        method,
-                        session: None,
-                        params,
-                    })
-                }
-            }
-            jsonrpcmsg::Message::Response(resp) => {
-                let id = resp
-                    .id
-                    .as_ref()
-                    .map(id_to_json)
-                    .unwrap_or(serde_json::Value::Null);
-                let (is_error, payload) = match (&resp.result, &resp.error) {
-                    (Some(result), _) => (false, result.clone()),
-                    (_, Some(error)) => (true, serde_json::to_value(error).unwrap_or_default()),
-                    (None, None) => (false, serde_json::Value::Null),
-                };
-                TraceEvent::Response(ResponseEvent {
-                    ts,
-                    from: from.to_string(),
-                    to: to.to_string(),
-                    id,
-                    is_error,
-                    payload,
-                })
-            }
-        };
-        self.send(event);
+    fn trace_message(
+        &self,
+        predecessor_index: ComponentIndex,
+        proxy_index: ComponentIndex,
+        successor_index: ComponentIndex,
+        incoming: Incoming,
+        message: &jsonrpcmsg::Message,
+    ) -> Result<(), sacp::Error> {
+        self.tx
+            .unbounded_send(TracedMessage {
+                predecessor_index,
+                proxy_index,
+                successor_index,
+                incoming,
+                message: message.clone(),
+            })
+            .map_err(sacp::util::internal_error)
     }
 
-    /// Create a tracing bridge that wraps a component.
+    /// Create a tracing bridge that wraps a proxy component.
     ///
     /// Spawns a bridge task that forwards messages between the channel and the component
     /// while tracing them. Returns the wrapped component.
@@ -425,51 +432,56 @@ impl TraceHandle {
     /// - `left_name`: Logical name of the component on the "left" side (e.g., "client", "proxy:0")
     /// - `right_name`: Logical name of the component on the "right" side (e.g., "proxy:0", "agent")
     /// - `component`: The component to wrap
-    /// - `trace_outgoing_requests`: If true, also trace outgoing requests/notifications (for edge bridges)
-    pub fn bridge<L: sacp::JrLink, Cx: sacp::JrLink>(
+    pub fn bridge_proxy<L: sacp::JrLink, Cx: sacp::JrLink>(
         &self,
         cx: &sacp::JrConnectionCx<Cx>,
-        left_name: impl Into<String>,
-        right_name: impl Into<String>,
-        component: impl sacp::Component<L> + 'static,
-        trace_outgoing_requests: bool,
+        predecessor_index: ComponentIndex,
+        proxy_index: ComponentIndex,
+        successor_index: ComponentIndex,
+        proxy: impl sacp::Component<L> + 'static,
     ) -> sacp::DynComponent<L> {
-        let left_name = left_name.into();
-        let right_name = right_name.into();
         use futures::StreamExt;
 
-        let (channel_a, channel_b) = sacp::Channel::duplex();
-        let (component_channel, component_future) = component.into_server();
-
+        // The way we do this is that instead of directly
+        // connecting the proxy to the conductor
+        //
+        // conductor <-> proxy
+        //
+        // we create a "man in the middle" (the tracing task)
+        // where all messages from the conductor go into a duplex
+        // channel. The `tracing_task` reads them from its endpoint (`b`),
+        // logs, and forwards to the component. Any messages
+        // sent by the component get forwarded back through the
+        // duplex channel.
+        //
+        // conductor <->  conductor_channel <-> tracing_channel <-> proxy_channel
+        //                                                  ^          ^
+        //                                                  +----------+
+        //                                               tracing task is doing this
+        let (conductor_channel, tracing_channel) = sacp::Channel::duplex();
+        let (proxy_channel, proxy_future) = proxy.into_server();
         let trace_handle = self.clone();
-        let left_name_clone = left_name.clone();
-        let right_name_clone = right_name.clone();
 
         let bridge_future = Box::pin(async move {
             // Forward messages left→right (incoming to component)
             // Trace requests/notifications, skip responses
             // Also skip SuccessorMessages - they came from the right and were already traced
             let left_to_right = async {
-                let mut rx = channel_b.rx;
-                let tx = component_channel.tx.clone();
+                let mut rx = tracing_channel.rx;
+                let tx = proxy_channel.tx.clone();
                 while let Some(msg) = rx.next().await {
                     if let Ok(ref m) = msg {
-                        // Trace incoming requests/notifications, skip responses
-                        // Also skip SuccessorMessages - they originate from the right
-                        // (e.g., agent-to-client notifications wrapped as SuccessorMessage)
-                        let should_trace = match m {
-                            jsonrpcmsg::Message::Response(_) => false,
-                            jsonrpcmsg::Message::Request(req) => !is_successor_message(&req.method),
-                        };
-                        if should_trace {
-                            trace_handle.trace_message(&left_name, &right_name, m);
-                        }
+                        trace_handle.trace_message(
+                            predecessor_index,
+                            proxy_index,
+                            successor_index,
+                            Incoming(true),
+                            m,
+                        )?;
                     }
-                    if tx.unbounded_send(msg).is_err() {
-                        break;
-                    }
+                    tx.unbounded_send(msg).map_err(sacp::util::internal_error)?;
                 }
-                Ok::<_, sacp::Error>(())
+                Ok(())
             };
 
             // Forward messages right→left (outgoing from component)
@@ -477,70 +489,30 @@ impl TraceHandle {
             // BUT: SuccessorMessage wrappers indicate the message is going RIGHT (to successor),
             // so we should NOT trace those here (they'll be traced as incoming at the next bridge)
             let right_to_left = async {
-                let mut rx = component_channel.rx;
-                let tx = channel_b.tx;
+                let mut rx = proxy_channel.rx;
+                let tx = tracing_channel.tx;
                 while let Some(msg) = rx.next().await {
                     if let Ok(ref m) = msg {
-                        let should_trace = match m {
-                            jsonrpcmsg::Message::Response(_) => true,
-                            jsonrpcmsg::Message::Request(req) => {
-                                // SuccessorMessages are going RIGHT, not left
-                                // Don't trace them here - they'll be traced at the next bridge
-                                if is_successor_message(&req.method) {
-                                    false
-                                } else {
-                                    trace_outgoing_requests
-                                }
-                            }
-                        };
-                        if should_trace {
-                            trace_handle.trace_message(&right_name_clone, &left_name_clone, m);
-                        }
+                        trace_handle.trace_message(
+                            predecessor_index,
+                            proxy_index,
+                            successor_index,
+                            Incoming(false),
+                            m,
+                        )?;
                     }
-                    if tx.unbounded_send(msg).is_err() {
-                        break;
-                    }
+                    tx.unbounded_send(msg).map_err(sacp::util::internal_error)?;
                 }
-                Ok::<_, sacp::Error>(())
+                Ok(())
             };
 
-            futures::try_join!(component_future, left_to_right, right_to_left)?;
+            futures::try_join!(proxy_future, left_to_right, right_to_left)?;
             Ok(())
         });
 
         let _ = cx.spawn(bridge_future);
-        sacp::DynComponent::new(channel_a)
+        sacp::DynComponent::new(conductor_channel)
     }
-}
-
-/// Spawn a trace writer task.
-///
-/// Returns a `TraceHandle` that can be cloned and used from multiple tasks,
-/// and a future that should be spawned (e.g., via `with_spawned`).
-pub fn spawn_trace_writer(
-    mut writer: TraceWriter,
-) -> (
-    TraceHandle,
-    impl std::future::Future<Output = Result<(), sacp::Error>>,
-) {
-    use futures::StreamExt;
-
-    let (tx, mut rx) = futures::channel::mpsc::unbounded();
-    let start_time = writer.start_time;
-
-    let future = async move {
-        while let Some(event) = rx.next().await {
-            writer.write_event(&event);
-        }
-        Ok(())
-    };
-
-    (TraceHandle { tx, start_time }, future)
-}
-
-/// Check if a method is a SuccessorMessage wrapper.
-fn is_successor_message(method: &str) -> bool {
-    method == "_proxy/successor"
 }
 
 /// Convert a jsonrpcmsg::Id to serde_json::Value.
@@ -552,94 +524,68 @@ fn id_to_json(id: &jsonrpcmsg::Id) -> serde_json::Value {
     }
 }
 
-/// Extract logical message info from method and params.
-///
-/// This unwraps protocol wrappers to get the "real" message:
-/// - `_proxy/successor` messages are unwrapped to get the inner message
-/// - `_proxy/initialize` messages are unwrapped to get `initialize`
-/// - `_mcp/message` messages are detected and marked as MCP protocol
-///
-/// Returns (protocol, method, params).
-fn extract_message_info(
-    method: &str,
-    params: &Option<jsonrpcmsg::Params>,
-) -> (Protocol, String, serde_json::Value) {
-    let params_value = params
-        .as_ref()
-        .map(|p| match p {
-            jsonrpcmsg::Params::Array(arr) => serde_json::Value::Array(arr.clone()),
-            jsonrpcmsg::Params::Object(obj) => serde_json::Value::Object(obj.clone()),
-        })
-        .unwrap_or(serde_json::Value::Null);
-
-    // Check for SuccessorMessage wrapper (_proxy/successor)
-    const METHOD_SUCCESSOR_MESSAGE: &str = "_proxy/successor";
-    if method == METHOD_SUCCESSOR_MESSAGE {
-        // Extract the inner message from the flattened structure
-        if let Some(inner_method) = params_value.get("method").and_then(|v| v.as_str()) {
-            let inner_params = params_value
-                .get("params")
-                .cloned()
-                .unwrap_or(serde_json::Value::Null);
-            // Recursively extract in case of nested wrappers
-            return extract_message_info_from_values(inner_method, &inner_params);
-        }
-    }
-
-    // Check for InitializeProxyRequest wrapper (_proxy/initialize)
-    // This wraps a standard `initialize` request
-    const METHOD_INITIALIZE_PROXY: &str = "_proxy/initialize";
-    if method == METHOD_INITIALIZE_PROXY {
-        // The inner initialize params are flattened into the outer params
-        return (Protocol::Acp, "initialize".to_string(), params_value);
-    }
-
-    // Check for MCP-over-ACP wrapper (_mcp/message)
-    const METHOD_MCP_MESSAGE: &str = "_mcp/message";
-    if method == METHOD_MCP_MESSAGE {
-        // Extract the inner MCP message
-        if let Some(inner_method) = params_value.get("method").and_then(|v| v.as_str()) {
-            let inner_params = params_value
-                .get("params")
-                .cloned()
-                .unwrap_or(serde_json::Value::Null);
-            return (Protocol::Mcp, inner_method.to_string(), inner_params);
-        }
-    }
-
-    // Regular ACP message
-    (Protocol::Acp, method.to_string(), params_value)
+/// A message observed going over a channel connected to `left` and `right`.
+/// This could be a successor message, a mcp-over-acp message, etc.
+#[derive(Debug)]
+struct TracedMessage {
+    predecessor_index: ComponentIndex,
+    proxy_index: ComponentIndex,
+    successor_index: ComponentIndex,
+    incoming: Incoming,
+    message: jsonrpcmsg::Message,
 }
 
-/// Helper for recursive extraction from already-parsed values.
-fn extract_message_info_from_values(
-    method: &str,
-    params: &serde_json::Value,
-) -> (Protocol, String, serde_json::Value) {
-    // Check for SuccessorMessage wrapper
-    const METHOD_SUCCESSOR_MESSAGE: &str = "_proxy/successor";
-    if method == METHOD_SUCCESSOR_MESSAGE {
-        if let Some(inner_method) = params.get("method").and_then(|v| v.as_str()) {
-            let inner_params = params
-                .get("params")
-                .cloned()
-                .unwrap_or(serde_json::Value::Null);
-            return extract_message_info_from_values(inner_method, &inner_params);
-        }
+/// Fully interpreted message info.
+#[derive(Debug)]
+struct MessageInfo {
+    successor: Successor,
+    id: Option<jsonrpcmsg::Id>,
+    protocol: Protocol,
+    method: String,
+    params: serde_json::Value,
+}
+
+#[derive(Copy, Clone, Debug)]
+struct Successor(bool);
+
+#[derive(Copy, Clone, Debug)]
+struct Incoming(bool);
+
+impl MessageInfo {
+    /// Extract logical message info from method and params.
+    ///
+    /// This unwraps protocol wrappers to get the "real" message:
+    /// - `_proxy/successor` messages are unwrapped to get the inner message
+    /// - `_proxy/initialize` messages are unwrapped to get `initialize`
+    /// - `_mcp/message` messages are detected and marked as MCP protocol
+    ///
+    /// Returns (protocol, method, params).
+    fn from_req(req: jsonrpcmsg::Request) -> Self {
+        let untyped = UntypedMessage::parse_message(&req.method, &req.params)
+            .expect("untyped message is infallible");
+        Self::from_untyped(Successor(false), req.id, Protocol::Acp, untyped)
     }
 
-    // Check for MCP-over-ACP wrapper
-    const METHOD_MCP_MESSAGE: &str = "_mcp/message";
-    if method == METHOD_MCP_MESSAGE {
-        if let Some(inner_method) = params.get("method").and_then(|v| v.as_str()) {
-            let inner_params = params
-                .get("params")
-                .cloned()
-                .unwrap_or(serde_json::Value::Null);
-            return (Protocol::Mcp, inner_method.to_string(), inner_params);
+    fn from_untyped(
+        successor: Successor,
+        id: Option<jsonrpcmsg::Id>,
+        protocol: Protocol,
+        untyped: UntypedMessage,
+    ) -> Self {
+        if let Ok(m) = SuccessorMessage::parse_message(&untyped.method, &untyped.params) {
+            return Self::from_untyped(Successor(true), id, protocol, m.message);
+        }
+
+        if let Ok(m) = McpOverAcpMessage::parse_message(&untyped.method, &untyped.params) {
+            return Self::from_untyped(successor, id, Protocol::Mcp, m.message);
+        }
+
+        Self {
+            successor,
+            id,
+            protocol,
+            method: untyped.method,
+            params: untyped.params,
         }
     }
-
-    // Regular message
-    (Protocol::Acp, method.to_string(), params.clone())
 }
