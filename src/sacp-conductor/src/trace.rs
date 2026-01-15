@@ -413,28 +413,29 @@ impl TraceHandle {
 
     /// Create a tracing bridge that wraps a component.
     ///
-    /// Returns a `DynComponent` that can be connected to, and a future that must be spawned.
-    /// The bridge forwards messages between the channel and the component while tracing them.
+    /// Spawns a bridge task that forwards messages between the channel and the component
+    /// while tracing them. Returns the wrapped component.
     ///
     /// Tracing strategy:
     /// - **Left→Right (incoming)**: Trace requests/notifications, skip responses
     /// - **Right→Left (outgoing)**: Trace responses, and if `trace_outgoing_requests` is true,
     ///   also trace requests/notifications (needed for edge bridges at conductor boundaries)
     ///
+    /// - `cx`: Connection context for spawning the bridge task
     /// - `left_name`: Logical name of the component on the "left" side (e.g., "client", "proxy:0")
     /// - `right_name`: Logical name of the component on the "right" side (e.g., "proxy:0", "agent")
     /// - `component`: The component to wrap
     /// - `trace_outgoing_requests`: If true, also trace outgoing requests/notifications (for edge bridges)
-    pub fn bridge<L: sacp::JrLink>(
+    pub fn bridge<L: sacp::JrLink, Cx: sacp::JrLink>(
         &self,
-        left_name: String,
-        right_name: String,
+        cx: &sacp::JrConnectionCx<Cx>,
+        left_name: impl Into<String>,
+        right_name: impl Into<String>,
         component: impl sacp::Component<L> + 'static,
         trace_outgoing_requests: bool,
-    ) -> (
-        sacp::DynComponent<L>,
-        futures::future::BoxFuture<'static, Result<(), sacp::Error>>,
-    ) {
+    ) -> sacp::DynComponent<L> {
+        let left_name = left_name.into();
+        let right_name = right_name.into();
         use futures::StreamExt;
 
         let (channel_a, channel_b) = sacp::Channel::duplex();
@@ -448,76 +449,67 @@ impl TraceHandle {
             // Forward messages left→right (incoming to component)
             // Trace requests/notifications, skip responses
             // Also skip SuccessorMessages - they came from the right and were already traced
-            let left_to_right = {
-                let trace_handle = trace_handle.clone();
-                let left_name = left_name.clone();
-                let right_name = right_name.clone();
+            let left_to_right = async {
                 let mut rx = channel_b.rx;
                 let tx = component_channel.tx.clone();
-                async move {
-                    while let Some(msg) = rx.next().await {
-                        if let Ok(ref m) = msg {
-                            // Trace incoming requests/notifications, skip responses
-                            // Also skip SuccessorMessages - they originate from the right
-                            // (e.g., agent-to-client notifications wrapped as SuccessorMessage)
-                            let should_trace = match m {
-                                jsonrpcmsg::Message::Response(_) => false,
-                                jsonrpcmsg::Message::Request(req) => {
-                                    !is_successor_message(&req.method)
-                                }
-                            };
-                            if should_trace {
-                                trace_handle.trace_message(&left_name, &right_name, m);
-                            }
-                        }
-                        if tx.unbounded_send(msg).is_err() {
-                            break;
+                while let Some(msg) = rx.next().await {
+                    if let Ok(ref m) = msg {
+                        // Trace incoming requests/notifications, skip responses
+                        // Also skip SuccessorMessages - they originate from the right
+                        // (e.g., agent-to-client notifications wrapped as SuccessorMessage)
+                        let should_trace = match m {
+                            jsonrpcmsg::Message::Response(_) => false,
+                            jsonrpcmsg::Message::Request(req) => !is_successor_message(&req.method),
+                        };
+                        if should_trace {
+                            trace_handle.trace_message(&left_name, &right_name, m);
                         }
                     }
-                    Ok::<_, sacp::Error>(())
+                    if tx.unbounded_send(msg).is_err() {
+                        break;
+                    }
                 }
+                Ok::<_, sacp::Error>(())
             };
 
             // Forward messages right→left (outgoing from component)
             // Trace responses always; trace requests/notifications only if trace_outgoing_requests
             // BUT: SuccessorMessage wrappers indicate the message is going RIGHT (to successor),
             // so we should NOT trace those here (they'll be traced as incoming at the next bridge)
-            let right_to_left = {
-                let trace_handle = trace_handle.clone();
+            let right_to_left = async {
                 let mut rx = component_channel.rx;
                 let tx = channel_b.tx;
-                async move {
-                    while let Some(msg) = rx.next().await {
-                        if let Ok(ref m) = msg {
-                            let should_trace = match m {
-                                jsonrpcmsg::Message::Response(_) => true,
-                                jsonrpcmsg::Message::Request(req) => {
-                                    // SuccessorMessages are going RIGHT, not left
-                                    // Don't trace them here - they'll be traced at the next bridge
-                                    if is_successor_message(&req.method) {
-                                        false
-                                    } else {
-                                        trace_outgoing_requests
-                                    }
+                while let Some(msg) = rx.next().await {
+                    if let Ok(ref m) = msg {
+                        let should_trace = match m {
+                            jsonrpcmsg::Message::Response(_) => true,
+                            jsonrpcmsg::Message::Request(req) => {
+                                // SuccessorMessages are going RIGHT, not left
+                                // Don't trace them here - they'll be traced at the next bridge
+                                if is_successor_message(&req.method) {
+                                    false
+                                } else {
+                                    trace_outgoing_requests
                                 }
-                            };
-                            if should_trace {
-                                trace_handle.trace_message(&right_name_clone, &left_name_clone, m);
                             }
-                        }
-                        if tx.unbounded_send(msg).is_err() {
-                            break;
+                        };
+                        if should_trace {
+                            trace_handle.trace_message(&right_name_clone, &left_name_clone, m);
                         }
                     }
-                    Ok::<_, sacp::Error>(())
+                    if tx.unbounded_send(msg).is_err() {
+                        break;
+                    }
                 }
+                Ok::<_, sacp::Error>(())
             };
 
             futures::try_join!(component_future, left_to_right, right_to_left)?;
             Ok(())
         });
 
-        (sacp::DynComponent::new(channel_a), bridge_future)
+        let _ = cx.spawn(bridge_future);
+        sacp::DynComponent::new(channel_a)
     }
 }
 

@@ -798,14 +798,13 @@ where
                     };
                     // First proxy (index 0) is an edge - outgoing requests go to client
                     let is_edge = component_index == 0;
-                    let (bridged_component, bridge_future) = trace_handle.bridge(
+                    trace_handle.bridge(
+                        &cx,
                         left_name,
                         format!("proxy:{}", component_index),
                         dyn_component,
                         is_edge,
-                    );
-                    let _ = cx.spawn(bridge_future);
-                    bridged_component
+                    )
                 }
                 None => dyn_component,
             };
@@ -1338,10 +1337,7 @@ impl ConductorLink for ConductorToClient {
                 };
                 // Agent bridge always traces outgoing requests/notifications
                 // (they go to a real destination: last proxy or client)
-                let (bridged_component, bridge_future) =
-                    trace_handle.bridge(left_name, "agent".to_string(), agent_component, true);
-                let _ = client.spawn(bridge_future);
-                bridged_component
+                trace_handle.bridge(&client, left_name, "agent", agent_component, true)
             }
             None => agent_component,
         };
