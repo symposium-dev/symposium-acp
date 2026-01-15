@@ -227,7 +227,7 @@ async fn test_trace_snapshot() -> Result<(), sacp::Error> {
                     ts: 0.0,
                     from: "agent",
                     to: "proxy:0",
-                    id: String("id:2"),
+                    id: String("id:1"),
                     is_error: false,
                     payload: Object {
                         "agentCapabilities": Object {
@@ -253,7 +253,7 @@ async fn test_trace_snapshot() -> Result<(), sacp::Error> {
                     ts: 0.0,
                     from: "proxy:0",
                     to: "client",
-                    id: String("id:3"),
+                    id: String("id:0"),
                     is_error: false,
                     payload: Object {
                         "agentCapabilities": Object {
@@ -280,7 +280,7 @@ async fn test_trace_snapshot() -> Result<(), sacp::Error> {
                     protocol: Acp,
                     from: "client",
                     to: "proxy:0",
-                    id: String("id:4"),
+                    id: String("id:2"),
                     method: "session/new",
                     session: None,
                     params: Object {
@@ -295,7 +295,7 @@ async fn test_trace_snapshot() -> Result<(), sacp::Error> {
                     protocol: Acp,
                     from: "proxy:0",
                     to: "agent",
-                    id: String("id:5"),
+                    id: String("id:3"),
                     method: "session/new",
                     session: None,
                     params: Object {
@@ -309,7 +309,7 @@ async fn test_trace_snapshot() -> Result<(), sacp::Error> {
                     ts: 0.0,
                     from: "agent",
                     to: "proxy:0",
-                    id: String("id:6"),
+                    id: String("id:3"),
                     is_error: false,
                     payload: Object {
                         "sessionId": String("session:0"),
@@ -321,7 +321,7 @@ async fn test_trace_snapshot() -> Result<(), sacp::Error> {
                     ts: 0.0,
                     from: "proxy:0",
                     to: "client",
-                    id: String("id:7"),
+                    id: String("id:2"),
                     is_error: false,
                     payload: Object {
                         "sessionId": String("session:0"),
@@ -334,7 +334,7 @@ async fn test_trace_snapshot() -> Result<(), sacp::Error> {
                     protocol: Acp,
                     from: "client",
                     to: "proxy:0",
-                    id: String("id:8"),
+                    id: String("id:4"),
                     method: "session/prompt",
                     session: None,
                     params: Object {
@@ -354,7 +354,7 @@ async fn test_trace_snapshot() -> Result<(), sacp::Error> {
                     protocol: Acp,
                     from: "proxy:0",
                     to: "agent",
-                    id: String("id:9"),
+                    id: String("id:5"),
                     method: "session/prompt",
                     session: None,
                     params: Object {
@@ -393,7 +393,7 @@ async fn test_trace_snapshot() -> Result<(), sacp::Error> {
                     ts: 0.0,
                     from: "agent",
                     to: "proxy:0",
-                    id: String("id:10"),
+                    id: String("id:5"),
                     is_error: false,
                     payload: Object {
                         "stopReason": String("end_turn"),
@@ -425,7 +425,7 @@ async fn test_trace_snapshot() -> Result<(), sacp::Error> {
                     ts: 0.0,
                     from: "proxy:0",
                     to: "client",
-                    id: String("id:11"),
+                    id: String("id:4"),
                     is_error: false,
                     payload: Object {
                         "stopReason": String("end_turn"),

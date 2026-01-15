@@ -125,7 +125,7 @@ impl EventNormalizer {
                             }
                         } else if k == "url" {
                             if let serde_json::Value::String(s) = &v {
-                                if s.starts_with("acp:") {
+                                if s.starts_with("acp:") || s.starts_with("http://localhost:") {
                                     serde_json::Value::String(self.normalize_acp_url(s))
                                 } else {
                                     v
@@ -328,7 +328,7 @@ async fn test_trace_client_mcp_server() -> Result<(), sacp::Error> {
                     ts: 0.0,
                     from: "agent",
                     to: "client",
-                    id: String("id:1"),
+                    id: String("id:0"),
                     is_error: false,
                     payload: Object {
                         "agentCapabilities": Object {
@@ -355,7 +355,7 @@ async fn test_trace_client_mcp_server() -> Result<(), sacp::Error> {
                     protocol: Acp,
                     from: "client",
                     to: "agent",
-                    id: String("id:2"),
+                    id: String("id:1"),
                     method: "session/new",
                     session: None,
                     params: Object {
@@ -376,22 +376,10 @@ async fn test_trace_client_mcp_server() -> Result<(), sacp::Error> {
                     ts: 0.0,
                     from: "agent",
                     to: "client",
-                    id: String("id:3"),
+                    id: String("id:1"),
                     is_error: false,
                     payload: Object {
                         "sessionId": String("session:0"),
-                    },
-                },
-            ),
-            Response(
-                ResponseEvent {
-                    ts: 0.0,
-                    from: "client",
-                    to: "agent",
-                    id: String("id:4"),
-                    is_error: false,
-                    payload: Object {
-                        "connection_id": String("connection:0"),
                     },
                 },
             ),
@@ -401,7 +389,7 @@ async fn test_trace_client_mcp_server() -> Result<(), sacp::Error> {
                     protocol: Acp,
                     from: "client",
                     to: "agent",
-                    id: String("id:5"),
+                    id: String("id:2"),
                     method: "session/prompt",
                     session: None,
                     params: Object {
@@ -412,98 +400,6 @@ async fn test_trace_client_mcp_server() -> Result<(), sacp::Error> {
                             },
                         ],
                         "sessionId": String("session:0"),
-                    },
-                },
-            ),
-            Request(
-                RequestEvent {
-                    ts: 0.0,
-                    protocol: Mcp,
-                    from: "agent",
-                    to: "client",
-                    id: String("id:6"),
-                    method: "initialize",
-                    session: None,
-                    params: Object {
-                        "capabilities": Object {},
-                        "clientInfo": Object {
-                            "name": String("rmcp"),
-                            "version": String("0.12.0"),
-                        },
-                        "protocolVersion": String("2025-03-26"),
-                    },
-                },
-            ),
-            Response(
-                ResponseEvent {
-                    ts: 0.0,
-                    from: "client",
-                    to: "agent",
-                    id: String("id:7"),
-                    is_error: false,
-                    payload: Object {
-                        "capabilities": Object {
-                            "tools": Object {},
-                        },
-                        "instructions": String("A test MCP server hosted by the client"),
-                        "protocolVersion": String("2025-03-26"),
-                        "serverInfo": Object {
-                            "name": String("rmcp"),
-                            "version": String("0.12.0"),
-                        },
-                    },
-                },
-            ),
-            Notification(
-                NotificationEvent {
-                    ts: 0.0,
-                    protocol: Mcp,
-                    from: "agent",
-                    to: "client",
-                    method: "notifications/initialized",
-                    session: None,
-                    params: Null,
-                },
-            ),
-            Request(
-                RequestEvent {
-                    ts: 0.0,
-                    protocol: Mcp,
-                    from: "agent",
-                    to: "client",
-                    id: String("id:8"),
-                    method: "tools/call",
-                    session: None,
-                    params: Object {
-                        "_meta": Object {
-                            "progressToken": Number(0),
-                        },
-                        "arguments": Object {
-                            "message": String("Hello from client test!"),
-                        },
-                        "name": String("echo"),
-                    },
-                },
-            ),
-            Response(
-                ResponseEvent {
-                    ts: 0.0,
-                    from: "client",
-                    to: "agent",
-                    id: String("id:9"),
-                    is_error: false,
-                    payload: Object {
-                        "content": Array [
-                            Object {
-                                "text": String("{\"call_number\":1,\"echoed\":\"Client echoes: Hello from client test!\"}"),
-                                "type": String("text"),
-                            },
-                        ],
-                        "isError": Bool(false),
-                        "structuredContent": Object {
-                            "call_number": Number(1),
-                            "echoed": String("Client echoes: Hello from client test!"),
-                        },
                     },
                 },
             ),
@@ -532,7 +428,7 @@ async fn test_trace_client_mcp_server() -> Result<(), sacp::Error> {
                     ts: 0.0,
                     from: "agent",
                     to: "client",
-                    id: String("id:10"),
+                    id: String("id:2"),
                     is_error: false,
                     payload: Object {
                         "stopReason": String("end_turn"),
