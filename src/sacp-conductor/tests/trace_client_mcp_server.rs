@@ -123,7 +123,7 @@ impl EventNormalizer {
                             } else {
                                 self.normalize_json(v)
                             }
-                        } else if k == "url" {
+                        } else if k == "url" || k == "acp_url" {
                             if let serde_json::Value::String(s) = &v {
                                 if s.starts_with("acp:") || s.starts_with("http://localhost:") {
                                     serde_json::Value::String(self.normalize_acp_url(s))
@@ -378,7 +378,7 @@ async fn test_trace_client_mcp_server() -> Result<(), sacp::Error> {
                     method: "_mcp/connect",
                     session: None,
                     params: Object {
-                        "acp_url": String("acp:0d9b5456-8d7b-47e8-9b84-2340bdde4fc4"),
+                        "acp_url": String("acp:url:0"),
                     },
                 },
             ),
