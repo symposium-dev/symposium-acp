@@ -83,6 +83,7 @@ mod conductor;
 mod debug_logger;
 /// MCP bridge functionality for TCP-based MCP servers
 mod mcp_bridge;
+mod snoop;
 /// Trace event types for sequence diagram viewer
 pub mod trace;
 

@@ -295,31 +295,10 @@ async fn test_trace_mcp_tool_call() -> Result<(), sacp::Error> {
                 RequestEvent {
                     ts: 0.0,
                     protocol: Acp,
-                    from: "client",
-                    to: "proxy:0",
+                    from: "Client",
+                    to: "Proxy(0)",
                     id: String("id:0"),
-                    method: "initialize",
-                    session: None,
-                    params: Object {
-                        "clientCapabilities": Object {
-                            "fs": Object {
-                                "readTextFile": Bool(false),
-                                "writeTextFile": Bool(false),
-                            },
-                            "terminal": Bool(false),
-                        },
-                        "protocolVersion": Number(1),
-                    },
-                },
-            ),
-            Request(
-                RequestEvent {
-                    ts: 0.0,
-                    protocol: Acp,
-                    from: "proxy:0",
-                    to: "agent",
-                    id: String("id:1"),
-                    method: "initialize",
+                    method: "_proxy/initialize",
                     session: None,
                     params: Object {
                         "clientCapabilities": Object {
@@ -336,34 +315,8 @@ async fn test_trace_mcp_tool_call() -> Result<(), sacp::Error> {
             Response(
                 ResponseEvent {
                     ts: 0.0,
-                    from: "agent",
-                    to: "proxy:0",
-                    id: String("id:1"),
-                    is_error: false,
-                    payload: Object {
-                        "agentCapabilities": Object {
-                            "loadSession": Bool(false),
-                            "mcpCapabilities": Object {
-                                "http": Bool(false),
-                                "sse": Bool(false),
-                            },
-                            "promptCapabilities": Object {
-                                "audio": Bool(false),
-                                "embeddedContext": Bool(false),
-                                "image": Bool(false),
-                            },
-                            "sessionCapabilities": Object {},
-                        },
-                        "authMethods": Array [],
-                        "protocolVersion": Number(1),
-                    },
-                },
-            ),
-            Response(
-                ResponseEvent {
-                    ts: 0.0,
-                    from: "proxy:0",
-                    to: "client",
+                    from: "Proxy(0)",
+                    to: "Client",
                     id: String("id:0"),
                     is_error: false,
                     payload: Object {
@@ -389,9 +342,9 @@ async fn test_trace_mcp_tool_call() -> Result<(), sacp::Error> {
                 RequestEvent {
                     ts: 0.0,
                     protocol: Acp,
-                    from: "client",
-                    to: "proxy:0",
-                    id: String("id:2"),
+                    from: "Client",
+                    to: "Proxy(0)",
+                    id: String("id:1"),
                     method: "session/new",
                     session: None,
                     params: Object {
@@ -404,42 +357,22 @@ async fn test_trace_mcp_tool_call() -> Result<(), sacp::Error> {
                 RequestEvent {
                     ts: 0.0,
                     protocol: Acp,
-                    from: "proxy:0",
-                    to: "agent",
-                    id: String("id:3"),
-                    method: "session/new",
+                    from: "Proxy(1)",
+                    to: "Proxy(0)",
+                    id: String("id:2"),
+                    method: "_mcp/connect",
                     session: None,
                     params: Object {
-                        "cwd": String("/"),
-                        "mcpServers": Array [
-                            Object {
-                                "headers": Array [],
-                                "name": String("test"),
-                                "type": String("http"),
-                                "url": String("acp:url:0"),
-                            },
-                        ],
+                        "acp_url": String("acp:11c72c80-94c7-4297-b61d-4bb5abeeab9f"),
                     },
                 },
             ),
             Response(
                 ResponseEvent {
                     ts: 0.0,
-                    from: "agent",
-                    to: "proxy:0",
-                    id: String("id:3"),
-                    is_error: false,
-                    payload: Object {
-                        "sessionId": String("session:0"),
-                    },
-                },
-            ),
-            Response(
-                ResponseEvent {
-                    ts: 0.0,
-                    from: "proxy:0",
-                    to: "client",
-                    id: String("id:4"),
+                    from: "Proxy(0)",
+                    to: "Proxy(1)",
+                    id: String("id:2"),
                     is_error: false,
                     payload: Object {
                         "connection_id": String("connection:0"),
@@ -449,9 +382,9 @@ async fn test_trace_mcp_tool_call() -> Result<(), sacp::Error> {
             Response(
                 ResponseEvent {
                     ts: 0.0,
-                    from: "proxy:0",
-                    to: "client",
-                    id: String("id:2"),
+                    from: "Proxy(0)",
+                    to: "Client",
+                    id: String("id:1"),
                     is_error: false,
                     payload: Object {
                         "sessionId": String("session:0"),
@@ -462,9 +395,9 @@ async fn test_trace_mcp_tool_call() -> Result<(), sacp::Error> {
                 RequestEvent {
                     ts: 0.0,
                     protocol: Acp,
-                    from: "client",
-                    to: "proxy:0",
-                    id: String("id:5"),
+                    from: "Client",
+                    to: "Proxy(0)",
+                    id: String("id:3"),
                     method: "session/prompt",
                     session: None,
                     params: Object {
@@ -481,29 +414,28 @@ async fn test_trace_mcp_tool_call() -> Result<(), sacp::Error> {
             Request(
                 RequestEvent {
                     ts: 0.0,
-                    protocol: Acp,
-                    from: "proxy:0",
-                    to: "agent",
-                    id: String("id:6"),
-                    method: "session/prompt",
+                    protocol: Mcp,
+                    from: "Proxy(1)",
+                    to: "Proxy(0)",
+                    id: String("id:4"),
+                    method: "initialize",
                     session: None,
                     params: Object {
-                        "prompt": Array [
-                            Object {
-                                "text": String("Use tool test::echo with {\"message\": \"Hello from trace test!\"}"),
-                                "type": String("text"),
-                            },
-                        ],
-                        "sessionId": String("session:0"),
+                        "capabilities": Object {},
+                        "clientInfo": Object {
+                            "name": String("rmcp"),
+                            "version": String("0.12.0"),
+                        },
+                        "protocolVersion": String("2025-03-26"),
                     },
                 },
             ),
             Response(
                 ResponseEvent {
                     ts: 0.0,
-                    from: "proxy:0",
-                    to: "client",
-                    id: String("id:7"),
+                    from: "Proxy(0)",
+                    to: "Proxy(1)",
+                    id: String("id:4"),
                     is_error: false,
                     payload: Object {
                         "capabilities": Object {
@@ -518,12 +450,43 @@ async fn test_trace_mcp_tool_call() -> Result<(), sacp::Error> {
                     },
                 },
             ),
+            Notification(
+                NotificationEvent {
+                    ts: 0.0,
+                    protocol: Mcp,
+                    from: "Proxy(1)",
+                    to: "Proxy(0)",
+                    method: "notifications/initialized",
+                    session: None,
+                    params: Null,
+                },
+            ),
+            Request(
+                RequestEvent {
+                    ts: 0.0,
+                    protocol: Mcp,
+                    from: "Proxy(1)",
+                    to: "Proxy(0)",
+                    id: String("id:5"),
+                    method: "tools/call",
+                    session: None,
+                    params: Object {
+                        "_meta": Object {
+                            "progressToken": Number(0),
+                        },
+                        "arguments": Object {
+                            "message": String("Hello from trace test!"),
+                        },
+                        "name": String("echo"),
+                    },
+                },
+            ),
             Response(
                 ResponseEvent {
                     ts: 0.0,
-                    from: "proxy:0",
-                    to: "client",
-                    id: String("id:8"),
+                    from: "Proxy(0)",
+                    to: "Proxy(1)",
+                    id: String("id:5"),
                     is_error: false,
                     payload: Object {
                         "content": Array [
@@ -543,8 +506,8 @@ async fn test_trace_mcp_tool_call() -> Result<(), sacp::Error> {
                 NotificationEvent {
                     ts: 0.0,
                     protocol: Acp,
-                    from: "agent",
-                    to: "proxy:0",
+                    from: "Proxy(1)",
+                    to: "Proxy(0)",
                     method: "session/update",
                     session: None,
                     params: Object {
@@ -562,41 +525,9 @@ async fn test_trace_mcp_tool_call() -> Result<(), sacp::Error> {
             Response(
                 ResponseEvent {
                     ts: 0.0,
-                    from: "agent",
-                    to: "proxy:0",
-                    id: String("id:6"),
-                    is_error: false,
-                    payload: Object {
-                        "stopReason": String("end_turn"),
-                    },
-                },
-            ),
-            Notification(
-                NotificationEvent {
-                    ts: 0.0,
-                    protocol: Acp,
-                    from: "proxy:0",
-                    to: "client",
-                    method: "session/update",
-                    session: None,
-                    params: Object {
-                        "sessionId": String("session:0"),
-                        "update": Object {
-                            "content": Object {
-                                "text": String("OK: CallToolResult { content: [Annotated { raw: Text(RawTextContent { text: \"{\\\"result\\\":\\\"Echo: Hello from trace test!\\\"}\", meta: None }), annotations: None }], structured_content: Some(Object {\"result\": String(\"Echo: Hello from trace test!\")}), is_error: Some(false), meta: None }"),
-                                "type": String("text"),
-                            },
-                            "sessionUpdate": String("agent_message_chunk"),
-                        },
-                    },
-                },
-            ),
-            Response(
-                ResponseEvent {
-                    ts: 0.0,
-                    from: "proxy:0",
-                    to: "client",
-                    id: String("id:5"),
+                    from: "Proxy(0)",
+                    to: "Client",
+                    id: String("id:3"),
                     is_error: false,
                     payload: Object {
                         "stopReason": String("end_turn"),

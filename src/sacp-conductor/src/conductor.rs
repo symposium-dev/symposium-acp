@@ -117,7 +117,8 @@ use futures::{
     channel::mpsc::{self},
 };
 use sacp::{
-    AgentPeer, BoxFuture, ClientPeer, Component, Error, HasPeer, JrMessage, MessageCx,
+    AgentPeer, BoxFuture, ClientPeer, Component, DynComponent, Error, HasPeer, JrMessage,
+    MessageCx,
     link::{
         AgentToClient, ConductorToAgent, ConductorToClient, ConductorToConductor, ConductorToProxy,
         ProxyToConductor,
@@ -713,23 +714,17 @@ where
     /// Wrap a proxy component with tracing if tracing is enabled.
     ///
     /// Returns the component unchanged if tracing is disabled.
-    fn trace_proxy<L: sacp::JrLink, Cx: sacp::JrLink>(
+    fn trace_proxy<L: sacp::JrLink>(
         &self,
-        cx: &sacp::JrConnectionCx<Cx>,
-        predecessor_index: ComponentIndex,
         proxy_index: ComponentIndex,
         successor_index: ComponentIndex,
-        component: sacp::DynComponent<L>,
-    ) -> sacp::DynComponent<L> {
+        component: impl Component<L>,
+    ) -> DynComponent<L> {
         match &self.trace_handle {
-            Some(trace_handle) => trace_handle.bridge_proxy(
-                cx,
-                predecessor_index,
-                proxy_index,
-                successor_index,
-                component,
-            ),
-            None => component,
+            Some(trace_handle) => {
+                trace_handle.bridge_component(proxy_index, successor_index, component)
+            }
+            None => DynComponent::new(component),
         }
     }
 
@@ -737,103 +732,139 @@ where
     fn spawn_proxies(
         &mut self,
         cx: JrConnectionCx<Link>,
-        proxy_components: Vec<sacp::DynComponent<ProxyToConductor>>,
+        proxy_components: Vec<DynComponent<ProxyToConductor>>,
     ) -> Result<(), sacp::Error> {
         assert!(self.proxies.is_empty());
 
         let num_proxies = proxy_components.len();
         info!(proxy_count = num_proxies, "spawn_proxies");
 
-        // Spawn each proxy component
-        for (component_index, dyn_component) in proxy_components.into_iter().enumerate() {
-            debug!(component_index, "spawning proxy");
-
-            let connection_builder = ConductorToProxy::builder()
-                .name(format!("conductor-to-component({})", component_index))
-                // Intercept messages sent by a proxy component to its successor.
-                .on_receive_message(
-                    {
-                        let mut conductor_tx = self.conductor_tx.clone();
-                        type SuccessorMessageCx = MessageCx<SuccessorMessage, SuccessorMessage>;
-                        async move |message_cx: SuccessorMessageCx, _cx| {
-                            // Subtle point:
-                            //
-                            // `ConductorToProxy` has only a single peer, `AgentPeer`. This means that we see
-                            // "successor messages" in their "desugared form". So when we intercept an *outgoing*
-                            // message that matches `SuccessorMessage`, it could be one of three things
-                            //
-                            // - A request being sent by the proxy to its successor (hence going left->right)
-                            // - A notification being sent by the proxy to its successor (hence going left->right)
-                            // - A response to a request sent to the proxy *by* its successor. Here, the *request*
-                            //   was going right->left, but the *response* (the message we are processing now)
-                            //   is going left->right.
-                            //
-                            // So, in all cases, we forward as a left->right message.
-
-                            conductor_tx
-                                .send(ConductorMessage::LeftToRight {
-                                    target_component_index: component_index + 1,
-                                    message: message_cx.map(|r, cx| (r.message, cx), |n| n.message),
-                                })
-                                .await
-                                .map_err(sacp::util::internal_error)
-                        }
-                    },
-                    sacp::on_receive_message!(),
-                )
-                // Intercept agent-to-client messages from the proxy.
-                .on_receive_message(
-                    {
-                        let mut conductor_tx = self.conductor_tx.clone();
-                        async move |message_cx: MessageCx, _cx| {
-                            // As in the previous handler:
-                            //
-                            // Messages here are seen in their "desugared form", so we are seeing
-                            // one of three things
-                            //
-                            // - A request being sent by the proxy to its predecessor (hence going right->left)
-                            // - A notification being sent by the proxy to its predecessor (hence going right->left)
-                            // - A response to a request sent to the proxy *by* its predecessor. Here, the *request*
-                            //   was going left->right, but the *response* (the message we are processing now)
-                            //   is going right->left.
-                            //
-                            // So, in all cases, we forward as a right->left message.
-
-                            let message = ConductorMessage::RightToLeft {
-                                source_component_index: SourceComponentIndex::Proxy(
-                                    component_index,
-                                ),
-                                message: message_cx,
-                            };
-                            conductor_tx
-                                .send(message)
-                                .await
-                                .map_err(sacp::util::internal_error)
-                        }
-                    },
-                    sacp::on_receive_message!(),
-                );
-
-            // First proxy (index 0) is an edge - outgoing requests go to client
-            let connect_component = self.trace_proxy(
+        // Special case: if there are no user-defined proxies
+        // but tracing is enabled, we make a dummy proxy that just
+        // passes through messages but which can trigger the
+        // tracing events.
+        if self.trace_handle.is_some() && num_proxies == 0 {
+            self.connect_to_proxy(
                 &cx,
-                ComponentIndex::predecessor_of(component_index),
-                ComponentIndex::Proxy(component_index),
-                ComponentIndex::successor_of(component_index, num_proxies),
-                dyn_component,
-            );
+                0,
+                ComponentIndex::Client,
+                ComponentIndex::Agent,
+                ProxyToConductor::builder(),
+            )?;
+        } else {
+            // Spawn each proxy component
+            for (component_index, dyn_component) in proxy_components.into_iter().enumerate() {
+                debug!(component_index, "spawning proxy");
 
-            let proxy_cx = cx
-                .spawn_connection(connection_builder.connect_to(connect_component)?, |c| {
-                    Box::pin(c.serve())
-                })?;
-
-            self.proxies.push(proxy_cx);
+                self.connect_to_proxy(
+                    &cx,
+                    component_index,
+                    ComponentIndex::Proxy(component_index),
+                    ComponentIndex::successor_of(component_index, num_proxies),
+                    dyn_component,
+                )?;
+            }
         }
 
         info!(proxy_count = self.proxies.len(), "Proxies spawned");
 
         Ok(())
+    }
+
+    /// Create a connection to the proxy with index `component_index` implemented in `component`.
+    ///
+    /// If tracing is enabled, the proxy's index is `trace_proxy_index` and its successor is `trace_successor_index`.
+    fn connect_to_proxy(
+        &mut self,
+        cx: &JrConnectionCx<Link>,
+        component_index: usize,
+        trace_proxy_index: ComponentIndex,
+        trace_successor_index: ComponentIndex,
+        component: impl Component<ProxyToConductor>,
+    ) -> Result<(), Error> {
+        let connection_builder = self.connection_to_proxy(component_index);
+        let connect_component =
+            self.trace_proxy(trace_proxy_index, trace_successor_index, component);
+        let proxy_cx = cx
+            .spawn_connection(connection_builder.connect_to(connect_component)?, |c| {
+                Box::pin(c.serve())
+            })?;
+        self.proxies.push(proxy_cx);
+        Ok(())
+    }
+
+    /// Create the conductor's connection to the proxy with index `component_index`.
+    ///
+    /// Outgoing messages received from the proxy are sent to `self.conductor_tx` as either
+    /// left-to-right or right-to-left messages depending on whether they are wrapped
+    /// in `SuccessorMessage`.
+    fn connection_to_proxy(
+        &mut self,
+        component_index: usize,
+    ) -> JrConnectionBuilder<impl JrMessageHandler<Link = ConductorToProxy> + 'static> {
+        ConductorToProxy::builder()
+            .name(format!("conductor-to-component({})", component_index))
+            // Intercept messages sent by a proxy component to its successor.
+            .on_receive_message(
+                {
+                    let mut conductor_tx = self.conductor_tx.clone();
+                    type SuccessorMessageCx = MessageCx<SuccessorMessage, SuccessorMessage>;
+                    async move |message_cx: SuccessorMessageCx, _cx| {
+                        // Subtle point:
+                        //
+                        // `ConductorToProxy` has only a single peer, `AgentPeer`. This means that we see
+                        // "successor messages" in their "desugared form". So when we intercept an *outgoing*
+                        // message that matches `SuccessorMessage`, it could be one of three things
+                        //
+                        // - A request being sent by the proxy to its successor (hence going left->right)
+                        // - A notification being sent by the proxy to its successor (hence going left->right)
+                        // - A response to a request sent to the proxy *by* its successor. Here, the *request*
+                        //   was going right->left, but the *response* (the message we are processing now)
+                        //   is going left->right.
+                        //
+                        // So, in all cases, we forward as a left->right message.
+
+                        conductor_tx
+                            .send(ConductorMessage::LeftToRight {
+                                target_component_index: component_index + 1,
+                                message: message_cx.map(|r, cx| (r.message, cx), |n| n.message),
+                            })
+                            .await
+                            .map_err(sacp::util::internal_error)
+                    }
+                },
+                sacp::on_receive_message!(),
+            )
+            // Intercept agent-to-client messages from the proxy.
+            .on_receive_message(
+                {
+                    let mut conductor_tx = self.conductor_tx.clone();
+                    async move |message_cx: MessageCx, _cx| {
+                        // As in the previous handler:
+                        //
+                        // Messages here are seen in their "desugared form", so we are seeing
+                        // one of three things
+                        //
+                        // - A request being sent by the proxy to its predecessor (hence going right->left)
+                        // - A notification being sent by the proxy to its predecessor (hence going right->left)
+                        // - A response to a request sent to the proxy *by* its predecessor. Here, the *request*
+                        //   was going left->right, but the *response* (the message we are processing now)
+                        //   is going right->left.
+                        //
+                        // So, in all cases, we forward as a right->left message.
+
+                        let message = ConductorMessage::RightToLeft {
+                            source_component_index: SourceComponentIndex::Proxy(component_index),
+                            message: message_cx,
+                        };
+                        conductor_tx
+                            .send(message)
+                            .await
+                            .map_err(sacp::util::internal_error)
+                    }
+                },
+                sacp::on_receive_message!(),
+            )
     }
 
     async fn forward_message_to_proxy(
@@ -1019,7 +1050,7 @@ pub trait InstantiateProxies: Send {
         req: InitializeRequest,
     ) -> futures::future::BoxFuture<
         'static,
-        Result<(InitializeRequest, Vec<sacp::DynComponent<ProxyToConductor>>), sacp::Error>,
+        Result<(InitializeRequest, Vec<DynComponent<ProxyToConductor>>), sacp::Error>,
     >;
 }
 
@@ -1035,13 +1066,11 @@ where
         req: InitializeRequest,
     ) -> futures::future::BoxFuture<
         'static,
-        Result<(InitializeRequest, Vec<sacp::DynComponent<ProxyToConductor>>), sacp::Error>,
+        Result<(InitializeRequest, Vec<DynComponent<ProxyToConductor>>), sacp::Error>,
     > {
         Box::pin(async move {
-            let components: Vec<sacp::DynComponent<ProxyToConductor>> = (*self)
-                .into_iter()
-                .map(|c| sacp::DynComponent::new(c))
-                .collect();
+            let components: Vec<DynComponent<ProxyToConductor>> =
+                (*self).into_iter().map(|c| DynComponent::new(c)).collect();
             Ok((req, components))
         })
     }
@@ -1052,10 +1081,7 @@ impl<F, Fut> InstantiateProxies for F
 where
     F: FnOnce(InitializeRequest) -> Fut + Send + 'static,
     Fut: std::future::Future<
-            Output = Result<
-                (InitializeRequest, Vec<sacp::DynComponent<ProxyToConductor>>),
-                sacp::Error,
-            >,
+            Output = Result<(InitializeRequest, Vec<DynComponent<ProxyToConductor>>), sacp::Error>,
         > + Send
         + 'static,
 {
@@ -1064,7 +1090,7 @@ where
         req: InitializeRequest,
     ) -> futures::future::BoxFuture<
         'static,
-        Result<(InitializeRequest, Vec<sacp::DynComponent<ProxyToConductor>>), sacp::Error>,
+        Result<(InitializeRequest, Vec<DynComponent<ProxyToConductor>>), sacp::Error>,
     > {
         Box::pin(async move { (*self)(req).await })
     }
@@ -1088,8 +1114,8 @@ pub trait InstantiateProxiesAndAgent: Send {
         Result<
             (
                 InitializeRequest,
-                Vec<sacp::DynComponent<ProxyToConductor>>,
-                sacp::DynComponent<AgentToClient>,
+                Vec<DynComponent<ProxyToConductor>>,
+                DynComponent<AgentToClient>,
             ),
             sacp::Error,
         >,
@@ -1108,13 +1134,13 @@ impl<A: Component<AgentToClient> + 'static> InstantiateProxiesAndAgent for Agent
         Result<
             (
                 InitializeRequest,
-                Vec<sacp::DynComponent<ProxyToConductor>>,
-                sacp::DynComponent<AgentToClient>,
+                Vec<DynComponent<ProxyToConductor>>,
+                DynComponent<AgentToClient>,
             ),
             sacp::Error,
         >,
     > {
-        Box::pin(async move { Ok((req, Vec::new(), sacp::DynComponent::new(self.0))) })
+        Box::pin(async move { Ok((req, Vec::new(), DynComponent::new(self.0))) })
     }
 }
 
@@ -1127,8 +1153,8 @@ impl<A: Component<AgentToClient> + 'static> InstantiateProxiesAndAgent for Agent
 ///     .proxy(AuthProxy::new())
 /// ```
 pub struct ProxiesAndAgent {
-    proxies: Vec<sacp::DynComponent<ProxyToConductor>>,
-    agent: sacp::DynComponent<AgentToClient>,
+    proxies: Vec<DynComponent<ProxyToConductor>>,
+    agent: DynComponent<AgentToClient>,
 }
 
 impl ProxiesAndAgent {
@@ -1136,13 +1162,13 @@ impl ProxiesAndAgent {
     pub fn new(agent: impl Component<AgentToClient> + 'static) -> Self {
         Self {
             proxies: vec![],
-            agent: sacp::DynComponent::new(agent),
+            agent: DynComponent::new(agent),
         }
     }
 
     /// Add a single proxy component.
     pub fn proxy(mut self, proxy: impl Component<ProxyToConductor> + 'static) -> Self {
-        self.proxies.push(sacp::DynComponent::new(proxy));
+        self.proxies.push(DynComponent::new(proxy));
         self
     }
 
@@ -1153,7 +1179,7 @@ impl ProxiesAndAgent {
         I: IntoIterator<Item = P>,
     {
         self.proxies
-            .extend(proxies.into_iter().map(sacp::DynComponent::new));
+            .extend(proxies.into_iter().map(DynComponent::new));
         self
     }
 }
@@ -1167,8 +1193,8 @@ impl InstantiateProxiesAndAgent for ProxiesAndAgent {
         Result<
             (
                 InitializeRequest,
-                Vec<sacp::DynComponent<ProxyToConductor>>,
-                sacp::DynComponent<AgentToClient>,
+                Vec<DynComponent<ProxyToConductor>>,
+                DynComponent<AgentToClient>,
             ),
             sacp::Error,
         >,
@@ -1185,8 +1211,8 @@ where
             Output = Result<
                 (
                     InitializeRequest,
-                    Vec<sacp::DynComponent<ProxyToConductor>>,
-                    sacp::DynComponent<AgentToClient>,
+                    Vec<DynComponent<ProxyToConductor>>,
+                    DynComponent<AgentToClient>,
                 ),
                 sacp::Error,
             >,
@@ -1201,8 +1227,8 @@ where
         Result<
             (
                 InitializeRequest,
-                Vec<sacp::DynComponent<ProxyToConductor>>,
-                sacp::DynComponent<AgentToClient>,
+                Vec<DynComponent<ProxyToConductor>>,
+                DynComponent<AgentToClient>,
             ),
             sacp::Error,
         >,

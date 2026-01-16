@@ -303,8 +303,8 @@ async fn test_trace_client_mcp_server() -> Result<(), sacp::Error> {
                 RequestEvent {
                     ts: 0.0,
                     protocol: Acp,
-                    from: "client",
-                    to: "agent",
+                    from: "Client",
+                    to: "Agent",
                     id: String("id:0"),
                     method: "initialize",
                     session: None,
@@ -323,8 +323,8 @@ async fn test_trace_client_mcp_server() -> Result<(), sacp::Error> {
             Response(
                 ResponseEvent {
                     ts: 0.0,
-                    from: "agent",
-                    to: "client",
+                    from: "Agent",
+                    to: "Client",
                     id: String("id:0"),
                     is_error: false,
                     payload: Object {
@@ -350,8 +350,8 @@ async fn test_trace_client_mcp_server() -> Result<(), sacp::Error> {
                 RequestEvent {
                     ts: 0.0,
                     protocol: Acp,
-                    from: "client",
-                    to: "agent",
+                    from: "Client",
+                    to: "Agent",
                     id: String("id:1"),
                     method: "session/new",
                     session: None,
@@ -368,11 +368,25 @@ async fn test_trace_client_mcp_server() -> Result<(), sacp::Error> {
                     },
                 },
             ),
+            Request(
+                RequestEvent {
+                    ts: 0.0,
+                    protocol: Acp,
+                    from: "Agent",
+                    to: "Client",
+                    id: String("id:2"),
+                    method: "_mcp/connect",
+                    session: None,
+                    params: Object {
+                        "acp_url": String("acp:0d9b5456-8d7b-47e8-9b84-2340bdde4fc4"),
+                    },
+                },
+            ),
             Response(
                 ResponseEvent {
                     ts: 0.0,
-                    from: "agent",
-                    to: "client",
+                    from: "Agent",
+                    to: "Client",
                     id: String("id:1"),
                     is_error: false,
                     payload: Object {
@@ -384,9 +398,9 @@ async fn test_trace_client_mcp_server() -> Result<(), sacp::Error> {
                 RequestEvent {
                     ts: 0.0,
                     protocol: Acp,
-                    from: "client",
-                    to: "agent",
-                    id: String("id:2"),
+                    from: "Client",
+                    to: "Agent",
+                    id: String("id:3"),
                     method: "session/prompt",
                     session: None,
                     params: Object {
@@ -400,12 +414,116 @@ async fn test_trace_client_mcp_server() -> Result<(), sacp::Error> {
                     },
                 },
             ),
+            Response(
+                ResponseEvent {
+                    ts: 0.0,
+                    from: "Client",
+                    to: "Agent",
+                    id: String("id:2"),
+                    is_error: false,
+                    payload: Object {
+                        "connection_id": String("connection:0"),
+                    },
+                },
+            ),
+            Request(
+                RequestEvent {
+                    ts: 0.0,
+                    protocol: Mcp,
+                    from: "Agent",
+                    to: "Client",
+                    id: String("id:4"),
+                    method: "initialize",
+                    session: None,
+                    params: Object {
+                        "capabilities": Object {},
+                        "clientInfo": Object {
+                            "name": String("rmcp"),
+                            "version": String("0.12.0"),
+                        },
+                        "protocolVersion": String("2025-03-26"),
+                    },
+                },
+            ),
+            Response(
+                ResponseEvent {
+                    ts: 0.0,
+                    from: "Client",
+                    to: "Agent",
+                    id: String("id:4"),
+                    is_error: false,
+                    payload: Object {
+                        "capabilities": Object {
+                            "tools": Object {},
+                        },
+                        "instructions": String("A test MCP server hosted by the client"),
+                        "protocolVersion": String("2025-03-26"),
+                        "serverInfo": Object {
+                            "name": String("rmcp"),
+                            "version": String("0.12.0"),
+                        },
+                    },
+                },
+            ),
+            Notification(
+                NotificationEvent {
+                    ts: 0.0,
+                    protocol: Mcp,
+                    from: "Agent",
+                    to: "Client",
+                    method: "notifications/initialized",
+                    session: None,
+                    params: Null,
+                },
+            ),
+            Request(
+                RequestEvent {
+                    ts: 0.0,
+                    protocol: Mcp,
+                    from: "Agent",
+                    to: "Client",
+                    id: String("id:5"),
+                    method: "tools/call",
+                    session: None,
+                    params: Object {
+                        "_meta": Object {
+                            "progressToken": Number(0),
+                        },
+                        "arguments": Object {
+                            "message": String("Hello from client test!"),
+                        },
+                        "name": String("echo"),
+                    },
+                },
+            ),
+            Response(
+                ResponseEvent {
+                    ts: 0.0,
+                    from: "Client",
+                    to: "Agent",
+                    id: String("id:5"),
+                    is_error: false,
+                    payload: Object {
+                        "content": Array [
+                            Object {
+                                "text": String("{\"call_number\":1,\"echoed\":\"Client echoes: Hello from client test!\"}"),
+                                "type": String("text"),
+                            },
+                        ],
+                        "isError": Bool(false),
+                        "structuredContent": Object {
+                            "call_number": Number(1),
+                            "echoed": String("Client echoes: Hello from client test!"),
+                        },
+                    },
+                },
+            ),
             Notification(
                 NotificationEvent {
                     ts: 0.0,
                     protocol: Acp,
-                    from: "agent",
-                    to: "client",
+                    from: "Agent",
+                    to: "Client",
                     method: "session/update",
                     session: None,
                     params: Object {
@@ -423,9 +541,9 @@ async fn test_trace_client_mcp_server() -> Result<(), sacp::Error> {
             Response(
                 ResponseEvent {
                     ts: 0.0,
-                    from: "agent",
-                    to: "client",
-                    id: String("id:2"),
+                    from: "Agent",
+                    to: "Client",
+                    id: String("id:3"),
                     is_error: false,
                     payload: Object {
                         "stopReason": String("end_turn"),

@@ -10,10 +10,11 @@ use std::time::Instant;
 
 use fxhash::FxHashMap;
 use sacp::schema::{McpOverAcpMessage, SuccessorMessage};
-use sacp::{JrMessage, UntypedMessage, jsonrpcmsg};
+use sacp::{DynComponent, JrMessage, UntypedMessage, jsonrpcmsg};
 use serde::{Deserialize, Serialize};
 
 use crate::ComponentIndex;
+use crate::snoop::SnooperComponent;
 
 /// A trace event representing message flow between components.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -284,8 +285,7 @@ impl TraceWriter {
     /// Trace a raw JSON-RPC message being sent from one component to another.
     fn trace_message(&mut self, traced_message: TracedMessage) {
         let TracedMessage {
-            predecessor_index,
-            proxy_index,
+            component_index,
             successor_index,
             incoming,
             message,
@@ -311,18 +311,27 @@ impl TraceWriter {
                     params,
                 } = MessageInfo::from_req(req);
 
-                let (from, to) = match (successor, incoming, successor_index) {
+                let (from, to) = match (successor, incoming, component_index, successor_index) {
                     // An incoming request/notification to a proxy from its predecessor.
-                    (Successor(false), Incoming(true), _) => (predecessor_index, proxy_index),
+                    (Successor(false), Incoming(true), ComponentIndex::Proxy(proxy_index), _) => (
+                        ComponentIndex::predecessor_of(proxy_index),
+                        ComponentIndex::Proxy(proxy_index),
+                    ),
 
-                    // An incoming request/notification to a proxy from its successor.
-                    (Successor(true), Incoming(true), _) => (successor_index, proxy_index),
+                    // An incoming request/notification to any component from its successor.
+                    //
+                    // This includes incoming messages to the client in the case where we have no proxies.
+                    (Successor(true), Incoming(true), component_index, successor_index) => {
+                        (successor_index, component_index)
+                    }
 
-                    // An outgoing request/notification to a proxy to its successor
-                    // *and* its successor is not a proxy. (If its successor is a proxy,
-                    // we ignore it, because we'll also see the message in "incoming" form).
-                    (Successor(true), Incoming(false), ComponentIndex::Agent) => {
-                        (proxy_index, successor_index)
+                    // An outgoing request/notification from a component to its successor
+                    // *and* its successor is not a proxy.
+                    //
+                    // (If its successor is a proxy, we ignore it, because we'll also see the
+                    // message in "incoming" form).
+                    (Successor(true), Incoming(false), component_index, ComponentIndex::Agent) => {
+                        (component_index, ComponentIndex::Agent)
                     }
 
                     _ => return,
@@ -401,16 +410,14 @@ impl TraceHandle {
     /// Trace a raw JSON-RPC message being sent from one component to another.
     fn trace_message(
         &self,
-        predecessor_index: ComponentIndex,
-        proxy_index: ComponentIndex,
+        component_index: ComponentIndex,
         successor_index: ComponentIndex,
         incoming: Incoming,
         message: &jsonrpcmsg::Message,
     ) -> Result<(), sacp::Error> {
         self.tx
             .unbounded_send(TracedMessage {
-                predecessor_index,
-                proxy_index,
+                component_index,
                 successor_index,
                 incoming,
                 message: message.clone(),
@@ -432,86 +439,27 @@ impl TraceHandle {
     /// - `left_name`: Logical name of the component on the "left" side (e.g., "client", "proxy:0")
     /// - `right_name`: Logical name of the component on the "right" side (e.g., "proxy:0", "agent")
     /// - `component`: The component to wrap
-    pub fn bridge_proxy<L: sacp::JrLink, Cx: sacp::JrLink>(
+    pub fn bridge_component<L: sacp::JrLink>(
         &self,
-        cx: &sacp::JrConnectionCx<Cx>,
-        predecessor_index: ComponentIndex,
         proxy_index: ComponentIndex,
         successor_index: ComponentIndex,
-        proxy: impl sacp::Component<L> + 'static,
-    ) -> sacp::DynComponent<L> {
-        use futures::StreamExt;
-
-        // The way we do this is that instead of directly
-        // connecting the proxy to the conductor
-        //
-        // conductor <-> proxy
-        //
-        // we create a "man in the middle" (the tracing task)
-        // where all messages from the conductor go into a duplex
-        // channel. The `tracing_task` reads them from its endpoint (`b`),
-        // logs, and forwards to the component. Any messages
-        // sent by the component get forwarded back through the
-        // duplex channel.
-        //
-        // conductor <->  conductor_channel <-> tracing_channel <-> proxy_channel
-        //                                                  ^          ^
-        //                                                  +----------+
-        //                                               tracing task is doing this
-        let (conductor_channel, tracing_channel) = sacp::Channel::duplex();
-        let (proxy_channel, proxy_future) = proxy.into_server();
-        let trace_handle = self.clone();
-
-        let bridge_future = Box::pin(async move {
-            // Forward messages left→right (incoming to component)
-            // Trace requests/notifications, skip responses
-            // Also skip SuccessorMessages - they came from the right and were already traced
-            let left_to_right = async {
-                let mut rx = tracing_channel.rx;
-                let tx = proxy_channel.tx.clone();
-                while let Some(msg) = rx.next().await {
-                    if let Ok(ref m) = msg {
-                        trace_handle.trace_message(
-                            predecessor_index,
-                            proxy_index,
-                            successor_index,
-                            Incoming(true),
-                            m,
-                        )?;
-                    }
-                    tx.unbounded_send(msg).map_err(sacp::util::internal_error)?;
+        proxy: impl sacp::Component<L>,
+    ) -> DynComponent<L> {
+        DynComponent::new(SnooperComponent::new(
+            proxy,
+            {
+                let trace_handle = self.clone();
+                move |msg| {
+                    trace_handle.trace_message(proxy_index, successor_index, Incoming(true), msg)
                 }
-                Ok(())
-            };
-
-            // Forward messages right→left (outgoing from component)
-            // Trace responses always; trace requests/notifications only if trace_outgoing_requests
-            // BUT: SuccessorMessage wrappers indicate the message is going RIGHT (to successor),
-            // so we should NOT trace those here (they'll be traced as incoming at the next bridge)
-            let right_to_left = async {
-                let mut rx = proxy_channel.rx;
-                let tx = tracing_channel.tx;
-                while let Some(msg) = rx.next().await {
-                    if let Ok(ref m) = msg {
-                        trace_handle.trace_message(
-                            predecessor_index,
-                            proxy_index,
-                            successor_index,
-                            Incoming(false),
-                            m,
-                        )?;
-                    }
-                    tx.unbounded_send(msg).map_err(sacp::util::internal_error)?;
+            },
+            {
+                let trace_handle = self.clone();
+                move |msg| {
+                    trace_handle.trace_message(proxy_index, successor_index, Incoming(false), msg)
                 }
-                Ok(())
-            };
-
-            futures::try_join!(proxy_future, left_to_right, right_to_left)?;
-            Ok(())
-        });
-
-        let _ = cx.spawn(bridge_future);
-        sacp::DynComponent::new(conductor_channel)
+            },
+        ))
     }
 }
 
@@ -528,8 +476,7 @@ fn id_to_json(id: &jsonrpcmsg::Id) -> serde_json::Value {
 /// This could be a successor message, a mcp-over-acp message, etc.
 #[derive(Debug)]
 struct TracedMessage {
-    predecessor_index: ComponentIndex,
-    proxy_index: ComponentIndex,
+    component_index: ComponentIndex,
     successor_index: ComponentIndex,
     incoming: Incoming,
     message: jsonrpcmsg::Message,
