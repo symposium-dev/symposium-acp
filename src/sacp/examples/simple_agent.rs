@@ -1,6 +1,6 @@
 use sacp::AgentToClient;
 use sacp::schema::{AgentCapabilities, InitializeRequest, InitializeResponse};
-use sacp::{JrConnectionCx, MessageCx};
+use sacp::{ConnectionTo, MessageCx};
 use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
 
 #[tokio::main]
@@ -18,7 +18,7 @@ async fn main() -> Result<(), sacp::Error> {
             sacp::on_receive_request!(),
         )
         .on_receive_message(
-            async move |message: MessageCx, cx: JrConnectionCx<AgentToClient>| {
+            async move |message: MessageCx, cx: ConnectionTo<AgentToClient>| {
                 // Respond to any other message with an error
                 message.respond_with_error(sacp::util::internal_error("TODO"), cx)
             },

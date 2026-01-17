@@ -27,8 +27,8 @@
 //!
 //! Your callback receives three arguments:
 //! - The request payload (e.g., `PermissionRequest`)
-//! - A [`JrRequestCx`] for sending the response
-//! - A [`JrConnectionCx`] for sending other messages
+//! - A [`Responder`] for sending the response
+//! - A [`ConnectionTo`] for sending other messages
 //!
 //! # Handling Notifications
 //!
@@ -51,7 +51,7 @@
 //!
 //! # The Request Context
 //!
-//! The [`JrRequestCx`] lets you send a response to the request:
+//! The [`Responder`] lets you send a response to the request:
 //!
 //! ```
 //! # use sacp::{ClientToAgent, AgentToClient, Component};
@@ -123,5 +123,5 @@
 //! - [Explicit Peers](super::peers) - Use `_from` variants to specify the source peer
 //! - [Ordering](super::ordering) - Understand dispatch loop semantics
 //!
-//! [`JrRequestCx`]: crate::JrRequestCx
-//! [`JrConnectionCx`]: crate::JrConnectionCx
+//! [`Responder`]: crate::Responder
+//! [`ConnectionTo`]: crate::ConnectionTo

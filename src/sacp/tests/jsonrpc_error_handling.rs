@@ -11,7 +11,7 @@ use expect_test::expect;
 use futures::{AsyncRead, AsyncWrite};
 use sacp::link::UntypedLink;
 use sacp::{
-    JrConnectionCx, JrRequestCx, JrResponse, JsonRpcMessage, JsonRpcRequest, JsonRpcResponse,
+    ConnectionTo, Responder, JrResponse, JsonRpcMessage, JsonRpcRequest, JsonRpcResponse,
 };
 use serde::{Deserialize, Serialize};
 use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
@@ -273,8 +273,8 @@ async fn test_handler_returns_error() {
             let server_transport = sacp::ByteStreams::new(server_writer, server_reader);
             let server = UntypedLink::builder().on_receive_request(
                 async |_request: ErrorRequest,
-                       request_cx: JrRequestCx<SimpleResponse>,
-                       _connection_cx: JrConnectionCx<UntypedLink>| {
+                       request_cx: Responder<SimpleResponse>,
+                       _connection_cx: ConnectionTo<UntypedLink>| {
                     // Explicitly return an error
                     request_cx.respond_with_error(sacp::Error::internal_error())
                 },
@@ -357,8 +357,8 @@ async fn test_missing_required_params() {
             let server_transport = sacp::ByteStreams::new(server_writer, server_reader);
             let server = UntypedLink::builder().on_receive_request(
                 async |_request: EmptyRequest,
-                       request_cx: JrRequestCx<SimpleResponse>,
-                       _connection_cx: JrConnectionCx<UntypedLink>| {
+                       request_cx: Responder<SimpleResponse>,
+                       _connection_cx: ConnectionTo<UntypedLink>| {
                     // This will be called, but EmptyRequest parsing already succeeded
                     // The test is actually checking if EmptyRequest (no params) fails to parse as SimpleRequest
                     // But with the new API, EmptyRequest parses successfully since it expects no params

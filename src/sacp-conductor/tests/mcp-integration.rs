@@ -38,7 +38,7 @@ fn conductor_command() -> Vec<String> {
 async fn run_test_with_mode(
     mode: McpBridgeMode,
     components: ProxiesAndAgent,
-    editor_task: impl AsyncFnOnce(sacp::JrConnectionCx<sacp::ClientToAgent>) -> Result<(), sacp::Error>,
+    editor_task: impl AsyncFnOnce(sacp::ConnectionTo<sacp::ClientToAgent>) -> Result<(), sacp::Error>,
 ) -> Result<(), sacp::Error> {
     // Initialize tracing for debug output
     let _ = tracing_subscriber::fmt()
@@ -165,7 +165,7 @@ async fn test_agent_handles_prompt() -> Result<(), sacp::Error> {
             {
                 let mut log_tx = log_tx.clone();
                 async move |notification: SessionNotification,
-                            _cx: sacp::JrConnectionCx<sacp::ClientToAgent>| {
+                            _cx: sacp::ConnectionTo<sacp::ClientToAgent>| {
                     // Log the notification in debug format
                     log_tx
                         .send(format!("{notification:?}"))

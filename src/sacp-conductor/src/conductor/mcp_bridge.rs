@@ -8,7 +8,7 @@ use std::path::PathBuf;
 use futures::{SinkExt, channel::mpsc};
 use sacp::schema::{McpServer, McpServerHttp, McpServerStdio};
 use sacp::{self, JrLink};
-use sacp::{JrConnectionCx, MessageCx};
+use sacp::{ConnectionTo, MessageCx};
 use tokio::net::TcpListener;
 use tracing::info;
 
@@ -60,7 +60,7 @@ impl McpBridgeListeners {
     /// Other MCP servers are left unchanged.
     pub async fn transform_mcp_server(
         &mut self,
-        cx: JrConnectionCx<impl JrLink>,
+        cx: ConnectionTo<impl JrLink>,
         mcp_server: &mut McpServer,
         conductor_tx: &mpsc::Sender<ConductorMessage>,
         mcp_bridge_mode: &crate::McpBridgeMode,
@@ -99,7 +99,7 @@ impl McpBridgeListeners {
     /// Spawn a bridge listener (HTTP or stdio) for an MCP server with ACP transport
     async fn spawn_bridge(
         &mut self,
-        cx: JrConnectionCx<impl JrLink>,
+        cx: ConnectionTo<impl JrLink>,
         server_name: &str,
         acp_url: &str,
         conductor_tx: &mpsc::Sender<ConductorMessage>,

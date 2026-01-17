@@ -6,7 +6,7 @@
 
 use std::future::Future;
 
-use crate::{JrConnectionCx, link::JrLink};
+use crate::{ConnectionTo, link::JrLink};
 
 /// A background task that runs alongside a connection.
 ///
@@ -14,7 +14,7 @@ use crate::{JrConnectionCx, link::JrLink};
 /// when the connection is active.
 pub trait Run<Link: JrLink>: Send {
     /// Run this task to completion.
-    fn run(self, cx: JrConnectionCx<Link>)
+    fn run(self, cx: ConnectionTo<Link>)
     -> impl Future<Output = Result<(), crate::Error>> + Send;
 }
 
@@ -23,7 +23,7 @@ pub trait Run<Link: JrLink>: Send {
 pub struct NullRun;
 
 impl<Link: JrLink> Run<Link> for NullRun {
-    async fn run(self, _cx: JrConnectionCx<Link>) -> Result<(), crate::Error> {
+    async fn run(self, _cx: ConnectionTo<Link>) -> Result<(), crate::Error> {
         Ok(())
     }
 }
@@ -42,7 +42,7 @@ impl<A, B> ChainRun<A, B> {
 }
 
 impl<Link: JrLink, A: Run<Link>, B: Run<Link>> Run<Link> for ChainRun<A, B> {
-    async fn run(self, cx: JrConnectionCx<Link>) -> Result<(), crate::Error> {
+    async fn run(self, cx: ConnectionTo<Link>) -> Result<(), crate::Error> {
         // Box the futures to avoid stack overflow with deeply nested Run chains
         let a_fut = Box::pin(self.a.run(cx.clone()));
         let b_fut = Box::pin(self.b.run(cx.clone()));
@@ -67,10 +67,10 @@ impl<F> SpawnedRun<F> {
 impl<Link, F, Fut> Run<Link> for SpawnedRun<F>
 where
     Link: JrLink,
-    F: FnOnce(JrConnectionCx<Link>) -> Fut + Send,
+    F: FnOnce(ConnectionTo<Link>) -> Fut + Send,
     Fut: Future<Output = Result<(), crate::Error>> + Send,
 {
-    async fn run(self, cx: JrConnectionCx<Link>) -> Result<(), crate::Error> {
+    async fn run(self, cx: ConnectionTo<Link>) -> Result<(), crate::Error> {
         let location = self.location;
         (self.task_fn)(cx).await.map_err(|err| {
             let data = err.data.clone();

@@ -17,7 +17,7 @@ use sacp::schema::{
     RequestPermissionOutcome, RequestPermissionRequest, RequestPermissionResponse,
     SelectedPermissionOutcome, SessionNotification, TextContent,
 };
-use sacp::{ClientToAgent, JrConnectionCx};
+use sacp::{ClientToAgent, ConnectionTo};
 use std::path::PathBuf;
 use tokio::process::Child;
 use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
@@ -114,7 +114,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             },
             sacp::on_receive_request!(),
         )
-        .run_until(transport, |cx: JrConnectionCx<ClientToAgent>| async move {
+        .run_until(transport, |cx: ConnectionTo<ClientToAgent>| async move {
             // Initialize the agent
             eprintln!("🤝 Initializing agent...");
             let init_response = cx

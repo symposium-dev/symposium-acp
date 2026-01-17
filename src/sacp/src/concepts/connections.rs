@@ -36,7 +36,7 @@
 //!
 //! # The Connection Context
 //!
-//! Inside `run_until`, you receive a [`JrConnectionCx`] (connection context) that
+//! Inside `run_until`, you receive a [`ConnectionTo`] (connection context) that
 //! lets you interact with the remote peer:
 //!
 //! ```
@@ -116,5 +116,5 @@
 //! [`ClientToAgent`]: crate::ClientToAgent
 //! [`AgentToClient`]: crate::AgentToClient
 //! [`ProxyToConductor`]: crate::ProxyToConductor
-//! [`JrConnectionCx`]: crate::JrConnectionCx
+//! [`ConnectionTo`]: crate::ConnectionTo
 //! [`JrResponse`]: crate::JrResponse

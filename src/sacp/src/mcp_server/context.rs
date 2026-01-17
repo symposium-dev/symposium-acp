@@ -1,10 +1,10 @@
-use crate::{JrConnectionCx, JrLink};
+use crate::{ConnectionTo, JrLink};
 
 /// Context about the ACP and MCP connection available to an MCP server.
 #[derive(Clone)]
 pub struct McpContext<Link> {
     pub(super) acp_url: String,
-    pub(super) connection_cx: JrConnectionCx<Link>,
+    pub(super) connection_cx: ConnectionTo<Link>,
 }
 
 impl<Link: JrLink> McpContext<Link> {
@@ -15,7 +15,7 @@ impl<Link: JrLink> McpContext<Link> {
 
     /// The ACP connection context, which can be used to send ACP requests and notifications
     /// to your successor.
-    pub fn connection_cx(&self) -> JrConnectionCx<Link> {
+    pub fn connection_cx(&self) -> ConnectionTo<Link> {
         self.connection_cx.clone()
     }
 }

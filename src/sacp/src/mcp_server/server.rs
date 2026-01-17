@@ -7,7 +7,7 @@ use futures::{StreamExt, channel::mpsc};
 use uuid::Uuid;
 
 use crate::{
-    AgentPeer, ClientPeer, Component, DynComponent, Handled, HasPeer, JrConnectionCx, JrLink,
+    AgentPeer, ClientPeer, Component, DynComponent, Handled, HasPeer, ConnectionTo, JrLink,
     JrMessageHandler, MessageCx,
     jsonrpc::{
         DynamicHandlerRegistration,
@@ -145,7 +145,7 @@ where
     pub fn into_dynamic_handler(
         self,
         request: &mut NewSessionRequest,
-        cx: &JrConnectionCx<Link>,
+        cx: &ConnectionTo<Link>,
     ) -> Result<DynamicHandlerRegistration<Link>, crate::Error>
     where
         Link: HasPeer<AgentPeer>,
@@ -164,7 +164,7 @@ where
     async fn handle_message(
         &mut self,
         message: crate::MessageCx,
-        cx: crate::JrConnectionCx<Self::Link>,
+        cx: crate::ConnectionTo<Self::Link>,
     ) -> Result<crate::Handled<crate::MessageCx>, crate::Error> {
         MatchMessageFrom::new(message, &cx)
             .if_request_from(

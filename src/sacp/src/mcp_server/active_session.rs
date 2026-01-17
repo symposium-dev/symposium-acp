@@ -9,14 +9,14 @@ use crate::schema::{
 };
 use crate::util::MatchMessageFrom;
 use crate::{
-    AgentPeer, Channel, Component, Handled, HasPeer, JrConnectionCx, JrLink, JrMessageHandler,
-    JrRequestCx, MessageCx, UntypedMessage,
+    AgentPeer, Channel, Component, Handled, HasPeer, ConnectionTo, JrLink, JrMessageHandler,
+    Responder, MessageCx, UntypedMessage,
 };
 use std::sync::Arc;
 
 /// The message handler for an MCP server offered to a particular session.
 /// This is added as a 'dynamic' handler to the connection context
-/// (see [`JrConnectionCx::add_dynamic_handler`]) and handles MCP-over-ACP messages
+/// (see [`ConnectionTo::add_dynamic_handler`]) and handles MCP-over-ACP messages
 /// with the appropriate ACP url.
 pub(super) struct McpActiveSession<Link> {
     /// The role of the server
@@ -51,9 +51,9 @@ where
     async fn handle_connect_request(
         &mut self,
         request: McpConnectRequest,
-        request_cx: JrRequestCx<McpConnectResponse>,
-        outer_cx: &JrConnectionCx<Link>,
-    ) -> Result<Handled<(McpConnectRequest, JrRequestCx<McpConnectResponse>)>, crate::Error> {
+        request_cx: Responder<McpConnectResponse>,
+        outer_cx: &ConnectionTo<Link>,
+    ) -> Result<Handled<(McpConnectRequest, Responder<McpConnectResponse>)>, crate::Error> {
         // Check that this is for our MCP server
         if request.acp_url != self.acp_url {
             return Ok(Handled::No {
@@ -145,11 +145,11 @@ where
     async fn handle_mcp_over_acp_request(
         &mut self,
         request: McpOverAcpMessage<UntypedMessage>,
-        request_cx: JrRequestCx<serde_json::Value>,
+        request_cx: Responder<serde_json::Value>,
     ) -> Result<
         Handled<(
             McpOverAcpMessage<UntypedMessage>,
-            JrRequestCx<serde_json::Value>,
+            Responder<serde_json::Value>,
         )>,
         crate::Error,
     > {
@@ -223,7 +223,7 @@ where
     async fn handle_message(
         &mut self,
         message: MessageCx,
-        connection_cx: JrConnectionCx<Link>,
+        connection_cx: ConnectionTo<Link>,
     ) -> Result<Handled<MessageCx>, crate::Error> {
         MatchMessageFrom::new(message, &connection_cx)
             // MCP connect requests come from the Agent direction (wrapped in SuccessorMessage)

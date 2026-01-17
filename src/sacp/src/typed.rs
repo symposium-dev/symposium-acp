@@ -2,7 +2,7 @@
 use jsonrpcmsg::Params;
 
 use crate::{
-    JrConnectionCx, JrRequestCx, JsonRpcNotification, JsonRpcRequest, UntypedMessage,
+    ConnectionTo, Responder, JsonRpcNotification, JsonRpcRequest, UntypedMessage,
     util::json_cast,
 };
 
@@ -13,12 +13,12 @@ pub struct TypeRequest {
 }
 
 enum TypeMessageState {
-    Unhandled(String, Option<Params>, JrRequestCx<serde_json::Value>),
+    Unhandled(String, Option<Params>, Responder<serde_json::Value>),
     Handled(Result<(), crate::Error>),
 }
 
 impl TypeRequest {
-    pub fn new(request: UntypedMessage, request_cx: JrRequestCx<serde_json::Value>) -> Self {
+    pub fn new(request: UntypedMessage, request_cx: Responder<serde_json::Value>) -> Self {
         let UntypedMessage { method, params } = request;
         let params: Option<Params> = json_cast(params).expect("valid params");
         Self {
@@ -28,7 +28,7 @@ impl TypeRequest {
 
     pub async fn handle_if<R: JsonRpcRequest>(
         mut self,
-        op: impl AsyncFnOnce(R, JrRequestCx<R::Response>) -> Result<(), crate::Error>,
+        op: impl AsyncFnOnce(R, Responder<R::Response>) -> Result<(), crate::Error>,
     ) -> Self {
         self.state = Some(match self.state.take().expect("valid state") {
             TypeMessageState::Unhandled(method, params, request_cx) => {
@@ -50,7 +50,7 @@ impl TypeRequest {
 
     pub async fn otherwise(
         mut self,
-        op: impl AsyncFnOnce(UntypedMessage, JrRequestCx<serde_json::Value>) -> Result<(), crate::Error>,
+        op: impl AsyncFnOnce(UntypedMessage, Responder<serde_json::Value>) -> Result<(), crate::Error>,
     ) -> Result<(), crate::Error> {
         match self.state.take().expect("valid state") {
             TypeMessageState::Unhandled(method, params, request_cx) => {
@@ -67,7 +67,7 @@ impl TypeRequest {
 /// Utility class for handling untyped notifications.
 #[must_use]
 pub struct TypeNotification {
-    cx: JrConnectionCx,
+    cx: ConnectionTo,
     state: Option<TypeNotificationState>,
 }
 
@@ -77,7 +77,7 @@ enum TypeNotificationState {
 }
 
 impl TypeNotification {
-    pub fn new(request: UntypedMessage, cx: &JrConnectionCx) -> Self {
+    pub fn new(request: UntypedMessage, cx: &ConnectionTo) -> Self {
         let UntypedMessage { method, params } = request;
         let params: Option<Params> = json_cast(params).expect("valid params");
         Self {

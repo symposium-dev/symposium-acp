@@ -8,8 +8,8 @@ use futures::channel::mpsc;
 use tokio::sync::oneshot;
 
 use crate::{
-    AgentPeer, ClientPeer, Handled, HasPeer, JrConnectionCx, JrLink, JrMessageHandler, JrRequestCx,
-    MessageCx,
+    AgentPeer, ClientPeer, ConnectionTo, Handled, HasPeer, JrLink, JrMessageHandler, MessageCx,
+    Responder,
     jsonrpc::{
         DynamicHandlerRegistration,
         run::{ChainRun, NullRun, Run},
@@ -34,7 +34,7 @@ impl SessionBlockState for NonBlocking {}
 /// See [`SessionBuilder::block_task`].
 pub trait SessionBlockState: Send + 'static + Sync + std::fmt::Debug {}
 
-impl<Link: JrLink> JrConnectionCx<Link>
+impl<Link: JrLink> ConnectionTo<Link>
 where
     Link: HasPeer<AgentPeer>,
 {
@@ -113,17 +113,14 @@ where
 /// - `Blocking` (after calling [`block_task`](Self::block_task)):
 ///   [`run_until`](Self::run_until) and [`start_session`](Self::start_session) become available
 #[must_use = "use `start_session`, `run_until`, or `on_session_start` to start the session"]
-pub struct SessionBuilder<
-    Link,
-    Responder: Run<Link> = NullRun,
-    BlockState: SessionBlockState = NonBlocking,
-> where
+pub struct SessionBuilder<Link, R: Run<Link> = NullRun, BlockState: SessionBlockState = NonBlocking>
+where
     Link: HasPeer<AgentPeer>,
 {
-    connection: JrConnectionCx<Link>,
+    connection: ConnectionTo<Link>,
     request: NewSessionRequest,
     dynamic_handler_registrations: Vec<DynamicHandlerRegistration<Link>>,
-    responder: Responder,
+    responder: R,
     block_state: PhantomData<BlockState>,
 }
 
@@ -131,7 +128,7 @@ impl<Link> SessionBuilder<Link, NullRun, NonBlocking>
 where
     Link: HasPeer<AgentPeer>,
 {
-    fn new(connection: &JrConnectionCx<Link>, request: NewSessionRequest) -> Self {
+    fn new(connection: &ConnectionTo<Link>, request: NewSessionRequest) -> Self {
         SessionBuilder {
             connection: connection.clone(),
             request,
@@ -142,19 +139,19 @@ where
     }
 }
 
-impl<Link, Responder, BlockState> SessionBuilder<Link, Responder, BlockState>
+impl<Link, R, BlockState> SessionBuilder<Link, R, BlockState>
 where
     Link: HasPeer<AgentPeer>,
-    Responder: Run<Link>,
+    R: Run<Link>,
     BlockState: SessionBlockState,
 {
     /// Add the MCP servers from the given registry to this session.
-    pub fn with_mcp_server<R>(
+    pub fn with_mcp_server<McpRun>(
         mut self,
-        mcp_server: McpServer<Link, R>,
-    ) -> Result<SessionBuilder<Link, ChainRun<Responder, R>, BlockState>, crate::Error>
+        mcp_server: McpServer<Link, McpRun>,
+    ) -> Result<SessionBuilder<Link, ChainRun<R, McpRun>, BlockState>, crate::Error>
     where
-        R: Run<Link>,
+        McpRun: Run<Link>,
     {
         let (handler, responder) = mcp_server.into_handler_and_responder();
         self.dynamic_handler_registrations
@@ -207,7 +204,7 @@ where
     /// callback completes. See the [`ordering`](crate::concepts::ordering) module for details.
     pub fn on_session_start<F, Fut>(self, op: F) -> Result<(), crate::Error>
     where
-        Responder: 'static,
+        R: 'static,
         F: FnOnce(ActiveSession<'static, Link>) -> Fut + Send + 'static,
         Fut: Future<Output = Result<(), crate::Error>> + Send,
     {
@@ -282,14 +279,14 @@ where
     /// callback completes. See the [`ordering`](crate::concepts::ordering) module for details.
     pub fn on_proxy_session_start<F, Fut>(
         self,
-        request_cx: JrRequestCx<NewSessionResponse>,
+        request_cx: Responder<NewSessionResponse>,
         op: F,
     ) -> Result<(), crate::Error>
     where
         F: FnOnce(SessionId) -> Fut + Send + 'static,
         Fut: Future<Output = Result<(), crate::Error>> + Send,
         Link: HasPeer<ClientPeer>,
-        Responder: 'static,
+        R: 'static,
     {
         let Self {
             connection,
@@ -329,10 +326,10 @@ where
     }
 }
 
-impl<Link, Responder> SessionBuilder<Link, Responder, NonBlocking>
+impl<Link, R> SessionBuilder<Link, R, NonBlocking>
 where
     Link: HasPeer<AgentPeer>,
-    Responder: Run<Link>,
+    R: Run<Link>,
 {
     /// Mark this session builder as being able to block the current task.
     ///
@@ -342,7 +339,7 @@ where
     /// This should not be used from inside a message handler like
     /// [`JrConnectionBuilder::on_receive_request`](`crate::JrConnectionBuilder::on_receive_request`) or [`JrMessageHandler`]
     /// implementations.
-    pub fn block_task(self) -> SessionBuilder<Link, Responder, Blocking> {
+    pub fn block_task(self) -> SessionBuilder<Link, R, Blocking> {
         SessionBuilder {
             connection: self.connection,
             request: self.request,
@@ -353,10 +350,10 @@ where
     }
 }
 
-impl<Link, Responder> SessionBuilder<Link, Responder, Blocking>
+impl<Link, R> SessionBuilder<Link, R, Blocking>
 where
     Link: HasPeer<AgentPeer>,
-    Responder: Run<Link>,
+    R: Run<Link>,
 {
     /// Run this session synchronously. The current task will be blocked
     /// and `op` will be executed with the active session information.
@@ -368,10 +365,10 @@ where
     /// responders would terminate when `op` returns).
     ///
     /// Requires calling [`block_task`](Self::block_task) first.
-    pub async fn run_until<R>(
+    pub async fn run_until<T>(
         self,
-        op: impl for<'responder> AsyncFnOnce(ActiveSession<'responder, Link>) -> Result<R, crate::Error>,
-    ) -> Result<R, crate::Error> {
+        op: impl for<'responder> AsyncFnOnce(ActiveSession<'responder, Link>) -> Result<T, crate::Error>,
+    ) -> Result<T, crate::Error> {
         let Self {
             connection,
             request,
@@ -401,7 +398,7 @@ where
     /// Requires calling [`block_task`](Self::block_task) first.
     pub async fn start_session(self) -> Result<ActiveSession<'static, Link>, crate::Error>
     where
-        Responder: 'static,
+        R: 'static,
     {
         let Self {
             connection,
@@ -455,11 +452,11 @@ where
     /// Requires calling [`block_task`](Self::block_task) first.
     pub async fn start_session_proxy(
         self,
-        request_cx: JrRequestCx<NewSessionResponse>,
+        request_cx: Responder<NewSessionResponse>,
     ) -> Result<SessionId, crate::Error>
     where
         Link: HasPeer<ClientPeer>,
-        Responder: 'static,
+        R: 'static,
     {
         let active_session = self.start_session().await?;
         let session_id = active_session.session_id().clone();
@@ -486,7 +483,7 @@ where
     update_tx: mpsc::UnboundedSender<SessionMessage>,
     modes: Option<SessionModeState>,
     meta: Option<serde_json::Map<String, serde_json::Value>>,
-    connection: JrConnectionCx<Link>,
+    connection: ConnectionTo<Link>,
 
     /// Registration for the handler that routes session messages to `update_rx`.
     /// This is separate from MCP handlers so it can be dropped independently
@@ -544,7 +541,7 @@ where
     }
 
     /// Access the underlying connection context used to communicate with the agent.
-    pub fn connection_cx(&self) -> JrConnectionCx<Link> {
+    pub fn connection_cx(&self) -> ConnectionTo<Link> {
         self.connection.clone()
     }
 
@@ -738,7 +735,7 @@ where
     async fn handle_message(
         &mut self,
         message: MessageCx,
-        cx: JrConnectionCx<Self::Link>,
+        cx: ConnectionTo<Self::Link>,
     ) -> Result<Handled<MessageCx>, crate::Error> {
         // If this is a message for our session, grab it.
         tracing::trace!(

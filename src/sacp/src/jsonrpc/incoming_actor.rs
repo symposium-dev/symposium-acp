@@ -10,10 +10,10 @@ use uuid::Uuid;
 
 use crate::MessageCx;
 use crate::UntypedMessage;
-use crate::jsonrpc::JrConnectionCx;
+use crate::jsonrpc::ConnectionTo;
 use crate::jsonrpc::JrMessageHandler;
-use crate::jsonrpc::JrRequestCx;
-use crate::jsonrpc::JrResponseCx;
+use crate::jsonrpc::Responder;
+use crate::jsonrpc::ResponseRouter;
 use crate::jsonrpc::ReplyMessage;
 use crate::jsonrpc::dynamic_handler::DynamicHandler;
 use crate::jsonrpc::dynamic_handler::DynamicHandlerMessage;
@@ -38,7 +38,7 @@ struct PendingReply {
 ///
 /// This is the protocol layer - it has no knowledge of how messages arrived.
 pub(super) async fn incoming_protocol_actor<Link: JrLink>(
-    json_rpc_cx: &JrConnectionCx<Link>,
+    json_rpc_cx: &ConnectionTo<Link>,
     transport_rx: mpsc::UnboundedReceiver<Result<jsonrpcmsg::Message, crate::Error>>,
     dynamic_handler_rx: mpsc::UnboundedReceiver<DynamicHandlerMessage<Link>>,
     reply_rx: mpsc::UnboundedReceiver<ReplyMessage>,
@@ -186,7 +186,7 @@ enum IncomingProtocolMsg<Link: JrLink> {
 /// Dispatches a JSON-RPC request to the handler.
 /// Report an error back to the server if it does not get handled.
 fn message_cx_from_request<Link: JrLink>(
-    json_rpc_cx: &JrConnectionCx<Link>,
+    json_rpc_cx: &ConnectionTo<Link>,
     request: jsonrpcmsg::Request,
 ) -> MessageCx {
     let message = UntypedMessage::new(&request.method, &request.params).expect("well-formed JSON");
@@ -194,7 +194,7 @@ fn message_cx_from_request<Link: JrLink>(
     let message_cx = match &request.id {
         Some(id) => MessageCx::Request(
             message,
-            JrRequestCx::new(
+            Responder::new(
                 json_rpc_cx.message_tx.clone(),
                 request.method.clone(),
                 id.clone(),
@@ -222,8 +222,8 @@ fn message_cx_from_response(
         sender,
     } = pending_reply;
 
-    // Create a MessageCx::Response with a JrResponseCx that routes to the oneshot
-    let response_cx = JrResponseCx::new(method.clone(), id.clone(), peer_id, sender);
+    // Create a MessageCx::Response with a ResponseRouter that routes to the oneshot
+    let response_cx = ResponseRouter::new(method.clone(), id.clone(), peer_id, sender);
     MessageCx::Response(result, response_cx)
 }
 
@@ -233,7 +233,7 @@ fn message_cx_from_response(
     level = "trace",
 )]
 async fn dispatch_message_cx<Link: JrLink>(
-    json_rpc_cx: &JrConnectionCx<Link>,
+    json_rpc_cx: &ConnectionTo<Link>,
     mut message_cx: MessageCx,
     dynamic_handlers: &mut FxHashMap<Uuid, Box<dyn DynamicHandler<Link>>>,
     handler: &mut impl JrMessageHandler<Link = Link>,

@@ -117,9 +117,9 @@ pub mod jsonrpcmsg {
 }
 
 pub use jsonrpc::{
-    ByteStreams, Channel, Handled, IntoHandled, JrConnection, JrConnectionBuilder, JrConnectionCx,
-    JrMessageHandler, JrRequestCx, JrResponse, JrResponseCx, JsonRpcMessage, JsonRpcNotification,
-    JsonRpcRequest, JsonRpcResponse, Lines, MessageCx, NullHandler, UntypedMessage,
+    ByteStreams, Channel, ConnectionTo, Handled, IntoHandled, JrConnection, JrConnectionBuilder,
+    JrMessageHandler, JrResponse, JsonRpcMessage, JsonRpcNotification, JsonRpcRequest,
+    JsonRpcResponse, Lines, MessageCx, NullHandler, Responder, ResponseRouter, UntypedMessage,
     run::{ChainRun, NullRun, Run},
 };
 
@@ -127,7 +127,7 @@ pub use link::{
     AgentToClient, ClientToAgent, HasDefaultPeer, HasPeer, JrLink, ProxyToConductor, RemoteStyle,
 };
 
-pub use role::{Agent, Client, Conductor, ConnectionTo, Proxy, Role, RoleId};
+pub use role::{Agent, Client, Conductor, Proxy, Role, RoleId};
 
 pub use peer::{AgentPeer, ClientPeer, ConductorPeer, JrPeer, PeerId};
 

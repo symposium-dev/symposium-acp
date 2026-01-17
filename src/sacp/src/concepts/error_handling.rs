@@ -43,7 +43,7 @@
 //! ```
 //!
 //! For sending error notifications (one-way error messages), use
-//! [`send_error_notification`][crate::JrConnectionCx::send_error_notification]:
+//! [`send_error_notification`][crate::ConnectionTo::send_error_notification]:
 //!
 //! ```
 //! # use sacp::{ClientToAgent, AgentToClient, Component};

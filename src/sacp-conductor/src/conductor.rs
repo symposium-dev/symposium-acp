@@ -102,13 +102,13 @@
 //! ```
 //!
 //! The closure receives:
-//! - `cx: &JrConnectionCx` - Connection context for spawning components
+//! - `cx: &ConnectionTo` - Connection context for spawning components
 //! - `conductor_tx: &mpsc::Sender<ConductorMessage>` - Channel for message routing
 //! - `init_req: InitializeRequest` - The Initialize request from the editor
 //!
 //! And returns:
 //! - Modified `InitializeRequest` to forward downstream
-//! - `Vec<JrConnectionCx>` of spawned components
+//! - `Vec<ConnectionTo>` of spawned components
 
 use std::{collections::HashMap, sync::Arc};
 
@@ -133,7 +133,7 @@ use sacp::{
     },
 };
 use sacp::{
-    JrConnectionBuilder, JrConnectionCx, JrLink, JrResponse, JsonRpcNotification, JsonRpcRequest,
+    JrConnectionBuilder, ConnectionTo, JrLink, JrResponse, JsonRpcNotification, JsonRpcRequest,
     UntypedMessage,
 };
 use sacp::{
@@ -329,7 +329,7 @@ impl<Link: ConductorLink> JrMessageHandler for ConductorMessageHandler<Link> {
     async fn handle_message(
         &mut self,
         message: MessageCx,
-        cx: sacp::JrConnectionCx<Link>,
+        cx: sacp::ConnectionTo<Link>,
     ) -> Result<sacp::Handled<MessageCx>, sacp::Error> {
         self.link
             .handle_message(message, cx, &mut self.conductor_tx)
@@ -367,7 +367,7 @@ where
     /// The chain of proxies before the agent (if any).
     ///
     /// Populated lazily when the first Initialize request is received.
-    proxies: Vec<JrConnectionCx<ConductorToProxy>>,
+    proxies: Vec<ConnectionTo<ConductorToProxy>>,
 
     /// If the conductor is operating in agent mode, this will direct messages to the agent.
     /// If the conductor is operating in proxy mode, this will direct messages to the successor.
@@ -388,7 +388,7 @@ impl<Link> Run<Link> for ConductorResponder<Link>
 where
     Link: ConductorLink,
 {
-    async fn run(mut self, cx: JrConnectionCx<Link>) -> Result<(), sacp::Error> {
+    async fn run(mut self, cx: ConnectionTo<Link>) -> Result<(), sacp::Error> {
         // Components are now spawned lazily in forward_initialize_request
         // when the first Initialize request is received.
 
@@ -434,7 +434,7 @@ where
     ///   through a stdio server that runs on localhost and bridges messages.
     async fn handle_conductor_message(
         &mut self,
-        client: JrConnectionCx<Link>,
+        client: ConnectionTo<Link>,
         message: ConductorMessage,
     ) -> Result<(), sacp::Error> {
         tracing::debug!(?message, "handle_conductor_message");
@@ -569,7 +569,7 @@ where
     ///   proxy's client.
     fn send_message_to_predecessor_of<Req: JsonRpcRequest, N: JsonRpcNotification>(
         &mut self,
-        client: JrConnectionCx<Link>,
+        client: ConnectionTo<Link>,
         source_component_index: SourceComponentIndex,
         message: MessageCx<Req, N>,
     ) -> Result<(), sacp::Error>
@@ -596,7 +596,7 @@ where
 
     fn send_request_to_predecessor_of<Req: JsonRpcRequest>(
         &mut self,
-        client: JrConnectionCx<Link>,
+        client: ConnectionTo<Link>,
         source_component_index: usize,
         request: Req,
     ) -> JrResponse<Req::Response> {
@@ -622,7 +622,7 @@ where
     ///   proxy's client.
     fn send_notification_to_predecessor_of<N: JsonRpcNotification>(
         &mut self,
-        client: JrConnectionCx<Link>,
+        client: ConnectionTo<Link>,
         source_component_index: usize,
         notification: N,
     ) -> Result<(), sacp::Error> {
@@ -654,7 +654,7 @@ where
         &mut self,
         target_component_index: usize,
         message: MessageCx,
-        conductor_cx: JrConnectionCx<Link>,
+        conductor_cx: ConnectionTo<Link>,
     ) -> Result<(), sacp::Error> {
         tracing::trace!(
             target_component_index,
@@ -696,7 +696,7 @@ where
     /// - `Err(_)` - A fatal error occurred
     async fn ensure_initialized(
         &mut self,
-        client: JrConnectionCx<Link>,
+        client: ConnectionTo<Link>,
         message: MessageCx,
     ) -> Result<MessageCx, Error> {
         // Already initialized - pass through
@@ -731,7 +731,7 @@ where
     /// Spawn proxy components and add them to the proxies list.
     fn spawn_proxies(
         &mut self,
-        cx: JrConnectionCx<Link>,
+        cx: ConnectionTo<Link>,
         proxy_components: Vec<DynComponent<ProxyToConductor>>,
     ) -> Result<(), sacp::Error> {
         assert!(self.proxies.is_empty());
@@ -776,7 +776,7 @@ where
     /// If tracing is enabled, the proxy's index is `trace_proxy_index` and its successor is `trace_successor_index`.
     fn connect_to_proxy(
         &mut self,
-        cx: &JrConnectionCx<Link>,
+        cx: &ConnectionTo<Link>,
         component_index: usize,
         trace_proxy_index: ComponentIndex,
         trace_successor_index: ComponentIndex,
@@ -911,9 +911,9 @@ where
     /// running as a proxy).
     async fn forward_message_to_agent(
         &mut self,
-        conductor_cx: JrConnectionCx<ConductorToClient>,
+        conductor_cx: ConnectionTo<ConductorToClient>,
         message: MessageCx,
-        agent_cx: JrConnectionCx<ConductorToAgent>,
+        agent_cx: ConnectionTo<ConductorToAgent>,
     ) -> Result<(), Error> {
         MatchMessage::new(message)
             .if_request(async |_request: InitializeProxyRequest, request_cx| {
@@ -1327,7 +1327,7 @@ pub trait ConductorLink: JrLink + HasPeer<ClientPeer> {
     fn initialize(
         self,
         message: MessageCx,
-        cx: JrConnectionCx<Self>,
+        cx: ConnectionTo<Self>,
         instantiator: Self::Instantiator,
         responder: &mut ConductorResponder<Self>,
     ) -> impl Future<Output = Result<MessageCx, sacp::Error>> + Send;
@@ -1336,7 +1336,7 @@ pub trait ConductorLink: JrLink + HasPeer<ClientPeer> {
     fn handle_message(
         self,
         message: MessageCx,
-        cx: JrConnectionCx<Self>,
+        cx: ConnectionTo<Self>,
         conductor_tx: &mut mpsc::Sender<ConductorMessage>,
     ) -> impl Future<Output = Result<Handled<MessageCx>, sacp::Error>> + Send;
 }
@@ -1350,7 +1350,7 @@ impl ConductorLink for ConductorToClient {
     async fn initialize(
         self,
         message: MessageCx,
-        client: JrConnectionCx<Self>,
+        client: ConnectionTo<Self>,
         instantiator: Self::Instantiator,
         responder: &mut ConductorResponder<Self>,
     ) -> Result<MessageCx, sacp::Error> {
@@ -1420,7 +1420,7 @@ impl ConductorLink for ConductorToClient {
     async fn handle_message(
         self,
         message: MessageCx,
-        cx: JrConnectionCx<Self>,
+        cx: ConnectionTo<Self>,
         conductor_tx: &mut mpsc::Sender<ConductorMessage>,
     ) -> Result<Handled<MessageCx>, sacp::Error> {
         tracing::debug!(
@@ -1450,7 +1450,7 @@ impl ConductorLink for ConductorToConductor {
     async fn initialize(
         self,
         message: MessageCx,
-        client_cx: JrConnectionCx<Self>,
+        client_cx: ConnectionTo<Self>,
         instantiator: Self::Instantiator,
         responder: &mut ConductorResponder<Self>,
     ) -> Result<MessageCx, sacp::Error> {
@@ -1496,7 +1496,7 @@ impl ConductorLink for ConductorToConductor {
     async fn handle_message(
         self,
         message: MessageCx,
-        cx: JrConnectionCx<Self>,
+        cx: ConnectionTo<Self>,
         conductor_tx: &mut mpsc::Sender<ConductorMessage>,
     ) -> Result<Handled<MessageCx>, sacp::Error> {
         tracing::debug!(
@@ -1537,7 +1537,7 @@ pub trait ConductorSuccessor<Link: ConductorLink>: Send + Sync + 'static {
     fn send_message<'a>(
         &self,
         message: MessageCx,
-        conductor_cx: JrConnectionCx<Link>,
+        conductor_cx: ConnectionTo<Link>,
         responder: &'a mut ConductorResponder<Link>,
     ) -> BoxFuture<'a, Result<(), sacp::Error>>;
 }
@@ -1546,7 +1546,7 @@ impl<Link: ConductorLink> ConductorSuccessor<Link> for sacp::Error {
     fn send_message<'a>(
         &self,
         #[expect(unused_variables)] message: MessageCx,
-        #[expect(unused_variables)] conductor_cx: JrConnectionCx<Link>,
+        #[expect(unused_variables)] conductor_cx: ConnectionTo<Link>,
         #[expect(unused_variables)] responder: &'a mut ConductorResponder<Link>,
     ) -> BoxFuture<'a, Result<(), sacp::Error>> {
         let error = self.clone();
@@ -1558,7 +1558,7 @@ impl ConductorSuccessor<ConductorToConductor> for () {
     fn send_message<'a>(
         &self,
         message: MessageCx,
-        conductor_cx: JrConnectionCx<ConductorToConductor>,
+        conductor_cx: ConnectionTo<ConductorToConductor>,
         _responder: &'a mut ConductorResponder<ConductorToConductor>,
     ) -> BoxFuture<'a, Result<(), sacp::Error>> {
         Box::pin(async move {
@@ -1568,11 +1568,11 @@ impl ConductorSuccessor<ConductorToConductor> for () {
     }
 }
 
-impl ConductorSuccessor<ConductorToClient> for JrConnectionCx<ConductorToAgent> {
+impl ConductorSuccessor<ConductorToClient> for ConnectionTo<ConductorToAgent> {
     fn send_message<'a>(
         &self,
         message: MessageCx,
-        conductor_cx: JrConnectionCx<ConductorToClient>,
+        conductor_cx: ConnectionTo<ConductorToClient>,
         responder: &'a mut ConductorResponder<ConductorToClient>,
     ) -> BoxFuture<'a, Result<(), sacp::Error>> {
         let agent_cx = self.clone();

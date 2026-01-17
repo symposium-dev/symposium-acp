@@ -10,7 +10,7 @@ use sacp::schema::{
     PromptRequest, PromptResponse, SessionId, SessionNotification, SessionUpdate, StopReason,
     TextContent,
 };
-use sacp::{Component, JrConnectionCx, JrRequestCx};
+use sacp::{Component, ConnectionTo, Responder};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
@@ -75,7 +75,7 @@ impl ElizaAgent {
     async fn handle_new_session(
         &self,
         request: NewSessionRequest,
-        request_cx: JrRequestCx<NewSessionResponse>,
+        request_cx: Responder<NewSessionResponse>,
     ) -> Result<(), sacp::Error> {
         tracing::debug!("New session request with cwd: {:?}", request.cwd);
 
@@ -89,7 +89,7 @@ impl ElizaAgent {
     async fn handle_load_session(
         &self,
         request: LoadSessionRequest,
-        request_cx: JrRequestCx<LoadSessionResponse>,
+        request_cx: Responder<LoadSessionResponse>,
     ) -> Result<(), sacp::Error> {
         tracing::debug!("Load session request: {:?}", request.session_id);
 
@@ -103,8 +103,8 @@ impl ElizaAgent {
     async fn process_prompt(
         &self,
         request: PromptRequest,
-        request_cx: JrRequestCx<PromptResponse>,
-        cx: JrConnectionCx<AgentToClient>,
+        request_cx: Responder<PromptResponse>,
+        cx: ConnectionTo<AgentToClient>,
     ) -> Result<(), sacp::Error> {
         let session_id = request.session_id.clone();
 

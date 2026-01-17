@@ -171,4 +171,4 @@
 //! [`on_session_start`]: crate::SessionBuilder::on_session_start
 //! [`on_proxy_session_start`]: crate::SessionBuilder::on_proxy_session_start
 //! [`JrResponse`]: crate::JrResponse
-//! [`spawn`]: crate::JrConnectionCx::spawn
+//! [`spawn`]: crate::ConnectionTo::spawn

@@ -20,7 +20,7 @@
 use jsonrpcmsg::Params;
 
 use crate::{
-    Handled, HasDefaultPeer, JrConnectionCx, JrMessageHandler, JrRequestCx, JrResponseCx,
+    Handled, HasDefaultPeer, ConnectionTo, JrMessageHandler, Responder, ResponseRouter,
     JsonRpcNotification, JsonRpcRequest, JsonRpcResponse, MessageCx, UntypedMessage,
     link::{self, HasPeer, JrLink},
     peer::JrPeer,
@@ -44,7 +44,7 @@ use crate::{
 /// # use sacp::util::MatchMessage;
 /// # async fn example(message: MessageCx) -> Result<(), sacp::Error> {
 /// MatchMessage::new(message)
-///     .if_request(|req: InitializeRequest, request_cx: sacp::JrRequestCx<InitializeResponse>| async move {
+///     .if_request(|req: InitializeRequest, request_cx: sacp::Responder<InitializeResponse>| async move {
 ///         let response = InitializeResponse::new(req.protocol_version)
 ///             .agent_capabilities(AgentCapabilities::new());
 ///         request_cx.respond(response)
@@ -92,10 +92,10 @@ impl MatchMessage {
     /// handled by a previous call, this has no effect.
     pub async fn if_request<Req: JsonRpcRequest, H>(
         mut self,
-        op: impl AsyncFnOnce(Req, JrRequestCx<Req::Response>) -> Result<H, crate::Error>,
+        op: impl AsyncFnOnce(Req, Responder<Req::Response>) -> Result<H, crate::Error>,
     ) -> Self
     where
-        H: crate::IntoHandled<(Req, JrRequestCx<Req::Response>)>,
+        H: crate::IntoHandled<(Req, Responder<Req::Response>)>,
     {
         if let Ok(Handled::No {
             message: message_cx,
@@ -284,13 +284,13 @@ impl MatchMessage {
         mut self,
         op: impl AsyncFnOnce(
             Result<Req::Response, crate::Error>,
-            JrResponseCx<Req::Response>,
+            ResponseRouter<Req::Response>,
         ) -> Result<H, crate::Error>,
     ) -> Self
     where
         H: crate::IntoHandled<(
                 Result<Req::Response, crate::Error>,
-                JrResponseCx<Req::Response>,
+                ResponseRouter<Req::Response>,
             )>,
     {
         if let Ok(Handled::No {
@@ -309,7 +309,7 @@ impl MatchMessage {
                         })
                     } else {
                         // Method matches, parse the response
-                        let typed_response_cx: JrResponseCx<Req::Response> = response_cx.cast();
+                        let typed_response_cx: ResponseRouter<Req::Response> = response_cx.cast();
                         let typed_result = match result {
                             Ok(value) => {
                                 Req::Response::from_value(typed_response_cx.method(), value)
@@ -361,10 +361,10 @@ impl MatchMessage {
     /// common case where you only care about successful responses.
     pub async fn if_ok_response_to<Req: JsonRpcRequest, H>(
         self,
-        op: impl AsyncFnOnce(Req::Response, JrResponseCx<Req::Response>) -> Result<H, crate::Error>,
+        op: impl AsyncFnOnce(Req::Response, ResponseRouter<Req::Response>) -> Result<H, crate::Error>,
     ) -> Self
     where
-        H: crate::IntoHandled<(Req::Response, JrResponseCx<Req::Response>)>,
+        H: crate::IntoHandled<(Req::Response, ResponseRouter<Req::Response>)>,
     {
         self.if_response_to::<Req, _>(async move |result, response_cx| match result {
             Ok(response) => {
@@ -435,16 +435,16 @@ impl MatchMessage {
 /// # use sacp::MessageCx;
 /// # use sacp::schema::{InitializeRequest, InitializeResponse, PromptRequest, PromptResponse, AgentCapabilities, StopReason};
 /// # use sacp::util::MatchMessageFrom;
-/// # async fn example(message: MessageCx, cx: &sacp::JrConnectionCx<sacp::AgentToClient>) -> Result<(), sacp::Error> {
+/// # async fn example(message: MessageCx, cx: &sacp::ConnectionTo<sacp::AgentToClient>) -> Result<(), sacp::Error> {
 /// MatchMessageFrom::new(message, cx)
-///     .if_request(|req: InitializeRequest, request_cx: sacp::JrRequestCx<InitializeResponse>| async move {
+///     .if_request(|req: InitializeRequest, request_cx: sacp::Responder<InitializeResponse>| async move {
 ///         // Handle initialization
 ///         let response = InitializeResponse::new(req.protocol_version)
 ///             .agent_capabilities(AgentCapabilities::new());
 ///         request_cx.respond(response)
 ///     })
 ///     .await
-///     .if_request(|_req: PromptRequest, request_cx: sacp::JrRequestCx<PromptResponse>| async move {
+///     .if_request(|_req: PromptRequest, request_cx: sacp::Responder<PromptResponse>| async move {
 ///         // Handle prompts
 ///         request_cx.respond(PromptResponse::new(StopReason::EndTurn))
 ///     })
@@ -462,12 +462,12 @@ impl MatchMessage {
 #[must_use]
 pub struct MatchMessageFrom<Link: JrLink> {
     state: Result<Handled<MessageCx>, crate::Error>,
-    cx: JrConnectionCx<Link>,
+    cx: ConnectionTo<Link>,
 }
 
 impl<Link: JrLink> MatchMessageFrom<Link> {
     /// Create a new pattern matcher for the given untyped request message.
-    pub fn new(message: MessageCx, cx: &JrConnectionCx<Link>) -> Self {
+    pub fn new(message: MessageCx, cx: &ConnectionTo<Link>) -> Self {
         Self {
             state: Ok(Handled::No {
                 message,
@@ -489,11 +489,11 @@ impl<Link: JrLink> MatchMessageFrom<Link> {
     /// Returns `self` to allow chaining multiple `handle_if` calls.
     pub async fn if_request<Req: JsonRpcRequest, H>(
         self,
-        op: impl AsyncFnOnce(Req, JrRequestCx<Req::Response>) -> Result<H, crate::Error>,
+        op: impl AsyncFnOnce(Req, Responder<Req::Response>) -> Result<H, crate::Error>,
     ) -> Self
     where
         Link: HasDefaultPeer,
-        H: crate::IntoHandled<(Req, JrRequestCx<Req::Response>)>,
+        H: crate::IntoHandled<(Req, Responder<Req::Response>)>,
     {
         self.if_request_from(<Link::DefaultPeer>::default(), op)
             .await
@@ -512,11 +512,11 @@ impl<Link: JrLink> MatchMessageFrom<Link> {
     pub async fn if_request_from<Peer: JrPeer, Req: JsonRpcRequest, H>(
         mut self,
         peer: Peer,
-        op: impl AsyncFnOnce(Req, JrRequestCx<Req::Response>) -> Result<H, crate::Error>,
+        op: impl AsyncFnOnce(Req, Responder<Req::Response>) -> Result<H, crate::Error>,
     ) -> Self
     where
         Link: HasPeer<Peer>,
-        H: crate::IntoHandled<(Req, JrRequestCx<Req::Response>)>,
+        H: crate::IntoHandled<(Req, Responder<Req::Response>)>,
     {
         if let Ok(Handled::No { message, retry: _ }) = self.state {
             self.state = link::handle_incoming_message::<Link, Peer>(
@@ -637,13 +637,13 @@ impl<Link: JrLink> MatchMessageFrom<Link> {
         mut self,
         op: impl AsyncFnOnce(
             Result<Req::Response, crate::Error>,
-            JrResponseCx<Req::Response>,
+            ResponseRouter<Req::Response>,
         ) -> Result<H, crate::Error>,
     ) -> Self
     where
         H: crate::IntoHandled<(
                 Result<Req::Response, crate::Error>,
-                JrResponseCx<Req::Response>,
+                ResponseRouter<Req::Response>,
             )>,
     {
         if let Ok(Handled::No { message, retry: _ }) = self.state {
@@ -664,11 +664,11 @@ impl<Link: JrLink> MatchMessageFrom<Link> {
     /// This is a convenience wrapper around [`if_response_to`](Self::if_response_to).
     pub async fn if_ok_response_to<Req: JsonRpcRequest, H>(
         self,
-        op: impl AsyncFnOnce(Req::Response, JrResponseCx<Req::Response>) -> Result<H, crate::Error>,
+        op: impl AsyncFnOnce(Req::Response, ResponseRouter<Req::Response>) -> Result<H, crate::Error>,
     ) -> Self
     where
         Link: HasDefaultPeer,
-        H: crate::IntoHandled<(Req::Response, JrResponseCx<Req::Response>)>,
+        H: crate::IntoHandled<(Req::Response, ResponseRouter<Req::Response>)>,
     {
         self.if_ok_response_to_from::<Req, Link::DefaultPeer, H>(<Link::DefaultPeer>::default(), op)
             .await
@@ -686,14 +686,14 @@ impl<Link: JrLink> MatchMessageFrom<Link> {
         peer: Peer,
         op: impl AsyncFnOnce(
             Result<Req::Response, crate::Error>,
-            JrResponseCx<Req::Response>,
+            ResponseRouter<Req::Response>,
         ) -> Result<H, crate::Error>,
     ) -> Self
     where
         Link: HasPeer<Peer>,
         H: crate::IntoHandled<(
                 Result<Req::Response, crate::Error>,
-                JrResponseCx<Req::Response>,
+                ResponseRouter<Req::Response>,
             )>,
     {
         if let Ok(Handled::No { message, retry: _ }) = self.state {
@@ -721,11 +721,11 @@ impl<Link: JrLink> MatchMessageFrom<Link> {
     pub async fn if_ok_response_to_from<Req: JsonRpcRequest, Peer: JrPeer, H>(
         self,
         peer: Peer,
-        op: impl AsyncFnOnce(Req::Response, JrResponseCx<Req::Response>) -> Result<H, crate::Error>,
+        op: impl AsyncFnOnce(Req::Response, ResponseRouter<Req::Response>) -> Result<H, crate::Error>,
     ) -> Self
     where
         Link: HasPeer<Peer>,
-        H: crate::IntoHandled<(Req::Response, JrResponseCx<Req::Response>)>,
+        H: crate::IntoHandled<(Req::Response, ResponseRouter<Req::Response>)>,
     {
         self.if_response_to_from::<Req, Peer, _>(
             peer,
@@ -819,11 +819,11 @@ impl<Link: JrLink> MatchMessageFrom<Link> {
 /// # Example
 ///
 /// ```
-/// # use sacp::{UntypedMessage, JrConnectionCx};
+/// # use sacp::{UntypedMessage, ConnectionTo};
 /// # use sacp::schema::SessionNotification;
 /// # use sacp::ClientToAgent;
 /// # use sacp::util::TypeNotification;
-/// # async fn example(message: UntypedMessage, cx: &JrConnectionCx<ClientToAgent>) -> Result<(), sacp::Error> {
+/// # async fn example(message: UntypedMessage, cx: &ConnectionTo<ClientToAgent>) -> Result<(), sacp::Error> {
 /// TypeNotification::new(message, cx)
 ///     .handle_if(|notif: SessionNotification| async move {
 ///         // Handle session notifications
@@ -844,7 +844,7 @@ impl<Link: JrLink> MatchMessageFrom<Link> {
 /// notification (not a request context).
 #[must_use]
 pub struct TypeNotification<Link: JrLink> {
-    cx: JrConnectionCx<Link>,
+    cx: ConnectionTo<Link>,
     state: Option<TypeNotificationState>,
 }
 
@@ -855,7 +855,7 @@ enum TypeNotificationState {
 
 impl<Link: JrLink> TypeNotification<Link> {
     /// Create a new pattern matcher for the given untyped notification message.
-    pub fn new(request: UntypedMessage, cx: &JrConnectionCx<Link>) -> Self {
+    pub fn new(request: UntypedMessage, cx: &ConnectionTo<Link>) -> Self {
         let UntypedMessage { method, params } = request;
         let params: Option<Params> = json_cast(params).expect("valid params");
         Self {

@@ -99,7 +99,7 @@ pub async fn prompt_with_callback(
             sacp::on_receive_message!(),
         )
         .connect_to(component)?
-        .run_until(|cx: sacp::JrConnectionCx<ClientToAgent>| async move {
+        .run_until(|cx: sacp::ConnectionTo<ClientToAgent>| async move {
             // Initialize the agent
             let _init_response = cx
                 .send_request(InitializeRequest::new(ProtocolVersion::LATEST))

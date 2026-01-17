@@ -117,7 +117,7 @@ impl Component<ProxyToConductor> for InitComponent {
 
 async fn run_test_with_components(
     proxies: Vec<InitComponent>,
-    editor_task: impl AsyncFnOnce(sacp::JrConnectionCx<sacp::ClientToAgent>) -> Result<(), sacp::Error>,
+    editor_task: impl AsyncFnOnce(sacp::ConnectionTo<sacp::ClientToAgent>) -> Result<(), sacp::Error>,
 ) -> Result<(), sacp::Error> {
     // Set up editor <-> conductor communication
     let (editor_out, conductor_in) = duplex(1024);
@@ -272,7 +272,7 @@ impl Component<ProxyToConductor> for BadProxy {
 async fn run_bad_proxy_test(
     proxies: Vec<sacp::DynComponent<ProxyToConductor>>,
     agent: sacp::DynComponent<sacp::link::AgentToClient>,
-    editor_task: impl AsyncFnOnce(sacp::JrConnectionCx<sacp::ClientToAgent>) -> Result<(), sacp::Error>,
+    editor_task: impl AsyncFnOnce(sacp::ConnectionTo<sacp::ClientToAgent>) -> Result<(), sacp::Error>,
 ) -> Result<(), sacp::Error> {
     let (editor_out, conductor_in) = duplex(1024);
     let (conductor_out, editor_in) = duplex(1024);

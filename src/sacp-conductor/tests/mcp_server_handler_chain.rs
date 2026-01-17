@@ -154,7 +154,7 @@ impl Component<AgentToClient> for SimpleAgent {
 async fn run_test(
     proxies: Vec<sacp::DynComponent<ProxyToConductor>>,
     agent: sacp::DynComponent<AgentToClient>,
-    editor_task: impl AsyncFnOnce(sacp::JrConnectionCx<sacp::ClientToAgent>) -> Result<(), sacp::Error>,
+    editor_task: impl AsyncFnOnce(sacp::ConnectionTo<sacp::ClientToAgent>) -> Result<(), sacp::Error>,
 ) -> Result<(), sacp::Error> {
     let (editor_out, conductor_in) = duplex(1024);
     let (conductor_out, editor_in) = duplex(1024);

@@ -121,7 +121,7 @@ impl JrMessageHandler for TeeHandler {
     async fn handle_message(
         &mut self,
         message: MessageCx,
-        _cx: sacp::JrConnectionCx<ProxyToConductor>,
+        _cx: sacp::ConnectionTo<ProxyToConductor>,
     ) -> Result<Handled<MessageCx>, sacp::Error> {
         match message {
             MessageCx::Request(request, request_cx) => {

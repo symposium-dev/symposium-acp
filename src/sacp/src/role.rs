@@ -6,7 +6,7 @@
 
 use std::{any::TypeId, fmt::Debug, future::Future, hash::Hash};
 
-use crate::{Handled, MessageCx, RemoteStyle};
+use crate::{Handled, ConnectionTo, MessageCx, RemoteStyle};
 
 /// The role that an endpoint plays in an ACP connection.
 ///
@@ -92,18 +92,6 @@ pub trait RoleExt: Role {
 }
 
 impl<R: Role> RoleExt for R {}
-
-// ============================================================================
-// Placeholder for ConnectionTo - will be defined properly in Phase 2
-// ============================================================================
-
-/// Connection context for communicating with a peer of role `R`.
-///
-/// This is a placeholder that will be properly defined in Phase 2.
-/// For now, it wraps the existing `JrConnectionCx`.
-pub struct ConnectionTo<R: Role> {
-    _marker: std::marker::PhantomData<R>,
-}
 
 // ============================================================================
 // Role implementations

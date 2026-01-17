@@ -8,7 +8,7 @@ use std::{fmt::Debug, hash::Hash};
 use agent_client_protocol_schema::{NewSessionRequest, NewSessionResponse, SessionId};
 
 use crate::{
-    Handled, JrConnectionCx, JrMessageHandler, JsonRpcMessage, MessageCx, UntypedMessage,
+    Handled, ConnectionTo, JrMessageHandler, JsonRpcMessage, MessageCx, UntypedMessage,
     jsonrpc::{JrConnectionBuilder, handlers::NullHandler},
     peer::{AgentPeer, ClientPeer, ConductorPeer, JrPeer, UntypedPeer},
     schema::{
@@ -45,7 +45,7 @@ pub trait JrLink: Debug + Copy + Send + Sync + 'static + Eq + Ord + Hash + Defau
     /// If this returns `no`, an error response will be sent.
     fn default_message_handler(
         message: MessageCx,
-        #[expect(unused_variables)] cx: JrConnectionCx<Self>,
+        #[expect(unused_variables)] cx: ConnectionTo<Self>,
         #[expect(unused_variables)] state: &mut Self::State,
     ) -> impl Future<Output = Result<Handled<MessageCx>, crate::Error>> + Send {
         async move {
@@ -61,11 +61,11 @@ pub trait JrLink: Debug + Copy + Send + Sync + 'static + Eq + Ord + Hash + Defau
 ///
 /// Links like [`ProxyToConductor`] multiplex multiple "logical peers" over a single link
 /// and do not implement this trait. Users of those links must explicitly specify
-/// the peer by calling [`JrConnectionCx::send_request_to`].
+/// the peer by calling [`ConnectionTo::send_request_to`].
 pub trait HasDefaultPeer: JrLink + HasPeer<Self::DefaultPeer> {
     /// The default peer for this link.
     ///
-    /// When you use [`JrConnectionCx::send_request`] or [`JrConnectionBuilder::on_receive_request`], etc.
+    /// When you use [`ConnectionTo::send_request`] or [`JrConnectionBuilder::on_receive_request`], etc.
     /// this is the peer that you are communicating with.
     type DefaultPeer: JrPeer;
 }
@@ -109,10 +109,10 @@ impl RemoteStyle {
 pub(crate) async fn handle_incoming_message<Link: JrLink, Peer: JrPeer>(
     peer: Peer,
     message_cx: MessageCx,
-    connection_cx: JrConnectionCx<Link>,
+    connection_cx: ConnectionTo<Link>,
     handle_message: impl AsyncFnOnce(
         MessageCx,
-        JrConnectionCx<Link>,
+        ConnectionTo<Link>,
     ) -> Result<Handled<MessageCx>, crate::Error>,
 ) -> Result<Handled<MessageCx>, crate::Error>
 where
@@ -275,7 +275,7 @@ impl JrLink for ClientToAgent {
 
     async fn default_message_handler(
         message: MessageCx,
-        cx: JrConnectionCx<Self>,
+        cx: ConnectionTo<Self>,
         _state: &mut (),
     ) -> Result<Handled<MessageCx>, crate::Error> {
         MatchMessageFrom::new(message, &cx)
@@ -459,7 +459,7 @@ impl JrLink for ProxyToConductor {
 
     async fn default_message_handler(
         message: MessageCx,
-        cx: JrConnectionCx<Self>,
+        cx: ConnectionTo<Self>,
         _state: &mut Self::State,
     ) -> Result<Handled<MessageCx>, crate::Error> {
         // Handle various special messages:
@@ -591,7 +591,7 @@ where
     async fn handle_message(
         &mut self,
         message: MessageCx,
-        cx: JrConnectionCx<Self::Link>,
+        cx: ConnectionTo<Self::Link>,
     ) -> Result<Handled<MessageCx>, crate::Error> {
         MatchMessageFrom::new(message, &cx)
             .if_message_from(AgentPeer, async |message| {

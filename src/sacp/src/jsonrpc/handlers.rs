@@ -1,9 +1,9 @@
 use crate::jsonrpc::{Handled, IntoHandled, JrMessageHandler, JsonRpcResponse};
 use crate::link::{HasPeer, JrLink, handle_incoming_message};
 use crate::peer::JrPeer;
-use crate::{JrConnectionCx, JsonRpcNotification, JsonRpcRequest, MessageCx, UntypedMessage};
+use crate::{ConnectionTo, JsonRpcNotification, JsonRpcRequest, MessageCx, UntypedMessage};
 // Types re-exported from crate root
-use super::JrRequestCx;
+use super::Responder;
 use std::marker::PhantomData;
 use std::ops::AsyncFnMut;
 
@@ -34,7 +34,7 @@ impl<Link: JrLink> JrMessageHandler for NullHandler<Link> {
     async fn handle_message(
         &mut self,
         message: MessageCx,
-        _cx: JrConnectionCx<Link>,
+        _cx: ConnectionTo<Link>,
     ) -> Result<Handled<MessageCx>, crate::Error> {
         Ok(Handled::No {
             message,
@@ -74,14 +74,14 @@ impl<Link: JrLink, Peer: JrPeer, Req, F, T, ToFut> JrMessageHandler
 where
     Link: HasPeer<Peer>,
     Req: JsonRpcRequest,
-    F: AsyncFnMut(Req, JrRequestCx<Req::Response>, JrConnectionCx<Link>) -> Result<T, crate::Error>
+    F: AsyncFnMut(Req, Responder<Req::Response>, ConnectionTo<Link>) -> Result<T, crate::Error>
         + Send,
-    T: crate::IntoHandled<(Req, JrRequestCx<Req::Response>)>,
+    T: crate::IntoHandled<(Req, Responder<Req::Response>)>,
     ToFut: Fn(
             &mut F,
             Req,
-            JrRequestCx<Req::Response>,
-            JrConnectionCx<Link>,
+            Responder<Req::Response>,
+            ConnectionTo<Link>,
         ) -> crate::BoxFuture<'_, Result<T, crate::Error>>
         + Send
         + Sync,
@@ -95,7 +95,7 @@ where
     async fn handle_message(
         &mut self,
         message_cx: MessageCx,
-        connection_cx: JrConnectionCx<Link>,
+        connection_cx: ConnectionTo<Link>,
     ) -> Result<Handled<MessageCx>, crate::Error> {
         handle_incoming_message::<Link, Peer>(
             Peer::default(),
@@ -201,9 +201,9 @@ impl<Link: JrLink, Peer: JrPeer, Notif, F, T, ToFut> JrMessageHandler
 where
     Link: HasPeer<Peer>,
     Notif: JsonRpcNotification,
-    F: AsyncFnMut(Notif, JrConnectionCx<Link>) -> Result<T, crate::Error> + Send,
-    T: crate::IntoHandled<(Notif, JrConnectionCx<Link>)>,
-    ToFut: Fn(&mut F, Notif, JrConnectionCx<Link>) -> crate::BoxFuture<'_, Result<T, crate::Error>>
+    F: AsyncFnMut(Notif, ConnectionTo<Link>) -> Result<T, crate::Error> + Send,
+    T: crate::IntoHandled<(Notif, ConnectionTo<Link>)>,
+    ToFut: Fn(&mut F, Notif, ConnectionTo<Link>) -> crate::BoxFuture<'_, Result<T, crate::Error>>
         + Send
         + Sync,
 {
@@ -216,7 +216,7 @@ where
     async fn handle_message(
         &mut self,
         message_cx: MessageCx,
-        connection_cx: JrConnectionCx<Link>,
+        connection_cx: ConnectionTo<Link>,
     ) -> Result<Handled<MessageCx>, crate::Error> {
         handle_incoming_message::<Link, Peer>(
             Peer::default(),
@@ -319,12 +319,12 @@ impl<Link: JrLink, Peer: JrPeer, Req: JsonRpcRequest, Notif: JsonRpcNotification
     JrMessageHandler for MessageHandler<Link, Peer, Req, Notif, F, ToFut>
 where
     Link: HasPeer<Peer>,
-    F: AsyncFnMut(MessageCx<Req, Notif>, JrConnectionCx<Link>) -> Result<T, crate::Error> + Send,
+    F: AsyncFnMut(MessageCx<Req, Notif>, ConnectionTo<Link>) -> Result<T, crate::Error> + Send,
     T: IntoHandled<MessageCx<Req, Notif>>,
     ToFut: Fn(
             &mut F,
             MessageCx<Req, Notif>,
-            JrConnectionCx<Link>,
+            ConnectionTo<Link>,
         ) -> crate::BoxFuture<'_, Result<T, crate::Error>>
         + Send
         + Sync,
@@ -342,7 +342,7 @@ where
     async fn handle_message(
         &mut self,
         message_cx: MessageCx,
-        connection_cx: JrConnectionCx<Link>,
+        connection_cx: ConnectionTo<Link>,
     ) -> Result<Handled<MessageCx>, crate::Error> {
         handle_incoming_message::<Link, Peer>(
             Peer::default(),
@@ -434,7 +434,7 @@ impl<H: JrMessageHandler> JrMessageHandler for NamedHandler<H> {
     async fn handle_message(
         &mut self,
         message: MessageCx,
-        connection_cx: JrConnectionCx<H::Link>,
+        connection_cx: ConnectionTo<H::Link>,
     ) -> Result<Handled<MessageCx>, crate::Error> {
         if let Some(name) = &self.name {
             crate::util::instrumented_with_connection_name(
@@ -483,7 +483,7 @@ where
     async fn handle_message(
         &mut self,
         message: MessageCx,
-        connection_cx: JrConnectionCx<H1::Link>,
+        connection_cx: ConnectionTo<H1::Link>,
     ) -> Result<Handled<MessageCx>, crate::Error> {
         match self
             .handler1

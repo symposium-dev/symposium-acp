@@ -109,9 +109,9 @@ pub mod one_shot_prompt {
     //!
     //! [`connect_to`]: sacp::JrConnectionBuilder::connect_to
     //! [`run_until`]: sacp::JrConnection::run_until
-    //! [`send_request`]: sacp::JrConnectionCx::send_request
+    //! [`send_request`]: sacp::ConnectionTo::send_request
     //! [`block_task`]: sacp::JrResponse::block_task
-    //! [`build_session_cwd`]: sacp::JrConnectionCx::build_session_cwd
+    //! [`build_session_cwd`]: sacp::ConnectionTo::build_session_cwd
     //! [`start_session`]: sacp::SessionBuilder::start_session
     //! [`ActiveSession`]: sacp::ActiveSession
     //! [`send_prompt`]: sacp::ActiveSession::send_prompt
@@ -198,7 +198,7 @@ pub mod connecting_as_client {
     //!
     //! [`run_until`]: sacp::JrConnectionBuilder::run_until
     //! [`block_task`]: sacp::JrResponse::block_task
-    //! [`build_session`]: sacp::JrConnectionCx::build_session
+    //! [`build_session`]: sacp::ConnectionTo::build_session
     //! [`SessionBuilder`]: sacp::SessionBuilder
     //! [`send_prompt`]: sacp::ActiveSession::send_prompt
     //! [`read_update`]: sacp::ActiveSession::read_update
@@ -222,7 +222,7 @@ pub mod building_an_agent {
     //! # Minimal Example
     //!
     //! ```
-    //! use sacp::{AgentToClient, Component, MessageCx, JrConnectionCx};
+    //! use sacp::{AgentToClient, Component, MessageCx, ConnectionTo};
     //! use sacp::link::JrLink;
     //! use sacp::schema::{
     //!     InitializeRequest, InitializeResponse, AgentCapabilities,
@@ -253,7 +253,7 @@ pub mod building_an_agent {
     //!             request_cx.respond(PromptResponse::new(StopReason::EndTurn))
     //!         }, sacp::on_receive_request!())
     //!         // Reject unknown messages
-    //!         .on_receive_message(async |message: MessageCx, cx: JrConnectionCx<AgentToClient>| {
+    //!         .on_receive_message(async |message: MessageCx, cx: ConnectionTo<AgentToClient>| {
     //!             message.respond_with_error(sacp::Error::method_not_found(), cx)
     //!         }, sacp::on_receive_message!())
     //!         .serve(transport)
@@ -378,11 +378,11 @@ pub mod reusable_components {
     //! Message handlers run on the event loop. Blocking in a handler prevents the
     //! connection from processing new messages. For expensive work:
     //!
-    //! - Use [`JrConnectionCx::spawn`] to offload work to a background task
+    //! - Use [`ConnectionTo::spawn`] to offload work to a background task
     //! - Use [`on_receiving_result`] to schedule work when a response arrives
     //!
     //! [`Component`]: sacp::Component
-    //! [`JrConnectionCx::spawn`]: sacp::JrConnectionCx::spawn
+    //! [`ConnectionTo::spawn`]: sacp::ConnectionTo::spawn
     //! [`on_receiving_result`]: sacp::JrResponse::on_receiving_result
     //! [`sacp-conductor`]: https://crates.io/crates/sacp-conductor
 }
@@ -401,7 +401,7 @@ pub mod custom_message_handlers {
     //! # Example
     //!
     //! ```
-    //! use sacp::{JrMessageHandler, MessageCx, Handled, JrConnectionCx};
+    //! use sacp::{JrMessageHandler, MessageCx, Handled, ConnectionTo};
     //! use sacp::schema::{InitializeRequest, InitializeResponse, AgentCapabilities};
     //! use sacp::util::MatchMessage;
     //!
@@ -413,7 +413,7 @@ pub mod custom_message_handlers {
     //!     async fn handle_message(
     //!         &mut self,
     //!         message: MessageCx,
-    //!         _cx: JrConnectionCx<Self::Link>,
+    //!         _cx: ConnectionTo<Self::Link>,
     //!     ) -> Result<Handled<MessageCx>, sacp::Error> {
     //!         MatchMessage::new(message)
     //!             .if_request(async |req: InitializeRequest, request_cx| {
