@@ -96,6 +96,8 @@ pub mod mcp;
 pub mod mcp_server;
 /// Peer types for JSON-RPC connections
 pub mod peer;
+/// Role types for ACP connections
+pub mod role;
 /// ACP protocol schema types - all message types, requests, responses, and supporting types
 pub mod schema;
 /// Utility functions and types
@@ -121,7 +123,11 @@ pub use jsonrpc::{
     responder::{ChainResponder, JrResponder, NullResponder},
 };
 
-pub use link::{AgentToClient, ClientToAgent, HasDefaultPeer, HasPeer, JrLink, ProxyToConductor};
+pub use link::{
+    AgentToClient, ClientToAgent, HasDefaultPeer, HasPeer, JrLink, ProxyToConductor, RemoteStyle,
+};
+
+pub use role::{Agent, Client, Conductor, ConnectionTo, Proxy, Role, RoleId};
 
 pub use peer::{AgentPeer, ClientPeer, ConductorPeer, JrPeer, PeerId};
 
