@@ -49,11 +49,11 @@ fn create_echo_proxy() -> Result<sacp::DynComponent<ProxyToConductor>, sacp::Err
     Ok(sacp::DynComponent::new(ProxyWithEchoServer { mcp_server }))
 }
 
-struct ProxyWithEchoServer<R: sacp::JrResponder<ProxyToConductor>> {
+struct ProxyWithEchoServer<R: sacp::Run<ProxyToConductor>> {
     mcp_server: McpServer<ProxyToConductor, R>,
 }
 
-impl<R: sacp::JrResponder<ProxyToConductor> + 'static + Send> Component<ProxyToConductor>
+impl<R: sacp::Run<ProxyToConductor> + 'static + Send> Component<ProxyToConductor>
     for ProxyWithEchoServer<R>
 {
     async fn serve(

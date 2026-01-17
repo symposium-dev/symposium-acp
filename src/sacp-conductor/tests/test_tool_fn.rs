@@ -36,11 +36,11 @@ fn create_greet_proxy() -> Result<sacp::DynComponent<ProxyToConductor>, sacp::Er
     Ok(sacp::DynComponent::new(ProxyWithGreetServer { mcp_server }))
 }
 
-struct ProxyWithGreetServer<R: sacp::JrResponder<ProxyToConductor>> {
+struct ProxyWithGreetServer<R: sacp::Run<ProxyToConductor>> {
     mcp_server: McpServer<ProxyToConductor, R>,
 }
 
-impl<R: sacp::JrResponder<ProxyToConductor> + 'static + Send> Component<ProxyToConductor>
+impl<R: sacp::Run<ProxyToConductor> + 'static + Send> Component<ProxyToConductor>
     for ProxyWithGreetServer<R>
 {
     async fn serve(

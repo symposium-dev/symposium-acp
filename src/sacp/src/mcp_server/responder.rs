@@ -6,7 +6,7 @@ use futures::{
     future::BoxFuture,
 };
 
-use crate::{JrConnectionCx, JrLink, jsonrpc::responder::JrResponder, mcp_server::McpContext};
+use crate::{JrConnectionCx, JrLink, jsonrpc::run::Run, mcp_server::McpContext};
 
 /// A tool call request sent through the channel.
 pub(super) struct ToolCall<P, R, Link> {
@@ -26,7 +26,7 @@ pub(super) struct ToolFnMutResponder<F, P, R, Link> {
     >,
 }
 
-impl<F, P, R, Link> JrResponder<Link> for ToolFnMutResponder<F, P, R, Link>
+impl<F, P, R, Link> Run<Link> for ToolFnMutResponder<F, P, R, Link>
 where
     Link: JrLink,
     P: Send,
@@ -66,7 +66,7 @@ pub(super) struct ToolFnResponder<F, P, R, Link> {
     >,
 }
 
-impl<F, P, R, Link> JrResponder<Link> for ToolFnResponder<F, P, R, Link>
+impl<F, P, R, Link> Run<Link> for ToolFnResponder<F, P, R, Link>
 where
     Link: JrLink,
     P: Send,

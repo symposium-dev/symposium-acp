@@ -86,11 +86,11 @@ fn create_proxy_with_allowlist() -> Result<sacp::DynComponent<ProxyToConductor>,
     Ok(sacp::DynComponent::new(TestProxy { mcp_server }))
 }
 
-struct TestProxy<R: sacp::JrResponder<ProxyToConductor>> {
+struct TestProxy<R: sacp::Run<ProxyToConductor>> {
     mcp_server: McpServer<ProxyToConductor, R>,
 }
 
-impl<R: sacp::JrResponder<ProxyToConductor> + 'static + Send> Component<ProxyToConductor>
+impl<R: sacp::Run<ProxyToConductor> + 'static + Send> Component<ProxyToConductor>
     for TestProxy<R>
 {
     async fn serve(

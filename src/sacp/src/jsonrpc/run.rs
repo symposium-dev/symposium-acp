@@ -1,6 +1,6 @@
-//! Responder trait for background tasks that run alongside a connection.
+//! Run trait for background tasks that run alongside a connection.
 //!
-//! Responders are composable background tasks that run while a connection is active.
+//! Run implementations are composable background tasks that run while a connection is active.
 //! They're used for things like MCP tool handlers that need to receive calls through
 //! channels and invoke user-provided closures.
 
@@ -8,44 +8,42 @@ use std::future::Future;
 
 use crate::{JrConnectionCx, link::JrLink};
 
-/// A responder runs background tasks alongside a connection.
+/// A background task that runs alongside a connection.
 ///
-/// Responders are composed using [`ChainResponder`] and run in parallel
+/// Run implementations are composed using [`ChainRun`] and run in parallel
 /// when the connection is active.
-pub trait JrResponder<Link: JrLink>: Send {
-    /// Run this responder to completion.
+pub trait Run<Link: JrLink>: Send {
+    /// Run this task to completion.
     fn run(self, cx: JrConnectionCx<Link>)
     -> impl Future<Output = Result<(), crate::Error>> + Send;
 }
 
-/// A no-op responder that completes immediately.
+/// A no-op Run that completes immediately.
 #[derive(Default)]
-pub struct NullResponder;
+pub struct NullRun;
 
-impl<Link: JrLink> JrResponder<Link> for NullResponder {
+impl<Link: JrLink> Run<Link> for NullRun {
     async fn run(self, _cx: JrConnectionCx<Link>) -> Result<(), crate::Error> {
         Ok(())
     }
 }
 
-/// Chains two responders to run in parallel.
-pub struct ChainResponder<A, B> {
+/// Chains two Run implementations to run in parallel.
+pub struct ChainRun<A, B> {
     a: A,
     b: B,
 }
 
-impl<A, B> ChainResponder<A, B> {
-    /// Create a new chained responder from two responders.
+impl<A, B> ChainRun<A, B> {
+    /// Create a new chained Run from two Run implementations.
     pub fn new(a: A, b: B) -> Self {
         Self { a, b }
     }
 }
 
-impl<Link: JrLink, A: JrResponder<Link>, B: JrResponder<Link>> JrResponder<Link>
-    for ChainResponder<A, B>
-{
+impl<Link: JrLink, A: Run<Link>, B: Run<Link>> Run<Link> for ChainRun<A, B> {
     async fn run(self, cx: JrConnectionCx<Link>) -> Result<(), crate::Error> {
-        // Box the futures to avoid stack overflow with deeply nested responder chains
+        // Box the futures to avoid stack overflow with deeply nested Run chains
         let a_fut = Box::pin(self.a.run(cx.clone()));
         let b_fut = Box::pin(self.b.run(cx.clone()));
         let ((), ()) = futures::future::try_join(a_fut, b_fut).await?;
@@ -53,20 +51,20 @@ impl<Link: JrLink, A: JrResponder<Link>, B: JrResponder<Link>> JrResponder<Link>
     }
 }
 
-/// A responder created from a closure via [`with_spawned`](crate::JrConnectionBuilder::with_spawned).
-pub struct SpawnedResponder<F> {
+/// A Run created from a closure via [`with_spawned`](crate::JrConnectionBuilder::with_spawned).
+pub struct SpawnedRun<F> {
     task_fn: F,
     location: &'static std::panic::Location<'static>,
 }
 
-impl<F> SpawnedResponder<F> {
-    /// Create a new spawned responder from a closure.
+impl<F> SpawnedRun<F> {
+    /// Create a new spawned Run from a closure.
     pub fn new(location: &'static std::panic::Location<'static>, task_fn: F) -> Self {
         Self { task_fn, location }
     }
 }
 
-impl<Link, F, Fut> JrResponder<Link> for SpawnedResponder<F>
+impl<Link, F, Fut> Run<Link> for SpawnedRun<F>
 where
     Link: JrLink,
     F: FnOnce(JrConnectionCx<Link>) -> Fut + Send,

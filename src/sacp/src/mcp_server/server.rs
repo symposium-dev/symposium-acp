@@ -11,7 +11,7 @@ use crate::{
     JrMessageHandler, MessageCx,
     jsonrpc::{
         DynamicHandlerRegistration,
-        responder::{JrResponder, NullResponder},
+        run::{NullRun, Run},
     },
     mcp::{McpClientPeer, McpClientToServer, McpServerPeer, McpServerToClient},
     mcp_server::{
@@ -43,7 +43,7 @@ use crate::{
 /// ```rust,ignore
 /// let server = McpServer::new(MyCustomServerConnect);
 /// ```
-pub struct McpServer<Link, Responder = NullResponder> {
+pub struct McpServer<Link, Responder = NullRun> {
     /// The ACP URL we assigned for this mcp server; always unique
     acp_url: String,
 
@@ -59,14 +59,14 @@ pub struct McpServer<Link, Responder = NullResponder> {
     responder: Responder,
 }
 
-impl<Link: JrLink> McpServer<Link, NullResponder> {
+impl<Link: JrLink> McpServer<Link, NullRun> {
     /// Create an empty server with no content.
-    pub fn builder(name: impl ToString) -> McpServerBuilder<Link, NullResponder> {
+    pub fn builder(name: impl ToString) -> McpServerBuilder<Link, NullRun> {
         McpServerBuilder::new(name.to_string())
     }
 }
 
-impl<Link: JrLink, Responder: JrResponder<Link>> McpServer<Link, Responder> {
+impl<Link: JrLink, Responder: Run<Link>> McpServer<Link, Responder> {
     /// Create an MCP server from something that implements the [`McpServerConnect`](`super::McpServerConnect`) trait.
     ///
     /// # See also
@@ -189,7 +189,7 @@ where
 
 impl<R> Component<McpServerToClient> for McpServer<McpServerToClient, R>
 where
-    R: JrResponder<McpServerToClient> + 'static,
+    R: Run<McpServerToClient> + 'static,
 {
     async fn serve(self, client: impl Component<McpClientToServer>) -> Result<(), crate::Error> {
         let Self {

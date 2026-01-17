@@ -48,7 +48,7 @@ use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
 use super::{McpContext, McpTool};
 use crate::{
     ByteStreams, Component, DynComponent, JrLink,
-    jsonrpc::responder::{ChainResponder, JrResponder, NullResponder},
+    jsonrpc::run::{ChainRun, Run, NullRun},
     mcp_server::{
         McpServer, McpServerConnect,
         responder::{ToolCall, ToolFnMutResponder, ToolFnResponder},
@@ -106,18 +106,18 @@ impl<Link: JrLink> Default for McpServerData<Link> {
     }
 }
 
-impl<Link: JrLink> McpServerBuilder<Link, NullResponder> {
+impl<Link: JrLink> McpServerBuilder<Link, NullRun> {
     pub(super) fn new(name: String) -> Self {
         Self {
             name: name,
             role: Link::default(),
             data: McpServerData::default(),
-            responder: NullResponder::default(),
+            responder: NullRun::default(),
         }
     }
 }
 
-impl<Link: JrLink, Responder: JrResponder<Link>> McpServerBuilder<Link, Responder> {
+impl<Link: JrLink, Responder: Run<Link>> McpServerBuilder<Link, Responder> {
     /// Set the server instructions that are provided to the client.
     pub fn instructions(mut self, instructions: impl ToString) -> Self {
         self.data.instructions = Some(instructions.to_string());
@@ -191,17 +191,17 @@ impl<Link: JrLink, Responder: JrResponder<Link>> McpServerBuilder<Link, Responde
 
     /// Private fn: adds the tool but also adds a responder that will be
     /// run while the MCP server is active.
-    fn tool_with_responder<R: JrResponder<Link>>(
+    fn tool_with_responder<R: Run<Link>>(
         self,
         tool: impl McpTool<Link> + 'static,
         tool_responder: R,
-    ) -> McpServerBuilder<Link, impl JrResponder<Link>> {
+    ) -> McpServerBuilder<Link, impl Run<Link>> {
         let this = self.tool(tool);
         McpServerBuilder {
             role: this.role,
             name: this.name,
             data: this.data,
-            responder: ChainResponder::new(this.responder, tool_responder),
+            responder: ChainRun::new(this.responder, tool_responder),
         }
     }
 
@@ -239,7 +239,7 @@ impl<Link: JrLink, Responder: JrResponder<Link>> McpServerBuilder<Link, Responde
         ) -> BoxFuture<'a, Result<R, crate::Error>>
         + Send
         + 'static,
-    ) -> McpServerBuilder<Link, impl JrResponder<Link>>
+    ) -> McpServerBuilder<Link, impl Run<Link>>
     where
         P: JsonSchema + DeserializeOwned + 'static + Send,
         R: JsonSchema + Serialize + 'static + Send,
@@ -293,7 +293,7 @@ impl<Link: JrLink, Responder: JrResponder<Link>> McpServerBuilder<Link, Responde
         + Send
         + Sync
         + 'static,
-    ) -> McpServerBuilder<Link, impl JrResponder<Link>>
+    ) -> McpServerBuilder<Link, impl Run<Link>>
     where
         P: JsonSchema + DeserializeOwned + 'static + Send,
         R: JsonSchema + Serialize + 'static + Send,

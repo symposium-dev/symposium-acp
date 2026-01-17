@@ -120,7 +120,7 @@ pub use jsonrpc::{
     ByteStreams, Channel, Handled, IntoHandled, JrConnection, JrConnectionBuilder, JrConnectionCx,
     JrMessageHandler, JrRequestCx, JrResponse, JrResponseCx, JsonRpcMessage, JsonRpcNotification,
     JsonRpcRequest, JsonRpcResponse, Lines, MessageCx, NullHandler, UntypedMessage,
-    responder::{ChainResponder, JrResponder, NullResponder},
+    run::{ChainRun, NullRun, Run},
 };
 
 pub use link::{

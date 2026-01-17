@@ -6,7 +6,7 @@
 
 use elizacp::ElizaAgent;
 use sacp::mcp_server::McpServer;
-use sacp::{AgentPeer, ClientToAgent, Component, HasPeer, JrLink, JrResponder, ProxyToConductor};
+use sacp::{AgentPeer, ClientToAgent, Component, HasPeer, JrLink, Run, ProxyToConductor};
 use sacp_conductor::{Conductor, McpBridgeMode, ProxiesAndAgent};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -80,7 +80,7 @@ struct ScopedProxy;
 
 fn make_mcp_server<'a, Link: JrLink>(
     values: &'a Mutex<Vec<String>>,
-) -> McpServer<Link, impl JrResponder<Link>>
+) -> McpServer<Link, impl Run<Link>>
 where
     Link: HasPeer<AgentPeer>,
 {

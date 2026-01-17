@@ -15,7 +15,7 @@ use futures::StreamExt;
 use futures::channel::mpsc;
 use sacp::mcp_server::McpServer;
 use sacp::schema::{InitializeRequest, ProtocolVersion};
-use sacp::{ClientToAgent, JrLink, JrResponder};
+use sacp::{ClientToAgent, JrLink, Run};
 use sacp_conductor::trace::TraceEvent;
 use sacp_conductor::{Conductor, McpBridgeMode, ProxiesAndAgent};
 use schemars::JsonSchema;
@@ -186,7 +186,7 @@ impl EventNormalizer {
 /// Create an MCP server with an echo tool for testing.
 fn make_echo_mcp_server<Link: JrLink>(
     call_count: &Mutex<usize>,
-) -> McpServer<Link, impl JrResponder<Link>> {
+) -> McpServer<Link, impl Run<Link>> {
     #[derive(Serialize, Deserialize, JsonSchema)]
     struct EchoInput {
         message: String,

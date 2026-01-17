@@ -12,7 +12,7 @@ use crate::{
     MessageCx,
     jsonrpc::{
         DynamicHandlerRegistration,
-        responder::{ChainResponder, JrResponder, NullResponder},
+        run::{ChainRun, NullRun, Run},
     },
     link::ProxySessionMessages,
     mcp_server::McpServer,
@@ -39,7 +39,7 @@ where
     Link: HasPeer<AgentPeer>,
 {
     /// Session builder for a new session request.
-    pub fn build_session(&self, cwd: impl AsRef<Path>) -> SessionBuilder<Link, NullResponder> {
+    pub fn build_session(&self, cwd: impl AsRef<Path>) -> SessionBuilder<Link, NullRun> {
         SessionBuilder::new(self, NewSessionRequest::new(cwd.as_ref()))
     }
 
@@ -49,7 +49,7 @@ where
     /// that uses [`std::env::current_dir`] to get the working directory.
     ///
     /// Returns an error if the current directory cannot be determined.
-    pub fn build_session_cwd(&self) -> Result<SessionBuilder<Link, NullResponder>, crate::Error> {
+    pub fn build_session_cwd(&self) -> Result<SessionBuilder<Link, NullRun>, crate::Error> {
         let cwd = std::env::current_dir().map_err(|e| {
             crate::Error::internal_error().data(format!("cannot get current directory: {e}"))
         })?;
@@ -60,10 +60,7 @@ where
     ///
     /// Use this when you've intercepted a `session.new` request and want to
     /// modify it (e.g., inject MCP servers) before forwarding.
-    pub fn build_session_from(
-        &self,
-        request: NewSessionRequest,
-    ) -> SessionBuilder<Link, NullResponder> {
+    pub fn build_session_from(&self, request: NewSessionRequest) -> SessionBuilder<Link, NullRun> {
         SessionBuilder::new(self, request)
     }
 
@@ -118,7 +115,7 @@ where
 #[must_use = "use `start_session`, `run_until`, or `on_session_start` to start the session"]
 pub struct SessionBuilder<
     Link,
-    Responder: JrResponder<Link> = NullResponder,
+    Responder: Run<Link> = NullRun,
     BlockState: SessionBlockState = NonBlocking,
 > where
     Link: HasPeer<AgentPeer>,
@@ -130,7 +127,7 @@ pub struct SessionBuilder<
     block_state: PhantomData<BlockState>,
 }
 
-impl<Link> SessionBuilder<Link, NullResponder, NonBlocking>
+impl<Link> SessionBuilder<Link, NullRun, NonBlocking>
 where
     Link: HasPeer<AgentPeer>,
 {
@@ -139,7 +136,7 @@ where
             connection: connection.clone(),
             request,
             dynamic_handler_registrations: Default::default(),
-            responder: NullResponder,
+            responder: NullRun,
             block_state: PhantomData,
         }
     }
@@ -148,16 +145,16 @@ where
 impl<Link, Responder, BlockState> SessionBuilder<Link, Responder, BlockState>
 where
     Link: HasPeer<AgentPeer>,
-    Responder: JrResponder<Link>,
+    Responder: Run<Link>,
     BlockState: SessionBlockState,
 {
     /// Add the MCP servers from the given registry to this session.
     pub fn with_mcp_server<R>(
         mut self,
         mcp_server: McpServer<Link, R>,
-    ) -> Result<SessionBuilder<Link, ChainResponder<Responder, R>, BlockState>, crate::Error>
+    ) -> Result<SessionBuilder<Link, ChainRun<Responder, R>, BlockState>, crate::Error>
     where
-        R: JrResponder<Link>,
+        R: Run<Link>,
     {
         let (handler, responder) = mcp_server.into_handler_and_responder();
         self.dynamic_handler_registrations
@@ -166,7 +163,7 @@ where
             connection: self.connection,
             request: self.request,
             dynamic_handler_registrations: self.dynamic_handler_registrations,
-            responder: ChainResponder::new(self.responder, responder),
+            responder: ChainRun::new(self.responder, responder),
             block_state: self.block_state,
         })
     }
@@ -335,7 +332,7 @@ where
 impl<Link, Responder> SessionBuilder<Link, Responder, NonBlocking>
 where
     Link: HasPeer<AgentPeer>,
-    Responder: JrResponder<Link>,
+    Responder: Run<Link>,
 {
     /// Mark this session builder as being able to block the current task.
     ///
@@ -359,7 +356,7 @@ where
 impl<Link, Responder> SessionBuilder<Link, Responder, Blocking>
 where
     Link: HasPeer<AgentPeer>,
-    Responder: JrResponder<Link>,
+    Responder: Run<Link>,
 {
     /// Run this session synchronously. The current task will be blocked
     /// and `op` will be executed with the active session information.

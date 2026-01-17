@@ -37,11 +37,11 @@ fn create_test_proxy() -> Result<sacp::DynComponent<ProxyToConductor>, sacp::Err
     Ok(sacp::DynComponent::new(ProxyWithTestServer { mcp_server }))
 }
 
-struct ProxyWithTestServer<R: sacp::JrResponder<ProxyToConductor>> {
+struct ProxyWithTestServer<R: sacp::Run<ProxyToConductor>> {
     mcp_server: McpServer<ProxyToConductor, R>,
 }
 
-impl<R: sacp::JrResponder<ProxyToConductor> + 'static + Send> Component<ProxyToConductor>
+impl<R: sacp::Run<ProxyToConductor> + 'static + Send> Component<ProxyToConductor>
     for ProxyWithTestServer<R>
 {
     async fn serve(

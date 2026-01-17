@@ -462,7 +462,7 @@ pub mod global_mcp_server {
     //!
     //! ```
     //! use sacp::mcp_server::McpServer;
-    //! use sacp::{Component, JrResponder, ProxyToConductor};
+    //! use sacp::{Component, Run, ProxyToConductor};
     //! use schemars::JsonSchema;
     //! use serde::{Deserialize, Serialize};
     //!
@@ -486,7 +486,7 @@ pub mod global_mcp_server {
     //!     mcp_server: McpServer<ProxyToConductor, R>,
     //! }
     //!
-    //! impl<R: JrResponder<ProxyToConductor> + Send + 'static> Component<ProxyToConductor> for MyProxy<R> {
+    //! impl<R: Run<ProxyToConductor> + Send + 'static> Component<ProxyToConductor> for MyProxy<R> {
     //!     async fn serve(self, client: impl Component<sacp::link::ConductorToProxy>) -> Result<(), sacp::Error> {
     //!         ProxyToConductor::builder()
     //!             .with_mcp_server(self.mcp_server)
@@ -713,7 +713,7 @@ pub mod filtering_tools {
     //! #[derive(Debug, Deserialize, JsonSchema)]
     //! struct Params {}
     //!
-    //! fn build_server(enable_admin: bool) -> Result<McpServer<ProxyToConductor, impl sacp::JrResponder<ProxyToConductor>>, sacp::Error> {
+    //! fn build_server(enable_admin: bool) -> Result<McpServer<ProxyToConductor, impl sacp::Run<ProxyToConductor>>, sacp::Error> {
     //!     let mut builder = McpServer::builder("my-server")
     //!         .tool_fn("echo", "Echo a message",
     //!             async |_p: Params, _cx| Ok("echoed"),
@@ -749,7 +749,7 @@ pub mod filtering_tools {
     //! #[derive(Debug, Deserialize, JsonSchema)]
     //! struct Params {}
     //!
-    //! fn build_restricted_server() -> Result<McpServer<ProxyToConductor, impl sacp::JrResponder<ProxyToConductor>>, sacp::Error> {
+    //! fn build_restricted_server() -> Result<McpServer<ProxyToConductor, impl sacp::Run<ProxyToConductor>>, sacp::Error> {
     //!     McpServer::builder("restricted-server")
     //!         .tool_fn("safe", "Safe operation",
     //!             async |_p: Params, _cx| Ok("safe"),

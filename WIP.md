@@ -17,6 +17,10 @@ Refactoring the Link/Peer type system to a simpler Role-based API. Goals:
 | `JrConnectionCx<AgentToClient>` | `ConnectionTo<Client>` |
 | `JrRequestCx<R>` | `Responder<R>` |
 | `JrResponseCx<R>` | `ResponseRouter<R>` |
+| `JrResponder` | `Run` |
+| `NullResponder` | `NullRun` |
+| `ChainResponder` | `ChainRun` |
+| `SpawnedResponder` | `SpawnedRun` |
 
 ## New API Shape
 
@@ -28,6 +32,12 @@ Agent::builder()
     .await
 
 // Active connection - drive the interaction
+Client::connect_to(transport, async |connection: ConnectionTo<Agent>| {
+    connection.send_request(...).await
+})
+.await
+
+// Equivalent to:
 Client::builder()
     .connect_to(transport, async |connection: ConnectionTo<Agent>| {
         connection.send_request(...).await
@@ -104,30 +114,37 @@ These stay public because external code needs them:
 
 ## Migration Phases
 
-### Phase 1: Introduce Role traits
-- [ ] Define `Role` trait with `Counterpart` associated type
-- [ ] Define `HasPeer<Peer>` trait
-- [ ] Implement for `Agent`, `Client`, `Proxy`
+### Phase 1: Introduce Role traits ✅
+- [x] Define `Role` trait with `Counterpart` associated type
+- [x] Define `HasPeer<Peer>` trait
+- [x] Implement for `Agent`, `Client`, `Proxy`, `Conductor`
 
-### Phase 2: Rename context types
+### Phase 2: Rename JrResponder ecosystem to Run ✅
+- [x] `JrResponder` → `Run`
+- [x] `NullResponder` → `NullRun`
+- [x] `ChainResponder` → `ChainRun`
+- [x] `SpawnedResponder` → `SpawnedRun`
+- [x] Renamed `jsonrpc/responder.rs` → `jsonrpc/run.rs`
+
+### Phase 3: Rename context types
 - [ ] `JrConnectionCx` → `ConnectionTo`
 - [ ] `JrRequestCx` → `Responder`
 - [ ] `JrResponseCx` → `ResponseRouter`
 
-### Phase 3: Simplify builder API
+### Phase 4: Simplify builder API
 - [ ] Remove `JrConnection` intermediate type
 - [ ] `connect_to(transport)?.run_until(...)` → `connect_to(transport, |cx| ...)`
 - [ ] Keep `serve(transport)` for reactive case
 
-### Phase 4: Rename builder
+### Phase 5: Rename builder
 - [ ] `JrConnectionBuilder` → `ConnectFrom`
 
-### Phase 5: Migrate conductor types
+### Phase 6: Migrate conductor types
 - [ ] Move `ConductorToAgent`, `ConductorToProxy` into sacp-conductor as private
 - [ ] Replace with `ConnectionTo<Agent>`, `ConnectionTo<Proxy>` + custom handlers
 - [ ] Create `ConductorImpl<R>` for external presentation
 
-### Phase 6: Remove Link types
+### Phase 7: Remove Link types
 - [ ] Replace Link type parameters with Role type parameters
 - [ ] Remove old Link types (`AgentToClient`, etc.)
 - [ ] Update `peer_id` to `role_id`

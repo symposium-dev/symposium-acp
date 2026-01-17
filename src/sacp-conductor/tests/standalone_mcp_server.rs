@@ -31,7 +31,7 @@ struct AddOutput {
 }
 
 /// Create a test MCP server with echo and add tools
-fn create_test_server() -> McpServer<McpServerToClient, impl sacp::JrResponder<McpServerToClient>> {
+fn create_test_server() -> McpServer<McpServerToClient, impl sacp::Run<McpServerToClient>> {
     McpServer::builder("test-server")
         .instructions("A test MCP server")
         .tool_fn(

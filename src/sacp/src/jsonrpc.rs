@@ -20,7 +20,7 @@ mod dynamic_handler;
 pub(crate) mod handlers;
 mod incoming_actor;
 mod outgoing_actor;
-pub(crate) mod responder;
+pub(crate) mod run;
 mod task_actor;
 mod transport_actor;
 
@@ -29,8 +29,8 @@ pub use crate::jsonrpc::handlers::NullHandler;
 use crate::jsonrpc::handlers::{ChainedHandler, NamedHandler};
 use crate::jsonrpc::handlers::{MessageHandler, NotificationHandler, RequestHandler};
 use crate::jsonrpc::outgoing_actor::{OutgoingMessageTx, send_raw_message};
-use crate::jsonrpc::responder::SpawnedResponder;
-use crate::jsonrpc::responder::{ChainResponder, JrResponder, NullResponder};
+use crate::jsonrpc::run::SpawnedRun;
+use crate::jsonrpc::run::{ChainRun, Run, NullRun};
 use crate::jsonrpc::task_actor::{Task, TaskTx};
 use crate::link::{HasDefaultPeer, HasPeer, JrLink};
 use crate::mcp_server::McpServer;
@@ -541,7 +541,7 @@ impl<H: JrMessageHandler> JrMessageHandler for &mut H {
 /// # }
 /// ```
 #[must_use]
-pub struct JrConnectionBuilder<H: JrMessageHandler, R: JrResponder<H::Link> = NullResponder> {
+pub struct JrConnectionBuilder<H: JrMessageHandler, R: Run<H::Link> = NullRun> {
     name: Option<String>,
 
     /// Handler for incoming messages.
@@ -551,7 +551,7 @@ pub struct JrConnectionBuilder<H: JrMessageHandler, R: JrResponder<H::Link> = Nu
     responder: R,
 }
 
-impl<Link: JrLink> JrConnectionBuilder<NullHandler<Link>, NullResponder> {
+impl<Link: JrLink> JrConnectionBuilder<NullHandler<Link>, NullRun> {
     /// Create a new JrConnection with the given role.
     /// This type follows a builder pattern; use other methods to configure and then invoke
     /// [`Self::serve`] (to use as a server) or [`Self::run_until`] to use as a client.
@@ -559,23 +559,23 @@ impl<Link: JrLink> JrConnectionBuilder<NullHandler<Link>, NullResponder> {
         Self {
             name: Default::default(),
             handler: NullHandler::new(role),
-            responder: NullResponder,
+            responder: NullRun,
         }
     }
 }
 
-impl<H: JrMessageHandler> JrConnectionBuilder<H, NullResponder> {
+impl<H: JrMessageHandler> JrConnectionBuilder<H, NullRun> {
     /// Create a new connection builder with the given handler.
     pub fn new_with(handler: H) -> Self {
         Self {
             name: Default::default(),
             handler,
-            responder: NullResponder,
+            responder: NullRun,
         }
     }
 }
 
-impl<H: JrMessageHandler, R: JrResponder<H::Link>> JrConnectionBuilder<H, R> {
+impl<H: JrMessageHandler, R: Run<H::Link>> JrConnectionBuilder<H, R> {
     /// Set the "name" of this connection -- used only for debugging logs.
     pub fn name(mut self, name: impl ToString) -> Self {
         self.name = Some(name.to_string());
@@ -589,10 +589,10 @@ impl<H: JrMessageHandler, R: JrResponder<H::Link>> JrConnectionBuilder<H, R> {
     pub fn with_connection_builder<H1, R1>(
         self,
         other: JrConnectionBuilder<H1, R1>,
-    ) -> JrConnectionBuilder<impl JrMessageHandler<Link = H::Link>, impl JrResponder<H::Link>>
+    ) -> JrConnectionBuilder<impl JrMessageHandler<Link = H::Link>, impl Run<H::Link>>
     where
         H1: JrMessageHandler<Link = H::Link>,
-        R1: JrResponder<H::Link>,
+        R1: Run<H::Link>,
     {
         JrConnectionBuilder {
             name: self.name,
@@ -600,7 +600,7 @@ impl<H: JrMessageHandler, R: JrResponder<H::Link>> JrConnectionBuilder<H, R> {
                 self.handler,
                 NamedHandler::new(other.name, other.handler),
             ),
-            responder: ChainResponder::new(self.responder, other.responder),
+            responder: ChainRun::new(self.responder, other.responder),
         }
     }
 
@@ -622,30 +622,30 @@ impl<H: JrMessageHandler, R: JrResponder<H::Link>> JrConnectionBuilder<H, R> {
         }
     }
 
-    /// Add a new [`JrResponder`] to the chain.
+    /// Add a new [`Run`] to the chain.
     pub fn with_responder<R1>(
         self,
         responder: R1,
-    ) -> JrConnectionBuilder<H, impl JrResponder<H::Link>>
+    ) -> JrConnectionBuilder<H, impl Run<H::Link>>
     where
-        R1: JrResponder<H::Link>,
+        R1: Run<H::Link>,
     {
         JrConnectionBuilder {
             name: self.name,
             handler: self.handler,
-            responder: ChainResponder::new(self.responder, responder),
+            responder: ChainRun::new(self.responder, responder),
         }
     }
 
     /// Enqueue a task to run once the connection is actively serving traffic.
     #[track_caller]
-    pub fn with_spawned<F, Fut>(self, task: F) -> JrConnectionBuilder<H, impl JrResponder<H::Link>>
+    pub fn with_spawned<F, Fut>(self, task: F) -> JrConnectionBuilder<H, impl Run<H::Link>>
     where
         F: FnOnce(JrConnectionCx<H::Link>) -> Fut + Send,
         Fut: Future<Output = Result<(), crate::Error>> + Send,
     {
         let location = Location::caller();
-        self.with_responder(SpawnedResponder::new(location, task))
+        self.with_responder(SpawnedRun::new(location, task))
     }
 
     /// Register a handler for messages that can be either requests OR notifications.
@@ -1032,10 +1032,10 @@ impl<H: JrMessageHandler, R: JrResponder<H::Link>> JrConnectionBuilder<H, R> {
     ///     .serve(connection)
     ///     .await?;
     /// ```
-    pub fn with_mcp_server<Link: JrLink, McpR: JrResponder<Link>>(
+    pub fn with_mcp_server<Link: JrLink, McpR: Run<Link>>(
         self,
         server: McpServer<Link, McpR>,
-    ) -> JrConnectionBuilder<impl JrMessageHandler<Link = Link>, impl JrResponder<Link>>
+    ) -> JrConnectionBuilder<impl JrMessageHandler<Link = Link>, impl Run<Link>>
     where
         H: JrMessageHandler<Link = Link>,
         Link: HasPeer<ClientPeer> + HasPeer<AgentPeer>,
@@ -1199,7 +1199,7 @@ impl<H: JrMessageHandler, R: JrResponder<H::Link>> JrConnectionBuilder<H, R> {
 impl<H, R> Component<H::Link> for JrConnectionBuilder<H, R>
 where
     H: JrMessageHandler + 'static,
-    R: JrResponder<H::Link> + 'static,
+    R: Run<H::Link> + 'static,
 {
     async fn serve(
         self,
@@ -1219,7 +1219,7 @@ where
 ///
 /// Most users won't construct this directly - instead use `JrConnectionBuilder::connect_to()` or
 /// `JrConnectionBuilder::serve()` for convenience.
-pub struct JrConnection<H: JrMessageHandler, R: JrResponder<H::Link> = NullResponder> {
+pub struct JrConnection<H: JrMessageHandler, R: Run<H::Link> = NullRun> {
     cx: JrConnectionCx<H::Link>,
     name: Option<String>,
     outgoing_rx: mpsc::UnboundedReceiver<OutgoingMessage>,
@@ -1231,7 +1231,7 @@ pub struct JrConnection<H: JrMessageHandler, R: JrResponder<H::Link> = NullRespo
     responder: R,
 }
 
-impl<H: JrMessageHandler, R: JrResponder<H::Link>> JrConnection<H, R> {
+impl<H: JrMessageHandler, R: Run<H::Link>> JrConnection<H, R> {
     /// Run the connection in server mode with the provided transport.
     ///
     /// This drives the connection by continuously processing messages from the transport
@@ -1672,7 +1672,7 @@ impl<Link: JrLink> JrConnectionCx<Link> {
     /// # }
     /// ```
     #[track_caller]
-    pub fn spawn_connection<H: JrMessageHandler, R: JrResponder<H::Link> + 'static>(
+    pub fn spawn_connection<H: JrMessageHandler, R: Run<H::Link> + 'static>(
         &self,
         connection: JrConnection<H, R>,
         serve_future: impl FnOnce(JrConnection<H, R>) -> BoxFuture<'static, Result<(), crate::Error>>,

@@ -137,7 +137,7 @@ use sacp::{
     UntypedMessage,
 };
 use sacp::{
-    JrMessageHandler, JrResponder,
+    JrMessageHandler, Run,
     schema::{InitializeProxyRequest, InitializeRequest, NewSessionRequest},
     util::MatchMessageFrom,
 };
@@ -384,7 +384,7 @@ where
     link: Link,
 }
 
-impl<Link> JrResponder<Link> for ConductorResponder<Link>
+impl<Link> Run<Link> for ConductorResponder<Link>
 where
     Link: ConductorLink,
 {

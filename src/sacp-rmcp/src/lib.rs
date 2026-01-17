@@ -22,7 +22,7 @@
 
 use rmcp::ServiceExt;
 use sacp::mcp_server::{McpContext, McpServer, McpServerConnect};
-use sacp::{AgentPeer, ByteStreams, Component, DynComponent, HasPeer, JrLink, NullResponder};
+use sacp::{AgentPeer, ByteStreams, Component, DynComponent, HasPeer, JrLink, NullRun};
 use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
 
 pub trait McpServerExt<Link: JrLink>
@@ -37,7 +37,7 @@ where
     fn from_rmcp<S>(
         name: impl ToString,
         new_fn: impl Fn() -> S + Send + Sync + 'static,
-    ) -> McpServer<Link, NullResponder>
+    ) -> McpServer<Link, NullRun>
     where
         S: rmcp::Service<rmcp::RoleServer>,
     {
@@ -67,7 +67,7 @@ where
                 name: name.to_string(),
                 new_fn,
             },
-            NullResponder,
+            NullRun,
         )
     }
 }
