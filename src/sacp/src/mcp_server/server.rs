@@ -8,7 +8,7 @@ use uuid::Uuid;
 
 use crate::{
     AgentPeer, ClientPeer, Component, DynComponent, Handled, HasPeer, JrConnectionCx, JrLink,
-    JsonRpcMessageHandler, MessageCx,
+    JrMessageHandler, MessageCx,
     jsonrpc::{
         DynamicHandlerRegistration,
         responder::{JrResponder, NullResponder},
@@ -155,7 +155,7 @@ where
     }
 }
 
-impl<Link: JrLink> JsonRpcMessageHandler for McpNewSessionHandler<Link>
+impl<Link: JrLink> JrMessageHandler for McpNewSessionHandler<Link>
 where
     Link: HasPeer<ClientPeer> + HasPeer<AgentPeer>,
 {

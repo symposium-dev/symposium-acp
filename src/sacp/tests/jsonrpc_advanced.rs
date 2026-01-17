@@ -8,7 +8,7 @@
 use futures::{AsyncRead, AsyncWrite};
 use sacp::link::UntypedLink;
 use sacp::{
-    JrConnectionCx, JrResponse, JsonRpcMessage, JsonRpcRequest, JsonRpcRequestCx, JsonRpcResponse,
+    JrConnectionCx, JrRequestCx, JrResponse, JsonRpcMessage, JsonRpcRequest, JsonRpcResponse,
 };
 use serde::{Deserialize, Serialize};
 use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
@@ -153,7 +153,7 @@ async fn test_bidirectional_communication() {
             let side_a_transport = sacp::ByteStreams::new(server_writer, server_reader);
             let side_a = UntypedLink::builder().on_receive_request(
                 async |request: PingRequest,
-                       request_cx: JsonRpcRequestCx<PongResponse>,
+                       request_cx: JrRequestCx<PongResponse>,
                        _connection_cx: JrConnectionCx<UntypedLink>| {
                     request_cx.respond(PongResponse {
                         value: request.value + 1,
@@ -207,7 +207,7 @@ async fn test_request_ids() {
             let server_transport = sacp::ByteStreams::new(server_writer, server_reader);
             let server = UntypedLink::builder().on_receive_request(
                 async |request: PingRequest,
-                       request_cx: JsonRpcRequestCx<PongResponse>,
+                       request_cx: JrRequestCx<PongResponse>,
                        _connection_cx: JrConnectionCx<UntypedLink>| {
                     request_cx.respond(PongResponse {
                         value: request.value + 1,
@@ -269,7 +269,7 @@ async fn test_out_of_order_responses() {
             let server_transport = sacp::ByteStreams::new(server_writer, server_reader);
             let server = UntypedLink::builder().on_receive_request(
                 async |request: SlowRequest,
-                       request_cx: JsonRpcRequestCx<SlowResponse>,
+                       request_cx: JrRequestCx<SlowResponse>,
                        _connection_cx: JrConnectionCx<UntypedLink>| {
                     // Simulate delay
                     tokio::time::sleep(tokio::time::Duration::from_millis(request.delay_ms)).await;

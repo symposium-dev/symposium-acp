@@ -8,8 +8,8 @@ use futures::channel::mpsc;
 use tokio::sync::oneshot;
 
 use crate::{
-    AgentPeer, ClientPeer, Handled, HasPeer, JrConnectionCx, JrLink, JsonRpcMessageHandler,
-    JsonRpcRequestCx, MessageCx,
+    AgentPeer, ClientPeer, Handled, HasPeer, JrConnectionCx, JrLink, JrMessageHandler, JrRequestCx,
+    MessageCx,
     jsonrpc::{
         DynamicHandlerRegistration,
         responder::{ChainResponder, JrResponder, NullResponder},
@@ -285,7 +285,7 @@ where
     /// callback completes. See the [`ordering`](crate::concepts::ordering) module for details.
     pub fn on_proxy_session_start<F, Fut>(
         self,
-        request_cx: JsonRpcRequestCx<NewSessionResponse>,
+        request_cx: JrRequestCx<NewSessionResponse>,
         op: F,
     ) -> Result<(), crate::Error>
     where
@@ -343,7 +343,7 @@ where
     /// [`start_session`](Self::start_session) which block the current task.
     ///
     /// This should not be used from inside a message handler like
-    /// [`JrConnectionBuilder::on_receive_request`](`crate::JrConnectionBuilder::on_receive_request`) or [`JsonRpcMessageHandler`]
+    /// [`JrConnectionBuilder::on_receive_request`](`crate::JrConnectionBuilder::on_receive_request`) or [`JrMessageHandler`]
     /// implementations.
     pub fn block_task(self) -> SessionBuilder<Link, Responder, Blocking> {
         SessionBuilder {
@@ -458,7 +458,7 @@ where
     /// Requires calling [`block_task`](Self::block_task) first.
     pub async fn start_session_proxy(
         self,
-        request_cx: JsonRpcRequestCx<NewSessionResponse>,
+        request_cx: JrRequestCx<NewSessionResponse>,
     ) -> Result<SessionId, crate::Error>
     where
         Link: HasPeer<ClientPeer>,
@@ -732,7 +732,7 @@ where
     }
 }
 
-impl<Link> JsonRpcMessageHandler for ActiveSessionHandler<Link>
+impl<Link> JrMessageHandler for ActiveSessionHandler<Link>
 where
     Link: HasPeer<AgentPeer>,
 {

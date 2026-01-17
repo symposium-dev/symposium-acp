@@ -137,7 +137,7 @@ use sacp::{
     UntypedMessage,
 };
 use sacp::{
-    JrResponder, JsonRpcMessageHandler,
+    JrMessageHandler, JrResponder,
     schema::{InitializeProxyRequest, InitializeRequest, NewSessionRequest},
     util::MatchMessageFrom,
 };
@@ -323,7 +323,7 @@ struct ConductorMessageHandler<Link: ConductorLink> {
     link: Link,
 }
 
-impl<Link: ConductorLink> JsonRpcMessageHandler for ConductorMessageHandler<Link> {
+impl<Link: ConductorLink> JrMessageHandler for ConductorMessageHandler<Link> {
     type Link = Link;
 
     async fn handle_message(
@@ -801,7 +801,7 @@ where
     fn connection_to_proxy(
         &mut self,
         component_index: usize,
-    ) -> JrConnectionBuilder<impl JsonRpcMessageHandler<Link = ConductorToProxy> + 'static> {
+    ) -> JrConnectionBuilder<impl JrMessageHandler<Link = ConductorToProxy> + 'static> {
         ConductorToProxy::builder()
             .name(format!("conductor-to-component({})", component_index))
             // Intercept messages sent by a proxy component to its successor.

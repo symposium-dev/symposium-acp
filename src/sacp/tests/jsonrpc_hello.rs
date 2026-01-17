@@ -6,8 +6,8 @@
 use futures::{AsyncRead, AsyncWrite};
 use sacp::link::UntypedLink;
 use sacp::{
-    JrConnectionCx, JrResponse, JsonRpcMessage, JsonRpcNotification, JsonRpcRequest,
-    JsonRpcRequestCx, JsonRpcResponse,
+    JrConnectionCx, JrRequestCx, JrResponse, JsonRpcMessage, JsonRpcNotification, JsonRpcRequest,
+    JsonRpcResponse,
 };
 use serde::{Deserialize, Serialize};
 use std::sync::{Arc, Mutex};
@@ -102,7 +102,7 @@ async fn test_hello_world() {
             let server_transport = sacp::ByteStreams::new(server_writer, server_reader);
             let server = UntypedLink::builder().on_receive_request(
                 async move |request: PingRequest,
-                            request_cx: JsonRpcRequestCx<PongResponse>,
+                            request_cx: JrRequestCx<PongResponse>,
                             _connection_cx: JrConnectionCx<UntypedLink>| {
                     let pong = PongResponse {
                         echo: format!("pong: {}", request.message),
@@ -265,7 +265,7 @@ async fn test_multiple_sequential_requests() {
             let server_transport = sacp::ByteStreams::new(server_writer, server_reader);
             let server = UntypedLink::builder().on_receive_request(
                 async |request: PingRequest,
-                       request_cx: JsonRpcRequestCx<PongResponse>,
+                       request_cx: JrRequestCx<PongResponse>,
                        _connection_cx: JrConnectionCx<UntypedLink>| {
                     let pong = PongResponse {
                         echo: format!("pong: {}", request.message),
@@ -324,7 +324,7 @@ async fn test_concurrent_requests() {
             let server_transport = sacp::ByteStreams::new(server_writer, server_reader);
             let server = UntypedLink::builder().on_receive_request(
                 async |request: PingRequest,
-                       request_cx: JsonRpcRequestCx<PongResponse>,
+                       request_cx: JrRequestCx<PongResponse>,
                        _connection_cx: JrConnectionCx<UntypedLink>| {
                     let pong = PongResponse {
                         echo: format!("pong: {}", request.message),

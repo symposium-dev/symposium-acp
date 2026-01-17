@@ -7,8 +7,8 @@
 use sacp::link::UntypedLink;
 use sacp::util::run_until;
 use sacp::{
-    Component, JrConnectionCx, JrResponse, JsonRpcMessage, JsonRpcNotification, JsonRpcRequest,
-    JsonRpcRequestCx, JsonRpcResponse,
+    Component, JrConnectionCx, JrRequestCx, JrResponse, JsonRpcMessage, JsonRpcNotification,
+    JsonRpcRequest, JsonRpcResponse,
 };
 use serde::{Deserialize, Serialize};
 use std::sync::{Arc, Mutex};
@@ -139,7 +139,7 @@ async fn test_multiple_handlers_different_methods() {
             let server = UntypedLink::builder()
                 .on_receive_request(
                     async |request: FooRequest,
-                           request_cx: JsonRpcRequestCx<FooResponse>,
+                           request_cx: JrRequestCx<FooResponse>,
                            _connection_cx: JrConnectionCx<UntypedLink>| {
                         request_cx.respond(FooResponse {
                             result: format!("foo: {}", request.value),
@@ -149,7 +149,7 @@ async fn test_multiple_handlers_different_methods() {
                 )
                 .on_receive_request(
                     async |request: BarRequest,
-                           request_cx: JsonRpcRequestCx<BarResponse>,
+                           request_cx: JrRequestCx<BarResponse>,
                            _connection_cx: JrConnectionCx<UntypedLink>| {
                         request_cx.respond(BarResponse {
                             result: format!("bar: {}", request.value),
@@ -259,7 +259,7 @@ async fn test_handler_priority_ordering() {
             let server = UntypedLink::builder()
                 .on_receive_request(
                     async move |request: TrackRequest,
-                                request_cx: JsonRpcRequestCx<FooResponse>,
+                                request_cx: JrRequestCx<FooResponse>,
                                 _connection_cx: JrConnectionCx<UntypedLink>| {
                         handled_clone1.lock().unwrap().push("handler1".to_string());
                         request_cx.respond(FooResponse {
@@ -270,7 +270,7 @@ async fn test_handler_priority_ordering() {
                 )
                 .on_receive_request(
                     async move |request: TrackRequest,
-                                request_cx: JsonRpcRequestCx<FooResponse>,
+                                request_cx: JrRequestCx<FooResponse>,
                                 _connection_cx: JrConnectionCx<UntypedLink>| {
                         handled_clone2.lock().unwrap().push("handler2".to_string());
                         request_cx.respond(FooResponse {
@@ -407,7 +407,7 @@ async fn test_fallthrough_behavior() {
             let server = UntypedLink::builder()
                 .on_receive_request(
                     async move |request: Method1Request,
-                                request_cx: JsonRpcRequestCx<FooResponse>,
+                                request_cx: JrRequestCx<FooResponse>,
                                 _connection_cx: JrConnectionCx<UntypedLink>| {
                         handled_clone1.lock().unwrap().push("method1".to_string());
                         request_cx.respond(FooResponse {
@@ -418,7 +418,7 @@ async fn test_fallthrough_behavior() {
                 )
                 .on_receive_request(
                     async move |request: Method2Request,
-                                request_cx: JsonRpcRequestCx<FooResponse>,
+                                request_cx: JrRequestCx<FooResponse>,
                                 _connection_cx: JrConnectionCx<UntypedLink>| {
                         handled_clone2.lock().unwrap().push("method2".to_string());
                         request_cx.respond(FooResponse {
@@ -490,7 +490,7 @@ async fn test_no_handler_claims() {
             let server_transport = sacp::ByteStreams::new(server_writer, server_reader);
             let server = UntypedLink::builder().on_receive_request(
                 async |request: FooRequest,
-                       request_cx: JsonRpcRequestCx<FooResponse>,
+                       request_cx: JrRequestCx<FooResponse>,
                        _connection_cx: JrConnectionCx<UntypedLink>| {
                     request_cx.respond(FooResponse {
                         result: format!("foo: {}", request.value),
@@ -645,7 +645,7 @@ async fn test_connection_builder_as_component() -> Result<(), sacp::Error> {
     // Create a connection builder (server side)
     let server_builder = UntypedLink::builder().on_receive_request(
         async |request: FooRequest,
-               request_cx: JsonRpcRequestCx<FooResponse>,
+               request_cx: JrRequestCx<FooResponse>,
                _cx: JrConnectionCx<UntypedLink>| {
             request_cx.respond(FooResponse {
                 result: format!("component: {}", request.value),

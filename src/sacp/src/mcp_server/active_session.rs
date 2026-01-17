@@ -9,8 +9,8 @@ use crate::schema::{
 };
 use crate::util::MatchMessageFrom;
 use crate::{
-    AgentPeer, Channel, Component, Handled, HasPeer, JrConnectionCx, JrLink, JsonRpcMessageHandler,
-    JsonRpcRequestCx, MessageCx, UntypedMessage,
+    AgentPeer, Channel, Component, Handled, HasPeer, JrConnectionCx, JrLink, JrMessageHandler,
+    JrRequestCx, MessageCx, UntypedMessage,
 };
 use std::sync::Arc;
 
@@ -51,10 +51,9 @@ where
     async fn handle_connect_request(
         &mut self,
         request: McpConnectRequest,
-        request_cx: JsonRpcRequestCx<McpConnectResponse>,
+        request_cx: JrRequestCx<McpConnectResponse>,
         outer_cx: &JrConnectionCx<Link>,
-    ) -> Result<Handled<(McpConnectRequest, JsonRpcRequestCx<McpConnectResponse>)>, crate::Error>
-    {
+    ) -> Result<Handled<(McpConnectRequest, JrRequestCx<McpConnectResponse>)>, crate::Error> {
         // Check that this is for our MCP server
         if request.acp_url != self.acp_url {
             return Ok(Handled::No {
@@ -146,11 +145,11 @@ where
     async fn handle_mcp_over_acp_request(
         &mut self,
         request: McpOverAcpMessage<UntypedMessage>,
-        request_cx: JsonRpcRequestCx<serde_json::Value>,
+        request_cx: JrRequestCx<serde_json::Value>,
     ) -> Result<
         Handled<(
             McpOverAcpMessage<UntypedMessage>,
-            JsonRpcRequestCx<serde_json::Value>,
+            JrRequestCx<serde_json::Value>,
         )>,
         crate::Error,
     > {
@@ -211,7 +210,7 @@ where
     }
 }
 
-impl<Link: JrLink> JsonRpcMessageHandler for McpActiveSession<Link>
+impl<Link: JrLink> JrMessageHandler for McpActiveSession<Link>
 where
     Link: HasPeer<AgentPeer>,
 {

@@ -1,9 +1,9 @@
-use crate::jsonrpc::{Handled, IntoHandled, JsonRpcMessageHandler, JsonRpcResponse};
+use crate::jsonrpc::{Handled, IntoHandled, JrMessageHandler, JsonRpcResponse};
 use crate::link::{HasPeer, JrLink, handle_incoming_message};
 use crate::peer::JrPeer;
 use crate::{JrConnectionCx, JsonRpcNotification, JsonRpcRequest, MessageCx, UntypedMessage};
 // Types re-exported from crate root
-use super::JsonRpcRequestCx;
+use super::JrRequestCx;
 use std::marker::PhantomData;
 use std::ops::AsyncFnMut;
 
@@ -24,7 +24,7 @@ impl<Link: JrLink> NullHandler<Link> {
     }
 }
 
-impl<Link: JrLink> JsonRpcMessageHandler for NullHandler<Link> {
+impl<Link: JrLink> JrMessageHandler for NullHandler<Link> {
     type Link = Link;
 
     fn describe_chain(&self) -> impl std::fmt::Debug {
@@ -69,22 +69,18 @@ impl<Link: JrLink, Peer: JrPeer, Req: JsonRpcRequest, F, ToFut>
     }
 }
 
-impl<Link: JrLink, Peer: JrPeer, Req, F, T, ToFut> JsonRpcMessageHandler
+impl<Link: JrLink, Peer: JrPeer, Req, F, T, ToFut> JrMessageHandler
     for RequestHandler<Link, Peer, Req, F, ToFut>
 where
     Link: HasPeer<Peer>,
     Req: JsonRpcRequest,
-    F: AsyncFnMut(
-            Req,
-            JsonRpcRequestCx<Req::Response>,
-            JrConnectionCx<Link>,
-        ) -> Result<T, crate::Error>
+    F: AsyncFnMut(Req, JrRequestCx<Req::Response>, JrConnectionCx<Link>) -> Result<T, crate::Error>
         + Send,
-    T: crate::IntoHandled<(Req, JsonRpcRequestCx<Req::Response>)>,
+    T: crate::IntoHandled<(Req, JrRequestCx<Req::Response>)>,
     ToFut: Fn(
             &mut F,
             Req,
-            JsonRpcRequestCx<Req::Response>,
+            JrRequestCx<Req::Response>,
             JrConnectionCx<Link>,
         ) -> crate::BoxFuture<'_, Result<T, crate::Error>>
         + Send
@@ -200,7 +196,7 @@ impl<Link: JrLink, Peer: JrPeer, Notif: JsonRpcNotification, F, ToFut>
     }
 }
 
-impl<Link: JrLink, Peer: JrPeer, Notif, F, T, ToFut> JsonRpcMessageHandler
+impl<Link: JrLink, Peer: JrPeer, Notif, F, T, ToFut> JrMessageHandler
     for NotificationHandler<Link, Peer, Notif, F, ToFut>
 where
     Link: HasPeer<Peer>,
@@ -320,7 +316,7 @@ impl<Link: JrLink, Peer: JrPeer, Req: JsonRpcRequest, Notif: JsonRpcNotification
 }
 
 impl<Link: JrLink, Peer: JrPeer, Req: JsonRpcRequest, Notif: JsonRpcNotification, F, T, ToFut>
-    JsonRpcMessageHandler for MessageHandler<Link, Peer, Req, Notif, F, ToFut>
+    JrMessageHandler for MessageHandler<Link, Peer, Req, Notif, F, ToFut>
 where
     Link: HasPeer<Peer>,
     F: AsyncFnMut(MessageCx<Req, Notif>, JrConnectionCx<Link>) -> Result<T, crate::Error> + Send,
@@ -417,14 +413,14 @@ pub struct NamedHandler<H> {
     handler: H,
 }
 
-impl<H: JsonRpcMessageHandler> NamedHandler<H> {
+impl<H: JrMessageHandler> NamedHandler<H> {
     /// Creates a new named handler
     pub fn new(name: Option<String>, handler: H) -> Self {
         Self { name, handler }
     }
 }
 
-impl<H: JsonRpcMessageHandler> JsonRpcMessageHandler for NamedHandler<H> {
+impl<H: JrMessageHandler> JrMessageHandler for NamedHandler<H> {
     type Link = H::Link;
 
     fn describe_chain(&self) -> impl std::fmt::Debug {
@@ -460,8 +456,8 @@ pub struct ChainedHandler<H1, H2> {
 
 impl<H1, H2> ChainedHandler<H1, H2>
 where
-    H1: JsonRpcMessageHandler,
-    H2: JsonRpcMessageHandler<Link = H1::Link>,
+    H1: JrMessageHandler,
+    H2: JrMessageHandler<Link = H1::Link>,
 {
     /// Creates a new chain handler
     pub fn new(handler1: H1, handler2: H2) -> Self {
@@ -469,10 +465,10 @@ where
     }
 }
 
-impl<H1, H2> JsonRpcMessageHandler for ChainedHandler<H1, H2>
+impl<H1, H2> JrMessageHandler for ChainedHandler<H1, H2>
 where
-    H1: JsonRpcMessageHandler,
-    H2: JsonRpcMessageHandler<Link = H1::Link>,
+    H1: JrMessageHandler,
+    H2: JrMessageHandler<Link = H1::Link>,
 {
     type Link = H1::Link;
 
