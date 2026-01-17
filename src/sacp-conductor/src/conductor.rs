@@ -126,15 +126,15 @@ use sacp::{
     util::MatchMessage,
 };
 use sacp::{
+    ConnectionTo, JrConnectionBuilder, JrLink, JrResponse, JsonRpcNotification, JsonRpcRequest,
+    UntypedMessage,
+};
+use sacp::{
     Handled,
     schema::{
         McpConnectRequest, McpConnectResponse, McpDisconnectNotification, McpOverAcpMessage,
         SuccessorMessage,
     },
-};
-use sacp::{
-    JrConnectionBuilder, ConnectionTo, JrLink, JrResponse, JsonRpcNotification, JsonRpcRequest,
-    UntypedMessage,
 };
 use sacp::{
     JrMessageHandler, Run,
@@ -785,10 +785,7 @@ where
         let connection_builder = self.connection_to_proxy(component_index);
         let connect_component =
             self.trace_proxy(trace_proxy_index, trace_successor_index, component);
-        let proxy_cx = cx
-            .spawn_connection(connection_builder.connect_to(connect_component)?, |c| {
-                Box::pin(c.serve())
-            })?;
+        let proxy_cx = cx.spawn_connection(connection_builder, connect_component)?;
         self.proxies.push(proxy_cx);
         Ok(())
     }
@@ -1402,9 +1399,8 @@ impl ConductorLink for ConductorToClient {
                         }
                     },
                     sacp::on_receive_message!(),
-                )
-                .connect_to(agent_component)?,
-            |c| Box::pin(c.serve()),
+                ),
+            agent_component,
         )?;
         responder.successor = Arc::new(agent_cx);
 

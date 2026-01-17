@@ -126,15 +126,15 @@ These stay public because external code needs them:
 - [x] `SpawnedResponder` → `SpawnedRun`
 - [x] Renamed `jsonrpc/responder.rs` → `jsonrpc/run.rs`
 
-### Phase 3: Rename context types
-- [ ] `JrConnectionCx` → `ConnectionTo`
-- [ ] `JrRequestCx` → `Responder`
-- [ ] `JrResponseCx` → `ResponseRouter`
+### Phase 3: Rename context types ✅
+- [x] `JrConnectionCx` → `ConnectionTo`
+- [x] `JrRequestCx` → `Responder`
+- [x] `JrResponseCx` → `ResponseRouter`
 
-### Phase 4: Simplify builder API
-- [ ] Remove `JrConnection` intermediate type
-- [ ] `connect_to(transport)?.run_until(...)` → `connect_to(transport, |cx| ...)`
-- [ ] Keep `serve(transport)` for reactive case
+### Phase 4: Simplify builder API ✅
+- [x] Simplify `spawn_connection` to take `(builder, transport)` instead of `(connection, serve_fn)`
+- [x] Make `JrConnection` internal (not publicly exported)
+- [x] Keep convenience methods `serve(transport)` and `run_until(transport, main_fn)` on builder
 
 ### Phase 5: Rename builder
 - [ ] `JrConnectionBuilder` → `ConnectFrom`

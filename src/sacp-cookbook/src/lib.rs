@@ -108,7 +108,7 @@ pub mod one_shot_prompt {
     //! [`RequestPermissionRequest`] messages.
     //!
     //! [`connect_to`]: sacp::JrConnectionBuilder::connect_to
-    //! [`run_until`]: sacp::JrConnection::run_until
+    //! [`run_until`]: sacp::JrConnectionBuilder::run_until
     //! [`send_request`]: sacp::ConnectionTo::send_request
     //! [`block_task`]: sacp::JrResponse::block_task
     //! [`build_session_cwd`]: sacp::ConnectionTo::build_session_cwd

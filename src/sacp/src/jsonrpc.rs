@@ -30,7 +30,7 @@ use crate::jsonrpc::handlers::{ChainedHandler, NamedHandler};
 use crate::jsonrpc::handlers::{MessageHandler, NotificationHandler, RequestHandler};
 use crate::jsonrpc::outgoing_actor::{OutgoingMessageTx, send_raw_message};
 use crate::jsonrpc::run::SpawnedRun;
-use crate::jsonrpc::run::{ChainRun, Run, NullRun};
+use crate::jsonrpc::run::{ChainRun, NullRun, Run};
 use crate::jsonrpc::task_actor::{Task, TaskTx};
 use crate::link::{HasDefaultPeer, HasPeer, JrLink};
 use crate::mcp_server::McpServer;
@@ -623,10 +623,7 @@ impl<H: JrMessageHandler, R: Run<H::Link>> JrConnectionBuilder<H, R> {
     }
 
     /// Add a new [`Run`] to the chain.
-    pub fn with_responder<R1>(
-        self,
-        responder: R1,
-    ) -> JrConnectionBuilder<H, impl Run<H::Link>>
+    pub fn with_responder<R1>(self, responder: R1) -> JrConnectionBuilder<H, impl Run<H::Link>>
     where
         R1: Run<H::Link>,
     {
@@ -1642,8 +1639,8 @@ impl<Link: JrLink> ConnectionTo<Link> {
     ///
     /// # Arguments
     ///
-    /// - `connection`: The `JrConnection` to spawn (typically created via `JrConnectionBuilder::connect_to()`)
-    /// - `serve_future`: A function that drives the connection (usually `|c| Box::pin(c.serve())`)
+    /// - `builder`: The connection builder with handlers configured
+    /// - `transport`: The transport component to connect to
     ///
     /// # Returns
     ///
@@ -1656,15 +1653,14 @@ impl<Link: JrLink> ConnectionTo<Link> {
     /// # use sacp::{JrConnectionBuilder, ConnectionTo};
     /// # use sacp_test::*;
     /// # async fn example(cx: ConnectionTo<UntypedLink>) -> Result<(), sacp::Error> {
-    /// // Set up a backend connection
+    /// // Set up a backend connection builder
     /// let backend = UntypedLink::builder()
     ///     .on_receive_request(async |req: MyRequest, request_cx, _cx| {
     ///         request_cx.respond(MyResponse { status: "ok".into() })
-    ///     }, sacp::on_receive_request!())
-    ///     .connect_to(MockTransport)?;
+    ///     }, sacp::on_receive_request!());
     ///
     /// // Spawn it and get a context to send requests to it
-    /// let backend_cx = cx.spawn_connection(backend, |c| Box::pin(c.serve()))?;
+    /// let backend_cx = cx.spawn_connection(backend, MockTransport)?;
     ///
     /// // Now you can forward requests to the backend
     /// let response = backend_cx.send_request(MyRequest {}).block_task().await?;
@@ -1672,13 +1668,14 @@ impl<Link: JrLink> ConnectionTo<Link> {
     /// # }
     /// ```
     #[track_caller]
-    pub fn spawn_connection<H: JrMessageHandler, R: Run<H::Link> + 'static>(
+    pub fn spawn_connection<H: JrMessageHandler + 'static, R: Run<H::Link> + 'static>(
         &self,
-        connection: JrConnection<H, R>,
-        serve_future: impl FnOnce(JrConnection<H, R>) -> BoxFuture<'static, Result<(), crate::Error>>,
+        builder: JrConnectionBuilder<H, R>,
+        transport: impl Component<<H::Link as JrLink>::ConnectsTo> + 'static,
     ) -> Result<ConnectionTo<H::Link>, crate::Error> {
+        let connection = builder.connect_to(transport)?;
         let cx = connection.cx.clone();
-        let future = serve_future(connection);
+        let future = connection.serve();
         Task::new(std::panic::Location::caller(), future).spawn(&self.task_tx)?;
         Ok(cx)
     }
@@ -2936,15 +2933,14 @@ impl<T: JsonRpcResponse> JrResponse<T> {
     /// # use sacp::{JrConnectionBuilder, ConnectionTo};
     /// # use sacp_test::*;
     /// # async fn example(cx: ConnectionTo<UntypedLink>) -> Result<(), sacp::Error> {
-    /// // Set up backend connection
+    /// // Set up backend connection builder
     /// let backend = UntypedLink::builder()
     ///     .on_receive_request(async |req: MyRequest, request_cx, cx| {
     ///         request_cx.respond(MyResponse { status: "ok".into() })
-    ///     }, sacp::on_receive_request!())
-    ///     .connect_to(MockTransport)?;
+    ///     }, sacp::on_receive_request!());
     ///
     /// // Spawn backend and get a context to send to it
-    /// let backend_cx = cx.spawn_connection(backend, |c| Box::pin(c.serve()))?;
+    /// let backend_cx = cx.spawn_connection(backend, MockTransport)?;
     ///
     /// // Set up proxy that forwards requests to backend
     /// UntypedLink::builder()
