@@ -1,12 +1,12 @@
 use crate::schema::CancelNotification;
 use serde::Serialize;
 
-use crate::jsonrpc::{JrMessage, JrNotification};
+use crate::jsonrpc::{JsonRpcMessage, JsonRpcNotification};
 use crate::util::json_cast;
 
 const METHOD_SESSION_CANCEL: &str = "session/cancel";
 
-impl JrMessage for CancelNotification {
+impl JsonRpcMessage for CancelNotification {
     fn matches_method(method: &str) -> bool {
         method == METHOD_SESSION_CANCEL
     }
@@ -27,4 +27,4 @@ impl JrMessage for CancelNotification {
     }
 }
 
-impl JrNotification for CancelNotification {}
+impl JsonRpcNotification for CancelNotification {}

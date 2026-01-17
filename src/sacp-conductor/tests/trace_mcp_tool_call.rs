@@ -183,7 +183,7 @@ impl EventNormalizer {
 }
 
 /// Test helper to receive a JSON-RPC response
-async fn recv<T: sacp::JrResponsePayload + Send>(
+async fn recv<T: sacp::JsonRpcResponse + Send>(
     response: sacp::JrResponse<T>,
 ) -> Result<T, sacp::Error> {
     let (tx, rx) = tokio::sync::oneshot::channel();

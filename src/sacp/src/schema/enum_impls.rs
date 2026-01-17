@@ -1,4 +1,4 @@
-//! JrRequest and JrNotification implementations for ACP enum types.
+//! JsonRpcRequest and JsonRpcNotification implementations for ACP enum types.
 //!
 //! This module implements the JSON-RPC traits for the enum types from
 //! agent-client-protocol-schema that represent all possible messages:
@@ -10,14 +10,14 @@
 use crate::schema::{AgentNotification, AgentRequest, ClientNotification, ClientRequest};
 use serde::Serialize;
 
-use crate::jsonrpc::{JrMessage, JrNotification, JrRequest};
+use crate::jsonrpc::{JsonRpcMessage, JsonRpcNotification, JsonRpcRequest};
 use crate::util::json_cast;
 
 // ============================================================================
 // Agent side (messages that agents receive)
 // ============================================================================
 
-impl JrMessage for ClientRequest {
+impl JsonRpcMessage for ClientRequest {
     fn matches_method(_method: &str) -> bool {
         // Enum types match any method - the parsing will determine if it's valid
         true
@@ -65,11 +65,11 @@ impl JrMessage for ClientRequest {
     }
 }
 
-impl JrRequest for ClientRequest {
+impl JsonRpcRequest for ClientRequest {
     type Response = serde_json::Value;
 }
 
-impl JrMessage for ClientNotification {
+impl JsonRpcMessage for ClientNotification {
     fn matches_method(_method: &str) -> bool {
         // Enum types match any method - the parsing will determine if it's valid
         true
@@ -107,13 +107,13 @@ impl JrMessage for ClientNotification {
     }
 }
 
-impl JrNotification for ClientNotification {}
+impl JsonRpcNotification for ClientNotification {}
 
 // ============================================================================
 // Client side (messages that clients/editors receive)
 // ============================================================================
 
-impl JrMessage for AgentRequest {
+impl JsonRpcMessage for AgentRequest {
     fn matches_method(_method: &str) -> bool {
         // Enum types match any method - the parsing will determine if it's valid
         true
@@ -169,11 +169,11 @@ impl JrMessage for AgentRequest {
     }
 }
 
-impl JrRequest for AgentRequest {
+impl JsonRpcRequest for AgentRequest {
     type Response = serde_json::Value;
 }
 
-impl JrMessage for AgentNotification {
+impl JsonRpcMessage for AgentNotification {
     fn matches_method(_method: &str) -> bool {
         // Enum types match any method - the parsing will determine if it's valid
         true
@@ -211,4 +211,4 @@ impl JrMessage for AgentNotification {
     }
 }
 
-impl JrNotification for AgentNotification {}
+impl JsonRpcNotification for AgentNotification {}

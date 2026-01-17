@@ -8,12 +8,14 @@
 
 use futures::{AsyncRead, AsyncWrite};
 use sacp::link::UntypedLink;
-use sacp::{JrConnectionCx, JrMessage, JrRequest, JrRequestCx, JrResponse, JrResponsePayload};
+use sacp::{
+    JrConnectionCx, JrResponse, JsonRpcMessage, JsonRpcRequest, JsonRpcRequestCx, JsonRpcResponse,
+};
 use serde::{Deserialize, Serialize};
 use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
 
 /// Test helper to block and wait for a JSON-RPC response.
-async fn recv<T: JrResponsePayload + Send>(response: JrResponse<T>) -> Result<T, sacp::Error> {
+async fn recv<T: JsonRpcResponse + Send>(response: JrResponse<T>) -> Result<T, sacp::Error> {
     let (tx, rx) = tokio::sync::oneshot::channel();
     response.on_receiving_result(async move |result| {
         tx.send(result).map_err(|_| sacp::Error::internal_error())
@@ -46,7 +48,7 @@ fn setup_test_streams() -> (
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct EmptyRequest;
 
-impl JrMessage for EmptyRequest {
+impl JsonRpcMessage for EmptyRequest {
     fn matches_method(method: &str) -> bool {
         method == "empty_method"
     }
@@ -67,7 +69,7 @@ impl JrMessage for EmptyRequest {
     }
 }
 
-impl JrRequest for EmptyRequest {
+impl JsonRpcRequest for EmptyRequest {
     type Response = SimpleResponse;
 }
 
@@ -77,7 +79,7 @@ struct OptionalParamsRequest {
     value: Option<String>,
 }
 
-impl JrMessage for OptionalParamsRequest {
+impl JsonRpcMessage for OptionalParamsRequest {
     fn matches_method(method: &str) -> bool {
         method == "optional_params_method"
     }
@@ -98,7 +100,7 @@ impl JrMessage for OptionalParamsRequest {
     }
 }
 
-impl JrRequest for OptionalParamsRequest {
+impl JsonRpcRequest for OptionalParamsRequest {
     type Response = SimpleResponse;
 }
 
@@ -107,7 +109,7 @@ struct SimpleResponse {
     result: String,
 }
 
-impl JrResponsePayload for SimpleResponse {
+impl JsonRpcResponse for SimpleResponse {
     fn into_json(self, _method: &str) -> Result<serde_json::Value, sacp::Error> {
         serde_json::to_value(self).map_err(sacp::Error::into_internal_error)
     }
@@ -134,7 +136,7 @@ async fn test_empty_request() {
             let server_transport = sacp::ByteStreams::new(server_writer, server_reader);
             let server = UntypedLink::builder().on_receive_request(
                 async |_request: EmptyRequest,
-                       request_cx: JrRequestCx<SimpleResponse>,
+                       request_cx: JsonRpcRequestCx<SimpleResponse>,
                        _connection_cx: JrConnectionCx<UntypedLink>| {
                     request_cx.respond(SimpleResponse {
                         result: "Got empty request".to_string(),
@@ -187,7 +189,7 @@ async fn test_null_params() {
             let server_transport = sacp::ByteStreams::new(server_writer, server_reader);
             let server = UntypedLink::builder().on_receive_request(
                 async |_request: OptionalParamsRequest,
-                       request_cx: JrRequestCx<SimpleResponse>,
+                       request_cx: JsonRpcRequestCx<SimpleResponse>,
                        _connection_cx: JrConnectionCx<UntypedLink>| {
                     request_cx.respond(SimpleResponse {
                         result: "Has params: true".to_string(),
@@ -237,7 +239,7 @@ async fn test_server_shutdown() {
             let server_transport = sacp::ByteStreams::new(server_writer, server_reader);
             let server = UntypedLink::builder().on_receive_request(
                 async |_request: EmptyRequest,
-                       request_cx: JrRequestCx<SimpleResponse>,
+                       request_cx: JsonRpcRequestCx<SimpleResponse>,
                        _connection_cx: JrConnectionCx<UntypedLink>| {
                     request_cx.respond(SimpleResponse {
                         result: "Got empty request".to_string(),
@@ -309,7 +311,7 @@ async fn test_client_disconnect() {
             let server_transport = sacp::ByteStreams::new(server_writer, server_reader);
             let server = UntypedLink::builder().on_receive_request(
                 async |_request: EmptyRequest,
-                       request_cx: JrRequestCx<SimpleResponse>,
+                       request_cx: JsonRpcRequestCx<SimpleResponse>,
                        _connection_cx: JrConnectionCx<UntypedLink>| {
                     request_cx.respond(SimpleResponse {
                         result: "Got empty request".to_string(),

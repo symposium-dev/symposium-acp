@@ -4,4 +4,4 @@
 //! to process incoming messages. Most users won't need to use these types directly,
 //! as the builder methods on `JrConnection` handle the construction automatically.
 
-pub use crate::jsonrpc::{JrMessageHandler, handlers::NullHandler};
+pub use crate::jsonrpc::{JsonRpcMessageHandler, handlers::NullHandler};

@@ -116,8 +116,9 @@ pub mod jsonrpcmsg {
 
 pub use jsonrpc::{
     ByteStreams, Channel, Handled, IntoHandled, JrConnection, JrConnectionBuilder, JrConnectionCx,
-    JrMessage, JrMessageHandler, JrNotification, JrRequest, JrRequestCx, JrResponse, JrResponseCx,
-    JrResponsePayload, Lines, MessageCx, NullHandler, UntypedMessage,
+    JrResponse, JrResponseCx, JsonRpcMessage, JsonRpcMessageHandler, JsonRpcNotification,
+    JsonRpcRequest, JsonRpcRequestCx, JsonRpcResponse, Lines, MessageCx, NullHandler,
+    UntypedMessage,
     responder::{ChainResponder, JrResponder, NullResponder},
 };
 
@@ -140,7 +141,7 @@ pub use schema::{
 pub use schema::{Error, ErrorCode};
 
 // Re-export derive macros for custom JSON-RPC types
-pub use sacp_derive::{JrNotification, JrRequest, JrResponsePayload};
+pub use sacp_derive::{JsonRpcNotification, JsonRpcRequest, JsonRpcResponse};
 
 mod session;
 pub use session::*;

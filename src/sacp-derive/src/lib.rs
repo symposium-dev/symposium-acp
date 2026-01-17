@@ -6,21 +6,21 @@
 //! # Example
 //!
 //! ```ignore
-//! use sacp::{JrRequest, JrNotification, JrResponsePayload};
+//! use sacp::{JsonRpcRequest, JsonRpcNotification, JsonRpcResponse};
 //!
-//! #[derive(Debug, Clone, Serialize, Deserialize, JrRequest)]
+//! #[derive(Debug, Clone, Serialize, Deserialize, JsonRpcRequest)]
 //! #[request(method = "_hello", response = HelloResponse)]
 //! struct HelloRequest {
 //!     name: String,
 //! }
 //!
-//! #[derive(Debug, Serialize, Deserialize, JrResponsePayload)]
+//! #[derive(Debug, Serialize, Deserialize, JsonRpcResponse)]
 //! #[response(method = "_hello")]
 //! struct HelloResponse {
 //!     greeting: String,
 //! }
 //!
-//! #[derive(Debug, Clone, Serialize, Deserialize, JrNotification)]
+//! #[derive(Debug, Clone, Serialize, Deserialize, JsonRpcNotification)]
 //! #[notification(method = "_ping")]
 //! struct PingNotification {
 //!     timestamp: u64,
@@ -32,7 +32,7 @@
 //! When using these derives within the sacp crate itself, add `crate = crate`:
 //!
 //! ```ignore
-//! #[derive(JrRequest)]
+//! #[derive(JsonRpcRequest)]
 //! #[request(method = "_foo", response = FooResponse, crate = crate)]
 //! struct FooRequest { ... }
 //! ```
@@ -41,7 +41,7 @@ use proc_macro::TokenStream;
 use quote::quote;
 use syn::{DeriveInput, Expr, Lit, Path, Type, parse_macro_input};
 
-/// Derive macro for implementing `JrRequest` and `JrMessage` traits.
+/// Derive macro for implementing `JsonRpcRequest` and `JsonRpcMessage` traits.
 ///
 /// # Attributes
 ///
@@ -51,13 +51,13 @@ use syn::{DeriveInput, Expr, Lit, Path, Type, parse_macro_input};
 /// # Example
 ///
 /// ```ignore
-/// #[derive(Debug, Clone, Serialize, Deserialize, JrRequest)]
+/// #[derive(Debug, Clone, Serialize, Deserialize, JsonRpcRequest)]
 /// #[request(method = "_hello", response = HelloResponse)]
 /// struct HelloRequest {
 ///     name: String,
 /// }
 /// ```
-#[proc_macro_derive(JrRequest, attributes(request))]
+#[proc_macro_derive(JsonRpcRequest, attributes(request))]
 pub fn derive_jr_request(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as DeriveInput);
     let name = &input.ident;
@@ -69,7 +69,7 @@ pub fn derive_jr_request(input: TokenStream) -> TokenStream {
     };
 
     let expanded = quote! {
-        impl #krate::JrMessage for #name {
+        impl #krate::JsonRpcMessage for #name {
             fn matches_method(method: &str) -> bool {
                 method == #method
             }
@@ -93,7 +93,7 @@ pub fn derive_jr_request(input: TokenStream) -> TokenStream {
             }
         }
 
-        impl #krate::JrRequest for #name {
+        impl #krate::JsonRpcRequest for #name {
             type Response = #response_type;
         }
     };
@@ -101,7 +101,7 @@ pub fn derive_jr_request(input: TokenStream) -> TokenStream {
     TokenStream::from(expanded)
 }
 
-/// Derive macro for implementing `JrNotification` and `JrMessage` traits.
+/// Derive macro for implementing `JsonRpcNotification` and `JsonRpcMessage` traits.
 ///
 /// # Attributes
 ///
@@ -111,13 +111,13 @@ pub fn derive_jr_request(input: TokenStream) -> TokenStream {
 /// # Example
 ///
 /// ```ignore
-/// #[derive(Debug, Clone, Serialize, Deserialize, JrNotification)]
+/// #[derive(Debug, Clone, Serialize, Deserialize, JsonRpcNotification)]
 /// #[notification(method = "_ping")]
 /// struct PingNotification {
 ///     timestamp: u64,
 /// }
 /// ```
-#[proc_macro_derive(JrNotification, attributes(notification))]
+#[proc_macro_derive(JsonRpcNotification, attributes(notification))]
 pub fn derive_jr_notification(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as DeriveInput);
     let name = &input.ident;
@@ -129,7 +129,7 @@ pub fn derive_jr_notification(input: TokenStream) -> TokenStream {
     };
 
     let expanded = quote! {
-        impl #krate::JrMessage for #name {
+        impl #krate::JsonRpcMessage for #name {
             fn matches_method(method: &str) -> bool {
                 method == #method
             }
@@ -153,13 +153,13 @@ pub fn derive_jr_notification(input: TokenStream) -> TokenStream {
             }
         }
 
-        impl #krate::JrNotification for #name {}
+        impl #krate::JsonRpcNotification for #name {}
     };
 
     TokenStream::from(expanded)
 }
 
-/// Derive macro for implementing `JrResponsePayload` trait.
+/// Derive macro for implementing `JsonRpcResponse` trait.
 ///
 /// # Attributes
 ///
@@ -168,12 +168,12 @@ pub fn derive_jr_notification(input: TokenStream) -> TokenStream {
 /// # Example
 ///
 /// ```ignore
-/// #[derive(Debug, Serialize, Deserialize, JrResponsePayload)]
+/// #[derive(Debug, Serialize, Deserialize, JsonRpcResponse)]
 /// struct HelloResponse {
 ///     greeting: String,
 /// }
 /// ```
-#[proc_macro_derive(JrResponsePayload, attributes(response))]
+#[proc_macro_derive(JsonRpcResponse, attributes(response))]
 pub fn derive_jr_response_payload(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as DeriveInput);
     let name = &input.ident;
@@ -184,7 +184,7 @@ pub fn derive_jr_response_payload(input: TokenStream) -> TokenStream {
     };
 
     let expanded = quote! {
-        impl #krate::JrResponsePayload for #name {
+        impl #krate::JsonRpcResponse for #name {
             fn into_json(self, _method: &str) -> Result<serde_json::Value, #krate::Error> {
                 serde_json::to_value(self).map_err(#krate::Error::into_internal_error)
             }

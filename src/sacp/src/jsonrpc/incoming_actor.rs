@@ -11,9 +11,9 @@ use uuid::Uuid;
 use crate::MessageCx;
 use crate::UntypedMessage;
 use crate::jsonrpc::JrConnectionCx;
-use crate::jsonrpc::JrMessageHandler;
-use crate::jsonrpc::JrRequestCx;
 use crate::jsonrpc::JrResponseCx;
+use crate::jsonrpc::JsonRpcMessageHandler;
+use crate::jsonrpc::JsonRpcRequestCx;
 use crate::jsonrpc::ReplyMessage;
 use crate::jsonrpc::dynamic_handler::DynamicHandler;
 use crate::jsonrpc::dynamic_handler::DynamicHandlerMessage;
@@ -42,7 +42,7 @@ pub(super) async fn incoming_protocol_actor<Link: JrLink>(
     transport_rx: mpsc::UnboundedReceiver<Result<jsonrpcmsg::Message, crate::Error>>,
     dynamic_handler_rx: mpsc::UnboundedReceiver<DynamicHandlerMessage<Link>>,
     reply_rx: mpsc::UnboundedReceiver<ReplyMessage>,
-    mut handler: impl JrMessageHandler<Link = Link>,
+    mut handler: impl JsonRpcMessageHandler<Link = Link>,
 ) -> Result<(), crate::Error> {
     let mut my_rx = transport_rx
         .map(IncomingProtocolMsg::Transport)
@@ -194,7 +194,7 @@ fn message_cx_from_request<Link: JrLink>(
     let message_cx = match &request.id {
         Some(id) => MessageCx::Request(
             message,
-            JrRequestCx::new(
+            JsonRpcRequestCx::new(
                 json_rpc_cx.message_tx.clone(),
                 request.method.clone(),
                 id.clone(),
@@ -236,7 +236,7 @@ async fn dispatch_message_cx<Link: JrLink>(
     json_rpc_cx: &JrConnectionCx<Link>,
     mut message_cx: MessageCx,
     dynamic_handlers: &mut FxHashMap<Uuid, Box<dyn DynamicHandler<Link>>>,
-    handler: &mut impl JrMessageHandler<Link = Link>,
+    handler: &mut impl JsonRpcMessageHandler<Link = Link>,
     pending_messages: &mut Vec<MessageCx>,
     state: &mut Link::State,
 ) -> Result<(), crate::Error> {

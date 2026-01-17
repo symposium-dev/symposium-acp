@@ -1,7 +1,7 @@
 use sacp::link::UntypedLink;
 use sacp::{
-    Component, Handled, JrConnectionCx, JrMessage, JrMessageHandler, JrRequest, JrRequestCx,
-    JrResponsePayload, MessageCx, util::MatchMessageFrom,
+    Component, Handled, JrConnectionCx, JsonRpcMessage, JsonRpcMessageHandler, JsonRpcRequest,
+    JsonRpcRequestCx, JsonRpcResponse, MessageCx, util::MatchMessageFrom,
 };
 use serde::{Deserialize, Serialize};
 
@@ -10,7 +10,7 @@ struct EchoRequestResponse {
     text: Vec<String>,
 }
 
-impl JrMessage for EchoRequestResponse {
+impl JsonRpcMessage for EchoRequestResponse {
     fn matches_method(method: &str) -> bool {
         method == "echo"
     }
@@ -27,14 +27,14 @@ impl JrMessage for EchoRequestResponse {
     }
 
     fn parse_message(method: &str, params: &impl serde::Serialize) -> Result<Self, sacp::Error> {
-        if !<Self as JrMessage>::matches_method(method) {
+        if !<Self as JsonRpcMessage>::matches_method(method) {
             return Err(sacp::Error::method_not_found());
         }
         sacp::util::json_cast(params)
     }
 }
 
-impl JrResponsePayload for EchoRequestResponse {
+impl JsonRpcResponse for EchoRequestResponse {
     fn into_json(self, _method: &str) -> Result<serde_json::Value, sacp::Error> {
         sacp::util::json_cast(self)
     }
@@ -44,13 +44,13 @@ impl JrResponsePayload for EchoRequestResponse {
     }
 }
 
-impl JrRequest for EchoRequestResponse {
+impl JsonRpcRequest for EchoRequestResponse {
     type Response = EchoRequestResponse;
 }
 
 struct EchoHandler;
 
-impl JrMessageHandler for EchoHandler {
+impl JsonRpcMessageHandler for EchoHandler {
     type Link = UntypedLink;
 
     async fn handle_message(
@@ -74,7 +74,7 @@ impl JrMessageHandler for EchoHandler {
 #[tokio::test]
 async fn modify_message_en_route() -> Result<(), sacp::Error> {
     // Demonstrate a case where we modify a message
-    // using a `JrMessageHandler` invoked from `MatchMessage`
+    // using a `JsonRpcMessageHandler` invoked from `MatchMessage`
 
     struct TestComponent;
 
@@ -94,7 +94,7 @@ async fn modify_message_en_route() -> Result<(), sacp::Error> {
         message: String,
     }
 
-    impl JrMessageHandler for PushHandler {
+    impl JsonRpcMessageHandler for PushHandler {
         type Link = UntypedLink;
 
         async fn handle_message(
@@ -154,7 +154,7 @@ async fn modify_message_en_route_inline() -> Result<(), sacp::Error> {
             UntypedLink::builder()
                 .on_receive_request(
                     async move |mut request: EchoRequestResponse,
-                                request_cx: JrRequestCx<EchoRequestResponse>,
+                                request_cx: JsonRpcRequestCx<EchoRequestResponse>,
                                 _connection_cx: JrConnectionCx<UntypedLink>| {
                         request.text.push("b".to_string());
                         Ok(Handled::No {
@@ -206,7 +206,7 @@ async fn modify_message_and_stop() -> Result<(), sacp::Error> {
             UntypedLink::builder()
                 .on_receive_request(
                     async move |request: EchoRequestResponse,
-                                request_cx: JrRequestCx<EchoRequestResponse>,
+                                request_cx: JsonRpcRequestCx<EchoRequestResponse>,
                                 _connection_cx: JrConnectionCx<UntypedLink>| {
                         request_cx.respond(request)
                     },
@@ -214,7 +214,7 @@ async fn modify_message_and_stop() -> Result<(), sacp::Error> {
                 )
                 .on_receive_request(
                     async move |mut request: EchoRequestResponse,
-                                request_cx: JrRequestCx<EchoRequestResponse>,
+                                request_cx: JsonRpcRequestCx<EchoRequestResponse>,
                                 _connection_cx: JrConnectionCx<UntypedLink>| {
                         request.text.push("b".to_string());
                         Ok(Handled::No {

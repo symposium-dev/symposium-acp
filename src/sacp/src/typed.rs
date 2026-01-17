@@ -2,7 +2,8 @@
 use jsonrpcmsg::Params;
 
 use crate::{
-    JrConnectionCx, JrNotification, JrRequest, JrRequestCx, UntypedMessage, util::json_cast,
+    JrConnectionCx, JsonRpcNotification, JsonRpcRequest, JsonRpcRequestCx, UntypedMessage,
+    util::json_cast,
 };
 
 /// Utility class for handling untyped requests.
@@ -12,12 +13,12 @@ pub struct TypeRequest {
 }
 
 enum TypeMessageState {
-    Unhandled(String, Option<Params>, JrRequestCx<serde_json::Value>),
+    Unhandled(String, Option<Params>, JsonRpcRequestCx<serde_json::Value>),
     Handled(Result<(), crate::Error>),
 }
 
 impl TypeRequest {
-    pub fn new(request: UntypedMessage, request_cx: JrRequestCx<serde_json::Value>) -> Self {
+    pub fn new(request: UntypedMessage, request_cx: JsonRpcRequestCx<serde_json::Value>) -> Self {
         let UntypedMessage { method, params } = request;
         let params: Option<Params> = json_cast(params).expect("valid params");
         Self {
@@ -25,9 +26,9 @@ impl TypeRequest {
         }
     }
 
-    pub async fn handle_if<R: JrRequest>(
+    pub async fn handle_if<R: JsonRpcRequest>(
         mut self,
-        op: impl AsyncFnOnce(R, JrRequestCx<R::Response>) -> Result<(), crate::Error>,
+        op: impl AsyncFnOnce(R, JsonRpcRequestCx<R::Response>) -> Result<(), crate::Error>,
     ) -> Self {
         self.state = Some(match self.state.take().expect("valid state") {
             TypeMessageState::Unhandled(method, params, request_cx) => {
@@ -49,7 +50,10 @@ impl TypeRequest {
 
     pub async fn otherwise(
         mut self,
-        op: impl AsyncFnOnce(UntypedMessage, JrRequestCx<serde_json::Value>) -> Result<(), crate::Error>,
+        op: impl AsyncFnOnce(
+            UntypedMessage,
+            JsonRpcRequestCx<serde_json::Value>,
+        ) -> Result<(), crate::Error>,
     ) -> Result<(), crate::Error> {
         match self.state.take().expect("valid state") {
             TypeMessageState::Unhandled(method, params, request_cx) => {
@@ -85,7 +89,7 @@ impl TypeNotification {
         }
     }
 
-    pub async fn handle_if<N: JrNotification>(
+    pub async fn handle_if<N: JsonRpcNotification>(
         mut self,
         op: impl AsyncFnOnce(N) -> Result<(), crate::Error>,
     ) -> Self {

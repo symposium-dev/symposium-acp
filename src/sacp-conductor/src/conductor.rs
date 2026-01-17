@@ -117,7 +117,7 @@ use futures::{
     channel::mpsc::{self},
 };
 use sacp::{
-    AgentPeer, BoxFuture, ClientPeer, Component, DynComponent, Error, HasPeer, JrMessage,
+    AgentPeer, BoxFuture, ClientPeer, Component, DynComponent, Error, HasPeer, JsonRpcMessage,
     MessageCx,
     link::{
         AgentToClient, ConductorToAgent, ConductorToClient, ConductorToConductor, ConductorToProxy,
@@ -133,11 +133,11 @@ use sacp::{
     },
 };
 use sacp::{
-    JrConnectionBuilder, JrConnectionCx, JrLink, JrNotification, JrRequest, JrResponse,
+    JrConnectionBuilder, JrConnectionCx, JrLink, JrResponse, JsonRpcNotification, JsonRpcRequest,
     UntypedMessage,
 };
 use sacp::{
-    JrMessageHandler, JrResponder,
+    JrResponder, JsonRpcMessageHandler,
     schema::{InitializeProxyRequest, InitializeRequest, NewSessionRequest},
     util::MatchMessageFrom,
 };
@@ -323,7 +323,7 @@ struct ConductorMessageHandler<Link: ConductorLink> {
     link: Link,
 }
 
-impl<Link: ConductorLink> JrMessageHandler for ConductorMessageHandler<Link> {
+impl<Link: ConductorLink> JsonRpcMessageHandler for ConductorMessageHandler<Link> {
     type Link = Link;
 
     async fn handle_message(
@@ -567,7 +567,7 @@ where
     /// * If the message is going to a proxy component, then we have to wrap
     ///   it in a "from successor" wrapper, because the conductor is the
     ///   proxy's client.
-    fn send_message_to_predecessor_of<Req: JrRequest, N: JrNotification>(
+    fn send_message_to_predecessor_of<Req: JsonRpcRequest, N: JsonRpcNotification>(
         &mut self,
         client: JrConnectionCx<Link>,
         source_component_index: SourceComponentIndex,
@@ -594,7 +594,7 @@ where
         }
     }
 
-    fn send_request_to_predecessor_of<Req: JrRequest>(
+    fn send_request_to_predecessor_of<Req: JsonRpcRequest>(
         &mut self,
         client: JrConnectionCx<Link>,
         source_component_index: usize,
@@ -620,7 +620,7 @@ where
     /// * If the notification is going to a proxy component, then we have to wrap
     ///   it in a "from successor" wrapper, because the conductor is the
     ///   proxy's client.
-    fn send_notification_to_predecessor_of<N: JrNotification>(
+    fn send_notification_to_predecessor_of<N: JsonRpcNotification>(
         &mut self,
         client: JrConnectionCx<Link>,
         source_component_index: usize,
@@ -801,7 +801,7 @@ where
     fn connection_to_proxy(
         &mut self,
         component_index: usize,
-    ) -> JrConnectionBuilder<impl JrMessageHandler<Link = ConductorToProxy> + 'static> {
+    ) -> JrConnectionBuilder<impl JsonRpcMessageHandler<Link = ConductorToProxy> + 'static> {
         ConductorToProxy::builder()
             .name(format!("conductor-to-component({})", component_index))
             // Intercept messages sent by a proxy component to its successor.

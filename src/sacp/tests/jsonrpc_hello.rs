@@ -6,8 +6,8 @@
 use futures::{AsyncRead, AsyncWrite};
 use sacp::link::UntypedLink;
 use sacp::{
-    JrConnectionCx, JrMessage, JrNotification, JrRequest, JrRequestCx, JrResponse,
-    JrResponsePayload,
+    JrConnectionCx, JrResponse, JsonRpcMessage, JsonRpcNotification, JsonRpcRequest,
+    JsonRpcRequestCx, JsonRpcResponse,
 };
 use serde::{Deserialize, Serialize};
 use std::sync::{Arc, Mutex};
@@ -15,7 +15,7 @@ use std::time::Duration;
 use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
 
 /// Test helper to block and wait for a JSON-RPC response.
-async fn recv<T: JrResponsePayload + Send>(response: JrResponse<T>) -> Result<T, sacp::Error> {
+async fn recv<T: JsonRpcResponse + Send>(response: JrResponse<T>) -> Result<T, sacp::Error> {
     let (tx, rx) = tokio::sync::oneshot::channel();
     response.on_receiving_result(async move |result| {
         tx.send(result).map_err(|_| sacp::Error::internal_error())
@@ -48,7 +48,7 @@ struct PingRequest {
     message: String,
 }
 
-impl JrMessage for PingRequest {
+impl JsonRpcMessage for PingRequest {
     fn matches_method(method: &str) -> bool {
         method == "ping"
     }
@@ -69,7 +69,7 @@ impl JrMessage for PingRequest {
     }
 }
 
-impl JrRequest for PingRequest {
+impl JsonRpcRequest for PingRequest {
     type Response = PongResponse;
 }
 
@@ -79,7 +79,7 @@ struct PongResponse {
     echo: String,
 }
 
-impl JrResponsePayload for PongResponse {
+impl JsonRpcResponse for PongResponse {
     fn into_json(self, _method: &str) -> Result<serde_json::Value, sacp::Error> {
         serde_json::to_value(self).map_err(sacp::Error::into_internal_error)
     }
@@ -102,7 +102,7 @@ async fn test_hello_world() {
             let server_transport = sacp::ByteStreams::new(server_writer, server_reader);
             let server = UntypedLink::builder().on_receive_request(
                 async move |request: PingRequest,
-                            request_cx: JrRequestCx<PongResponse>,
+                            request_cx: JsonRpcRequestCx<PongResponse>,
                             _connection_cx: JrConnectionCx<UntypedLink>| {
                     let pong = PongResponse {
                         echo: format!("pong: {}", request.message),
@@ -152,7 +152,7 @@ struct LogNotification {
     message: String,
 }
 
-impl JrMessage for LogNotification {
+impl JsonRpcMessage for LogNotification {
     fn matches_method(method: &str) -> bool {
         method == "log"
     }
@@ -173,7 +173,7 @@ impl JrMessage for LogNotification {
     }
 }
 
-impl JrNotification for LogNotification {}
+impl JsonRpcNotification for LogNotification {}
 
 #[tokio::test(flavor = "current_thread")]
 async fn test_notification() {
@@ -265,7 +265,7 @@ async fn test_multiple_sequential_requests() {
             let server_transport = sacp::ByteStreams::new(server_writer, server_reader);
             let server = UntypedLink::builder().on_receive_request(
                 async |request: PingRequest,
-                       request_cx: JrRequestCx<PongResponse>,
+                       request_cx: JsonRpcRequestCx<PongResponse>,
                        _connection_cx: JrConnectionCx<UntypedLink>| {
                     let pong = PongResponse {
                         echo: format!("pong: {}", request.message),
@@ -324,7 +324,7 @@ async fn test_concurrent_requests() {
             let server_transport = sacp::ByteStreams::new(server_writer, server_reader);
             let server = UntypedLink::builder().on_receive_request(
                 async |request: PingRequest,
-                       request_cx: JrRequestCx<PongResponse>,
+                       request_cx: JsonRpcRequestCx<PongResponse>,
                        _connection_cx: JrConnectionCx<UntypedLink>| {
                     let pong = PongResponse {
                         echo: format!("pong: {}", request.message),

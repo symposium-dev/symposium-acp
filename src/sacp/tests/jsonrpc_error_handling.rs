@@ -10,12 +10,14 @@
 use expect_test::expect;
 use futures::{AsyncRead, AsyncWrite};
 use sacp::link::UntypedLink;
-use sacp::{JrConnectionCx, JrMessage, JrRequest, JrRequestCx, JrResponse, JrResponsePayload};
+use sacp::{
+    JrConnectionCx, JrResponse, JsonRpcMessage, JsonRpcRequest, JsonRpcRequestCx, JsonRpcResponse,
+};
 use serde::{Deserialize, Serialize};
 use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
 
 /// Test helper to block and wait for a JSON-RPC response.
-async fn recv<T: JrResponsePayload + Send>(response: JrResponse<T>) -> Result<T, sacp::Error> {
+async fn recv<T: JsonRpcResponse + Send>(response: JrResponse<T>) -> Result<T, sacp::Error> {
     let (tx, rx) = tokio::sync::oneshot::channel();
     response.on_receiving_result(async move |result| {
         tx.send(result).map_err(|_| sacp::Error::internal_error())
@@ -50,7 +52,7 @@ struct SimpleRequest {
     message: String,
 }
 
-impl JrMessage for SimpleRequest {
+impl JsonRpcMessage for SimpleRequest {
     fn matches_method(method: &str) -> bool {
         method == "simple_method"
     }
@@ -71,7 +73,7 @@ impl JrMessage for SimpleRequest {
     }
 }
 
-impl JrRequest for SimpleRequest {
+impl JsonRpcRequest for SimpleRequest {
     type Response = SimpleResponse;
 }
 
@@ -80,7 +82,7 @@ struct SimpleResponse {
     result: String,
 }
 
-impl JrResponsePayload for SimpleResponse {
+impl JsonRpcResponse for SimpleResponse {
     fn into_json(self, _method: &str) -> Result<serde_json::Value, sacp::Error> {
         serde_json::to_value(self).map_err(sacp::Error::into_internal_error)
     }
@@ -233,7 +235,7 @@ struct ErrorRequest {
     value: String,
 }
 
-impl JrMessage for ErrorRequest {
+impl JsonRpcMessage for ErrorRequest {
     fn matches_method(method: &str) -> bool {
         method == "error_method"
     }
@@ -254,7 +256,7 @@ impl JrMessage for ErrorRequest {
     }
 }
 
-impl JrRequest for ErrorRequest {
+impl JsonRpcRequest for ErrorRequest {
     type Response = SimpleResponse;
 }
 
@@ -271,7 +273,7 @@ async fn test_handler_returns_error() {
             let server_transport = sacp::ByteStreams::new(server_writer, server_reader);
             let server = UntypedLink::builder().on_receive_request(
                 async |_request: ErrorRequest,
-                       request_cx: JrRequestCx<SimpleResponse>,
+                       request_cx: JsonRpcRequestCx<SimpleResponse>,
                        _connection_cx: JrConnectionCx<UntypedLink>| {
                     // Explicitly return an error
                     request_cx.respond_with_error(sacp::Error::internal_error())
@@ -315,7 +317,7 @@ async fn test_handler_returns_error() {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct EmptyRequest;
 
-impl JrMessage for EmptyRequest {
+impl JsonRpcMessage for EmptyRequest {
     fn matches_method(method: &str) -> bool {
         method == "strict_method"
     }
@@ -336,7 +338,7 @@ impl JrMessage for EmptyRequest {
     }
 }
 
-impl JrRequest for EmptyRequest {
+impl JsonRpcRequest for EmptyRequest {
     type Response = SimpleResponse;
 }
 
@@ -355,7 +357,7 @@ async fn test_missing_required_params() {
             let server_transport = sacp::ByteStreams::new(server_writer, server_reader);
             let server = UntypedLink::builder().on_receive_request(
                 async |_request: EmptyRequest,
-                       request_cx: JrRequestCx<SimpleResponse>,
+                       request_cx: JsonRpcRequestCx<SimpleResponse>,
                        _connection_cx: JrConnectionCx<UntypedLink>| {
                     // This will be called, but EmptyRequest parsing already succeeded
                     // The test is actually checking if EmptyRequest (no params) fails to parse as SimpleRequest

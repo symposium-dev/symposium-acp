@@ -111,10 +111,10 @@ pub struct AnalysisComplete {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct QueryComplete {}
 
-// Implement JrMessage for all types
+// Implement JsonRpcMessage for all types
 macro_rules! impl_jr_message {
     ($type:ty, $method:expr) => {
-        impl JrMessage for $type {
+        impl JsonRpcMessage for $type {
             fn matches_method(method: &str) -> bool {
                 method == $method
             }
@@ -134,21 +134,21 @@ macro_rules! impl_jr_message {
     };
 }
 
-// Implement JrRequest for request types
+// Implement JsonRpcRequest for request types
 macro_rules! impl_jr_request {
     ($req:ty, $resp:ty, $method:expr) => {
         impl_jr_message!($req, $method);
-        impl JrRequest for $req {
+        impl JsonRpcRequest for $req {
             type Response = $resp;
         }
     };
 }
 
-// Implement JrNotification for notification types
+// Implement JsonRpcNotification for notification types
 macro_rules! impl_jr_notification {
     ($type:ty, $method:expr) => {
         impl_jr_message!($type, $method);
-        impl JrNotification for $type {}
+        impl JsonRpcNotification for $type {}
     };
 }
 
@@ -168,10 +168,10 @@ impl_jr_notification!(AnalysisComplete, "analysisComplete");
 impl_jr_notification!(QueryComplete, "queryComplete");
 impl_jr_notification!(ProcessStarted, "processStarted");
 
-// Implement JrResponsePayload for response types
+// Implement JsonRpcResponse for response types
 macro_rules! impl_jr_response_payload {
     ($type:ty, $method:expr) => {
-        impl JrResponsePayload for $type {
+        impl JsonRpcResponse for $type {
             fn into_json(self, _method: &str) -> Result<serde_json::Value, crate::Error> {
                 Ok(serde_json::to_value(self)?)
             }

@@ -1,14 +1,14 @@
 use crate::schema::SessionNotification;
 use serde::Serialize;
 
-use crate::jsonrpc::{JrMessage, JrNotification};
+use crate::jsonrpc::{JsonRpcMessage, JsonRpcNotification};
 
 const METHOD_SESSION_UPDATE: &str = "session/update";
 
 // Agent -> Client notifications
 // These are one-way messages that agents send to clients/editors
 
-impl JrMessage for SessionNotification {
+impl JsonRpcMessage for SessionNotification {
     fn matches_method(method: &str) -> bool {
         method == METHOD_SESSION_UPDATE
     }
@@ -29,4 +29,4 @@ impl JrMessage for SessionNotification {
     }
 }
 
-impl JrNotification for SessionNotification {}
+impl JsonRpcNotification for SessionNotification {}

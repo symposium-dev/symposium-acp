@@ -8,7 +8,7 @@ use std::{fmt::Debug, hash::Hash};
 use agent_client_protocol_schema::{NewSessionRequest, NewSessionResponse, SessionId};
 
 use crate::{
-    Handled, JrConnectionCx, JrMessage, JrMessageHandler, MessageCx, UntypedMessage,
+    Handled, JrConnectionCx, JsonRpcMessage, JsonRpcMessageHandler, MessageCx, UntypedMessage,
     jsonrpc::{JrConnectionBuilder, handlers::NullHandler},
     peer::{AgentPeer, ClientPeer, ConductorPeer, JrPeer, UntypedPeer},
     schema::{
@@ -91,7 +91,7 @@ pub enum RemoteStyle {
 }
 
 impl RemoteStyle {
-    pub(crate) fn transform_outgoing_message<M: JrMessage>(
+    pub(crate) fn transform_outgoing_message<M: JsonRpcMessage>(
         &self,
         msg: M,
     ) -> Result<UntypedMessage, crate::Error> {
@@ -582,7 +582,7 @@ impl<Link> ProxySessionMessages<Link> {
     }
 }
 
-impl<Link: JrLink> JrMessageHandler for ProxySessionMessages<Link>
+impl<Link: JrLink> JsonRpcMessageHandler for ProxySessionMessages<Link>
 where
     Link: HasPeer<AgentPeer> + HasPeer<ClientPeer>,
 {

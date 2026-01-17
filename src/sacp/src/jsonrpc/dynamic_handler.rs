@@ -2,9 +2,9 @@ use futures::future::BoxFuture;
 use uuid::Uuid;
 
 use crate::link::JrLink;
-use crate::{Handled, JrConnectionCx, JrMessageHandler, MessageCx};
+use crate::{Handled, JrConnectionCx, JsonRpcMessageHandler, MessageCx};
 
-/// Internal dyn-safe wrapper around `JrMessageHandler`
+/// Internal dyn-safe wrapper around `JsonRpcMessageHandler`
 pub(crate) trait DynamicHandler<Link>: Send {
     fn dyn_handle_message(
         &mut self,
@@ -15,13 +15,13 @@ pub(crate) trait DynamicHandler<Link>: Send {
     fn dyn_describe_chain(&self) -> String;
 }
 
-impl<H: JrMessageHandler> DynamicHandler<H::Link> for H {
+impl<H: JsonRpcMessageHandler> DynamicHandler<H::Link> for H {
     fn dyn_handle_message(
         &mut self,
         message: MessageCx,
         cx: JrConnectionCx<H::Link>,
     ) -> BoxFuture<'_, Result<Handled<MessageCx>, crate::Error>> {
-        Box::pin(JrMessageHandler::handle_message(self, message, cx))
+        Box::pin(JsonRpcMessageHandler::handle_message(self, message, cx))
     }
 
     fn dyn_describe_chain(&self) -> String {

@@ -10,7 +10,7 @@ use std::time::Instant;
 
 use fxhash::FxHashMap;
 use sacp::schema::{McpOverAcpMessage, SuccessorMessage};
-use sacp::{DynComponent, JrMessage, UntypedMessage, jsonrpcmsg};
+use sacp::{DynComponent, JsonRpcMessage, UntypedMessage, jsonrpcmsg};
 use serde::{Deserialize, Serialize};
 
 use crate::ComponentIndex;

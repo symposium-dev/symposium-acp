@@ -7,8 +7,8 @@
 use sacp::link::UntypedLink;
 use sacp::util::run_until;
 use sacp::{
-    Component, JrConnectionCx, JrMessage, JrNotification, JrRequest, JrRequestCx, JrResponse,
-    JrResponsePayload,
+    Component, JrConnectionCx, JrResponse, JsonRpcMessage, JsonRpcNotification, JsonRpcRequest,
+    JsonRpcRequestCx, JsonRpcResponse,
 };
 use serde::{Deserialize, Serialize};
 use std::sync::{Arc, Mutex};
@@ -16,7 +16,7 @@ use std::time::Duration;
 use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
 
 /// Test helper to block and wait for a JSON-RPC response.
-async fn recv<T: JrResponsePayload + Send>(response: JrResponse<T>) -> Result<T, sacp::Error> {
+async fn recv<T: JsonRpcResponse + Send>(response: JrResponse<T>) -> Result<T, sacp::Error> {
     let (tx, rx) = tokio::sync::oneshot::channel();
     response.on_receiving_result(async move |result| {
         tx.send(result).map_err(|_| sacp::Error::internal_error())
@@ -33,7 +33,7 @@ struct FooRequest {
     value: String,
 }
 
-impl JrMessage for FooRequest {
+impl JsonRpcMessage for FooRequest {
     fn matches_method(method: &str) -> bool {
         method == "foo"
     }
@@ -54,7 +54,7 @@ impl JrMessage for FooRequest {
     }
 }
 
-impl JrRequest for FooRequest {
+impl JsonRpcRequest for FooRequest {
     type Response = FooResponse;
 }
 
@@ -63,7 +63,7 @@ struct FooResponse {
     result: String,
 }
 
-impl JrResponsePayload for FooResponse {
+impl JsonRpcResponse for FooResponse {
     fn into_json(self, _method: &str) -> Result<serde_json::Value, sacp::Error> {
         serde_json::to_value(self).map_err(sacp::Error::into_internal_error)
     }
@@ -78,7 +78,7 @@ struct BarRequest {
     value: String,
 }
 
-impl JrMessage for BarRequest {
+impl JsonRpcMessage for BarRequest {
     fn matches_method(method: &str) -> bool {
         method == "bar"
     }
@@ -99,7 +99,7 @@ impl JrMessage for BarRequest {
     }
 }
 
-impl JrRequest for BarRequest {
+impl JsonRpcRequest for BarRequest {
     type Response = BarResponse;
 }
 
@@ -108,7 +108,7 @@ struct BarResponse {
     result: String,
 }
 
-impl JrResponsePayload for BarResponse {
+impl JsonRpcResponse for BarResponse {
     fn into_json(self, _method: &str) -> Result<serde_json::Value, sacp::Error> {
         serde_json::to_value(self).map_err(sacp::Error::into_internal_error)
     }
@@ -139,7 +139,7 @@ async fn test_multiple_handlers_different_methods() {
             let server = UntypedLink::builder()
                 .on_receive_request(
                     async |request: FooRequest,
-                           request_cx: JrRequestCx<FooResponse>,
+                           request_cx: JsonRpcRequestCx<FooResponse>,
                            _connection_cx: JrConnectionCx<UntypedLink>| {
                         request_cx.respond(FooResponse {
                             result: format!("foo: {}", request.value),
@@ -149,7 +149,7 @@ async fn test_multiple_handlers_different_methods() {
                 )
                 .on_receive_request(
                     async |request: BarRequest,
-                           request_cx: JrRequestCx<BarResponse>,
+                           request_cx: JsonRpcRequestCx<BarResponse>,
                            _connection_cx: JrConnectionCx<UntypedLink>| {
                         request_cx.respond(BarResponse {
                             result: format!("bar: {}", request.value),
@@ -209,7 +209,7 @@ struct TrackRequest {
     value: String,
 }
 
-impl JrMessage for TrackRequest {
+impl JsonRpcMessage for TrackRequest {
     fn matches_method(method: &str) -> bool {
         method == "track"
     }
@@ -230,7 +230,7 @@ impl JrMessage for TrackRequest {
     }
 }
 
-impl JrRequest for TrackRequest {
+impl JsonRpcRequest for TrackRequest {
     type Response = FooResponse;
 }
 
@@ -259,7 +259,7 @@ async fn test_handler_priority_ordering() {
             let server = UntypedLink::builder()
                 .on_receive_request(
                     async move |request: TrackRequest,
-                                request_cx: JrRequestCx<FooResponse>,
+                                request_cx: JsonRpcRequestCx<FooResponse>,
                                 _connection_cx: JrConnectionCx<UntypedLink>| {
                         handled_clone1.lock().unwrap().push("handler1".to_string());
                         request_cx.respond(FooResponse {
@@ -270,7 +270,7 @@ async fn test_handler_priority_ordering() {
                 )
                 .on_receive_request(
                     async move |request: TrackRequest,
-                                request_cx: JrRequestCx<FooResponse>,
+                                request_cx: JsonRpcRequestCx<FooResponse>,
                                 _connection_cx: JrConnectionCx<UntypedLink>| {
                         handled_clone2.lock().unwrap().push("handler2".to_string());
                         request_cx.respond(FooResponse {
@@ -327,7 +327,7 @@ struct Method1Request {
     value: String,
 }
 
-impl JrMessage for Method1Request {
+impl JsonRpcMessage for Method1Request {
     fn matches_method(method: &str) -> bool {
         method == "method1"
     }
@@ -348,7 +348,7 @@ impl JrMessage for Method1Request {
     }
 }
 
-impl JrRequest for Method1Request {
+impl JsonRpcRequest for Method1Request {
     type Response = FooResponse;
 }
 
@@ -357,7 +357,7 @@ struct Method2Request {
     value: String,
 }
 
-impl JrMessage for Method2Request {
+impl JsonRpcMessage for Method2Request {
     fn matches_method(method: &str) -> bool {
         method == "method2"
     }
@@ -378,7 +378,7 @@ impl JrMessage for Method2Request {
     }
 }
 
-impl JrRequest for Method2Request {
+impl JsonRpcRequest for Method2Request {
     type Response = FooResponse;
 }
 
@@ -407,7 +407,7 @@ async fn test_fallthrough_behavior() {
             let server = UntypedLink::builder()
                 .on_receive_request(
                     async move |request: Method1Request,
-                                request_cx: JrRequestCx<FooResponse>,
+                                request_cx: JsonRpcRequestCx<FooResponse>,
                                 _connection_cx: JrConnectionCx<UntypedLink>| {
                         handled_clone1.lock().unwrap().push("method1".to_string());
                         request_cx.respond(FooResponse {
@@ -418,7 +418,7 @@ async fn test_fallthrough_behavior() {
                 )
                 .on_receive_request(
                     async move |request: Method2Request,
-                                request_cx: JrRequestCx<FooResponse>,
+                                request_cx: JsonRpcRequestCx<FooResponse>,
                                 _connection_cx: JrConnectionCx<UntypedLink>| {
                         handled_clone2.lock().unwrap().push("method2".to_string());
                         request_cx.respond(FooResponse {
@@ -490,7 +490,7 @@ async fn test_no_handler_claims() {
             let server_transport = sacp::ByteStreams::new(server_writer, server_reader);
             let server = UntypedLink::builder().on_receive_request(
                 async |request: FooRequest,
-                       request_cx: JrRequestCx<FooResponse>,
+                       request_cx: JsonRpcRequestCx<FooResponse>,
                        _connection_cx: JrConnectionCx<UntypedLink>| {
                     request_cx.respond(FooResponse {
                         result: format!("foo: {}", request.value),
@@ -539,7 +539,7 @@ struct EventNotification {
     event: String,
 }
 
-impl JrMessage for EventNotification {
+impl JsonRpcMessage for EventNotification {
     fn matches_method(method: &str) -> bool {
         method == "event"
     }
@@ -560,7 +560,7 @@ impl JrMessage for EventNotification {
     }
 }
 
-impl JrNotification for EventNotification {}
+impl JsonRpcNotification for EventNotification {}
 
 #[tokio::test(flavor = "current_thread")]
 async fn test_handler_claims_notification() {
@@ -645,7 +645,7 @@ async fn test_connection_builder_as_component() -> Result<(), sacp::Error> {
     // Create a connection builder (server side)
     let server_builder = UntypedLink::builder().on_receive_request(
         async |request: FooRequest,
-               request_cx: JrRequestCx<FooResponse>,
+               request_cx: JsonRpcRequestCx<FooResponse>,
                _cx: JrConnectionCx<UntypedLink>| {
             request_cx.respond(FooResponse {
                 result: format!("component: {}", request.value),

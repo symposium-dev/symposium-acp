@@ -1,24 +1,24 @@
-//! Tests for the JrRequest, JrNotification, and JrResponsePayload derive macros.
+//! Tests for the JsonRpcRequest, JsonRpcNotification, and JsonRpcResponse derive macros.
 
-use sacp::{JrMessage, JrNotification, JrRequest, JrResponsePayload};
+use sacp::{JsonRpcMessage, JsonRpcNotification, JsonRpcRequest, JsonRpcResponse};
 use serde::{Deserialize, Serialize};
 
 // ============================================================================
 // Test types using derive macros
 // ============================================================================
 
-#[derive(Debug, Clone, Serialize, Deserialize, JrRequest)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonRpcRequest)]
 #[request(method = "_test/hello", response = HelloResponse)]
 struct HelloRequest {
     name: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, JrResponsePayload)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonRpcResponse)]
 struct HelloResponse {
     greeting: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, JrNotification)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonRpcNotification)]
 #[notification(method = "_test/ping")]
 struct PingNotification {
     timestamp: u64,
@@ -70,7 +70,7 @@ fn test_jr_request_parse_message() {
 #[test]
 fn test_jr_request_response_type() {
     // This is a compile-time check that the Response type is correctly set
-    fn assert_response_type<R: JrRequest<Response = HelloResponse>>() {}
+    fn assert_response_type<R: JsonRpcRequest<Response = HelloResponse>>() {}
     assert_response_type::<HelloRequest>();
 }
 
@@ -121,11 +121,11 @@ fn test_jr_response_payload_from_value() {
 }
 
 // ============================================================================
-// Test that JrNotification is a marker trait
+// Test that JsonRpcNotification is a marker trait
 // ============================================================================
 
 #[test]
 fn test_jr_notification_is_marker() {
-    fn assert_notification<N: sacp::JrNotification>() {}
+    fn assert_notification<N: sacp::JsonRpcNotification>() {}
     assert_notification::<PingNotification>();
 }
