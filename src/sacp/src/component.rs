@@ -107,7 +107,7 @@ use crate::{Channel, link::JrLink};
 ///
 /// [`ByteStreams`]: crate::ByteStreams
 /// [`AcpAgent`]: https://docs.rs/sacp-tokio/latest/sacp_tokio/struct.AcpAgent.html
-/// [`JrConnectionBuilder`]: crate::JrConnectionBuilder
+/// [`ConnectFrom`]: crate::ConnectFrom
 pub trait Component<L: JrLink>: Send + 'static {
     /// Serve this component by forwarding to a client component.
     ///

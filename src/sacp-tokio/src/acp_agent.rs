@@ -57,7 +57,7 @@ pub enum LineDirection {
 /// Use as a component to connect to an external agent:
 /// ```no_run
 /// # use sacp::link::UntypedLink;
-/// # use sacp::JrConnectionBuilder;
+/// # use sacp::ConnectFrom;
 /// # use sacp_tokio::AcpAgent;
 /// # use std::str::FromStr;
 /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {

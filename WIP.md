@@ -12,7 +12,7 @@ Refactoring the Link/Peer type system to a simpler Role-based API. Goals:
 
 | Old | New |
 |-----|-----|
-| `JrConnectionBuilder<AgentToClient>` | `ConnectFrom<Agent>` |
+| `ConnectFrom<AgentToClient>` | `ConnectFrom<Agent>` |
 | `JrConnection<AgentToClient>` | *(removed)* |
 | `JrConnectionCx<AgentToClient>` | `ConnectionTo<Client>` |
 | `JrRequestCx<R>` | `Responder<R>` |
@@ -136,8 +136,8 @@ These stay public because external code needs them:
 - [x] Make `JrConnection` internal (not publicly exported)
 - [x] Keep convenience methods `serve(transport)` and `run_until(transport, main_fn)` on builder
 
-### Phase 5: Rename builder
-- [ ] `JrConnectionBuilder` → `ConnectFrom`
+### Phase 5: Rename builder ✅
+- [x] `JrConnectionBuilder` → `ConnectFrom`
 
 ### Phase 6: Migrate conductor types
 - [ ] Move `ConductorToAgent`, `ConductorToProxy` into sacp-conductor as private

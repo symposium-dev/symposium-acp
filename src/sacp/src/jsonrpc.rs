@@ -104,7 +104,7 @@ use crate::{AgentPeer, ClientPeer, Component};
 ///
 /// # Handler Registration
 ///
-/// Most users register handlers using the builder methods on [`JrConnectionBuilder`]:
+/// Most users register handlers using the builder methods on [`ConnectFrom`]:
 ///
 /// ```
 /// # use sacp::{AgentToClient, ClientToAgent, Component};
@@ -189,7 +189,7 @@ use crate::{AgentPeer, ClientPeer, Component};
 /// A handler for incoming JSON-RPC messages.
 ///
 /// This trait is implemented by types that can process incoming messages on a connection.
-/// Handlers are registered with a [`JrConnectionBuilder`] and are called in order until
+/// Handlers are registered with a [`ConnectFrom`] and are called in order until
 /// one claims the message.
 pub trait JrMessageHandler: Send {
     /// The role type for this handler's connection.
@@ -243,8 +243,8 @@ impl<H: JrMessageHandler> JrMessageHandler for &mut H {
 ///
 /// `JrConnection` provides a builder-style API for creating JSON-RPC servers and clients.
 /// You start by calling `Link::builder()` (e.g., `ClientToAgent::builder()`), then add message
-/// handlers, and finally drive the connection with either [`serve`](JrConnectionBuilder::serve)
-/// or [`run_until`](JrConnectionBuilder::run_until), providing a component implementation
+/// handlers, and finally drive the connection with either [`serve`](ConnectFrom::serve)
+/// or [`run_until`](ConnectFrom::run_until), providing a component implementation
 /// (e.g., [`ByteStreams`] for byte streams).
 ///
 /// # JSON-RPC Primer
@@ -510,7 +510,7 @@ impl<H: JrMessageHandler> JrMessageHandler for &mut H {
 ///
 /// ```no_run
 /// # use sacp::link::UntypedLink;
-/// # use sacp::{JrConnectionBuilder};
+/// # use sacp::{ConnectFrom};
 /// # use sacp::ByteStreams;
 /// # use sacp::schema::{InitializeRequest, InitializeResponse, PromptRequest, PromptResponse, SessionNotification};
 /// # use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
@@ -541,7 +541,7 @@ impl<H: JrMessageHandler> JrMessageHandler for &mut H {
 /// # }
 /// ```
 #[must_use]
-pub struct JrConnectionBuilder<H: JrMessageHandler, R: Run<H::Link> = NullRun> {
+pub struct ConnectFrom<H: JrMessageHandler, R: Run<H::Link> = NullRun> {
     name: Option<String>,
 
     /// Handler for incoming messages.
@@ -551,7 +551,7 @@ pub struct JrConnectionBuilder<H: JrMessageHandler, R: Run<H::Link> = NullRun> {
     responder: R,
 }
 
-impl<Link: JrLink> JrConnectionBuilder<NullHandler<Link>, NullRun> {
+impl<Link: JrLink> ConnectFrom<NullHandler<Link>, NullRun> {
     /// Create a new JrConnection with the given role.
     /// This type follows a builder pattern; use other methods to configure and then invoke
     /// [`Self::serve`] (to use as a server) or [`Self::run_until`] to use as a client.
@@ -564,7 +564,7 @@ impl<Link: JrLink> JrConnectionBuilder<NullHandler<Link>, NullRun> {
     }
 }
 
-impl<H: JrMessageHandler> JrConnectionBuilder<H, NullRun> {
+impl<H: JrMessageHandler> ConnectFrom<H, NullRun> {
     /// Create a new connection builder with the given handler.
     pub fn new_with(handler: H) -> Self {
         Self {
@@ -575,26 +575,26 @@ impl<H: JrMessageHandler> JrConnectionBuilder<H, NullRun> {
     }
 }
 
-impl<H: JrMessageHandler, R: Run<H::Link>> JrConnectionBuilder<H, R> {
+impl<H: JrMessageHandler, R: Run<H::Link>> ConnectFrom<H, R> {
     /// Set the "name" of this connection -- used only for debugging logs.
     pub fn name(mut self, name: impl ToString) -> Self {
         self.name = Some(name.to_string());
         self
     }
 
-    /// Merge another [`JrConnectionBuilder`] into this one.
+    /// Merge another [`ConnectFrom`] into this one.
     ///
     /// Prefer [`Self::on_receive_request`] or [`Self::on_receive_notification`].
     /// This is a low-level method that is not intended for general use.
     pub fn with_connection_builder<H1, R1>(
         self,
-        other: JrConnectionBuilder<H1, R1>,
-    ) -> JrConnectionBuilder<impl JrMessageHandler<Link = H::Link>, impl Run<H::Link>>
+        other: ConnectFrom<H1, R1>,
+    ) -> ConnectFrom<impl JrMessageHandler<Link = H::Link>, impl Run<H::Link>>
     where
         H1: JrMessageHandler<Link = H::Link>,
         R1: Run<H::Link>,
     {
-        JrConnectionBuilder {
+        ConnectFrom {
             name: self.name,
             handler: ChainedHandler::new(
                 self.handler,
@@ -611,11 +611,11 @@ impl<H: JrMessageHandler, R: Run<H::Link>> JrConnectionBuilder<H, R> {
     pub fn with_handler<H1>(
         self,
         handler: H1,
-    ) -> JrConnectionBuilder<impl JrMessageHandler<Link = H::Link>, R>
+    ) -> ConnectFrom<impl JrMessageHandler<Link = H::Link>, R>
     where
         H1: JrMessageHandler<Link = H::Link>,
     {
-        JrConnectionBuilder {
+        ConnectFrom {
             name: self.name,
             handler: ChainedHandler::new(self.handler, handler),
             responder: self.responder,
@@ -623,11 +623,11 @@ impl<H: JrMessageHandler, R: Run<H::Link>> JrConnectionBuilder<H, R> {
     }
 
     /// Add a new [`Run`] to the chain.
-    pub fn with_responder<R1>(self, responder: R1) -> JrConnectionBuilder<H, impl Run<H::Link>>
+    pub fn with_responder<R1>(self, responder: R1) -> ConnectFrom<H, impl Run<H::Link>>
     where
         R1: Run<H::Link>,
     {
-        JrConnectionBuilder {
+        ConnectFrom {
             name: self.name,
             handler: self.handler,
             responder: ChainRun::new(self.responder, responder),
@@ -636,7 +636,7 @@ impl<H: JrMessageHandler, R: Run<H::Link>> JrConnectionBuilder<H, R> {
 
     /// Enqueue a task to run once the connection is actively serving traffic.
     #[track_caller]
-    pub fn with_spawned<F, Fut>(self, task: F) -> JrConnectionBuilder<H, impl Run<H::Link>>
+    pub fn with_spawned<F, Fut>(self, task: F) -> ConnectFrom<H, impl Run<H::Link>>
     where
         F: FnOnce(ConnectionTo<H::Link>) -> Fut + Send,
         Fut: Future<Output = Result<(), crate::Error>> + Send,
@@ -696,7 +696,7 @@ impl<H: JrMessageHandler, R: Run<H::Link>> JrConnectionBuilder<H, R> {
         self,
         op: F,
         to_future_hack: ToFut,
-    ) -> JrConnectionBuilder<impl JrMessageHandler<Link = H::Link>, R>
+    ) -> ConnectFrom<impl JrMessageHandler<Link = H::Link>, R>
     where
         H::Link: HasDefaultPeer,
         Req: JsonRpcRequest,
@@ -735,9 +735,9 @@ impl<H: JrMessageHandler, R: Run<H::Link>> JrConnectionBuilder<H, R> {
     ///
     /// ```ignore
     /// # use sacp::link::UntypedLink;
-    /// # use sacp::{JrConnectionBuilder};
+    /// # use sacp::{ConnectFrom};
     /// # use sacp::schema::{PromptRequest, PromptResponse, SessionNotification};
-    /// # fn example(connection: JrConnectionBuilder<impl sacp::JrMessageHandler<Link = UntypedLink>>) {
+    /// # fn example(connection: ConnectFrom<impl sacp::JrMessageHandler<Link = UntypedLink>>) {
     /// connection.on_receive_request(async |request: PromptRequest, request_cx, cx| {
     ///     // Send a notification while processing
     ///     let notif: SessionNotification = todo!();
@@ -767,7 +767,7 @@ impl<H: JrMessageHandler, R: Run<H::Link>> JrConnectionBuilder<H, R> {
         self,
         op: F,
         to_future_hack: ToFut,
-    ) -> JrConnectionBuilder<impl JrMessageHandler<Link = H::Link>, R>
+    ) -> ConnectFrom<impl JrMessageHandler<Link = H::Link>, R>
     where
         H::Link: HasDefaultPeer,
         F: AsyncFnMut(
@@ -840,7 +840,7 @@ impl<H: JrMessageHandler, R: Run<H::Link>> JrConnectionBuilder<H, R> {
         self,
         op: F,
         to_future_hack: ToFut,
-    ) -> JrConnectionBuilder<impl JrMessageHandler<Link = H::Link>, R>
+    ) -> ConnectFrom<impl JrMessageHandler<Link = H::Link>, R>
     where
         H::Link: HasDefaultPeer,
         Notif: JsonRpcNotification,
@@ -889,7 +889,7 @@ impl<H: JrMessageHandler, R: Run<H::Link>> JrConnectionBuilder<H, R> {
         peer: Peer,
         op: F,
         to_future_hack: ToFut,
-    ) -> JrConnectionBuilder<impl JrMessageHandler<Link = H::Link>, R>
+    ) -> ConnectFrom<impl JrMessageHandler<Link = H::Link>, R>
     where
         H::Link: HasPeer<Peer>,
         F: AsyncFnMut(MessageCx<Req, Notif>, ConnectionTo<H::Link>) -> Result<T, crate::Error>
@@ -944,7 +944,7 @@ impl<H: JrMessageHandler, R: Run<H::Link>> JrConnectionBuilder<H, R> {
         peer: Peer,
         op: F,
         to_future_hack: ToFut,
-    ) -> JrConnectionBuilder<impl JrMessageHandler<Link = H::Link>, R>
+    ) -> ConnectFrom<impl JrMessageHandler<Link = H::Link>, R>
     where
         H::Link: HasPeer<Peer>,
         F: AsyncFnMut(
@@ -991,7 +991,7 @@ impl<H: JrMessageHandler, R: Run<H::Link>> JrConnectionBuilder<H, R> {
         peer: Peer,
         op: F,
         to_future_hack: ToFut,
-    ) -> JrConnectionBuilder<impl JrMessageHandler<Link = H::Link>, R>
+    ) -> ConnectFrom<impl JrMessageHandler<Link = H::Link>, R>
     where
         H::Link: HasPeer<Peer>,
         F: AsyncFnMut(Notif, ConnectionTo<H::Link>) -> Result<T, crate::Error> + Send,
@@ -1032,7 +1032,7 @@ impl<H: JrMessageHandler, R: Run<H::Link>> JrConnectionBuilder<H, R> {
     pub fn with_mcp_server<Link: JrLink, McpR: Run<Link>>(
         self,
         server: McpServer<Link, McpR>,
-    ) -> JrConnectionBuilder<impl JrMessageHandler<Link = Link>, impl Run<Link>>
+    ) -> ConnectFrom<impl JrMessageHandler<Link = Link>, impl Run<Link>>
     where
         H: JrMessageHandler<Link = Link>,
         Link: HasPeer<ClientPeer> + HasPeer<AgentPeer>,
@@ -1101,7 +1101,7 @@ impl<H: JrMessageHandler, R: Run<H::Link>> JrConnectionBuilder<H, R> {
     ///
     /// You may find that [`MatchMessage`](`crate::util::MatchMessage`) is a better choice than this method
     /// for implementing custom handlers. It offers a very similar API to
-    /// [`JrConnectionBuilder`] but is structured to apply each test one at a time
+    /// [`ConnectFrom`] but is structured to apply each test one at a time
     /// (sequentially) instead of setting them all up at once. This sequential approach
     /// often interacts better with the borrow checker, at the cost of requiring `.await`
     /// calls between each handler and only working for processing a single message.
@@ -1112,7 +1112,7 @@ impl<H: JrMessageHandler, R: Run<H::Link>> JrConnectionBuilder<H, R> {
     /// borrow checker errors if multiple handlers need access to the same mutable state:
     ///
     /// ```compile_fail
-    /// # use sacp::{JrConnectionBuilder, Responder};
+    /// # use sacp::{ConnectFrom, Responder};
     /// # use sacp::schema::{InitializeRequest, InitializeResponse};
     /// # use sacp::schema::{PromptRequest, PromptResponse};
     /// # async fn example() -> Result<(), sacp::Error> {
@@ -1193,7 +1193,7 @@ impl<H: JrMessageHandler, R: Run<H::Link>> JrConnectionBuilder<H, R> {
     }
 }
 
-impl<H, R> Component<H::Link> for JrConnectionBuilder<H, R>
+impl<H, R> Component<H::Link> for ConnectFrom<H, R>
 where
     H: JrMessageHandler + 'static,
     R: Run<H::Link> + 'static,
@@ -1208,14 +1208,14 @@ where
 
 /// A JSON-RPC connection with an active transport.
 ///
-/// This type represents a `JrConnectionBuilder` that has been connected to a transport
+/// This type represents a `ConnectFrom` that has been connected to a transport
 /// via `connect_to()`. It can be driven in two modes:
 ///
 /// - [`serve()`](Self::serve) - Run as a server, handling incoming messages until the connection closes
 /// - [`run_until()`](Self::run_until) - Run until a closure completes, allowing you to send requests/notifications
 ///
-/// Most users won't construct this directly - instead use `JrConnectionBuilder::connect_to()` or
-/// `JrConnectionBuilder::serve()` for convenience.
+/// Most users won't construct this directly - instead use `ConnectFrom::connect_to()` or
+/// `ConnectFrom::serve()` for convenience.
 pub struct JrConnection<H: JrMessageHandler, R: Run<H::Link> = NullRun> {
     cx: ConnectionTo<H::Link>,
     name: Option<String>,
@@ -1248,7 +1248,7 @@ impl<H: JrMessageHandler, R: Run<H::Link>> JrConnection<H, R> {
     ///
     /// ```no_run
     /// # use sacp::link::UntypedLink;
-    /// # use sacp::{JrConnectionBuilder};
+    /// # use sacp::{ConnectFrom};
     /// # use sacp::ByteStreams;
     /// # use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
     /// # use sacp_test::*;
@@ -1289,7 +1289,7 @@ impl<H: JrMessageHandler, R: Run<H::Link>> JrConnection<H, R> {
     ///
     /// ```no_run
     /// # use sacp::link::UntypedLink;
-    /// # use sacp::{JrConnectionBuilder};
+    /// # use sacp::{ConnectFrom};
     /// # use sacp::ByteStreams;
     /// # use sacp::schema::InitializeRequest;
     /// # use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
@@ -1650,7 +1650,7 @@ impl<Link: JrLink> ConnectionTo<Link> {
     ///
     /// ```
     /// # use sacp::link::UntypedLink;
-    /// # use sacp::{JrConnectionBuilder, ConnectionTo};
+    /// # use sacp::{ConnectFrom, ConnectionTo};
     /// # use sacp_test::*;
     /// # async fn example(cx: ConnectionTo<UntypedLink>) -> Result<(), sacp::Error> {
     /// // Set up a backend connection builder
@@ -1670,7 +1670,7 @@ impl<Link: JrLink> ConnectionTo<Link> {
     #[track_caller]
     pub fn spawn_connection<H: JrMessageHandler + 'static, R: Run<H::Link> + 'static>(
         &self,
-        builder: JrConnectionBuilder<H, R>,
+        builder: ConnectFrom<H, R>,
         transport: impl Component<<H::Link as JrLink>::ConnectsTo> + 'static,
     ) -> Result<ConnectionTo<H::Link>, crate::Error> {
         let connection = builder.connect_to(transport)?;
@@ -2930,7 +2930,7 @@ impl<T: JsonRpcResponse> JrResponse<T> {
     ///
     /// ```
     /// # use sacp::link::UntypedLink;
-    /// # use sacp::{JrConnectionBuilder, ConnectionTo};
+    /// # use sacp::{ConnectFrom, ConnectionTo};
     /// # use sacp_test::*;
     /// # async fn example(cx: ConnectionTo<UntypedLink>) -> Result<(), sacp::Error> {
     /// // Set up backend connection builder
@@ -3439,7 +3439,7 @@ where
 ///
 /// ```no_run
 /// # use sacp::link::UntypedLink;
-/// # use sacp::{Channel, JrConnectionBuilder};
+/// # use sacp::{Channel, ConnectFrom};
 /// # async fn example() -> Result<(), sacp::Error> {
 /// // Create a pair of connected channels
 /// let (channel_a, channel_b) = Channel::duplex();

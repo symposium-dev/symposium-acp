@@ -117,7 +117,7 @@ pub mod jsonrpcmsg {
 }
 
 pub use jsonrpc::{
-    ByteStreams, Channel, ConnectionTo, Handled, IntoHandled, JrConnectionBuilder,
+    ByteStreams, Channel, ConnectionTo, Handled, IntoHandled, ConnectFrom,
     JrMessageHandler, JrResponse, JsonRpcMessage, JsonRpcNotification, JsonRpcRequest,
     JsonRpcResponse, Lines, MessageCx, NullHandler, Responder, ResponseRouter, UntypedMessage,
     run::{ChainRun, NullRun, Run},
@@ -177,7 +177,7 @@ macro_rules! tool_fn {
 }
 
 /// This macro is used for the value of the `to_future_hack` parameter of
-/// [`JrConnectionBuilder::on_receive_request`] and [`JrConnectionBuilder::on_receive_request_from`].
+/// [`ConnectFrom::on_receive_request`] and [`ConnectFrom::on_receive_request_from`].
 ///
 /// It expands to `|f, req, req_cx, cx| Box::pin(f(req, req_cx, cx))`.
 ///
@@ -191,7 +191,7 @@ macro_rules! on_receive_request {
 }
 
 /// This macro is used for the value of the `to_future_hack` parameter of
-/// [`JrConnectionBuilder::on_receive_notification`] and [`JrConnectionBuilder::on_receive_notification_from`].
+/// [`ConnectFrom::on_receive_notification`] and [`ConnectFrom::on_receive_notification_from`].
 ///
 /// It expands to `|f, notif, cx| Box::pin(f(notif, cx))`.
 ///
@@ -205,7 +205,7 @@ macro_rules! on_receive_notification {
 }
 
 /// This macro is used for the value of the `to_future_hack` parameter of
-/// [`JrConnectionBuilder::on_receive_message`] and [`JrConnectionBuilder::on_receive_message_from`].
+/// [`ConnectFrom::on_receive_message`] and [`ConnectFrom::on_receive_message_from`].
 ///
 /// It expands to `|f, msg_cx, cx| Box::pin(f(msg_cx, cx))`.
 ///

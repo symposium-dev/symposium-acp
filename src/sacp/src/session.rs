@@ -337,7 +337,7 @@ where
     /// [`start_session`](Self::start_session) which block the current task.
     ///
     /// This should not be used from inside a message handler like
-    /// [`JrConnectionBuilder::on_receive_request`](`crate::JrConnectionBuilder::on_receive_request`) or [`JrMessageHandler`]
+    /// [`ConnectFrom::on_receive_request`](`crate::ConnectFrom::on_receive_request`) or [`JrMessageHandler`]
     /// implementations.
     pub fn block_task(self) -> SessionBuilder<Link, R, Blocking> {
         SessionBuilder {

@@ -107,8 +107,8 @@ pub mod one_shot_prompt {
     //! commands or writing files. See [`connecting_as_client`] for how to handle
     //! [`RequestPermissionRequest`] messages.
     //!
-    //! [`connect_to`]: sacp::JrConnectionBuilder::connect_to
-    //! [`run_until`]: sacp::JrConnectionBuilder::run_until
+    //! [`connect_to`]: sacp::ConnectFrom::connect_to
+    //! [`run_until`]: sacp::ConnectFrom::run_until
     //! [`send_request`]: sacp::ConnectionTo::send_request
     //! [`block_task`]: sacp::JrResponse::block_task
     //! [`build_session_cwd`]: sacp::ConnectionTo::build_session_cwd
@@ -196,7 +196,7 @@ pub mod connecting_as_client {
     //! as a spawned task, not on the event loop. The event loop continues processing
     //! messages (including the response you're waiting for) while your task blocks.
     //!
-    //! [`run_until`]: sacp::JrConnectionBuilder::run_until
+    //! [`run_until`]: sacp::ConnectFrom::run_until
     //! [`block_task`]: sacp::JrResponse::block_task
     //! [`build_session`]: sacp::ConnectionTo::build_session
     //! [`SessionBuilder`]: sacp::SessionBuilder
@@ -205,7 +205,7 @@ pub mod connecting_as_client {
     //! [`read_to_string`]: sacp::ActiveSession::read_to_string
     //! [`with_mcp_server`]: sacp::SessionBuilder::with_mcp_server
     //! [`RequestPermissionRequest`]: sacp::schema::RequestPermissionRequest
-    //! [`on_receive_request`]: sacp::JrConnectionBuilder::on_receive_request
+    //! [`on_receive_request`]: sacp::ConnectFrom::on_receive_request
 }
 
 pub mod building_an_agent {
@@ -568,7 +568,7 @@ pub mod global_mcp_server {
     //!
     //! [`McpServer::builder`]: sacp::mcp_server::McpServer::builder
     //! [`McpServer::from_rmcp`]: sacp_rmcp::McpServerExt::from_rmcp
-    //! [`with_mcp_server`]: sacp::JrConnectionBuilder::with_mcp_server
+    //! [`with_mcp_server`]: sacp::ConnectFrom::with_mcp_server
 }
 
 pub mod per_session_mcp_server {

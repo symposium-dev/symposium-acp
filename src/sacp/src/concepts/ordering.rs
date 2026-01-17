@@ -164,8 +164,8 @@
 //!
 //! - [Proxies and Conductors](super::proxies) - Building message interceptors
 //!
-//! [`on_receive_request`]: crate::JrConnectionBuilder::on_receive_request
-//! [`on_receive_notification`]: crate::JrConnectionBuilder::on_receive_notification
+//! [`on_receive_request`]: crate::ConnectFrom::on_receive_request
+//! [`on_receive_notification`]: crate::ConnectFrom::on_receive_notification
 //! [`on_receiving_result`]: crate::JrResponse::on_receiving_result
 //! [`on_receiving_ok_result`]: crate::JrResponse::on_receiving_ok_result
 //! [`on_session_start`]: crate::SessionBuilder::on_session_start

@@ -9,7 +9,7 @@ use agent_client_protocol_schema::{NewSessionRequest, NewSessionResponse, Sessio
 
 use crate::{
     Handled, ConnectionTo, JrMessageHandler, JsonRpcMessage, MessageCx, UntypedMessage,
-    jsonrpc::{JrConnectionBuilder, handlers::NullHandler},
+    jsonrpc::{ConnectFrom, handlers::NullHandler},
     peer::{AgentPeer, ClientPeer, ConductorPeer, JrPeer, UntypedPeer},
     schema::{
         InitializeProxyRequest, InitializeRequest, METHOD_INITIALIZE_PROXY,
@@ -25,8 +25,8 @@ use crate::{
 /// provides link-specific behavior like handling unhandled messages.
 pub trait JrLink: Debug + Copy + Send + Sync + 'static + Eq + Ord + Hash + Default {
     /// Create a new connection builder for this link.
-    fn builder() -> JrConnectionBuilder<NullHandler<Self>> {
-        JrConnectionBuilder::new(Self::default())
+    fn builder() -> ConnectFrom<NullHandler<Self>> {
+        ConnectFrom::new(Self::default())
     }
 
     /// The link type that connects to this link.
@@ -65,7 +65,7 @@ pub trait JrLink: Debug + Copy + Send + Sync + 'static + Eq + Ord + Hash + Defau
 pub trait HasDefaultPeer: JrLink + HasPeer<Self::DefaultPeer> {
     /// The default peer for this link.
     ///
-    /// When you use [`ConnectionTo::send_request`] or [`JrConnectionBuilder::on_receive_request`], etc.
+    /// When you use [`ConnectionTo::send_request`] or [`ConnectFrom::on_receive_request`], etc.
     /// this is the peer that you are communicating with.
     type DefaultPeer: JrPeer;
 }
@@ -259,8 +259,8 @@ impl HasPeer<UntypedPeer> for UntypedLink {
 
 impl UntypedLink {
     /// Create a connection builder with an untyped link.
-    pub fn builder() -> JrConnectionBuilder<NullHandler<UntypedLink>> {
-        JrConnectionBuilder::new(UntypedLink)
+    pub fn builder() -> ConnectFrom<NullHandler<UntypedLink>> {
+        ConnectFrom::new(UntypedLink)
     }
 }
 
@@ -637,47 +637,47 @@ impl HasPeer<AgentPeer> for ProxyToConductor {
 }
 
 // ============================================================================
-// Convenience constructors for JrConnectionBuilder
+// Convenience constructors for ConnectFrom
 // ============================================================================
 
 impl ClientToAgent {
     /// Create a connection builder for a client talking to an agent.
-    pub fn builder() -> JrConnectionBuilder<NullHandler<ClientToAgent>> {
-        JrConnectionBuilder::new(ClientToAgent)
+    pub fn builder() -> ConnectFrom<NullHandler<ClientToAgent>> {
+        ConnectFrom::new(ClientToAgent)
     }
 }
 
 impl AgentToClient {
     /// Create a connection builder for an agent talking to a client.
-    pub fn builder() -> JrConnectionBuilder<NullHandler<AgentToClient>> {
-        JrConnectionBuilder::new(AgentToClient)
+    pub fn builder() -> ConnectFrom<NullHandler<AgentToClient>> {
+        ConnectFrom::new(AgentToClient)
     }
 }
 
 impl ProxyToConductor {
     /// Create a connection builder for a proxy talking to a conductor.
-    pub fn builder() -> JrConnectionBuilder<NullHandler<ProxyToConductor>> {
-        JrConnectionBuilder::new(ProxyToConductor)
+    pub fn builder() -> ConnectFrom<NullHandler<ProxyToConductor>> {
+        ConnectFrom::new(ProxyToConductor)
     }
 }
 
 impl ConductorToProxy {
     /// Create a connection builder for a conductor talking to a proxy.
-    pub fn builder() -> JrConnectionBuilder<NullHandler<ConductorToProxy>> {
-        JrConnectionBuilder::new(ConductorToProxy)
+    pub fn builder() -> ConnectFrom<NullHandler<ConductorToProxy>> {
+        ConnectFrom::new(ConductorToProxy)
     }
 }
 
 impl ConductorToAgent {
     /// Create a connection builder for a conductor talking to an agent.
-    pub fn builder() -> JrConnectionBuilder<NullHandler<ConductorToAgent>> {
-        JrConnectionBuilder::new(ConductorToAgent)
+    pub fn builder() -> ConnectFrom<NullHandler<ConductorToAgent>> {
+        ConnectFrom::new(ConductorToAgent)
     }
 }
 
 impl ConductorToClient {
     /// Create a connection builder for a conductor talking to a client.
-    pub fn builder() -> JrConnectionBuilder<NullHandler<ConductorToClient>> {
-        JrConnectionBuilder::new(ConductorToClient)
+    pub fn builder() -> ConnectFrom<NullHandler<ConductorToClient>> {
+        ConnectFrom::new(ConductorToClient)
     }
 }

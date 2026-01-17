@@ -51,7 +51,7 @@ impl<Link: JrLink, A: Run<Link>, B: Run<Link>> Run<Link> for ChainRun<A, B> {
     }
 }
 
-/// A Run created from a closure via [`with_spawned`](crate::JrConnectionBuilder::with_spawned).
+/// A Run created from a closure via [`with_spawned`](crate::ConnectFrom::with_spawned).
 pub struct SpawnedRun<F> {
     task_fn: F,
     location: &'static std::panic::Location<'static>,

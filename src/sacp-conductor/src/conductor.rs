@@ -126,7 +126,7 @@ use sacp::{
     util::MatchMessage,
 };
 use sacp::{
-    ConnectionTo, JrConnectionBuilder, JrLink, JrResponse, JsonRpcNotification, JsonRpcRequest,
+    ConnectionTo, ConnectFrom, JrLink, JrResponse, JsonRpcNotification, JsonRpcRequest,
     UntypedMessage,
 };
 use sacp::{
@@ -270,7 +270,7 @@ impl<Link: ConductorLink> Conductor<Link> {
             link: self.link,
         };
 
-        JrConnectionBuilder::new_with(ConductorMessageHandler {
+        ConnectFrom::new_with(ConductorMessageHandler {
             conductor_tx,
             link: self.link,
         })
@@ -798,7 +798,7 @@ where
     fn connection_to_proxy(
         &mut self,
         component_index: usize,
-    ) -> JrConnectionBuilder<impl JrMessageHandler<Link = ConductorToProxy> + 'static> {
+    ) -> ConnectFrom<impl JrMessageHandler<Link = ConductorToProxy> + 'static> {
         ConductorToProxy::builder()
             .name(format!("conductor-to-component({})", component_index))
             // Intercept messages sent by a proxy component to its successor.

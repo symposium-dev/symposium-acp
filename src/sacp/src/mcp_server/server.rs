@@ -23,7 +23,7 @@ use crate::{
 /// An MCP server that can be attached to ACP connections.
 ///
 /// `McpServer` wraps an [`McpServerConnect`](`super::McpServerConnect`) implementation and can be used either:
-/// - As a message handler via [`JrConnectionBuilder::with_handler`](`crate::JrConnectionBuilder::with_handler`), automatically
+/// - As a message handler via [`ConnectFrom::with_handler`](`crate::ConnectFrom::with_handler`), automatically
 ///   attaching to new sessions
 /// - Manually for more control
 ///

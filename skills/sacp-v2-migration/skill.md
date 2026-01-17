@@ -1,6 +1,6 @@
 ---
 name: sacp-v2-migration
-description: Migrate Rust code from sacp v1.x to v2.0 role-based API. Use when upgrading sacp dependencies, fixing JrConnectionBuilder errors, or when code references MessageAndCx or old connection patterns.
+description: Migrate Rust code from sacp v1.x to v2.0 role-based API. Use when upgrading sacp dependencies, fixing ConnectFrom errors, or when code references MessageAndCx or old connection patterns.
 ---
 
 # SACP v2 Migration

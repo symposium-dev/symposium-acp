@@ -632,7 +632,7 @@ async fn test_handler_claims_notification() {
 }
 
 // ============================================================================
-// Test 6: JrConnectionBuilder implements Component
+// Test 6: ConnectFrom implements Component
 // ============================================================================
 
 #[tokio::test]
@@ -660,9 +660,9 @@ async fn test_connection_builder_as_component() -> Result<(), sacp::Error> {
     let client_transport =
         sacp::ByteStreams::new(client_write.compat_write(), client_read.compat());
 
-    // Use JrConnectionBuilder as a Component via run_until
+    // Use ConnectFrom as a Component via run_until
     run_until(
-        // This uses Component::serve on JrConnectionBuilder
+        // This uses Component::serve on ConnectFrom
         Component::<UntypedLink>::serve(server_builder, server_transport),
         async move {
             // Client side

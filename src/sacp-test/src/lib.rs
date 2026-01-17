@@ -208,7 +208,7 @@ pub fn process(data: &str) -> Result<String, crate::Error> {
 }
 
 // Helper to create a mock connection for examples
-pub fn mock_connection() -> JrConnectionBuilder<NullHandler<ClientToAgent>> {
+pub fn mock_connection() -> ConnectFrom<NullHandler<ClientToAgent>> {
     ClientToAgent::builder()
 }
 

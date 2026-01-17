@@ -1,6 +1,6 @@
 use crate::{
     HasDefaultPeer, HasPeer, JrLink, JrPeer,
-    jsonrpc::{JrConnectionBuilder, handlers::NullHandler},
+    jsonrpc::{ConnectFrom, handlers::NullHandler},
     link::RemoteStyle,
     peer::PeerId,
 };
@@ -46,8 +46,8 @@ impl HasPeer<McpServerPeer> for McpClientToServer {
 
 impl McpClientToServer {
     /// Create a connection builder for an MCP client talking to an MCP server.
-    pub fn builder() -> JrConnectionBuilder<NullHandler<McpClientToServer>> {
-        JrConnectionBuilder::new(McpClientToServer)
+    pub fn builder() -> ConnectFrom<NullHandler<McpClientToServer>> {
+        ConnectFrom::new(McpClientToServer)
     }
 }
 
@@ -72,7 +72,7 @@ impl HasPeer<McpClientPeer> for McpServerToClient {
 
 impl McpServerToClient {
     /// Create a connection builder for an MCP server talking to an MCP client.
-    pub fn builder() -> JrConnectionBuilder<NullHandler<McpServerToClient>> {
-        JrConnectionBuilder::new(McpServerToClient)
+    pub fn builder() -> ConnectFrom<NullHandler<McpServerToClient>> {
+        ConnectFrom::new(McpServerToClient)
     }
 }
