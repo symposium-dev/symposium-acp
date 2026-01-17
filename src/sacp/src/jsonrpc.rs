@@ -19,10 +19,21 @@ use futures::{AsyncRead, AsyncWrite, StreamExt};
 mod dynamic_handler;
 pub(crate) mod handlers;
 mod incoming_actor;
-mod outgoing_actor;
+/// Outgoing protocol actor: Converts application-level OutgoingMessage to protocol-level jsonrpcmsg::Message.
+///
+/// This module contains:
+/// - The `TransportMessage` enum for transport-layer communication
+/// - The `TransportMessageTx` type alias for sending messages
+/// - The `send_raw_message` helper function
+pub mod outgoing_actor;
 pub(crate) mod responder;
 mod task_actor;
-mod transport_actor;
+/// Transport layer actor: Handles serialization and I/O for JSON-RPC messages.
+///
+/// This module contains:
+/// - The `transport_outgoing_lines_actor` function for line-based transports
+/// - The `transport_incoming_lines_actor` function for parsing incoming messages
+pub mod transport_actor;
 
 use crate::jsonrpc::dynamic_handler::DynamicHandlerMessage;
 pub use crate::jsonrpc::handlers::NullHandler;
@@ -1213,8 +1224,8 @@ pub struct JrConnection<H: JrMessageHandler, R: JrResponder<H::Link> = NullRespo
     name: Option<String>,
     outgoing_rx: mpsc::UnboundedReceiver<OutgoingMessage>,
     new_task_rx: mpsc::UnboundedReceiver<Task>,
-    transport_outgoing_tx: mpsc::UnboundedSender<Result<jsonrpcmsg::Message, crate::Error>>,
-    transport_incoming_rx: mpsc::UnboundedReceiver<Result<jsonrpcmsg::Message, crate::Error>>,
+    transport_outgoing_tx: mpsc::UnboundedSender<outgoing_actor::TransportMessage>,
+    transport_incoming_rx: mpsc::UnboundedReceiver<outgoing_actor::TransportMessage>,
     dynamic_handler_rx: mpsc::UnboundedReceiver<DynamicHandlerMessage<H::Link>>,
     handler: H,
     responder: R,
@@ -1448,6 +1459,12 @@ enum OutgoingMessage {
 
     /// Send a generalized error message
     Error { error: crate::Error },
+
+    /// Flush the outgoing message queue, ensuring all pending messages are sent.
+    Flush {
+        /// Channel to signal when flush is complete
+        responder: oneshot::Sender<()>,
+    },
 }
 
 /// Return type from JrHandler; indicates whether the request was handled or not.
@@ -1863,6 +1880,46 @@ impl<Link: JrLink> JrConnectionCx<Link> {
         send_raw_message(&self.message_tx, OutgoingMessage::Error { error })
     }
 
+    /// Flush the outgoing message queue, ensuring all pending messages are sent.
+    ///
+    /// This is particularly important when you need to guarantee that notifications
+    /// are sent before responding to a request. Without flushing, notifications may
+    /// remain in the queue while the response is sent, causing message ordering issues.
+    ///
+    /// # Example: Ensuring notifications are sent before responding
+    ///
+    /// ```no_run
+    /// # use sacp::link::UntypedLink;
+    /// # use sacp::{JrConnectionCx, JrRequestCx};
+    /// # type MyResponse = serde_json::Value;
+    /// # async fn handle_prompt(
+    /// #     cx: JrConnectionCx<UntypedLink>,
+    /// #     request_cx: JrRequestCx<MyResponse>,
+    /// # ) -> Result<(), sacp::Error> {
+    /// // Send multiple notifications
+    /// // cx.send_notification(MyNotification { value: 1 })?;
+    /// // cx.send_notification(MyNotification { value: 2 })?;
+    ///
+    /// // CRITICAL: flush to ensure notifications are sent before response
+    /// cx.flush().await?;
+    ///
+    /// // Return response
+    /// request_cx.respond(serde_json::json!({}))?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub async fn flush(&self) -> Result<(), crate::Error> {
+        let (done_tx, done_rx) = oneshot::channel();
+        send_raw_message(
+            &self.message_tx,
+            OutgoingMessage::Flush { responder: done_tx },
+        )?;
+        done_rx
+            .await
+            .map_err(|_| crate::util::internal_error("flush failed: transport channel closed"))?;
+        Ok(())
+    }
+
     /// Register a dynamic message handler, used to intercept messages specific to a particular session
     /// or some similar modal thing.
     ///
@@ -1897,6 +1954,10 @@ impl<Link: JrLink> JrConnectionCx<Link> {
     }
 }
 
+/// Registration guard for a dynamic handler that automatically removes when dropped.
+///
+/// When a dynamic handler is added to the connection via [`JrConnectionCx::add_dynamic_handler`],
+/// it returns a `DynamicHandlerRegistration` handle. Dropping this registration removes the handler.
 #[derive(Clone, Debug)]
 pub struct DynamicHandlerRegistration<Link: JrLink> {
     uuid: Uuid,
@@ -3158,9 +3219,9 @@ where
 /// ```
 pub struct Channel {
     /// Receives messages (or errors) from the counterpart.
-    pub rx: mpsc::UnboundedReceiver<Result<jsonrpcmsg::Message, crate::Error>>,
+    pub rx: mpsc::UnboundedReceiver<outgoing_actor::TransportMessage>,
     /// Sends messages (or errors) to the counterpart.
-    pub tx: mpsc::UnboundedSender<Result<jsonrpcmsg::Message, crate::Error>>,
+    pub tx: mpsc::UnboundedSender<outgoing_actor::TransportMessage>,
 }
 
 impl Channel {

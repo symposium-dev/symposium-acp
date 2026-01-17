@@ -209,7 +209,7 @@ impl RunningServer {
         #[derive(Debug)]
         enum MultiplexMessage {
             FromHttpToChannel(HttpMessage),
-            FromChannelToHttp(Result<sacp::jsonrpcmsg::Message, sacp::Error>),
+            FromChannelToHttp(sacp::jsonrpc::outgoing_actor::TransportMessage),
         }
 
         let mut merged_stream = http_rx
@@ -225,19 +225,35 @@ impl RunningServer {
                         .await?
                 }
 
-                MultiplexMessage::FromChannelToHttp(message) => {
-                    let message = message.unwrap_or_else(|err| {
-                        sacp::jsonrpcmsg::Message::Response(sacp::jsonrpcmsg::Response::error(
-                            sacp::util::into_jsonrpc_error(err),
-                            None,
-                        ))
-                    });
-                    tracing::debug!(
-                        queue_len = self.message_deque.len() + 1,
-                        ?message,
-                        "enqueuing outgoing message"
-                    );
-                    self.message_deque.push_back(message);
+                MultiplexMessage::FromChannelToHttp(transport_msg) => {
+                    match transport_msg {
+                        sacp::jsonrpc::outgoing_actor::TransportMessage::Data(Ok(message)) => {
+                            tracing::debug!(
+                                queue_len = self.message_deque.len() + 1,
+                                ?message,
+                                "enqueuing outgoing message"
+                            );
+                            self.message_deque.push_back(message);
+                        }
+                        sacp::jsonrpc::outgoing_actor::TransportMessage::Data(Err(error)) => {
+                            let error_msg = sacp::jsonrpcmsg::Message::Response(
+                                sacp::jsonrpcmsg::Response::error(
+                                    sacp::util::into_jsonrpc_error(error),
+                                    None,
+                                )
+                            );
+                            tracing::debug!(
+                                queue_len = self.message_deque.len() + 1,
+                                ?error_msg,
+                                "enqueuing error message"
+                            );
+                            self.message_deque.push_back(error_msg);
+                        }
+                        // Flush messages are handled internally by sacp, ignore here
+                        sacp::jsonrpc::outgoing_actor::TransportMessage::Flush(_) => {
+                            tracing::trace!("Ignoring Flush message in HTTP bridge");
+                        }
+                    }
                 }
             }
 
@@ -253,7 +269,7 @@ impl RunningServer {
     async fn handle_http_message(
         &mut self,
         message: HttpMessage,
-        channel_tx: &mut mpsc::UnboundedSender<Result<sacp::jsonrpcmsg::Message, sacp::Error>>,
+        channel_tx: &mut mpsc::UnboundedSender<sacp::jsonrpc::outgoing_actor::TransportMessage>,
     ) -> Result<(), sacp::Error> {
         match message {
             HttpMessage::Request {
@@ -266,7 +282,7 @@ impl RunningServer {
 
                 // Send to the JSON-RPC server
                 channel_tx
-                    .unbounded_send(Ok(Message::Request(request)))
+                    .unbounded_send(sacp::jsonrpc::outgoing_actor::TransportMessage::Data(Ok(Message::Request(request))))
                     .map_err(sacp::util::internal_error)?;
 
                 // Register to receive the response
@@ -285,10 +301,10 @@ impl RunningServer {
                 http_request_id,
                 request,
             } => {
-                tracing::debug!(%http_request_id, ?request, "handling notification");
+                tracing::debug!(%http_request_id, method = %request.method, "handling notification");
                 // Just forward to the server, no response tracking needed
                 channel_tx
-                    .unbounded_send(Ok(Message::Request(request)))
+                    .unbounded_send(sacp::jsonrpc::outgoing_actor::TransportMessage::Data(Ok(Message::Request(request))))
                     .map_err(sacp::util::internal_error)?;
             }
 
@@ -299,7 +315,7 @@ impl RunningServer {
                 tracing::debug!(%http_request_id, ?response, "handling response");
                 // Forward to the server
                 channel_tx
-                    .unbounded_send(Ok(Message::Response(response)))
+                    .unbounded_send(sacp::jsonrpc::outgoing_actor::TransportMessage::Data(Ok(Message::Response(response))))
                     .map_err(sacp::util::internal_error)?;
             }
 

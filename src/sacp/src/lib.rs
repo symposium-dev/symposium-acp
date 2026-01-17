@@ -87,8 +87,8 @@ pub mod cookbook;
 /// JSON-RPC handler types for building custom message handlers
 pub mod handler;
 /// JSON-RPC connection and handler infrastructure
-mod jsonrpc;
-/// Link types for JSON-RPC connections
+pub mod jsonrpc;
+/// Link types for JSONRPC connections
 pub mod link;
 /// MCP declarations (minimal)
 pub mod mcp;
@@ -120,6 +120,9 @@ pub use jsonrpc::{
     JrResponsePayload, Lines, MessageCx, NullHandler, UntypedMessage,
     responder::{ChainResponder, JrResponder, NullResponder},
 };
+
+// Re-export TransportMessage for use in downstream crates
+pub use jsonrpc::outgoing_actor::TransportMessage;
 
 pub use link::{AgentToClient, ClientToAgent, HasDefaultPeer, HasPeer, JrLink, ProxyToConductor};
 
