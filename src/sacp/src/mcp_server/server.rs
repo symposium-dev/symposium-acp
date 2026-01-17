@@ -7,8 +7,8 @@ use futures::{StreamExt, channel::mpsc};
 use uuid::Uuid;
 
 use crate::{
-    AgentPeer, ClientPeer, Component, DynComponent, Handled, HasPeer, ConnectionTo, JrLink,
-    JrMessageHandler, MessageCx,
+    AgentPeer, ClientPeer, Component, ConnectionTo, DynComponent, HandleMessageFrom, Handled,
+    HasPeer, JrLink, MessageCx,
     jsonrpc::{
         DynamicHandlerRegistration,
         run::{NullRun, Run},
@@ -155,7 +155,7 @@ where
     }
 }
 
-impl<Link: JrLink> JrMessageHandler for McpNewSessionHandler<Link>
+impl<Link: JrLink> HandleMessageFrom for McpNewSessionHandler<Link>
 where
     Link: HasPeer<ClientPeer> + HasPeer<AgentPeer>,
 {

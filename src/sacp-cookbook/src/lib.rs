@@ -390,7 +390,7 @@ pub mod reusable_components {
 pub mod custom_message_handlers {
     //! Pattern: Custom message handlers.
     //!
-    //! For reusable message handling logic, implement [`JrMessageHandler`] and use
+    //! For reusable message handling logic, implement [`HandleMessageFrom`] and use
     //! [`MatchMessage`] or [`MatchMessageFrom`] for type-safe dispatching.
     //!
     //! This is useful when you need to:
@@ -401,13 +401,13 @@ pub mod custom_message_handlers {
     //! # Example
     //!
     //! ```
-    //! use sacp::{JrMessageHandler, MessageCx, Handled, ConnectionTo};
+    //! use sacp::{HandleMessageFrom, MessageCx, Handled, ConnectionTo};
     //! use sacp::schema::{InitializeRequest, InitializeResponse, AgentCapabilities};
     //! use sacp::util::MatchMessage;
     //!
     //! struct MyHandler;
     //!
-    //! impl JrMessageHandler for MyHandler {
+    //! impl HandleMessageFrom for MyHandler {
     //!     type Link = sacp::link::UntypedLink;
     //!
     //!     async fn handle_message(
@@ -438,7 +438,7 @@ pub mod custom_message_handlers {
     //! - [`MatchMessageFrom`] - Use in proxies where messages come from different
     //!   peers (`ClientPeer` vs `AgentPeer`) and may need different handling
     //!
-    //! [`JrMessageHandler`]: sacp::JrMessageHandler
+    //! [`HandleMessageFrom`]: sacp::HandleMessageFrom
     //! [`MatchMessage`]: sacp::util::MatchMessage
     //! [`MatchMessageFrom`]: sacp::util::MatchMessageFrom
 }

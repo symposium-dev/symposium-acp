@@ -117,11 +117,15 @@ pub mod jsonrpcmsg {
 }
 
 pub use jsonrpc::{
-    ByteStreams, Channel, ConnectionTo, Handled, IntoHandled, ConnectFrom,
-    JrMessageHandler, JrResponse, JsonRpcMessage, JsonRpcNotification, JsonRpcRequest,
-    JsonRpcResponse, Lines, MessageCx, NullHandler, Responder, ResponseRouter, UntypedMessage,
+    ByteStreams, Channel, ConnectFrom, ConnectionTo, HandleMessageFrom, Handled, IntoHandled,
+    JrResponse, JsonRpcMessage, JsonRpcNotification, JsonRpcRequest, JsonRpcResponse, Lines,
+    MessageCx, NullHandler, Responder, ResponseRouter, UntypedMessage,
     run::{ChainRun, NullRun, Run},
 };
+
+/// Deprecated alias for [`HandleMessageFrom`].
+#[deprecated(since = "0.1.0", note = "renamed to HandleMessageFrom")]
+pub use HandleMessageFrom as JrMessageHandler;
 
 pub use link::{
     AgentToClient, ClientToAgent, HasDefaultPeer, HasPeer, JrLink, ProxyToConductor, RemoteStyle,

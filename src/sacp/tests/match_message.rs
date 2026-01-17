@@ -1,7 +1,7 @@
 use sacp::link::UntypedLink;
 use sacp::{
-    Component, Handled, ConnectionTo, JrMessageHandler, Responder, JsonRpcMessage,
-    JsonRpcRequest, JsonRpcResponse, MessageCx, util::MatchMessageFrom,
+    Component, ConnectionTo, HandleMessageFrom, Handled, JsonRpcMessage, JsonRpcRequest,
+    JsonRpcResponse, MessageCx, Responder, util::MatchMessageFrom,
 };
 use serde::{Deserialize, Serialize};
 
@@ -50,7 +50,7 @@ impl JsonRpcRequest for EchoRequestResponse {
 
 struct EchoHandler;
 
-impl JrMessageHandler for EchoHandler {
+impl HandleMessageFrom for EchoHandler {
     type Link = UntypedLink;
 
     async fn handle_message(
@@ -74,7 +74,7 @@ impl JrMessageHandler for EchoHandler {
 #[tokio::test]
 async fn modify_message_en_route() -> Result<(), sacp::Error> {
     // Demonstrate a case where we modify a message
-    // using a `JrMessageHandler` invoked from `MatchMessage`
+    // using a `HandleMessageFrom` invoked from `MatchMessage`
 
     struct TestComponent;
 
@@ -94,7 +94,7 @@ async fn modify_message_en_route() -> Result<(), sacp::Error> {
         message: String,
     }
 
-    impl JrMessageHandler for PushHandler {
+    impl HandleMessageFrom for PushHandler {
         type Link = UntypedLink;
 
         async fn handle_message(

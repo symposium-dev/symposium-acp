@@ -6,7 +6,7 @@
 //!
 //! # When to use which
 //!
-//! - **[`MatchMessageFrom`]**: Preferred over implementing [`JrMessageHandler`] directly.
+//! - **[`MatchMessageFrom`]**: Preferred over implementing [`HandleMessageFrom`] directly.
 //!   Use this in connection handlers when you need to match on message types with
 //!   proper peer-aware transforms (e.g., unwrapping `SuccessorMessage` envelopes).
 //!
@@ -14,14 +14,14 @@
 //!   just need to parse it, such as inside a [`MatchMessageFrom`] callback or when
 //!   processing messages that don't need peer transforms.
 //!
-//! [`JrMessageHandler`]: crate::JrMessageHandler
+//! [`HandleMessageFrom`]: crate::HandleMessageFrom
 
 // Types re-exported from crate root
 use jsonrpcmsg::Params;
 
 use crate::{
-    Handled, HasDefaultPeer, ConnectionTo, JrMessageHandler, Responder, ResponseRouter,
-    JsonRpcNotification, JsonRpcRequest, JsonRpcResponse, MessageCx, UntypedMessage,
+    ConnectionTo, HandleMessageFrom, Handled, HasDefaultPeer, JsonRpcNotification, JsonRpcRequest,
+    JsonRpcResponse, MessageCx, Responder, ResponseRouter, UntypedMessage,
     link::{self, HasPeer, JrLink},
     peer::JrPeer,
     util::json_cast,
@@ -416,7 +416,7 @@ impl MatchMessage {
 
 /// Role-aware helper for pattern-matching on untyped JSON-RPC requests.
 ///
-/// **Prefer this over implementing [`JrMessageHandler`] directly.** This provides
+/// **Prefer this over implementing [`HandleMessageFrom`] directly.** This provides
 /// a more ergonomic API for matching on message types in connection handlers.
 ///
 /// Use this when you need peer-aware transforms (e.g., unwrapping proxy envelopes)
@@ -427,7 +427,7 @@ impl MatchMessage {
 /// via `remote_style().handle_incoming_message()` before delegating to `MatchMessage`
 /// for the actual parsing.
 ///
-/// [`JrMessageHandler`]: crate::JrMessageHandler
+/// [`HandleMessageFrom`]: crate::HandleMessageFrom
 ///
 /// # Example
 ///
@@ -784,7 +784,7 @@ impl<Link: JrLink> MatchMessageFrom<Link> {
     /// matching chain and get the final result.
     pub async fn otherwise_delegate(
         self,
-        mut handler: impl JrMessageHandler<Link = Link>,
+        mut handler: impl HandleMessageFrom<Link = Link>,
     ) -> Result<Handled<MessageCx>, crate::Error> {
         match self.state? {
             Handled::Yes => Ok(Handled::Yes),

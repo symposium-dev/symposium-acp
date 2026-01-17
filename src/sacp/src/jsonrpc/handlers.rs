@@ -1,4 +1,4 @@
-use crate::jsonrpc::{Handled, IntoHandled, JrMessageHandler, JsonRpcResponse};
+use crate::jsonrpc::{HandleMessageFrom, Handled, IntoHandled, JsonRpcResponse};
 use crate::link::{HasPeer, JrLink, handle_incoming_message};
 use crate::peer::JrPeer;
 use crate::{ConnectionTo, JsonRpcNotification, JsonRpcRequest, MessageCx, UntypedMessage};
@@ -24,7 +24,7 @@ impl<Link: JrLink> NullHandler<Link> {
     }
 }
 
-impl<Link: JrLink> JrMessageHandler for NullHandler<Link> {
+impl<Link: JrLink> HandleMessageFrom for NullHandler<Link> {
     type Link = Link;
 
     fn describe_chain(&self) -> impl std::fmt::Debug {
@@ -69,7 +69,7 @@ impl<Link: JrLink, Peer: JrPeer, Req: JsonRpcRequest, F, ToFut>
     }
 }
 
-impl<Link: JrLink, Peer: JrPeer, Req, F, T, ToFut> JrMessageHandler
+impl<Link: JrLink, Peer: JrPeer, Req, F, T, ToFut> HandleMessageFrom
     for RequestHandler<Link, Peer, Req, F, ToFut>
 where
     Link: HasPeer<Peer>,
@@ -196,7 +196,7 @@ impl<Link: JrLink, Peer: JrPeer, Notif: JsonRpcNotification, F, ToFut>
     }
 }
 
-impl<Link: JrLink, Peer: JrPeer, Notif, F, T, ToFut> JrMessageHandler
+impl<Link: JrLink, Peer: JrPeer, Notif, F, T, ToFut> HandleMessageFrom
     for NotificationHandler<Link, Peer, Notif, F, ToFut>
 where
     Link: HasPeer<Peer>,
@@ -316,7 +316,7 @@ impl<Link: JrLink, Peer: JrPeer, Req: JsonRpcRequest, Notif: JsonRpcNotification
 }
 
 impl<Link: JrLink, Peer: JrPeer, Req: JsonRpcRequest, Notif: JsonRpcNotification, F, T, ToFut>
-    JrMessageHandler for MessageHandler<Link, Peer, Req, Notif, F, ToFut>
+    HandleMessageFrom for MessageHandler<Link, Peer, Req, Notif, F, ToFut>
 where
     Link: HasPeer<Peer>,
     F: AsyncFnMut(MessageCx<Req, Notif>, ConnectionTo<Link>) -> Result<T, crate::Error> + Send,
@@ -413,14 +413,14 @@ pub struct NamedHandler<H> {
     handler: H,
 }
 
-impl<H: JrMessageHandler> NamedHandler<H> {
+impl<H: HandleMessageFrom> NamedHandler<H> {
     /// Creates a new named handler
     pub fn new(name: Option<String>, handler: H) -> Self {
         Self { name, handler }
     }
 }
 
-impl<H: JrMessageHandler> JrMessageHandler for NamedHandler<H> {
+impl<H: HandleMessageFrom> HandleMessageFrom for NamedHandler<H> {
     type Link = H::Link;
 
     fn describe_chain(&self) -> impl std::fmt::Debug {
@@ -456,8 +456,8 @@ pub struct ChainedHandler<H1, H2> {
 
 impl<H1, H2> ChainedHandler<H1, H2>
 where
-    H1: JrMessageHandler,
-    H2: JrMessageHandler<Link = H1::Link>,
+    H1: HandleMessageFrom,
+    H2: HandleMessageFrom<Link = H1::Link>,
 {
     /// Creates a new chain handler
     pub fn new(handler1: H1, handler2: H2) -> Self {
@@ -465,10 +465,10 @@ where
     }
 }
 
-impl<H1, H2> JrMessageHandler for ChainedHandler<H1, H2>
+impl<H1, H2> HandleMessageFrom for ChainedHandler<H1, H2>
 where
-    H1: JrMessageHandler,
-    H2: JrMessageHandler<Link = H1::Link>,
+    H1: HandleMessageFrom,
+    H2: HandleMessageFrom<Link = H1::Link>,
 {
     type Link = H1::Link;
 

@@ -9,8 +9,8 @@ use crate::schema::{
 };
 use crate::util::MatchMessageFrom;
 use crate::{
-    AgentPeer, Channel, Component, Handled, HasPeer, ConnectionTo, JrLink, JrMessageHandler,
-    Responder, MessageCx, UntypedMessage,
+    AgentPeer, Channel, Component, ConnectionTo, HandleMessageFrom, Handled, HasPeer, JrLink,
+    MessageCx, Responder, UntypedMessage,
 };
 use std::sync::Arc;
 
@@ -210,7 +210,7 @@ where
     }
 }
 
-impl<Link: JrLink> JrMessageHandler for McpActiveSession<Link>
+impl<Link: JrLink> HandleMessageFrom for McpActiveSession<Link>
 where
     Link: HasPeer<AgentPeer>,
 {

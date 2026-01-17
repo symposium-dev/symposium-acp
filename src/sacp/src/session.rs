@@ -8,7 +8,7 @@ use futures::channel::mpsc;
 use tokio::sync::oneshot;
 
 use crate::{
-    AgentPeer, ClientPeer, ConnectionTo, Handled, HasPeer, JrLink, JrMessageHandler, MessageCx,
+    AgentPeer, ClientPeer, ConnectionTo, HandleMessageFrom, Handled, HasPeer, JrLink, MessageCx,
     Responder,
     jsonrpc::{
         DynamicHandlerRegistration,
@@ -337,7 +337,7 @@ where
     /// [`start_session`](Self::start_session) which block the current task.
     ///
     /// This should not be used from inside a message handler like
-    /// [`ConnectFrom::on_receive_request`](`crate::ConnectFrom::on_receive_request`) or [`JrMessageHandler`]
+    /// [`ConnectFrom::on_receive_request`](`crate::ConnectFrom::on_receive_request`) or [`HandleMessageFrom`]
     /// implementations.
     pub fn block_task(self) -> SessionBuilder<Link, R, Blocking> {
         SessionBuilder {
@@ -726,7 +726,7 @@ where
     }
 }
 
-impl<Link> JrMessageHandler for ActiveSessionHandler<Link>
+impl<Link> HandleMessageFrom for ActiveSessionHandler<Link>
 where
     Link: HasPeer<AgentPeer>,
 {

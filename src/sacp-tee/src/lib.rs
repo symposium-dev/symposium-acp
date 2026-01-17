@@ -6,7 +6,7 @@
 use anyhow::Result;
 use sacp::ProxyToConductor;
 use sacp::component::Component;
-use sacp::{Handled, JrMessageHandler, MessageCx};
+use sacp::{HandleMessageFrom, Handled, MessageCx};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use tokio::sync::mpsc;
@@ -111,7 +111,7 @@ impl TeeHandler {
     }
 }
 
-impl JrMessageHandler for TeeHandler {
+impl HandleMessageFrom for TeeHandler {
     type Link = ProxyToConductor;
 
     fn describe_chain(&self) -> impl std::fmt::Debug {

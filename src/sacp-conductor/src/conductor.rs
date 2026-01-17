@@ -126,8 +126,13 @@ use sacp::{
     util::MatchMessage,
 };
 use sacp::{
-    ConnectionTo, ConnectFrom, JrLink, JrResponse, JsonRpcNotification, JsonRpcRequest,
+    ConnectFrom, ConnectionTo, JrLink, JrResponse, JsonRpcNotification, JsonRpcRequest,
     UntypedMessage,
+};
+use sacp::{
+    HandleMessageFrom, Run,
+    schema::{InitializeProxyRequest, InitializeRequest, NewSessionRequest},
+    util::MatchMessageFrom,
 };
 use sacp::{
     Handled,
@@ -135,11 +140,6 @@ use sacp::{
         McpConnectRequest, McpConnectResponse, McpDisconnectNotification, McpOverAcpMessage,
         SuccessorMessage,
     },
-};
-use sacp::{
-    JrMessageHandler, Run,
-    schema::{InitializeProxyRequest, InitializeRequest, NewSessionRequest},
-    util::MatchMessageFrom,
 };
 use tracing::{debug, info};
 
@@ -323,7 +323,7 @@ struct ConductorMessageHandler<Link: ConductorLink> {
     link: Link,
 }
 
-impl<Link: ConductorLink> JrMessageHandler for ConductorMessageHandler<Link> {
+impl<Link: ConductorLink> HandleMessageFrom for ConductorMessageHandler<Link> {
     type Link = Link;
 
     async fn handle_message(
@@ -798,7 +798,7 @@ where
     fn connection_to_proxy(
         &mut self,
         component_index: usize,
-    ) -> ConnectFrom<impl JrMessageHandler<Link = ConductorToProxy> + 'static> {
+    ) -> ConnectFrom<impl HandleMessageFrom<Link = ConductorToProxy> + 'static> {
         ConductorToProxy::builder()
             .name(format!("conductor-to-component({})", component_index))
             // Intercept messages sent by a proxy component to its successor.

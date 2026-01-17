@@ -133,12 +133,12 @@ use crate::{AgentPeer, ClientPeer, Component};
 ///
 /// # Implementing Custom Handlers
 ///
-/// For advanced use cases, you can implement `JrMessageHandler` directly:
+/// For advanced use cases, you can implement `HandleMessageFrom` directly:
 ///
 /// ```ignore
 /// struct MyHandler;
 ///
-/// impl JrMessageHandler for MyHandler {
+/// impl HandleMessageFrom for MyHandler {
 ///     type Link = ClientToAgent;
 ///
 ///     async fn handle_message(
@@ -191,7 +191,7 @@ use crate::{AgentPeer, ClientPeer, Component};
 /// This trait is implemented by types that can process incoming messages on a connection.
 /// Handlers are registered with a [`ConnectFrom`] and are called in order until
 /// one claims the message.
-pub trait JrMessageHandler: Send {
+pub trait HandleMessageFrom: Send {
     /// The role type for this handler's connection.
     type Link: JrLink;
 
@@ -223,7 +223,7 @@ pub trait JrMessageHandler: Send {
     fn describe_chain(&self) -> impl std::fmt::Debug;
 }
 
-impl<H: JrMessageHandler> JrMessageHandler for &mut H {
+impl<H: HandleMessageFrom> HandleMessageFrom for &mut H {
     type Link = H::Link;
 
     fn handle_message(
@@ -541,7 +541,7 @@ impl<H: JrMessageHandler> JrMessageHandler for &mut H {
 /// # }
 /// ```
 #[must_use]
-pub struct ConnectFrom<H: JrMessageHandler, R: Run<H::Link> = NullRun> {
+pub struct ConnectFrom<H: HandleMessageFrom, R: Run<H::Link> = NullRun> {
     name: Option<String>,
 
     /// Handler for incoming messages.
@@ -564,7 +564,7 @@ impl<Link: JrLink> ConnectFrom<NullHandler<Link>, NullRun> {
     }
 }
 
-impl<H: JrMessageHandler> ConnectFrom<H, NullRun> {
+impl<H: HandleMessageFrom> ConnectFrom<H, NullRun> {
     /// Create a new connection builder with the given handler.
     pub fn new_with(handler: H) -> Self {
         Self {
@@ -575,7 +575,7 @@ impl<H: JrMessageHandler> ConnectFrom<H, NullRun> {
     }
 }
 
-impl<H: JrMessageHandler, R: Run<H::Link>> ConnectFrom<H, R> {
+impl<H: HandleMessageFrom, R: Run<H::Link>> ConnectFrom<H, R> {
     /// Set the "name" of this connection -- used only for debugging logs.
     pub fn name(mut self, name: impl ToString) -> Self {
         self.name = Some(name.to_string());
@@ -589,9 +589,9 @@ impl<H: JrMessageHandler, R: Run<H::Link>> ConnectFrom<H, R> {
     pub fn with_connection_builder<H1, R1>(
         self,
         other: ConnectFrom<H1, R1>,
-    ) -> ConnectFrom<impl JrMessageHandler<Link = H::Link>, impl Run<H::Link>>
+    ) -> ConnectFrom<impl HandleMessageFrom<Link = H::Link>, impl Run<H::Link>>
     where
-        H1: JrMessageHandler<Link = H::Link>,
+        H1: HandleMessageFrom<Link = H::Link>,
         R1: Run<H::Link>,
     {
         ConnectFrom {
@@ -604,16 +604,16 @@ impl<H: JrMessageHandler, R: Run<H::Link>> ConnectFrom<H, R> {
         }
     }
 
-    /// Add a new [`JrMessageHandler`] to the chain.
+    /// Add a new [`HandleMessageFrom`] to the chain.
     ///
     /// Prefer [`Self::on_receive_request`] or [`Self::on_receive_notification`].
     /// This is a low-level method that is not intended for general use.
     pub fn with_handler<H1>(
         self,
         handler: H1,
-    ) -> ConnectFrom<impl JrMessageHandler<Link = H::Link>, R>
+    ) -> ConnectFrom<impl HandleMessageFrom<Link = H::Link>, R>
     where
-        H1: JrMessageHandler<Link = H::Link>,
+        H1: HandleMessageFrom<Link = H::Link>,
     {
         ConnectFrom {
             name: self.name,
@@ -696,7 +696,7 @@ impl<H: JrMessageHandler, R: Run<H::Link>> ConnectFrom<H, R> {
         self,
         op: F,
         to_future_hack: ToFut,
-    ) -> ConnectFrom<impl JrMessageHandler<Link = H::Link>, R>
+    ) -> ConnectFrom<impl HandleMessageFrom<Link = H::Link>, R>
     where
         H::Link: HasDefaultPeer,
         Req: JsonRpcRequest,
@@ -737,7 +737,7 @@ impl<H: JrMessageHandler, R: Run<H::Link>> ConnectFrom<H, R> {
     /// # use sacp::link::UntypedLink;
     /// # use sacp::{ConnectFrom};
     /// # use sacp::schema::{PromptRequest, PromptResponse, SessionNotification};
-    /// # fn example(connection: ConnectFrom<impl sacp::JrMessageHandler<Link = UntypedLink>>) {
+    /// # fn example(connection: ConnectFrom<impl sacp::HandleMessageFrom<Link = UntypedLink>>) {
     /// connection.on_receive_request(async |request: PromptRequest, request_cx, cx| {
     ///     // Send a notification while processing
     ///     let notif: SessionNotification = todo!();
@@ -767,7 +767,7 @@ impl<H: JrMessageHandler, R: Run<H::Link>> ConnectFrom<H, R> {
         self,
         op: F,
         to_future_hack: ToFut,
-    ) -> ConnectFrom<impl JrMessageHandler<Link = H::Link>, R>
+    ) -> ConnectFrom<impl HandleMessageFrom<Link = H::Link>, R>
     where
         H::Link: HasDefaultPeer,
         F: AsyncFnMut(
@@ -840,7 +840,7 @@ impl<H: JrMessageHandler, R: Run<H::Link>> ConnectFrom<H, R> {
         self,
         op: F,
         to_future_hack: ToFut,
-    ) -> ConnectFrom<impl JrMessageHandler<Link = H::Link>, R>
+    ) -> ConnectFrom<impl HandleMessageFrom<Link = H::Link>, R>
     where
         H::Link: HasDefaultPeer,
         Notif: JsonRpcNotification,
@@ -889,7 +889,7 @@ impl<H: JrMessageHandler, R: Run<H::Link>> ConnectFrom<H, R> {
         peer: Peer,
         op: F,
         to_future_hack: ToFut,
-    ) -> ConnectFrom<impl JrMessageHandler<Link = H::Link>, R>
+    ) -> ConnectFrom<impl HandleMessageFrom<Link = H::Link>, R>
     where
         H::Link: HasPeer<Peer>,
         F: AsyncFnMut(MessageCx<Req, Notif>, ConnectionTo<H::Link>) -> Result<T, crate::Error>
@@ -944,7 +944,7 @@ impl<H: JrMessageHandler, R: Run<H::Link>> ConnectFrom<H, R> {
         peer: Peer,
         op: F,
         to_future_hack: ToFut,
-    ) -> ConnectFrom<impl JrMessageHandler<Link = H::Link>, R>
+    ) -> ConnectFrom<impl HandleMessageFrom<Link = H::Link>, R>
     where
         H::Link: HasPeer<Peer>,
         F: AsyncFnMut(
@@ -991,7 +991,7 @@ impl<H: JrMessageHandler, R: Run<H::Link>> ConnectFrom<H, R> {
         peer: Peer,
         op: F,
         to_future_hack: ToFut,
-    ) -> ConnectFrom<impl JrMessageHandler<Link = H::Link>, R>
+    ) -> ConnectFrom<impl HandleMessageFrom<Link = H::Link>, R>
     where
         H::Link: HasPeer<Peer>,
         F: AsyncFnMut(Notif, ConnectionTo<H::Link>) -> Result<T, crate::Error> + Send,
@@ -1032,9 +1032,9 @@ impl<H: JrMessageHandler, R: Run<H::Link>> ConnectFrom<H, R> {
     pub fn with_mcp_server<Link: JrLink, McpR: Run<Link>>(
         self,
         server: McpServer<Link, McpR>,
-    ) -> ConnectFrom<impl JrMessageHandler<Link = Link>, impl Run<Link>>
+    ) -> ConnectFrom<impl HandleMessageFrom<Link = Link>, impl Run<Link>>
     where
-        H: JrMessageHandler<Link = Link>,
+        H: HandleMessageFrom<Link = Link>,
         Link: HasPeer<ClientPeer> + HasPeer<AgentPeer>,
     {
         let (message_handler, mcp_responder) = server.into_handler_and_responder();
@@ -1195,7 +1195,7 @@ impl<H: JrMessageHandler, R: Run<H::Link>> ConnectFrom<H, R> {
 
 impl<H, R> Component<H::Link> for ConnectFrom<H, R>
 where
-    H: JrMessageHandler + 'static,
+    H: HandleMessageFrom + 'static,
     R: Run<H::Link> + 'static,
 {
     async fn serve(
@@ -1216,7 +1216,7 @@ where
 ///
 /// Most users won't construct this directly - instead use `ConnectFrom::connect_to()` or
 /// `ConnectFrom::serve()` for convenience.
-pub struct JrConnection<H: JrMessageHandler, R: Run<H::Link> = NullRun> {
+pub struct JrConnection<H: HandleMessageFrom, R: Run<H::Link> = NullRun> {
     cx: ConnectionTo<H::Link>,
     name: Option<String>,
     outgoing_rx: mpsc::UnboundedReceiver<OutgoingMessage>,
@@ -1228,7 +1228,7 @@ pub struct JrConnection<H: JrMessageHandler, R: Run<H::Link> = NullRun> {
     responder: R,
 }
 
-impl<H: JrMessageHandler, R: Run<H::Link>> JrConnection<H, R> {
+impl<H: HandleMessageFrom, R: Run<H::Link>> JrConnection<H, R> {
     /// Run the connection in server mode with the provided transport.
     ///
     /// This drives the connection by continuously processing messages from the transport
@@ -1668,7 +1668,7 @@ impl<Link: JrLink> ConnectionTo<Link> {
     /// # }
     /// ```
     #[track_caller]
-    pub fn spawn_connection<H: JrMessageHandler + 'static, R: Run<H::Link> + 'static>(
+    pub fn spawn_connection<H: HandleMessageFrom + 'static, R: Run<H::Link> + 'static>(
         &self,
         builder: ConnectFrom<H, R>,
         transport: impl Component<<H::Link as JrLink>::ConnectsTo> + 'static,
@@ -1911,7 +1911,7 @@ impl<Link: JrLink> ConnectionTo<Link> {
     /// The handler will stay registered until the returned registration guard is dropped.
     pub fn add_dynamic_handler(
         &self,
-        handler: impl JrMessageHandler<Link = Link> + 'static,
+        handler: impl HandleMessageFrom<Link = Link> + 'static,
     ) -> Result<DynamicHandlerRegistration<Link>, crate::Error> {
         let uuid = Uuid::new_v4();
         self.dynamic_handler_tx

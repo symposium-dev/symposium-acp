@@ -8,7 +8,7 @@ use std::{fmt::Debug, hash::Hash};
 use agent_client_protocol_schema::{NewSessionRequest, NewSessionResponse, SessionId};
 
 use crate::{
-    Handled, ConnectionTo, JrMessageHandler, JsonRpcMessage, MessageCx, UntypedMessage,
+    ConnectionTo, HandleMessageFrom, Handled, JsonRpcMessage, MessageCx, UntypedMessage,
     jsonrpc::{ConnectFrom, handlers::NullHandler},
     peer::{AgentPeer, ClientPeer, ConductorPeer, JrPeer, UntypedPeer},
     schema::{
@@ -582,7 +582,7 @@ impl<Link> ProxySessionMessages<Link> {
     }
 }
 
-impl<Link: JrLink> JrMessageHandler for ProxySessionMessages<Link>
+impl<Link: JrLink> HandleMessageFrom for ProxySessionMessages<Link>
 where
     Link: HasPeer<AgentPeer> + HasPeer<ClientPeer>,
 {
