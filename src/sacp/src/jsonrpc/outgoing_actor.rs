@@ -1,13 +1,20 @@
 // Types re-exported from crate root
 use futures::StreamExt as _;
 use futures::channel::mpsc;
+use futures::channel::oneshot;
 use uuid::Uuid;
 
 use crate::jsonrpc::OutgoingMessage;
 use crate::jsonrpc::ReplyMessage;
 
+/// Channel sender for outgoing JSON-RPC messages.
+///
+/// This is the primary interface for sending messages to the transport layer.
 pub type OutgoingMessageTx = mpsc::UnboundedSender<OutgoingMessage>;
 
+/// Send a raw message through the outgoing message channel.
+///
+/// This is a low-level API typically only used internally by the framework.
 pub(crate) fn send_raw_message(
     tx: &OutgoingMessageTx,
     message: OutgoingMessage,
@@ -15,6 +22,19 @@ pub(crate) fn send_raw_message(
     tracing::debug!(?message, ?tx, "send_raw_message");
     tx.unbounded_send(message)
         .map_err(crate::util::internal_error)
+}
+
+/// Messages sent to the transport layer.
+///
+/// This enum wraps both regular JSON-RPC messages and control messages like flush.
+#[derive(Debug)]
+pub enum TransportMessage {
+    /// Regular JSON-RPC message to be sent over the transport.
+    Data(Result<jsonrpcmsg::Message, crate::Error>),
+
+    /// Flush command: ensures all previous Data messages have been sent.
+    /// The provided oneshot sender is signaled when the flush is complete.
+    Flush(oneshot::Sender<()>),
 }
 
 /// Outgoing protocol actor: Converts application-level OutgoingMessage to protocol-level jsonrpcmsg::Message.
@@ -28,13 +48,13 @@ pub(crate) fn send_raw_message(
 pub(super) async fn outgoing_protocol_actor(
     mut outgoing_rx: mpsc::UnboundedReceiver<OutgoingMessage>,
     reply_tx: mpsc::UnboundedSender<ReplyMessage>,
-    transport_tx: mpsc::UnboundedSender<Result<jsonrpcmsg::Message, crate::Error>>,
+    transport_tx: mpsc::UnboundedSender<TransportMessage>,
 ) -> Result<(), crate::Error> {
     while let Some(message) = outgoing_rx.next().await {
         tracing::debug!(?message, "outgoing_protocol_actor");
 
         // Create the message to be sent over the transport
-        let json_rpc_message = match message {
+        let transport_message = match message {
             OutgoingMessage::Request {
                 method,
                 params,
@@ -49,17 +69,21 @@ pub(super) async fn outgoing_protocol_actor(
                     .unbounded_send(ReplyMessage::Subscribe(id.clone(), response_rx))
                     .map_err(crate::Error::into_internal_error)?;
 
-                jsonrpcmsg::Message::Request(jsonrpcmsg::Request::new_v2(method, params, Some(id)))
+                TransportMessage::Data(Ok(jsonrpcmsg::Message::Request(
+                    jsonrpcmsg::Request::new_v2(method, params, Some(id)),
+                )))
             }
-            OutgoingMessage::Notification { method, params } => {
-                jsonrpcmsg::Message::Request(jsonrpcmsg::Request::new_v2(method, params, None))
-            }
+            OutgoingMessage::Notification { method, params } => TransportMessage::Data(Ok(
+                jsonrpcmsg::Message::Request(jsonrpcmsg::Request::new_v2(method, params, None)),
+            )),
             OutgoingMessage::Response {
                 id,
                 response: Ok(value),
             } => {
                 tracing::debug!(?id, "Sending success response");
-                jsonrpcmsg::Message::Response(jsonrpcmsg::Response::success_v2(value, Some(id)))
+                TransportMessage::Data(Ok(jsonrpcmsg::Message::Response(
+                    jsonrpcmsg::Response::success_v2(value, Some(id)),
+                )))
             }
             OutgoingMessage::Response {
                 id,
@@ -72,10 +96,9 @@ pub(super) async fn outgoing_protocol_actor(
                     message: error.message,
                     data: error.data,
                 };
-                jsonrpcmsg::Message::Response(jsonrpcmsg::Response::error_v2(
-                    jsonrpc_error,
-                    Some(id),
-                ))
+                TransportMessage::Data(Ok(jsonrpcmsg::Message::Response(
+                    jsonrpcmsg::Response::error_v2(jsonrpc_error, Some(id)),
+                )))
             }
             OutgoingMessage::Error { error } => {
                 // Convert crate::Error to jsonrpcmsg::Error
@@ -86,13 +109,19 @@ pub(super) async fn outgoing_protocol_actor(
                 };
                 // Response with id: None means this is an error notification that couldn't be
                 // correlated to a specific request (e.g., parse error before we could read the id)
-                jsonrpcmsg::Message::Response(jsonrpcmsg::Response::error_v2(jsonrpc_error, None))
+                TransportMessage::Data(Ok(jsonrpcmsg::Message::Response(
+                    jsonrpcmsg::Response::error_v2(jsonrpc_error, None),
+                )))
+            }
+            OutgoingMessage::Flush { responder } => {
+                // Forward flush to transport layer for reliable synchronization
+                TransportMessage::Flush(responder)
             }
         };
 
-        // Send to transport layer (wrapped in Ok since transport expects Result)
+        // Send to transport layer
         transport_tx
-            .unbounded_send(Ok(json_rpc_message))
+            .unbounded_send(transport_message)
             .map_err(crate::Error::into_internal_error)?;
     }
     Ok(())

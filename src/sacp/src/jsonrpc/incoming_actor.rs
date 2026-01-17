@@ -19,6 +19,7 @@ use crate::jsonrpc::dynamic_handler::DynamicHandlerMessage;
 use crate::link::JrLink;
 
 use super::Handled;
+use super::outgoing_actor::TransportMessage;
 
 /// Incoming protocol actor: The central dispatch loop for a connection.
 ///
@@ -31,7 +32,7 @@ use super::Handled;
 /// This is the protocol layer - it has no knowledge of how messages arrived.
 pub(super) async fn incoming_protocol_actor<Link: JrLink>(
     json_rpc_cx: &JrConnectionCx<Link>,
-    transport_rx: mpsc::UnboundedReceiver<Result<jsonrpcmsg::Message, crate::Error>>,
+    transport_rx: mpsc::UnboundedReceiver<TransportMessage>,
     dynamic_handler_rx: mpsc::UnboundedReceiver<DynamicHandlerMessage<Link>>,
     reply_rx: mpsc::UnboundedReceiver<ReplyMessage>,
     mut handler: impl JrMessageHandler<Link = Link>,
@@ -96,8 +97,8 @@ pub(super) async fn incoming_protocol_actor<Link: JrLink>(
                 }
             },
 
-            IncomingProtocolMsg::Transport(message) => match message {
-                Ok(message) => match message {
+            IncomingProtocolMsg::Transport(transport_msg) => match transport_msg {
+                TransportMessage::Data(Ok(message)) => match message {
                     jsonrpcmsg::Message::Request(request) => {
                         tracing::trace!(method = %request.method, id = ?request.id, "Handling request");
                         dispatch_request(
@@ -159,10 +160,14 @@ pub(super) async fn incoming_protocol_actor<Link: JrLink>(
                         }
                     }
                 },
-                Err(error) => {
+                TransportMessage::Data(Err(error)) => {
                     // Parse error from transport - send error notification back to remote
                     tracing::warn!(?error, "Transport parse error, sending error notification");
                     json_rpc_cx.send_error_notification(error)?;
+                }
+                // Flush messages are handled by the transport actor, ignore here
+                TransportMessage::Flush(_) => {
+                    tracing::trace!("Ignoring Flush message in incoming actor");
                 }
             },
         }
@@ -172,7 +177,7 @@ pub(super) async fn incoming_protocol_actor<Link: JrLink>(
 
 #[derive(Debug)]
 enum IncomingProtocolMsg<Link: JrLink> {
-    Transport(Result<jsonrpcmsg::Message, crate::Error>),
+    Transport(TransportMessage),
     DynamicHandler(DynamicHandlerMessage<Link>),
     Reply(ReplyMessage),
 }
