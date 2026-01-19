@@ -1,8 +1,10 @@
-# Conductor: P/ACP Orchestrator
+# Conductor Design
 
 {{#rfd: proxying-acp}}
 
-The **Conductor** (binary name: `conductor`) is the orchestrator for P/ACP proxy chains. It coordinates the flow of ACP messages through a chain of proxy components.
+The **Conductor** (binary name: `sacp-conductor`) orchestrates P/ACP proxy chains. It coordinates the flow of ACP messages through a chain of proxy components.
+
+For API usage, see the [sacp-conductor rustdoc](https://docs.rs/sacp-conductor).
 
 ## Overview
 
@@ -29,7 +31,7 @@ flowchart TB
 - Sends `_proxy/successor/request` to conductor to forward messages TO successor
 - Receives `_proxy/successor/request` from conductor for messages FROM successor
 
-See [Architecture Overview](./architecture.md) for detailed conceptual and actual message flows.
+See [Protocol Reference](./protocol.md) for detailed message formats.
 
 ## Responsibilities
 
@@ -67,7 +69,7 @@ The conductor routes ALL messages between components. No component talks directl
 3. **Successor → Component**: Conductor wraps messages in `_proxy/successor/request` when sending FROM successor
 4. **Responses**: Flow back via standard JSON-RPC response IDs
 
-See [Architecture Overview](./architecture.md#message-flow) for detailed request/response flow diagrams.
+See [Protocol Reference](./protocol.md) for detailed request/response flow diagrams.
 
 ### 3. Capability Management
 
@@ -83,7 +85,7 @@ The conductor manages proxy capability handshakes during initialization:
 - Offers `proxy: true` to ALL components (including the last)
 - Enables tree-structured proxy chains
 
-See [Architecture Overview](./architecture.md#capability-handshake) for detailed handshake flows and [Proxy Mode](#proxy-mode) below for hierarchical chain details.
+See [Proxy Mode](#proxy-mode) below for hierarchical chain details.
 
 ### 4. MCP Bridge Adaptation
 
@@ -144,7 +146,6 @@ client → proxy1 → conductor (proxy mode) → final-agent
 - In proxy mode: all components are proxies (all receive proxy capability)
 - The conductor's own successor is determined by whoever initialized it
 
-See [Architecture Overview](./architecture.md#proxy-mode) for conceptual diagrams.
 
 ## Initialization Flow
 
@@ -346,8 +347,16 @@ If component fails to initialize:
 4. **Metrics**: Should Conductor expose metrics (message counts, latency)?
 5. **Security**: Do we need to validate/sandbox component processes?
 
+## Key Source Files
+
+| File | Purpose |
+|------|---------|
+| `src/sacp-conductor/src/conductor.rs` | Main conductor implementation |
+| `src/sacp-conductor/src/conductor/mcp_bridge.rs` | MCP bridge actor |
+| `src/sacp-conductor/src/main.rs` | CLI entry point |
+
 ## Related Documentation
 
-- [P/ACP RFD](../rfds/draft/proxying-acp.md) - Full protocol specification
-- [Proxying ACP Server Trait](./proxying-acp-server-trait.md) - Component implementation guide
-- [Sparkle Component](./sparkle-component.md) - Example P/ACP component
+- [P/ACP Specification](./proxying-acp.md) - Full protocol specification
+- [MCP Bridge](./mcp-bridge.md) - MCP-over-ACP implementation details
+- [Protocol Reference](./protocol.md) - Wire protocol details

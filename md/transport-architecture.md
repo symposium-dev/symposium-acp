@@ -1,6 +1,8 @@
 # Transport Architecture
 
-This chapter explains how `JrConnection` separates protocol semantics from transport mechanisms, enabling flexible deployment patterns including in-process message passing.
+> **Note**: This document describes internal architecture and uses older terminology (e.g., `JrConnection` instead of the current API). For the user-facing API, see [Building an Agent](./building-agent.md) and [Building a Proxy](./building-proxy.md).
+
+This chapter explains how the connection layer separates protocol semantics from transport mechanisms, enabling flexible deployment patterns including in-process message passing.
 
 ## Overview
 
