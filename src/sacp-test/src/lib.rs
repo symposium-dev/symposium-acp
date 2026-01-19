@@ -8,8 +8,8 @@ pub mod test_binaries;
 /// This is only for documentation examples that don't actually run.
 pub struct MockTransport;
 
-impl<R: Role> Serve<R> for MockTransport {
-    async fn serve(self, _client: impl Serve<R::Counterpart>) -> Result<(), Error> {
+impl<R: Role> ConnectTo<R> for MockTransport {
+    async fn connect_to(self, _client: impl ConnectTo<R::Counterpart>) -> Result<(), Error> {
         panic!("MockTransport should never be used in running code - it's only for doctests")
     }
 }
@@ -208,7 +208,7 @@ pub fn process(data: &str) -> Result<String, crate::Error> {
 
 // Helper to create a mock connection for examples
 pub fn mock_connection() -> ConnectFrom<Client> {
-    Client::builder()
+    Client.connect_from()
 }
 
 pub trait Make {

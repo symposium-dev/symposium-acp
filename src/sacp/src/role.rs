@@ -39,6 +39,14 @@ pub trait Role: Debug + Clone + Send + Sync + 'static + Eq + Ord + Hash {
     /// - `Conductor::Counterpart = Proxy`
     type Counterpart: Role<Counterpart = Self>;
 
+    /// Creates a new builder playing this role.
+    fn connect_from(self) -> ConnectFrom<Self>
+    where
+        Self: Sized,
+    {
+        ConnectFrom::new(self)
+    }
+
     /// Returns a unique identifier for this role.
     fn role_id(&self) -> RoleId;
 
@@ -262,8 +270,8 @@ pub struct UntypedRole;
 
 impl UntypedRole {
     /// Creates a new builder for a connection from this role.
-    pub fn builder() -> ConnectFrom<Self> {
-        ConnectFrom::new(UntypedRole)
+    pub fn connect_from(self) -> ConnectFrom<Self> {
+        ConnectFrom::new(self)
     }
 }
 

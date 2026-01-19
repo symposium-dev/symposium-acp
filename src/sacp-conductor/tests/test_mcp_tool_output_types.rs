@@ -3,7 +3,7 @@
 //! MCP structured output requires JSON objects. This test verifies behavior
 //! when tools return non-object types like bare strings or integers.
 
-use sacp::{Agent, Client, Conductor, DynServe, Proxy, RunWithConnectionTo, Serve};
+use sacp::{Agent, Client, Conductor, DynConnectTo, Proxy, RunWithConnectionTo, ConnectTo};
 use sacp::mcp_server::McpServer;
 use sacp_conductor::{ConductorImpl, ProxiesAndAgent};
 use schemars::JsonSchema;
@@ -16,7 +16,7 @@ use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
 struct EmptyInput {}
 
 /// Create a proxy with tools that return different types
-fn create_test_proxy() -> Result<DynServe<Conductor>, sacp::Error> {
+fn create_test_proxy() -> Result<DynConnectTo<Conductor>, sacp::Error> {
     let mcp_server = McpServer::builder("test_server".to_string())
         .instructions("Test MCP server with various output types")
         .tool_fn_mut(
@@ -33,24 +33,24 @@ fn create_test_proxy() -> Result<DynServe<Conductor>, sacp::Error> {
         )
         .build();
 
-    Ok(DynServe::new(ProxyWithTestServer { mcp_server }))
+    Ok(DynConnectTo::new(ProxyWithTestServer { mcp_server }))
 }
 
 struct ProxyWithTestServer<R: RunWithConnectionTo<Conductor>> {
     mcp_server: McpServer<Conductor, R>,
 }
 
-impl<R: RunWithConnectionTo<Conductor> + 'static + Send> Serve<Conductor>
+impl<R: RunWithConnectionTo<Conductor> + 'static + Send> ConnectTo<Conductor>
     for ProxyWithTestServer<R>
 {
-    async fn serve(
+    async fn connect_to(
         self,
-        client: impl Serve<Proxy>,
+        client: impl ConnectTo<Proxy>,
     ) -> Result<(), sacp::Error> {
-        sacp::Proxy::builder()
+        sacp::Proxy.connect_from()
             .name("test-proxy")
             .with_mcp_server(self.mcp_server)
-            .serve(client)
+            .connect_to(client)
             .await
     }
 }
@@ -58,10 +58,10 @@ impl<R: RunWithConnectionTo<Conductor> + 'static + Send> Serve<Conductor>
 /// Elizacp agent component wrapper for testing
 struct ElizacpAgentComponent;
 
-impl Serve<Client> for ElizacpAgentComponent {
-    async fn serve(
+impl ConnectTo<Client> for ElizacpAgentComponent {
+    async fn connect_to(
         self,
-        client: impl Serve<Agent>,
+        client: impl ConnectTo<Agent>,
     ) -> Result<(), sacp::Error> {
         let (elizacp_write, client_read) = duplex(8192);
         let (client_write, elizacp_read) = duplex(8192);
@@ -74,14 +74,14 @@ impl Serve<Client> for ElizacpAgentComponent {
 
         tokio::spawn(async move {
             if let Err(e) =
-                Serve::<Client>::serve(elizacp::ElizaAgent::new(true), elizacp_transport)
+                ConnectTo::<Client>::connect_to(elizacp::ElizaAgent::new(true), elizacp_transport)
                     .await
             {
                 tracing::error!("Elizacp error: {}", e);
             }
         });
 
-        Serve::<Client>::serve(client_transport, client).await
+        ConnectTo::<Client>::connect_to(client_transport, client).await
     }
 }
 

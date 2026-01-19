@@ -38,9 +38,8 @@ impl Role for Client {
 
 impl Client {
     /// Create a connection builder for an MCP client.
-    pub fn builder() -> ConnectFrom<Client, NullHandler, NullRun> {
-        ConnectFrom::new(Self::default())
-    }
+    pub fn connect_from(self) -> ConnectFrom<Client, NullHandler, NullRun> {
+ConnectFrom::new(self)    }
 }
 
 impl HasPeer<Client> for Client {
@@ -78,9 +77,8 @@ impl Role for Server {
 
 impl Server {
     /// Create a connection builder for an MCP server.
-    pub fn builder() -> ConnectFrom<Server, NullHandler, NullRun> {
-        ConnectFrom::new(Self::default())
-    }
+    pub fn connect_from(self) -> ConnectFrom<Server, NullHandler, NullRun> {
+ConnectFrom::new(self)    }
 }
 
 impl HasPeer<Server> for Server {

@@ -11,16 +11,16 @@ Refactoring the Link/Peer type system to a simpler Role-based API. Goals:
 ## Current State (2026-01-19)
 
 **Branch**: `the-big-rename`
-**Status**: Phase 6 complete, all tests passing
+**Status**: Phase 6b complete, all tests passing
 
-The Role-based API migration is complete. The codebase now uses a unified `Role` type system instead of the previous `JrLink`/`JrPeer` system.
+The Role-based API migration is complete. The codebase now uses a unified `Role` type system instead of the previous `JrLink`/`JrPeer` system, with `ConnectTo<R>` as the core trait.
 
 ## Type Mapping (Final)
 
 | Old | New |
 |-----|-----|
-| `Component<L>` | `Serve<R>` |
-| `DynComponent<L>` | `DynServe<R>` |
+| `Component<L>` | `ConnectTo<R>` |
+| `DynComponent<L>` | `DynConnectTo<R>` |
 | `ClientToAgent` | `Client` |
 | `AgentToClient` | `Agent` |
 | `ProxyToConductor` | `Proxy` / `Conductor` |
@@ -29,19 +29,25 @@ The Role-based API migration is complete. The codebase now uses a unified `Role`
 | `Run` (trait) | `RunWithConnectionTo` |
 | `JrLink` | Removed |
 | `JrPeer` | Removed |
+| `Serve<R>` | `ConnectTo<R>` |
+| `DynServe<R>` | `DynConnectTo<R>` |
+| `::builder()` | `.connect_from()` |
+| `.serve(transport)` | `.connect_to(transport)` |
+| `.run_until(transport, ...)` | `.connect_with(transport, ...)` |
+| `.into_server()` | `.into_channel_and_future()` |
 
 ## New API Shape
 
 ```rust
 // Purely reactive - just handle incoming messages
-Agent::builder()
+Agent.connect_from()
     .on_receive_request(...)
-    .serve(transport)
+    .connect_to(transport)
     .await
 
 // Active connection - drive the interaction
-Client::builder()
-    .run_until(transport, async |connection: ConnectionTo<Agent>| {
+Client.connect_from()
+    .connect_with(transport, async |connection: ConnectionTo<Agent>| {
         connection.send_request(...).await
     })
     .await
@@ -110,6 +116,15 @@ trait HasPeer<Peer: Role>: Role {
 - [x] Migrate all test files
 - [x] Remove `sacp-tee` crate (no longer maintained)
 
+### Phase 6b: Rename Serve to ConnectTo ✅
+- [x] Rename `Serve<R>` → `ConnectTo<R>`
+- [x] Rename `DynServe<R>` → `DynConnectTo<R>`
+- [x] Rename `.serve(transport)` → `.connect_to(transport)`
+- [x] Rename `::builder()` → `.connect_from()`
+- [x] Rename `.run_until(transport, ...)` → `.connect_with(transport, ...)`
+- [x] Rename `.into_server()` → `.into_channel_and_future()`
+- [x] Update all crates and documentation
+
 ### Phase 7: Documentation ⏳
 - [ ] Update sacp crate doctests (currently failing)
 - [ ] Update examples in documentation
@@ -123,7 +138,7 @@ trait HasPeer<Peer: Role>: Role {
 
 ## Key Patterns Discovered
 
-- `ConductorImpl.run_until(transport)` accepts `Serve<Client>` components directly
+- `ConductorImpl.connect_with(transport)` accepts `ConnectTo<Client>` components directly
 - For session-hosted MCP servers: `make_mcp_server::<Agent>()`
 - For proxy-hosted MCP servers: `make_mcp_server::<Conductor>()`
-- `Serve<R>` means "I serve someone playing role R" - an agent implements `Serve<Client>`
+- `ConnectTo<R>` means "I can connect to something playing role R" - an agent implements `ConnectTo<Client>`

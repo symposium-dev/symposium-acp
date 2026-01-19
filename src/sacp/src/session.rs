@@ -185,7 +185,7 @@ where
     /// # use sacp::{ClientToAgent, AgentToClient, Component};
     /// # use sacp::mcp_server::McpServer;
     /// # async fn example(transport: impl Component<AgentToClient>) -> Result<(), sacp::Error> {
-    /// # Client::builder().run_until(transport, async |cx| {
+    /// # Client.connect_from().run_until(transport, async |cx| {
     /// # let mcp = McpServer::<ClientToAgent, _>::builder("tools").build();
     /// cx.build_session_cwd()?
     ///     .with_mcp_server(mcp)?
@@ -261,7 +261,7 @@ where
     /// # use sacp::schema::NewSessionRequest;
     /// # use sacp::mcp_server::McpServer;
     /// # async fn example(transport: impl Component<ConductorToProxy>) -> Result<(), sacp::Error> {
-    /// Proxy::builder()
+    /// Proxy.connect_from()
     ///     .on_receive_request_from(Client, async |request: NewSessionRequest, request_cx, cx| {
     ///         let mcp = McpServer::<ProxyToConductor, _>::builder("tools").build();
     ///         cx.build_session_from(request)

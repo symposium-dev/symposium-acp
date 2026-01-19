@@ -10,7 +10,7 @@ use crate::schema::{
 };
 use crate::util::MatchMessageFrom;
 use crate::{
-    Agent, Channel, ConnectionTo, HandleMessageFrom, Handled, MessageCx, Responder, Role, Serve,
+    Agent, Channel, ConnectionTo, HandleMessageFrom, Handled, MessageCx, Responder, Role, ConnectTo,
     UntypedMessage,
 };
 use std::sync::Arc;
@@ -72,7 +72,7 @@ where
             let connection_id = connection_id.clone();
             let acp_connection = acp_connection.clone();
 
-            role::mcp::Client::builder()
+            role::mcp::Client.connect_from()
                 .on_receive_message(
                     async move |message: MessageCx, _mcp_cx| {
                         // Wrap the message in McpOverAcp{Request,Notification} and forward to successor
@@ -115,10 +115,10 @@ where
 
         // Spawn both sides of the connection
         let spawn_results = acp_connection
-            .spawn(async move { client_component.serve(client_channel).await })
+            .spawn(async move { client_component.connect_to(client_channel).await })
             .and_then(|()| {
                 // Spawn the MCP server serving the server channel
-                acp_connection.spawn(async move { spawned_server.serve(server_channel).await })
+                acp_connection.spawn(async move { spawned_server.connect_to(server_channel).await })
             });
 
         match spawn_results {

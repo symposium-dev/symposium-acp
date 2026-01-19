@@ -14,7 +14,7 @@
 //! let server = McpServer::from_rmcp("my-server", MyRmcpService::new);
 //!
 //! // Use as a handler
-//! Proxy::builder()
+//! Proxy.connect_from()
 //!     .with_handler(server)
 //!     .serve(client)
 //!     .await?;
@@ -24,7 +24,7 @@ use futures_concurrency::future::TryJoin as _;
 use rmcp::ServiceExt;
 use sacp::mcp_server::{McpConnectionTo, McpServer, McpServerConnect};
 use sacp::role::{self, HasPeer};
-use sacp::{Agent, ByteStreams, DynServe, NullRun, Role, Serve};
+use sacp::{Agent, ByteStreams, DynConnectTo, NullRun, Role, ConnectTo};
 use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
 
 pub trait McpServerExt<Counterpart: Role>
@@ -58,9 +58,9 @@ where
                 self.name.clone()
             }
 
-            fn connect(&self, _cx: McpConnectionTo<Counterpart>) -> DynServe<role::mcp::Client> {
+            fn connect(&self, _cx: McpConnectionTo<Counterpart>) -> DynConnectTo<role::mcp::Client> {
                 let service = (self.new_fn)();
-                DynServe::new(RmcpServerComponent { service })
+                DynConnectTo::new(RmcpServerComponent { service })
             }
         }
 
@@ -84,11 +84,11 @@ struct RmcpServerComponent<S> {
     service: S,
 }
 
-impl<S> Serve<role::mcp::Client> for RmcpServerComponent<S>
+impl<S> ConnectTo<role::mcp::Client> for RmcpServerComponent<S>
 where
     S: rmcp::Service<rmcp::RoleServer>,
 {
-    async fn serve(self, client: impl Serve<role::mcp::Server>) -> Result<(), sacp::Error> {
+    async fn connect_to(self, client: impl ConnectTo<role::mcp::Server>) -> Result<(), sacp::Error> {
         // Create tokio byte streams that rmcp expects
         let (mcp_server_stream, mcp_client_stream) = tokio::io::duplex(8192);
         let (mcp_server_read, mcp_server_write) = tokio::io::split(mcp_server_stream);
@@ -100,7 +100,7 @@ where
                 ByteStreams::new(mcp_client_write.compat_write(), mcp_client_read.compat());
 
             // Spawn task to connect byte_streams to the provided client
-            let _ = Serve::<role::mcp::Client>::serve(byte_streams, client).await;
+            let _ = ConnectTo::<role::mcp::Client>::connect_to(byte_streams, client).await;
 
             Ok(())
         };

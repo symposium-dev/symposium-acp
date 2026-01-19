@@ -19,7 +19,7 @@
 //!
 //! Run `just prep-tests` before running these tests.
 
-use sacp::{Agent, Client, Conductor, DynServe, Serve};
+use sacp::{Agent, Client, Conductor, DynConnectTo, ConnectTo};
 use sacp_conductor::{ConductorImpl, ProxiesAndAgent};
 use sacp_test::arrow_proxy::run_arrow_proxy;
 use sacp_test::test_binaries::{arrow_proxy_example, conductor_binary, elizacp};
@@ -31,10 +31,10 @@ use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
 /// Runs the arrow proxy logic in-process instead of spawning a subprocess.
 struct MockArrowProxy;
 
-impl Serve<Conductor> for MockArrowProxy {
-    async fn serve(
+impl ConnectTo<Conductor> for MockArrowProxy {
+    async fn connect_to(
         self,
-        client: impl Serve<sacp::Proxy>,
+        client: impl ConnectTo<sacp::Proxy>,
     ) -> Result<(), sacp::Error> {
         run_arrow_proxy(client).await
     }
@@ -44,12 +44,12 @@ impl Serve<Conductor> for MockArrowProxy {
 /// Runs the Eliza agent logic in-process instead of spawning a subprocess.
 struct MockEliza;
 
-impl Serve<Client> for MockEliza {
-    async fn serve(
+impl ConnectTo<Client> for MockEliza {
+    async fn connect_to(
         self,
-        client: impl Serve<Agent>,
+        client: impl ConnectTo<Agent>,
     ) -> Result<(), sacp::Error> {
-        Serve::<Client>::serve(elizacp::ElizaAgent::new(true), client).await
+        ConnectTo::<Client>::connect_to(elizacp::ElizaAgent::new(true), client).await
     }
 }
 
@@ -65,20 +65,20 @@ impl MockInnerConductor {
     }
 }
 
-impl Serve<Conductor> for MockInnerConductor {
-    async fn serve(
+impl ConnectTo<Conductor> for MockInnerConductor {
+    async fn connect_to(
         self,
-        client: impl Serve<sacp::Proxy>,
+        client: impl ConnectTo<sacp::Proxy>,
     ) -> Result<(), sacp::Error> {
         // Create mock arrow proxy components for the inner conductor
         // This conductor is ONLY proxies - no actual agent
         // Use Serve::serve instead of .run() to get the Serve<Conductor> impl
-        let mut components: Vec<DynServe<Conductor>> = Vec::new();
+        let mut components: Vec<DynConnectTo<Conductor>> = Vec::new();
         for _ in 0..self.num_arrow_proxies {
-            components.push(DynServe::new(MockArrowProxy));
+            components.push(DynConnectTo::new(MockArrowProxy));
         }
 
-        Serve::<Conductor>::serve(
+        ConnectTo::<Conductor>::connect_to(
             sacp_conductor::ConductorImpl::new_proxy(
                 "inner-conductor".to_string(),
                 components,

@@ -91,7 +91,7 @@ pub use self::conductor::*;
 
 use clap::{Parser, Subcommand};
 
-use sacp::{Client, Conductor, DynServe, schema::InitializeRequest};
+use sacp::{Client, Conductor, DynConnectTo, schema::InitializeRequest};
 use sacp_tokio::{AcpAgent, Stdio};
 use tracing::Instrument;
 use tracing_subscriber::{EnvFilter, layer::SubscriberExt, util::SubscriberInitExt};
@@ -110,10 +110,10 @@ impl InstantiateProxies for CommandLineComponents {
         req: InitializeRequest,
     ) -> futures::future::BoxFuture<
         'static,
-        Result<(InitializeRequest, Vec<DynServe<Conductor>>), sacp::Error>,
+        Result<(InitializeRequest, Vec<DynConnectTo<Conductor>>), sacp::Error>,
     > {
         Box::pin(async move {
-            let proxies = self.0.into_iter().map(|c| DynServe::new(c)).collect();
+            let proxies = self.0.into_iter().map(|c| DynConnectTo::new(c)).collect();
             Ok((req, proxies))
         })
     }
@@ -128,23 +128,23 @@ impl InstantiateProxiesAndAgent for CommandLineComponents {
         Result<
             (
                 InitializeRequest,
-                Vec<DynServe<Conductor>>,
-                DynServe<Client>,
+                Vec<DynConnectTo<Conductor>>,
+                DynConnectTo<Client>,
             ),
             sacp::Error,
         >,
     > {
         Box::pin(async move {
             let mut iter = self.0.into_iter().peekable();
-            let mut proxies: Vec<DynServe<Conductor>> = Vec::new();
+            let mut proxies: Vec<DynConnectTo<Conductor>> = Vec::new();
 
             // All but the last element are proxies
             while let Some(component) = iter.next() {
                 if iter.peek().is_some() {
-                    proxies.push(DynServe::new(component));
+                    proxies.push(DynConnectTo::new(component));
                 } else {
                     // Last element is the agent
-                    let agent = DynServe::new(component);
+                    let agent = DynConnectTo::new(component);
                     return Ok((req, proxies, agent));
                 }
             }

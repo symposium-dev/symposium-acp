@@ -15,7 +15,7 @@
 //!     .build();
 //!
 //! // Use the server as a handler on your connection
-//! Proxy::builder()
+//! Proxy.connect_from()
 //!     .with_handler(server)
 //!     .serve(client)
 //!     .await?;

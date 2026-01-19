@@ -242,9 +242,9 @@ async fn test_trace_client_mcp_server() -> Result<(), sacp::Error> {
 
     // Run the client with a client-hosted MCP server
     let test_result = tokio::time::timeout(std::time::Duration::from_secs(30), async move {
-        sacp::Client::builder()
+        sacp::Client.connect_from()
             .name("test-client")
-            .run_until(
+            .connect_with(
                 sacp::ByteStreams::new(client_write.compat_write(), client_read.compat()),
                 async |cx| {
                     // Initialize

@@ -67,7 +67,7 @@ pub mod one_shot_prompt {
     //!     transport: impl Component<AgentToClient> + 'static,
     //!     prompt: &str,
     //! ) -> Result<String, sacp::Error> {
-    //!     Client::builder()
+    //!     Client.connect_from()
     //!         .name("my-client")
     //!         .connect_to(transport)?
     //!         .run_until(async |cx| {
@@ -134,7 +134,7 @@ pub mod connecting_as_client {
     //! use sacp::schema::{InitializeRequest, ProtocolVersion};
     //!
     //! async fn connect_to_agent(transport: impl Component<AgentToClient>) -> Result<(), sacp::Error> {
-    //!     Client::builder()
+    //!     Client.connect_from()
     //!         .name("my-client")
     //!         .run_until(transport, async |cx| {
     //!             // Initialize the connection
@@ -174,7 +174,7 @@ pub mod connecting_as_client {
     //! before taking actions. Handle these with [`on_receive_request`]:
     //!
     //! ```ignore
-    //! Client::builder()
+    //! Client.connect_from()
     //!     .on_receive_request(async |req: RequestPermissionRequest, request_cx, _cx| {
     //!         // Auto-approve by selecting the first option (YOLO mode)
     //!         let option_id = req.options.first().map(|opt| opt.id.clone());
@@ -231,7 +231,7 @@ pub mod building_an_agent {
     //! };
     //!
     //! async fn run_agent(transport: impl Component<sacp::ClientToAgent>) -> Result<(), sacp::Error> {
-    //!     Agent::builder()
+    //!     Agent.connect_from()
     //!         .name("my-agent")
     //!         // Handle initialization
     //!         .on_receive_request(async |req: InitializeRequest, request_cx, _cx| {
@@ -357,7 +357,7 @@ pub mod reusable_components {
     //!
     //! impl Component<AgentToClient> for MyAgent {
     //!     async fn serve(self, client: impl Component<<AgentToClient as JrLink>::ConnectsTo>) -> Result<(), sacp::Error> {
-    //!         Agent::builder()
+    //!         Agent.connect_from()
     //!             .name(&self.name)
     //!             .on_receive_request(async move |req: InitializeRequest, request_cx, _cx| {
     //!                 request_cx.respond(
@@ -488,7 +488,7 @@ pub mod global_mcp_server {
     //!
     //! impl<R: Run<ProxyToConductor> + Send + 'static> Component<ProxyToConductor> for MyProxy<R> {
     //!     async fn serve(self, client: impl Component<sacp::link::ConductorToProxy>) -> Result<(), sacp::Error> {
-    //!         Proxy::builder()
+    //!         Proxy.connect_from()
     //!             .with_mcp_server(self.mcp_server)
     //!             .serve(client)
     //!             .await
@@ -596,7 +596,7 @@ pub mod per_session_mcp_server {
     //! use sacp::link::ConductorToProxy;
     //!
     //! async fn run_proxy(transport: impl Component<ConductorToProxy>) -> Result<(), sacp::Error> {
-    //!     Proxy::builder()
+    //!     Proxy.connect_from()
     //!         .on_receive_request_from(Client, async move |request: NewSessionRequest, request_cx, cx| {
     //!             // Extract session context from the request
     //!             let workspace_path = request.cwd.clone();
@@ -654,7 +654,7 @@ pub mod per_session_mcp_server {
     //! # use sacp::{Client, Component, ProxyToConductor};
     //! # use sacp::link::ConductorToProxy;
     //! # async fn run_proxy(transport: impl Component<ConductorToProxy>) -> Result<(), sacp::Error> {
-    //!     Proxy::builder()
+    //!     Proxy.connect_from()
     //!         .on_receive_request_from(Client, async |request: NewSessionRequest, request_cx, cx| {
     //!             let cwd = request.cwd.clone();
     //!             let mcp_server = McpServer::builder("tools")

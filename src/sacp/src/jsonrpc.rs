@@ -36,7 +36,7 @@ use crate::mcp_server::McpServer;
 use crate::role::HasPeer;
 use crate::role::Role;
 use crate::util::json_cast;
-use crate::{Agent, Client, RoleId, Serve};
+use crate::{Agent, Client, RoleId, ConnectTo};
 
 /// Handlers process incoming JSON-RPC messages on a [`JrConnection`].
 ///
@@ -111,7 +111,7 @@ use crate::{Agent, Client, RoleId, Serve};
 /// # use sacp::schema::{InitializeRequest, InitializeResponse, AgentCapabilities};
 /// # use sacp_test::StatusUpdate;
 /// # async fn example(transport: impl Component<ClientToAgent>) -> Result<(), sacp::Error> {
-/// AgentToClient::builder()
+/// AgentToClient.connect_from()
 ///     .on_receive_request(async |req: InitializeRequest, request_cx, cx| {
 ///         request_cx.respond(
 ///             InitializeResponse::new(req.protocol_version)
@@ -170,7 +170,7 @@ use crate::{Agent, Client, RoleId, Serve};
 /// # use sacp::{ClientToAgent, AgentToClient, Component};
 /// # use sacp_test::{expensive_operation, ProcessComplete};
 /// # async fn example(transport: impl Component<AgentToClient>) -> Result<(), sacp::Error> {
-/// # ClientToAgent::builder().run_until(transport, async |cx| {
+/// # ClientToAgent.connect_from().run_until(transport, async |cx| {
 /// cx.spawn({
 ///     let connection_cx = cx.clone();
 ///     async move {
@@ -243,7 +243,7 @@ where
 /// A JSON-RPC connection that can act as either a server, client, or both.
 ///
 /// `JrConnection` provides a builder-style API for creating JSON-RPC servers and clients.
-/// You start by calling `Link::builder()` (e.g., `ClientToAgent::builder()`), then add message
+/// You start by calling `Link.connect_from()` (e.g., `ClientToAgent.connect_from()`), then add message
 /// handlers, and finally drive the connection with either [`serve`](ConnectFrom::serve)
 /// or [`run_until`](ConnectFrom::run_until), providing a component implementation
 /// (e.g., [`ByteStreams`] for byte streams).
@@ -521,7 +521,7 @@ where
 ///     tokio::io::stdin().compat(),
 /// );
 ///
-/// UntypedRole::builder()
+/// UntypedRole.connect_from()
 ///     .name("my-agent")  // Optional: for debugging logs
 ///     .on_receive_request(async |init: InitializeRequest, request_cx, cx| {
 ///         let response: InitializeResponse = todo!();
@@ -1085,7 +1085,7 @@ impl<
     ///     tokio::io::stdin().compat(),
     /// );
     ///
-    /// UntypedRole::builder()
+    /// UntypedRole.connect_from()
     ///     .on_receive_request(async |req: MyRequest, request_cx, cx| {
     ///         request_cx.respond(MyResponse { status: "ok".into() })
     ///     }, sacp::on_receive_request!())
@@ -1094,8 +1094,8 @@ impl<
     /// # Ok(())
     /// # }
     /// ```
-    pub async fn serve(self, transport: impl Serve<Host> + 'static) -> Result<(), crate::Error> {
-        self.run_until(transport, async move |_cx| future::pending().await)
+    pub async fn connect_to(self, transport: impl ConnectTo<Host> + 'static) -> Result<(), crate::Error> {
+        self.connect_with(transport, async move |_cx| future::pending().await)
             .await
     }
 
@@ -1127,7 +1127,7 @@ impl<
     ///     tokio::io::stdin().compat(),
     /// );
     ///
-    /// UntypedRole::builder()
+    /// UntypedRole.connect_from()
     ///     .on_receive_request(async |req: MyRequest, request_cx, cx| {
     ///         // Handle incoming requests in the background
     ///         request_cx.respond(MyResponse { status: "ok".into() })
@@ -1159,23 +1159,23 @@ impl<
     /// # Errors
     ///
     /// Returns an error if the connection closes before `main_fn` completes.
-    pub async fn run_until(
+    pub async fn connect_with<R>(
         self,
-        transport: impl Serve<Host> + 'static,
-        main_fn: impl AsyncFnOnce(ConnectionTo<Host::Counterpart>) -> Result<(), crate::Error>,
-    ) -> Result<(), crate::Error> {
+        transport: impl ConnectTo<Host> + 'static,
+        main_fn: impl AsyncFnOnce(ConnectionTo<Host::Counterpart>) -> Result<R, crate::Error>,
+    ) -> Result<R, crate::Error> {
         let (_, future) = self.into_connection_and_future(transport, main_fn);
         future.await
     }
 
     /// Helper that returns a [`ConnectionTo<R>`] and a future that runs this connection until `main_fn` returns.
-    fn into_connection_and_future(
+    fn into_connection_and_future<R>(
         self,
-        transport: impl Serve<Host> + 'static,
-        main_fn: impl AsyncFnOnce(ConnectionTo<Host::Counterpart>) -> Result<(), crate::Error>,
+        transport: impl ConnectTo<Host> + 'static,
+        main_fn: impl AsyncFnOnce(ConnectionTo<Host::Counterpart>) -> Result<R, crate::Error>,
     ) -> (
         ConnectionTo<Host::Counterpart>,
-        impl Future<Output = Result<(), crate::Error>>,
+        impl Future<Output = Result<R, crate::Error>>,
     ) {
         let Self {
             name,
@@ -1196,8 +1196,8 @@ impl<
 
         // Convert transport into server - this returns a channel for us to use
         // and a future that runs the transport
-        let transport_component = crate::DynServe::new(transport);
-        let (transport_channel, transport_future) = transport_component.into_server();
+        let transport_component = crate::DynConnectTo::new(transport);
+        let (transport_channel, transport_future) = transport_component.into_channel_and_future();
         let spawn_result = connection.spawn(transport_future);
 
         // Destructure the channel endpoints
@@ -1244,14 +1244,14 @@ impl<
     }
 }
 
-impl<R, H, Run> Serve<R::Counterpart> for ConnectFrom<R, H, Run>
+impl<R, H, Run> ConnectTo<R::Counterpart> for ConnectFrom<R, H, Run>
 where
     R: Role,
     H: HandleMessageFrom<R::Counterpart> + 'static,
     Run: RunWithConnectionTo<R::Counterpart> + 'static,
 {
-    async fn serve(self, client: impl Serve<R>) -> Result<(), crate::Error> {
-        ConnectFrom::serve(self, client).await
+    async fn connect_to(self, client: impl ConnectTo<R>) -> Result<(), crate::Error> {
+        ConnectFrom::connect_to(self, client).await
     }
 }
 
@@ -1536,7 +1536,7 @@ impl<Counterpart: Role> ConnectionTo<Counterpart> {
     /// # use sacp_test::*;
     /// # async fn example(cx: ConnectionTo<UntypedRole>) -> Result<(), sacp::Error> {
     /// // Set up a backend connection builder
-    /// let backend = UntypedRole::builder()
+    /// let backend = UntypedRole.connect_from()
     ///     .on_receive_request(async |req: MyRequest, request_cx, _cx| {
     ///         request_cx.respond(MyResponse { status: "ok".into() })
     ///     }, sacp::on_receive_request!());
@@ -1557,7 +1557,7 @@ impl<Counterpart: Role> ConnectionTo<Counterpart> {
             impl HandleMessageFrom<R::Counterpart> + 'static,
             impl RunWithConnectionTo<R::Counterpart> + 'static,
         >,
-        transport: impl Serve<R> + 'static,
+        transport: impl ConnectTo<R> + 'static,
     ) -> Result<ConnectionTo<R::Counterpart>, crate::Error> {
         let (connection, future) =
             builder.into_connection_and_future(transport, |_| std::future::pending());
@@ -2833,7 +2833,7 @@ impl<T: JsonRpcResponse> SentRequest<T> {
     /// # use sacp_test::*;
     /// # async fn example(cx: ConnectionTo<UntypedRole>) -> Result<(), sacp::Error> {
     /// // Set up backend connection builder
-    /// let backend = UntypedRole::builder()
+    /// let backend = UntypedRole.connect_from()
     ///     .on_receive_request(async |req: MyRequest, request_cx, cx| {
     ///         request_cx.respond(MyResponse { status: "ok".into() })
     ///     }, sacp::on_receive_request!());
@@ -2842,7 +2842,7 @@ impl<T: JsonRpcResponse> SentRequest<T> {
     /// let backend_cx = cx.spawn_connection(backend, MockTransport)?;
     ///
     /// // Set up proxy that forwards requests to backend
-    /// UntypedRole::builder()
+    /// UntypedRole.connect_from()
     ///     .on_receive_request({
     ///         let backend_cx = backend_cx.clone();
     ///         async move |req: MyRequest, request_cx, cx| {
@@ -3196,20 +3196,20 @@ where
     }
 }
 
-impl<OutgoingSink, IncomingStream, R: Role> Serve<R> for Lines<OutgoingSink, IncomingStream>
+impl<OutgoingSink, IncomingStream, R: Role> ConnectTo<R> for Lines<OutgoingSink, IncomingStream>
 where
     OutgoingSink: futures::Sink<String, Error = std::io::Error> + Send + 'static,
     IncomingStream: futures::Stream<Item = std::io::Result<String>> + Send + 'static,
 {
-    async fn serve(self, client: impl Serve<R::Counterpart>) -> Result<(), crate::Error> {
-        let (channel, serve_self) = Serve::<R>::into_server(self);
-        match futures::future::select(Box::pin(client.serve(channel)), serve_self).await {
+    async fn connect_to(self, client: impl ConnectTo<R::Counterpart>) -> Result<(), crate::Error> {
+        let (channel, serve_self) = ConnectTo::<R>::into_channel_and_future(self);
+        match futures::future::select(Box::pin(client.connect_to(channel)), serve_self).await {
             Either::Left((result, _)) => result,
             Either::Right((result, _)) => result,
         }
     }
 
-    fn into_server(self) -> (Channel, BoxFuture<'static, Result<(), crate::Error>>) {
+    fn into_channel_and_future(self) -> (Channel, BoxFuture<'static, Result<(), crate::Error>>) {
         let Self { outgoing, incoming } = self;
 
         // Create a channel pair for the client to use
@@ -3262,7 +3262,7 @@ where
 /// );
 ///
 /// // Use as a component in a connection
-/// sacp::link::UntypedRole::builder()
+/// sacp::link::UntypedRole.connect_from()
 ///     .name("my-client")
 ///     .serve(component)
 ///     .await?;
@@ -3289,20 +3289,20 @@ where
     }
 }
 
-impl<OB, IB, R: Role> Serve<R> for ByteStreams<OB, IB>
+impl<OB, IB, R: Role> ConnectTo<R> for ByteStreams<OB, IB>
 where
     OB: AsyncWrite + Send + 'static,
     IB: AsyncRead + Send + 'static,
 {
-    async fn serve(self, client: impl Serve<R::Counterpart>) -> Result<(), crate::Error> {
-        let (channel, serve_self) = Serve::<R>::into_server(self);
-        match futures::future::select(pin!(client.serve(channel)), serve_self).await {
+    async fn connect_to(self, client: impl ConnectTo<R::Counterpart>) -> Result<(), crate::Error> {
+        let (channel, serve_self) = ConnectTo::<R>::into_channel_and_future(self);
+        match futures::future::select(pin!(client.connect_to(channel)), serve_self).await {
             Either::Left((result, _)) => result,
             Either::Right((result, _)) => result,
         }
     }
 
-    fn into_server(self) -> (Channel, BoxFuture<'static, Result<(), crate::Error>>) {
+    fn into_channel_and_future(self) -> (Channel, BoxFuture<'static, Result<(), crate::Error>>) {
         use futures::AsyncBufReadExt;
         use futures::AsyncWriteExt;
         use futures::io::BufReader;
@@ -3323,7 +3323,7 @@ where
             });
 
         // Delegate to Lines component
-        Serve::<R>::into_server(Lines::new(outgoing_sink, incoming_lines))
+        ConnectTo::<R>::into_channel_and_future(Lines::new(outgoing_sink, incoming_lines))
     }
 }
 
@@ -3344,7 +3344,7 @@ where
 /// let (channel_a, channel_b) = Channel::duplex();
 ///
 /// // Each channel can be used by a different component
-/// UntypedRole::builder()
+/// UntypedRole.connect_from()
 ///     .name("connection-a")
 ///     .serve(channel_a)
 ///     .await?;
@@ -3394,9 +3394,9 @@ impl Channel {
     }
 }
 
-impl<R: Role> Serve<R> for Channel {
-    async fn serve(self, client: impl Serve<R::Counterpart>) -> Result<(), crate::Error> {
-        let (client_channel, client_serve) = client.into_server();
+impl<R: Role> ConnectTo<R> for Channel {
+    async fn connect_to(self, client: impl ConnectTo<R::Counterpart>) -> Result<(), crate::Error> {
+        let (client_channel, client_serve) = client.into_channel_and_future();
 
         match futures::try_join!(
             Channel {
@@ -3416,7 +3416,7 @@ impl<R: Role> Serve<R> for Channel {
         }
     }
 
-    fn into_server(self) -> (Channel, BoxFuture<'static, Result<(), crate::Error>>) {
+    fn into_channel_and_future(self) -> (Channel, BoxFuture<'static, Result<(), crate::Error>>) {
         (self, Box::pin(future::ready(Ok(()))))
     }
 }

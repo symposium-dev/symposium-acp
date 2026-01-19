@@ -4,7 +4,7 @@
 //! that don't need mutable state.
 
 use sacp::mcp_server::McpServer;
-use sacp::{Client, Conductor, DynServe, Proxy, RunWithConnectionTo, Serve};
+use sacp::{Client, Conductor, DynConnectTo, Proxy, RunWithConnectionTo, ConnectTo};
 use sacp_conductor::{ConductorImpl, ProxiesAndAgent};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -18,7 +18,7 @@ struct GreetInput {
 }
 
 /// Create a proxy that provides an MCP server with a stateless greet tool
-fn create_greet_proxy() -> Result<DynServe<Conductor>, sacp::Error> {
+fn create_greet_proxy() -> Result<DynConnectTo<Conductor>, sacp::Error> {
     // Create MCP server with a stateless greet tool using tool_fn
     let mcp_server = McpServer::builder("greet_server".to_string())
         .instructions("Test MCP server with stateless greet tool")
@@ -31,24 +31,24 @@ fn create_greet_proxy() -> Result<DynServe<Conductor>, sacp::Error> {
         .build();
 
     // Create proxy component
-    Ok(DynServe::new(ProxyWithGreetServer { mcp_server }))
+    Ok(DynConnectTo::new(ProxyWithGreetServer { mcp_server }))
 }
 
 struct ProxyWithGreetServer<R: RunWithConnectionTo<Conductor>> {
     mcp_server: McpServer<Conductor, R>,
 }
 
-impl<R: RunWithConnectionTo<Conductor> + 'static + Send> Serve<Conductor>
+impl<R: RunWithConnectionTo<Conductor> + 'static + Send> ConnectTo<Conductor>
     for ProxyWithGreetServer<R>
 {
-    async fn serve(
+    async fn connect_to(
         self,
-        client: impl Serve<Proxy>,
+        client: impl ConnectTo<Proxy>,
     ) -> Result<(), sacp::Error> {
-        Proxy::builder()
+        Proxy.connect_from()
             .name("greet-proxy")
             .with_mcp_server(self.mcp_server)
-            .serve(client)
+            .connect_to(client)
             .await
     }
 }
@@ -56,10 +56,10 @@ impl<R: RunWithConnectionTo<Conductor> + 'static + Send> Serve<Conductor>
 /// Elizacp agent component wrapper for testing
 struct ElizacpAgentComponent;
 
-impl Serve<Client> for ElizacpAgentComponent {
-    async fn serve(
+impl ConnectTo<Client> for ElizacpAgentComponent {
+    async fn connect_to(
         self,
-        client: impl Serve<sacp::Agent>,
+        client: impl ConnectTo<sacp::Agent>,
     ) -> Result<(), sacp::Error> {
         // Create duplex channels for bidirectional communication
         let (elizacp_write, client_read) = duplex(8192);
@@ -74,7 +74,7 @@ impl Serve<Client> for ElizacpAgentComponent {
         // Spawn elizacp in a background task
         tokio::spawn(async move {
             if let Err(e) =
-                Serve::<Client>::serve(elizacp::ElizaAgent::new(true), elizacp_transport)
+                ConnectTo::<Client>::connect_to(elizacp::ElizaAgent::new(true), elizacp_transport)
                     .await
             {
                 tracing::error!("Elizacp error: {}", e);
@@ -82,7 +82,7 @@ impl Serve<Client> for ElizacpAgentComponent {
         });
 
         // Serve the client with the transport connected to elizacp
-        Serve::<Client>::serve(client_transport, client).await
+        ConnectTo::<Client>::connect_to(client_transport, client).await
     }
 }
 

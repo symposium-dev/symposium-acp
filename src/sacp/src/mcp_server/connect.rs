@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use crate::{
-    DynServe,
+    DynConnectTo,
     mcp_server::McpConnectionTo,
     role::{self, Role},
 };
@@ -44,7 +44,7 @@ pub trait McpServerConnect<Counterpart: Role>: Send + Sync + 'static {
     ///
     /// The [`McpContext`] provides access to the ACP connection context and the
     /// server's ACP URL.
-    fn connect(&self, cx: McpConnectionTo<Counterpart>) -> DynServe<role::mcp::Client>;
+    fn connect(&self, cx: McpConnectionTo<Counterpart>) -> DynConnectTo<role::mcp::Client>;
 }
 
 impl<Counterpart: Role, S: ?Sized + McpServerConnect<Counterpart>> McpServerConnect<Counterpart>
@@ -54,7 +54,7 @@ impl<Counterpart: Role, S: ?Sized + McpServerConnect<Counterpart>> McpServerConn
         S::name(self)
     }
 
-    fn connect(&self, cx: McpConnectionTo<Counterpart>) -> DynServe<role::mcp::Client> {
+    fn connect(&self, cx: McpConnectionTo<Counterpart>) -> DynConnectTo<role::mcp::Client> {
         S::connect(self, cx)
     }
 }
@@ -66,7 +66,7 @@ impl<Counterpart: Role, S: ?Sized + McpServerConnect<Counterpart>> McpServerConn
         S::name(self)
     }
 
-    fn connect(&self, cx: McpConnectionTo<Counterpart>) -> DynServe<role::mcp::Client> {
+    fn connect(&self, cx: McpConnectionTo<Counterpart>) -> DynConnectTo<role::mcp::Client> {
         S::connect(self, cx)
     }
 }

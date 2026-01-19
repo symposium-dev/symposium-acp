@@ -1,6 +1,6 @@
 //! Integration test for AcpAgent debug logging
 
-use sacp::{Client, Serve};
+use sacp::{Client, ConnectTo};
 use sacp::schema::InitializeRequest;
 use sacp_test::test_binaries::elizacp;
 use sacp_tokio::LineDirection;
@@ -57,16 +57,16 @@ async fn test_acp_agent_debug_callback() -> Result<(), Box<dyn std::error::Error
 
     let transport = sacp::ByteStreams::new(client_out.compat_write(), client_in.compat());
 
-    Client::builder()
+    Client.connect_from()
         .name("test-client")
         .with_spawned(|_cx| async move {
-            Serve::<Client>::serve(
+            ConnectTo::<Client>::connect_to(
                 agent,
                 sacp::ByteStreams::new(agent_out.compat_write(), agent_in.compat()),
             )
             .await
         })
-        .run_until(transport, async |client_cx| {
+        .connect_with(transport, async |client_cx| {
             // Send an initialize request
             let _init_response = recv(client_cx.send_request(InitializeRequest::new(
                 sacp::schema::ProtocolVersion::LATEST,

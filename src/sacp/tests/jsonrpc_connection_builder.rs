@@ -11,7 +11,7 @@ use std::{
 
 use sacp::{
     ConnectionTo, JsonRpcMessage, JsonRpcNotification, JsonRpcRequest, JsonRpcResponse, Responder,
-    SentRequest, Serve, role::UntypedRole, util::run_until,
+    SentRequest, ConnectTo, role::UntypedRole, util::run_until,
 };
 use serde::{Deserialize, Serialize};
 use tokio_util::compat::{TokioAsyncReadCompatExt as _, TokioAsyncWriteCompatExt as _};
@@ -137,7 +137,7 @@ async fn test_multiple_handlers_different_methods() {
 
             // Chain both handlers
             let server_transport = sacp::ByteStreams::new(server_writer, server_reader);
-            let server = UntypedRole::builder()
+            let server = UntypedRole.connect_from()
                 .on_receive_request(
                     async |request: FooRequest,
                            request_cx: Responder<FooResponse>,
@@ -159,16 +159,16 @@ async fn test_multiple_handlers_different_methods() {
                     sacp::on_receive_request!(),
                 );
             let client_transport = sacp::ByteStreams::new(client_writer, client_reader);
-            let client = UntypedRole::builder();
+            let client = UntypedRole.connect_from();
 
             tokio::task::spawn_local(async move {
-                if let Err(e) = server.serve(server_transport).await {
+                if let Err(e) = server.connect_to(server_transport).await {
                     eprintln!("Server error: {e:?}");
                 }
             });
 
             let result = client
-                .run_until(
+                .connect_with(
                     client_transport,
                     async |cx| -> std::result::Result<(), sacp::Error> {
                         // Test foo request
@@ -257,7 +257,7 @@ async fn test_handler_priority_ordering() {
             let handled_clone1 = handled.clone();
             let handled_clone2 = handled.clone();
             let server_transport = sacp::ByteStreams::new(server_writer, server_reader);
-            let server = UntypedRole::builder()
+            let server = UntypedRole.connect_from()
                 .on_receive_request(
                     async move |request: TrackRequest,
                                 request_cx: Responder<FooResponse>,
@@ -281,16 +281,16 @@ async fn test_handler_priority_ordering() {
                     sacp::on_receive_request!(),
                 );
             let client_transport = sacp::ByteStreams::new(client_writer, client_reader);
-            let client = UntypedRole::builder();
+            let client = UntypedRole.connect_from();
 
             tokio::task::spawn_local(async move {
-                if let Err(e) = server.serve(server_transport).await {
+                if let Err(e) = server.connect_to(server_transport).await {
                     eprintln!("Server error: {:?}", e);
                 }
             });
 
             let result = client
-                .run_until(
+                .connect_with(
                     client_transport,
                     async |cx| -> std::result::Result<(), sacp::Error> {
                         let response = recv(cx.send_request(TrackRequest {
@@ -405,7 +405,7 @@ async fn test_fallthrough_behavior() {
             let handled_clone1 = handled.clone();
             let handled_clone2 = handled.clone();
             let server_transport = sacp::ByteStreams::new(server_writer, server_reader);
-            let server = UntypedRole::builder()
+            let server = UntypedRole.connect_from()
                 .on_receive_request(
                     async move |request: Method1Request,
                                 request_cx: Responder<FooResponse>,
@@ -429,16 +429,16 @@ async fn test_fallthrough_behavior() {
                     sacp::on_receive_request!(),
                 );
             let client_transport = sacp::ByteStreams::new(client_writer, client_reader);
-            let client = UntypedRole::builder();
+            let client = UntypedRole.connect_from();
 
             tokio::task::spawn_local(async move {
-                if let Err(e) = server.serve(server_transport).await {
+                if let Err(e) = server.connect_to(server_transport).await {
                     eprintln!("Server error: {:?}", e);
                 }
             });
 
             let result = client
-                .run_until(
+                .connect_with(
                     client_transport,
                     async |cx| -> std::result::Result<(), sacp::Error> {
                         // Send method2 - should fallthrough handler1 to handler2
@@ -489,7 +489,7 @@ async fn test_no_handler_claims() {
 
             // Handler that only handles "foo"
             let server_transport = sacp::ByteStreams::new(server_writer, server_reader);
-            let server = UntypedRole::builder().on_receive_request(
+            let server = UntypedRole.connect_from().on_receive_request(
                 async |request: FooRequest,
                        request_cx: Responder<FooResponse>,
                        _connection_cx: ConnectionTo<UntypedRole>| {
@@ -500,16 +500,16 @@ async fn test_no_handler_claims() {
                 sacp::on_receive_request!(),
             );
             let client_transport = sacp::ByteStreams::new(client_writer, client_reader);
-            let client = UntypedRole::builder();
+            let client = UntypedRole.connect_from();
 
             tokio::task::spawn_local(async move {
-                if let Err(e) = server.serve(server_transport).await {
+                if let Err(e) = server.connect_to(server_transport).await {
                     eprintln!("Server error: {:?}", e);
                 }
             });
 
             let result = client
-                .run_until(
+                .connect_with(
                     client_transport,
                     async |cx| -> std::result::Result<(), sacp::Error> {
                         // Send "bar" request which no handler claims
@@ -584,7 +584,7 @@ async fn test_handler_claims_notification() {
             // EventHandler claims notifications
             let events_clone = events.clone();
             let server_transport = sacp::ByteStreams::new(server_writer, server_reader);
-            let server = UntypedRole::builder().on_receive_notification(
+            let server = UntypedRole.connect_from().on_receive_notification(
                 async move |notification: EventNotification,
                             _notification_cx: ConnectionTo<UntypedRole>| {
                     events_clone.lock().unwrap().push(notification.event);
@@ -593,16 +593,16 @@ async fn test_handler_claims_notification() {
                 sacp::on_receive_notification!(),
             );
             let client_transport = sacp::ByteStreams::new(client_writer, client_reader);
-            let client = UntypedRole::builder();
+            let client = UntypedRole.connect_from();
 
             tokio::task::spawn_local(async move {
-                if let Err(e) = server.serve(server_transport).await {
+                if let Err(e) = server.connect_to(server_transport).await {
                     eprintln!("Server error: {:?}", e);
                 }
             });
 
             let result = client
-                .run_until(
+                .connect_with(
                     client_transport,
                     async |cx| -> std::result::Result<(), sacp::Error> {
                         cx.send_notification(EventNotification {
@@ -644,7 +644,7 @@ async fn test_connection_builder_as_component() -> Result<(), sacp::Error> {
     let (client_read, client_write) = tokio::io::split(client_stream);
 
     // Create a connection builder (server side)
-    let server_builder = UntypedRole::builder().on_receive_request(
+    let server_builder = UntypedRole.connect_from().on_receive_request(
         async |request: FooRequest,
                request_cx: Responder<FooResponse>,
                _cx: ConnectionTo<UntypedRole>| {
@@ -664,11 +664,11 @@ async fn test_connection_builder_as_component() -> Result<(), sacp::Error> {
     // Use ConnectFrom as a Component via run_until
     run_until(
         // This uses Component::serve on ConnectFrom
-        Serve::<UntypedRole>::serve(server_builder, server_transport),
+        ConnectTo::<UntypedRole>::connect_to(server_builder, server_transport),
         async move {
             // Client side
-            UntypedRole::builder()
-                .run_until(client_transport, async |cx| {
+            UntypedRole.connect_from()
+                .connect_with(client_transport, async |cx| {
                     let response = recv(cx.send_request(FooRequest {
                         value: "test".to_string(),
                     }))

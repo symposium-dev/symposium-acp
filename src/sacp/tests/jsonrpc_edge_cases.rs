@@ -134,7 +134,7 @@ async fn test_empty_request() {
             let (server_reader, server_writer, client_reader, client_writer) = setup_test_streams();
 
             let server_transport = sacp::ByteStreams::new(server_writer, server_reader);
-            let server = UntypedRole::builder().on_receive_request(
+            let server = UntypedRole.connect_from().on_receive_request(
                 async |_request: EmptyRequest,
                        request_cx: Responder<SimpleResponse>,
                        _connection_cx: ConnectionTo<UntypedRole>| {
@@ -146,14 +146,14 @@ async fn test_empty_request() {
             );
 
             let client_transport = sacp::ByteStreams::new(client_writer, client_reader);
-            let client = UntypedRole::builder();
+            let client = UntypedRole.connect_from();
 
             tokio::task::spawn_local(async move {
-                server.serve(server_transport).await.ok();
+                server.connect_to(server_transport).await.ok();
             });
 
             let result = client
-                .run_until(client_transport, async |cx| -> Result<(), sacp::Error> {
+                .connect_with(client_transport, async |cx| -> Result<(), sacp::Error> {
                     let request = EmptyRequest;
 
                     let result: Result<SimpleResponse, _> = recv(cx.send_request(request)).await;
@@ -187,7 +187,7 @@ async fn test_null_params() {
             let (server_reader, server_writer, client_reader, client_writer) = setup_test_streams();
 
             let server_transport = sacp::ByteStreams::new(server_writer, server_reader);
-            let server = UntypedRole::builder().on_receive_request(
+            let server = UntypedRole.connect_from().on_receive_request(
                 async |_request: OptionalParamsRequest,
                        request_cx: Responder<SimpleResponse>,
                        _connection_cx: ConnectionTo<UntypedRole>| {
@@ -199,14 +199,14 @@ async fn test_null_params() {
             );
 
             let client_transport = sacp::ByteStreams::new(client_writer, client_reader);
-            let client = UntypedRole::builder();
+            let client = UntypedRole.connect_from();
 
             tokio::task::spawn_local(async move {
-                server.serve(server_transport).await.ok();
+                server.connect_to(server_transport).await.ok();
             });
 
             let result = client
-                .run_until(client_transport, async |cx| -> Result<(), sacp::Error> {
+                .connect_with(client_transport, async |cx| -> Result<(), sacp::Error> {
                     let request = OptionalParamsRequest { value: None };
 
                     let result: Result<SimpleResponse, _> = recv(cx.send_request(request)).await;
@@ -237,7 +237,7 @@ async fn test_server_shutdown() {
             let (server_reader, server_writer, client_reader, client_writer) = setup_test_streams();
 
             let server_transport = sacp::ByteStreams::new(server_writer, server_reader);
-            let server = UntypedRole::builder().on_receive_request(
+            let server = UntypedRole.connect_from().on_receive_request(
                 async |_request: EmptyRequest,
                        request_cx: Responder<SimpleResponse>,
                        _connection_cx: ConnectionTo<UntypedRole>| {
@@ -249,15 +249,15 @@ async fn test_server_shutdown() {
             );
 
             let client_transport = sacp::ByteStreams::new(client_writer, client_reader);
-            let client = UntypedRole::builder();
+            let client = UntypedRole.connect_from();
 
             let server_handle = tokio::task::spawn_local(async move {
-                server.serve(server_transport).await.ok();
+                server.connect_to(server_transport).await.ok();
             });
 
             let client_result = tokio::task::spawn_local(async move {
                 client
-                    .run_until(client_transport, async |cx| -> Result<(), sacp::Error> {
+                    .connect_with(client_transport, async |cx| -> Result<(), sacp::Error> {
                         let request = EmptyRequest;
 
                         // Send request and get future for response
@@ -309,7 +309,7 @@ async fn test_client_disconnect() {
             let server_writer = server_writer.compat_write();
 
             let server_transport = sacp::ByteStreams::new(server_writer, server_reader);
-            let server = UntypedRole::builder().on_receive_request(
+            let server = UntypedRole.connect_from().on_receive_request(
                 async |_request: EmptyRequest,
                        request_cx: Responder<SimpleResponse>,
                        _connection_cx: ConnectionTo<UntypedRole>| {
@@ -321,7 +321,7 @@ async fn test_client_disconnect() {
             );
 
             tokio::task::spawn_local(async move {
-                let _ = server.serve(server_transport).await;
+                let _ = server.connect_to(server_transport).await;
             });
 
             // Send partial request and then disconnect

@@ -21,7 +21,7 @@
 //! // An agent serves clients
 //! impl Serve<Client> for MyAgent {
 //!     async fn serve(self, client: impl Serve<Client::Counterpart>) -> Result<(), sacp::Error> {
-//!         sacp::Agent::builder()
+//!         sacp::Agent.connect_from()
 //!             .name("my-agent")
 //!             // configure handlers here
 //!             .serve(client)
@@ -35,7 +35,8 @@ use std::{fmt::Debug, future::Future, marker::PhantomData};
 
 use crate::{Channel, role::Role};
 
-/// A component that can participate in the Agent-Client Protocol.
+/// A component that can exchange JSON-RPC messages to an endpoint playing the role `R`
+/// (e.g., an ACP [`Agent`](`crate::role::acp::Agent`) or an MCP [`Server`](`crate::role::mcp::Server`)).
 ///
 /// This trait represents anything that can communicate via JSON-RPC messages over channels -
 /// agents, proxies, in-process connections, or any ACP-speaking component.
@@ -77,7 +78,7 @@ use crate::{Channel, role::Role};
 /// impl Serve<Client> for MyAgent {
 ///     async fn serve(self, client: impl Serve<Client::Counterpart>) -> Result<(), sacp::Error> {
 ///         // Set up connection that forwards to client
-///         sacp::Agent::builder()
+///         sacp::Agent.connect_from()
 ///             .name("my-agent")
 ///             .on_receive_request(async |req: MyRequest, cx| {
 ///                 // Handle request
@@ -106,7 +107,7 @@ use crate::{Channel, role::Role};
 /// [`ByteStreams`]: crate::ByteStreams
 /// [`AcpAgent`]: https://docs.rs/sacp-tokio/latest/sacp_tokio/struct.AcpAgent.html
 /// [`ConnectFrom`]: crate::ConnectFrom
-pub trait Serve<R: Role>: Send + 'static {
+pub trait ConnectTo<R: Role>: Send + 'static {
     /// Serve this component by forwarding to a client component.
     ///
     /// Most components implement this method to set up their connection and
@@ -120,9 +121,9 @@ pub trait Serve<R: Role>: Send + 'static {
     ///
     /// A future that resolves when the component stops serving, either successfully
     /// or with an error. The future must be `Send`.
-    fn serve(
+    fn connect_to(
         self,
-        client: impl Serve<R::Counterpart>,
+        client: impl ConnectTo<R::Counterpart>,
     ) -> impl Future<Output = Result<(), crate::Error>> + Send;
 
     /// Convert this component into a channel endpoint and server future.
@@ -140,12 +141,12 @@ pub trait Serve<R: Role>: Send + 'static {
     ///
     /// A tuple of `(Channel, BoxFuture)` where the channel is for the caller to use
     /// and the future must be spawned to run the server.
-    fn into_server(self) -> (Channel, BoxFuture<'static, Result<(), crate::Error>>)
+    fn into_channel_and_future(self) -> (Channel, BoxFuture<'static, Result<(), crate::Error>>)
     where
         Self: Sized,
     {
         let (channel_a, channel_b) = Channel::duplex();
-        let future = Box::pin(self.serve(channel_b));
+        let future = Box::pin(self.connect_to(channel_b));
         (channel_a, future)
     }
 }
@@ -155,32 +156,32 @@ pub trait Serve<R: Role>: Send + 'static {
 /// This trait is internal and used by [`DynServe`]. Users should implement
 /// [`Serve`] instead, which is automatically converted to `ErasedServe`
 /// via a blanket implementation.
-trait ErasedServe<R: Role>: Send {
+trait ErasedConnectTo<R: Role>: Send {
     fn type_name(&self) -> String;
 
-    fn serve_erased(
+    fn connect_to_erased(
         self: Box<Self>,
-        client: Box<dyn ErasedServe<R::Counterpart>>,
+        client: Box<dyn ErasedConnectTo<R::Counterpart>>,
     ) -> BoxFuture<'static, Result<(), crate::Error>>;
 
-    fn into_server_erased(
+    fn into_channel_and_future_erased(
         self: Box<Self>,
     ) -> (Channel, BoxFuture<'static, Result<(), crate::Error>>);
 }
 
 /// Blanket implementation: any `Serve<R>` can be type-erased.
-impl<C: Serve<R>, R: Role> ErasedServe<R> for C {
+impl<C: ConnectTo<R>, R: Role> ErasedConnectTo<R> for C {
     fn type_name(&self) -> String {
         std::any::type_name::<C>().to_string()
     }
 
-    fn serve_erased(
+    fn connect_to_erased(
         self: Box<Self>,
-        client: Box<dyn ErasedServe<R::Counterpart>>,
+        client: Box<dyn ErasedConnectTo<R::Counterpart>>,
     ) -> BoxFuture<'static, Result<(), crate::Error>> {
         Box::pin(async move {
             (*self)
-                .serve(DynServe {
+                .connect_to(DynConnectTo {
                     inner: client,
                     _marker: PhantomData,
                 })
@@ -188,10 +189,10 @@ impl<C: Serve<R>, R: Role> ErasedServe<R> for C {
         })
     }
 
-    fn into_server_erased(
+    fn into_channel_and_future_erased(
         self: Box<Self>,
     ) -> (Channel, BoxFuture<'static, Result<(), crate::Error>>) {
-        (*self).into_server()
+        (*self).into_channel_and_future()
     }
 }
 
@@ -214,14 +215,14 @@ impl<C: Serve<R>, R: Role> ErasedServe<R> for C {
 ///     DynServe::new(Agent),
 /// ];
 /// ```
-pub struct DynServe<R: Role> {
-    inner: Box<dyn ErasedServe<R>>,
+pub struct DynConnectTo<R: Role> {
+    inner: Box<dyn ErasedConnectTo<R>>,
     _marker: PhantomData<R>,
 }
 
-impl<R: Role> DynServe<R> {
+impl<R: Role> DynConnectTo<R> {
     /// Create a new `DynServe` from any type implementing [`Serve`].
-    pub fn new<C: Serve<R>>(component: C) -> Self {
+    pub fn new<C: ConnectTo<R>>(component: C) -> Self {
         Self {
             inner: Box::new(component),
             _marker: PhantomData,
@@ -234,19 +235,19 @@ impl<R: Role> DynServe<R> {
     }
 }
 
-impl<R: Role> Serve<R> for DynServe<R> {
-    async fn serve(self, client: impl Serve<R::Counterpart>) -> Result<(), crate::Error> {
+impl<R: Role> ConnectTo<R> for DynConnectTo<R> {
+    async fn connect_to(self, client: impl ConnectTo<R::Counterpart>) -> Result<(), crate::Error> {
         self.inner
-            .serve_erased(Box::new(client) as Box<dyn ErasedServe<R::Counterpart>>)
+            .connect_to_erased(Box::new(client) as Box<dyn ErasedConnectTo<R::Counterpart>>)
             .await
     }
 
-    fn into_server(self) -> (Channel, BoxFuture<'static, Result<(), crate::Error>>) {
-        self.inner.into_server_erased()
+    fn into_channel_and_future(self) -> (Channel, BoxFuture<'static, Result<(), crate::Error>>) {
+        self.inner.into_channel_and_future_erased()
     }
 }
 
-impl<R: Role> Debug for DynServe<R> {
+impl<R: Role> Debug for DynConnectTo<R> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("DynServe")
             .field("type_name", &self.type_name())

@@ -53,7 +53,7 @@ async fn run_test_with_mode(
 
     let transport = sacp::ByteStreams::new(editor_out.compat_write(), editor_in.compat());
 
-    sacp::Client::builder()
+    sacp::Client.connect_from()
         .name("editor-to-connector")
         .with_spawned(|_cx| async move {
             ConductorImpl::new_agent("conductor".to_string(), components, mode)
@@ -63,7 +63,7 @@ async fn run_test_with_mode(
                 ))
                 .await
         })
-        .run_until(transport, editor_task)
+        .connect_with(transport, editor_task)
         .await
 }
 
@@ -180,7 +180,7 @@ async fn test_agent_handles_prompt() -> Result<(), sacp::Error> {
     });
 
     // Run the client
-    let result = sacp::Client::builder()
+    let result = sacp::Client.connect_from()
         .name("editor-to-connector")
         .on_receive_notification(
             {
@@ -196,7 +196,7 @@ async fn test_agent_handles_prompt() -> Result<(), sacp::Error> {
             },
             sacp::on_receive_notification!(),
         )
-        .run_until(
+        .connect_with(
             sacp::ByteStreams::new(client_write.compat_write(), client_read.compat()),
             async |editor_cx| {
                 // Initialize

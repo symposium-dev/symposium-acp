@@ -117,8 +117,8 @@ use futures::{
     channel::mpsc::{self},
 };
 use sacp::{
-    Agent, BoxFuture, Client, Conductor, DynServe, Error, JsonRpcMessage, MessageCx, Proxy, Role,
-    RunWithConnectionTo, Serve, role::HasPeer, util::MatchMessage,
+    Agent, BoxFuture, Client, Conductor, DynConnectTo, Error, JsonRpcMessage, MessageCx, Proxy, Role,
+    RunWithConnectionTo, ConnectTo, role::HasPeer, util::MatchMessage,
 };
 use sacp::{
     ConnectFrom, ConnectionTo, JsonRpcNotification, JsonRpcRequest, SentRequest, UntypedMessage,
@@ -220,7 +220,7 @@ impl<Host: ConductorHostRole> ConductorImpl<Host> {
     }
 
     /// Run the conductor with a transport.
-    pub async fn run(self, transport: impl Serve<Host>) -> Result<(), sacp::Error> {
+    pub async fn run(self, transport: impl ConnectTo<Host>) -> Result<(), sacp::Error> {
         let (conductor_tx, conductor_rx) = mpsc::channel(128 /* chosen arbitrarily */);
 
         // Set up tracing if enabled - spawn writer task and get handle
@@ -261,7 +261,7 @@ impl<Host: ConductorHostRole> ConductorImpl<Host> {
         .name(self.name)
         .with_responder(responder)
         .with_spawned(|_cx| trace_future)
-        .serve(transport)
+        .connect_to(transport)
         .await
     }
 
@@ -292,8 +292,8 @@ impl<Host: ConductorHostRole> ConductorImpl<Host> {
     }
 }
 
-impl<Host: ConductorHostRole> Serve<Host::Counterpart> for ConductorImpl<Host> {
-    async fn serve(self, client: impl Serve<Host>) -> Result<(), sacp::Error> {
+impl<Host: ConductorHostRole> ConnectTo<Host::Counterpart> for ConductorImpl<Host> {
+    async fn connect_to(self, client: impl ConnectTo<Host>) -> Result<(), sacp::Error> {
         self.run(client).await
     }
 }
@@ -698,13 +698,13 @@ where
         &self,
         proxy_index: ComponentIndex,
         successor_index: ComponentIndex,
-        component: impl Serve<Conductor>,
-    ) -> DynServe<Conductor> {
+        component: impl ConnectTo<Conductor>,
+    ) -> DynConnectTo<Conductor> {
         match &self.trace_handle {
             Some(trace_handle) => {
                 trace_handle.bridge_component(proxy_index, successor_index, component)
             }
-            None => DynServe::new(component),
+            None => DynConnectTo::new(component),
         }
     }
 
@@ -712,7 +712,7 @@ where
     fn spawn_proxies(
         &mut self,
         client: ConnectionTo<Host::Counterpart>,
-        proxy_components: Vec<DynServe<Conductor>>,
+        proxy_components: Vec<DynConnectTo<Conductor>>,
     ) -> Result<(), sacp::Error> {
         assert!(self.proxies.is_empty());
 
@@ -729,7 +729,7 @@ where
                 0,
                 ComponentIndex::Client,
                 ComponentIndex::Agent,
-                Proxy::builder(),
+                Proxy.connect_from(),
             )?;
         } else {
             // Spawn each proxy component
@@ -760,7 +760,7 @@ where
         component_index: usize,
         trace_proxy_index: ComponentIndex,
         trace_successor_index: ComponentIndex,
-        component: impl Serve<Conductor>,
+        component: impl ConnectTo<Conductor>,
     ) -> Result<(), Error> {
         let connection_builder = self.connection_to_proxy(component_index);
         let connect_component =
@@ -781,7 +781,7 @@ where
     ) -> ConnectFrom<Conductor, impl HandleMessageFrom<Proxy> + 'static> {
         type SuccessorMessageCx = MessageCx<SuccessorMessage, SuccessorMessage>;
         let mut conductor_tx = self.conductor_tx.clone();
-        Conductor::builder()
+        Conductor.connect_from()
             .name(format!("conductor-to-component({})", component_index))
             // Intercept messages sent by the proxy.
             .on_receive_message(
@@ -1029,7 +1029,7 @@ pub trait InstantiateProxies: Send {
         req: InitializeRequest,
     ) -> futures::future::BoxFuture<
         'static,
-        Result<(InitializeRequest, Vec<DynServe<Conductor>>), sacp::Error>,
+        Result<(InitializeRequest, Vec<DynConnectTo<Conductor>>), sacp::Error>,
     >;
 }
 
@@ -1038,18 +1038,18 @@ pub trait InstantiateProxies: Send {
 /// Requires `T: Component<ProxyToConductor>`.
 impl<T> InstantiateProxies for Vec<T>
 where
-    T: Serve<Conductor> + 'static,
+    T: ConnectTo<Conductor> + 'static,
 {
     fn instantiate_proxies(
         self: Box<Self>,
         req: InitializeRequest,
     ) -> futures::future::BoxFuture<
         'static,
-        Result<(InitializeRequest, Vec<DynServe<Conductor>>), sacp::Error>,
+        Result<(InitializeRequest, Vec<DynConnectTo<Conductor>>), sacp::Error>,
     > {
         Box::pin(async move {
-            let components: Vec<DynServe<Conductor>> =
-                (*self).into_iter().map(|c| DynServe::new(c)).collect();
+            let components: Vec<DynConnectTo<Conductor>> =
+                (*self).into_iter().map(|c| DynConnectTo::new(c)).collect();
             Ok((req, components))
         })
     }
@@ -1060,7 +1060,7 @@ impl<F, Fut> InstantiateProxies for F
 where
     F: FnOnce(InitializeRequest) -> Fut + Send + 'static,
     Fut: std::future::Future<
-            Output = Result<(InitializeRequest, Vec<DynServe<Conductor>>), sacp::Error>,
+            Output = Result<(InitializeRequest, Vec<DynConnectTo<Conductor>>), sacp::Error>,
         > + Send
         + 'static,
 {
@@ -1069,7 +1069,7 @@ where
         req: InitializeRequest,
     ) -> futures::future::BoxFuture<
         'static,
-        Result<(InitializeRequest, Vec<DynServe<Conductor>>), sacp::Error>,
+        Result<(InitializeRequest, Vec<DynConnectTo<Conductor>>), sacp::Error>,
     > {
         Box::pin(async move { (*self)(req).await })
     }
@@ -1093,8 +1093,8 @@ pub trait InstantiateProxiesAndAgent: Send {
         Result<
             (
                 InitializeRequest,
-                Vec<DynServe<Conductor>>,
-                DynServe<Client>,
+                Vec<DynConnectTo<Conductor>>,
+                DynConnectTo<Client>,
             ),
             sacp::Error,
         >,
@@ -1104,7 +1104,7 @@ pub trait InstantiateProxiesAndAgent: Send {
 /// Wrapper to convert a single agent component (no proxies) into InstantiateProxiesAndAgent.
 pub struct AgentOnly<A>(pub A);
 
-impl<A: Serve<Client> + 'static> InstantiateProxiesAndAgent for AgentOnly<A> {
+impl<A: ConnectTo<Client> + 'static> InstantiateProxiesAndAgent for AgentOnly<A> {
     fn instantiate_proxies_and_agent(
         self: Box<Self>,
         req: InitializeRequest,
@@ -1113,13 +1113,13 @@ impl<A: Serve<Client> + 'static> InstantiateProxiesAndAgent for AgentOnly<A> {
         Result<
             (
                 InitializeRequest,
-                Vec<DynServe<Conductor>>,
-                DynServe<Client>,
+                Vec<DynConnectTo<Conductor>>,
+                DynConnectTo<Client>,
             ),
             sacp::Error,
         >,
     > {
-        Box::pin(async move { Ok((req, Vec::new(), DynServe::new(self.0))) })
+        Box::pin(async move { Ok((req, Vec::new(), DynConnectTo::new(self.0))) })
     }
 }
 
@@ -1132,32 +1132,32 @@ impl<A: Serve<Client> + 'static> InstantiateProxiesAndAgent for AgentOnly<A> {
 ///     .proxy(AuthProxy::new())
 /// ```
 pub struct ProxiesAndAgent {
-    proxies: Vec<DynServe<Conductor>>,
-    agent: DynServe<Client>,
+    proxies: Vec<DynConnectTo<Conductor>>,
+    agent: DynConnectTo<Client>,
 }
 
 impl ProxiesAndAgent {
     /// Create a new builder with the given agent component.
-    pub fn new(agent: impl Serve<Client> + 'static) -> Self {
+    pub fn new(agent: impl ConnectTo<Client> + 'static) -> Self {
         Self {
             proxies: vec![],
-            agent: DynServe::new(agent),
+            agent: DynConnectTo::new(agent),
         }
     }
 
     /// Add a single proxy component.
-    pub fn proxy(mut self, proxy: impl Serve<Conductor> + 'static) -> Self {
-        self.proxies.push(DynServe::new(proxy));
+    pub fn proxy(mut self, proxy: impl ConnectTo<Conductor> + 'static) -> Self {
+        self.proxies.push(DynConnectTo::new(proxy));
         self
     }
 
     /// Add multiple proxy components.
     pub fn proxies<P, I>(mut self, proxies: I) -> Self
     where
-        P: Serve<Conductor> + 'static,
+        P: ConnectTo<Conductor> + 'static,
         I: IntoIterator<Item = P>,
     {
-        self.proxies.extend(proxies.into_iter().map(DynServe::new));
+        self.proxies.extend(proxies.into_iter().map(DynConnectTo::new));
         self
     }
 }
@@ -1171,8 +1171,8 @@ impl InstantiateProxiesAndAgent for ProxiesAndAgent {
         Result<
             (
                 InitializeRequest,
-                Vec<DynServe<Conductor>>,
-                DynServe<Client>,
+                Vec<DynConnectTo<Conductor>>,
+                DynConnectTo<Client>,
             ),
             sacp::Error,
         >,
@@ -1189,8 +1189,8 @@ where
             Output = Result<
                 (
                     InitializeRequest,
-                    Vec<DynServe<Conductor>>,
-                    DynServe<Client>,
+                    Vec<DynConnectTo<Conductor>>,
+                    DynConnectTo<Client>,
                 ),
                 sacp::Error,
             >,
@@ -1205,8 +1205,8 @@ where
         Result<
             (
                 InitializeRequest,
-                Vec<DynServe<Conductor>>,
-                DynServe<Client>,
+                Vec<DynConnectTo<Conductor>>,
+                DynConnectTo<Client>,
             ),
             sacp::Error,
         >,
@@ -1359,7 +1359,7 @@ impl ConductorHostRole for Agent {
         debug!(?agent_component, "spawning agent");
 
         let agent_cx = client_connection.spawn_connection(
-            Client::builder()
+            Client.connect_from()
                 .name("conductor-to-agent")
                 // Intercept agent-to-client messages from the agent.
                 .on_receive_message(

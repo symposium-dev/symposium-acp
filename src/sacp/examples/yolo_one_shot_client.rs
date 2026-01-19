@@ -85,7 +85,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let transport = sacp::ByteStreams::new(child_stdin.compat_write(), child_stdout.compat());
 
     // Run the client
-    Client::builder()
+    Client.connect_from()
         .on_receive_notification(
             async move |notification: SessionNotification, _cx| {
                 // Print session updates to stdout (so 2>/dev/null shows only agent output)
@@ -113,7 +113,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             },
             sacp::on_receive_request!(),
         )
-        .run_until(transport, |connection: ConnectionTo<Agent>| async move {
+        .connect_with(transport, |connection: ConnectionTo<Agent>| async move {
             // Initialize the agent
             eprintln!("🤝 Initializing agent...");
             let init_response = connection

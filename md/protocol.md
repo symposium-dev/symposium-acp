@@ -92,7 +92,7 @@ A minimal proxy that just forwards everything doesn't need any handlers - the co
 ```rust
 use sacp::{Component, ProxyToConductor};
 
-Proxy::builder()
+Proxy.connect_from()
     .name("passthrough")
     .connect_to(transport)?
     .serve()
@@ -105,7 +105,7 @@ To explicitly handle and forward messages:
 use sacp::{AgentPeer, ClientPeer, ProxyToConductor};
 use sacp::schema::PromptRequest;
 
-Proxy::builder()
+Proxy.connect_from()
     .name("my-proxy")
     .on_receive_request(
         async |request: PromptRequest, _request_cx, cx| {
@@ -364,7 +364,7 @@ The `conductor mcp PORT` process bridges between stdio and the conductor's ACP m
 
 ## Building on SACP
 
-When building proxies, you use `Proxy::builder()` from the `sacp` crate which provides:
+When building proxies, you use `Proxy.connect_from()` from the `sacp` crate which provides:
 
 - `.on_receive_request()` / `.on_receive_notification()` for handling messages from client
 - `.on_receive_request_from(AgentPeer, ...)` / `.on_receive_notification_from(AgentPeer, ...)` for handling messages from agent

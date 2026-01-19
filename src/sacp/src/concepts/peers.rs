@@ -19,7 +19,7 @@
 //! # use sacp::{ClientToAgent, AgentToClient, Component};
 //! # use sacp::schema::{InitializeRequest, ProtocolVersion};
 //! # async fn example(transport: impl Component<AgentToClient>) -> Result<(), sacp::Error> {
-//! # Client::builder().run_until(transport, async |cx| {
+//! # Client.connect_from().run_until(transport, async |cx| {
 //! // As a client
 //! cx.send_request(InitializeRequest::new(ProtocolVersion::LATEST));
 //! # Ok(())
@@ -48,7 +48,7 @@
 //! # use sacp::{ClientToAgent, AgentToClient, Agent, Component};
 //! # use sacp_test::MyRequest;
 //! # async fn example(transport: impl Component<AgentToClient>) -> Result<(), sacp::Error> {
-//! # Client::builder().run_until(transport, async |cx| {
+//! # Client.connect_from().run_until(transport, async |cx| {
 //! # let req = MyRequest {};
 //! // These are equivalent for ClientToAgent:
 //! cx.send_request(req.clone());
@@ -74,7 +74,7 @@
 //! # use sacp::link::ConductorToProxy;
 //! # use sacp_test::MyRequest;
 //! # async fn example(transport: impl Component<ConductorToProxy>) -> Result<(), sacp::Error> {
-//! Proxy::builder()
+//! Proxy.connect_from()
 //!     // Receive a request from the client
 //!     .on_receive_request_from(Client, async |req: MyRequest, request_cx, cx| {
 //!         // Forward it to the agent

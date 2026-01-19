@@ -3,7 +3,7 @@ use sacp::role::UntypedRole;
 use sacp::util::MatchMessage;
 use sacp::{
     ConnectionTo, HandleMessageFrom, Handled, JsonRpcMessage, JsonRpcRequest, JsonRpcResponse,
-    MessageCx, Responder, Serve, util::MatchMessageFrom,
+    MessageCx, Responder, ConnectTo, util::MatchMessageFrom,
 };
 use serde::{Deserialize, Serialize};
 
@@ -78,14 +78,14 @@ async fn modify_message_en_route() -> Result<(), sacp::Error> {
 
     struct TestComponent;
 
-    impl Serve<UntypedRole> for TestComponent {
-        async fn serve(self, client: impl Serve<UntypedRole>) -> Result<(), sacp::Error> {
-            UntypedRole::builder()
+    impl ConnectTo<UntypedRole> for TestComponent {
+        async fn connect_to(self, client: impl ConnectTo<UntypedRole>) -> Result<(), sacp::Error> {
+            UntypedRole.connect_from()
                 .with_handler(PushHandler {
                     message: "b".to_string(),
                 })
                 .with_handler(EchoHandler)
-                .serve(client)
+                .connect_to(client)
                 .await
         }
     }
@@ -117,8 +117,8 @@ async fn modify_message_en_route() -> Result<(), sacp::Error> {
         }
     }
 
-    UntypedRole::builder()
-        .run_until(TestComponent, async |cx| {
+    UntypedRole.connect_from()
+        .connect_with(TestComponent, async |cx| {
             let result = cx
                 .send_request(EchoRequestResponse {
                     text: vec!["a".to_string()],
@@ -146,9 +146,9 @@ async fn modify_message_en_route_inline() -> Result<(), sacp::Error> {
 
     struct TestComponent;
 
-    impl Serve<UntypedRole> for TestComponent {
-        async fn serve(self, client: impl Serve<UntypedRole>) -> Result<(), sacp::Error> {
-            UntypedRole::builder()
+    impl ConnectTo<UntypedRole> for TestComponent {
+        async fn connect_to(self, client: impl ConnectTo<UntypedRole>) -> Result<(), sacp::Error> {
+            UntypedRole.connect_from()
                 .on_receive_request(
                     async move |mut request: EchoRequestResponse,
                                 request_cx: Responder<EchoRequestResponse>,
@@ -162,13 +162,13 @@ async fn modify_message_en_route_inline() -> Result<(), sacp::Error> {
                     sacp::on_receive_request!(),
                 )
                 .with_handler(EchoHandler)
-                .serve(client)
+                .connect_to(client)
                 .await
         }
     }
 
-    UntypedRole::builder()
-        .run_until(TestComponent, async |cx| {
+    UntypedRole.connect_from()
+        .connect_with(TestComponent, async |cx| {
             let result = cx
                 .send_request(EchoRequestResponse {
                     text: vec!["a".to_string()],
@@ -197,9 +197,9 @@ async fn modify_message_and_stop() -> Result<(), sacp::Error> {
 
     struct TestComponent;
 
-    impl Serve<UntypedRole> for TestComponent {
-        async fn serve(self, client: impl Serve<UntypedRole>) -> Result<(), sacp::Error> {
-            UntypedRole::builder()
+    impl ConnectTo<UntypedRole> for TestComponent {
+        async fn connect_to(self, client: impl ConnectTo<UntypedRole>) -> Result<(), sacp::Error> {
+            UntypedRole.connect_from()
                 .on_receive_request(
                     async move |request: EchoRequestResponse,
                                 request_cx: Responder<EchoRequestResponse>,
@@ -221,13 +221,13 @@ async fn modify_message_and_stop() -> Result<(), sacp::Error> {
                     sacp::on_receive_request!(),
                 )
                 .with_handler(EchoHandler)
-                .serve(client)
+                .connect_to(client)
                 .await
         }
     }
 
-    UntypedRole::builder()
-        .run_until(TestComponent, async |cx| {
+    UntypedRole.connect_from()
+        .connect_with(TestComponent, async |cx| {
             let result = cx
                 .send_request(EchoRequestResponse {
                     text: vec!["a".to_string()],

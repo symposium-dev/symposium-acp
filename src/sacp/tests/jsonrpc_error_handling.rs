@@ -114,11 +114,11 @@ async fn test_invalid_json() {
 
             // No handlers - all requests will return errors
             let server_transport = sacp::ByteStreams::new(server_writer, server_reader);
-            let server = UntypedRole::builder();
+            let server = UntypedRole.connect_from();
 
             // Spawn server
             tokio::task::spawn_local(async move {
-                let _ = server.serve(server_transport).await;
+                let _ = server.connect_to(server_transport).await;
             });
 
             // Send invalid JSON
@@ -168,10 +168,10 @@ async fn test_incomplete_line() {
 
     // No handlers needed for EOF test
     let transport = sacp::ByteStreams::new(output, input);
-    let connection = UntypedRole::builder();
+    let connection = UntypedRole.connect_from();
 
     // The server should handle EOF mid-message gracefully
-    let result = connection.serve(transport).await;
+    let result = connection.connect_to(transport).await;
 
     // Server should terminate cleanly when hitting EOF
     assert!(result.is_ok() || result.is_err());
@@ -193,18 +193,18 @@ async fn test_unknown_method() {
 
             // No handlers - all requests will be "method not found"
             let server_transport = sacp::ByteStreams::new(server_writer, server_reader);
-            let server = UntypedRole::builder();
+            let server = UntypedRole.connect_from();
             let client_transport = sacp::ByteStreams::new(client_writer, client_reader);
-            let client = UntypedRole::builder();
+            let client = UntypedRole.connect_from();
 
             // Spawn server
             tokio::task::spawn_local(async move {
-                server.serve(server_transport).await.ok();
+                server.connect_to(server_transport).await.ok();
             });
 
             // Send request from client
             let result = client
-                .run_until(client_transport, async |cx| -> Result<(), sacp::Error> {
+                .connect_with(client_transport, async |cx| -> Result<(), sacp::Error> {
                     let request = SimpleRequest {
                         message: "test".to_string(),
                     };
@@ -271,7 +271,7 @@ async fn test_handler_returns_error() {
             let (server_reader, server_writer, client_reader, client_writer) = setup_test_streams();
 
             let server_transport = sacp::ByteStreams::new(server_writer, server_reader);
-            let server = UntypedRole::builder().on_receive_request(
+            let server = UntypedRole.connect_from().on_receive_request(
                 async |_request: ErrorRequest,
                        request_cx: Responder<SimpleResponse>,
                        _connection_cx: ConnectionTo<UntypedRole>| {
@@ -282,14 +282,14 @@ async fn test_handler_returns_error() {
             );
 
             let client_transport = sacp::ByteStreams::new(client_writer, client_reader);
-            let client = UntypedRole::builder();
+            let client = UntypedRole.connect_from();
 
             tokio::task::spawn_local(async move {
-                server.serve(server_transport).await.ok();
+                server.connect_to(server_transport).await.ok();
             });
 
             let result = client
-                .run_until(client_transport, async |cx| -> Result<(), sacp::Error> {
+                .connect_with(client_transport, async |cx| -> Result<(), sacp::Error> {
                     let request = ErrorRequest {
                         value: "trigger error".to_string(),
                     };
@@ -355,7 +355,7 @@ async fn test_missing_required_params() {
             // Handler that validates params - since EmptyRequest has no params but we're checking
             // against SimpleRequest which requires a message field, this will fail
             let server_transport = sacp::ByteStreams::new(server_writer, server_reader);
-            let server = UntypedRole::builder().on_receive_request(
+            let server = UntypedRole.connect_from().on_receive_request(
                 async |_request: EmptyRequest,
                        request_cx: Responder<SimpleResponse>,
                        _connection_cx: ConnectionTo<UntypedRole>| {
@@ -370,14 +370,14 @@ async fn test_missing_required_params() {
             );
 
             let client_transport = sacp::ByteStreams::new(client_writer, client_reader);
-            let client = UntypedRole::builder();
+            let client = UntypedRole.connect_from();
 
             tokio::task::spawn_local(async move {
-                server.serve(server_transport).await.ok();
+                server.connect_to(server_transport).await.ok();
             });
 
             let result = client
-                .run_until(client_transport, async |cx| -> Result<(), sacp::Error> {
+                .connect_with(client_transport, async |cx| -> Result<(), sacp::Error> {
                     // Send request with no params (EmptyRequest has no fields)
                     let request = EmptyRequest;
 

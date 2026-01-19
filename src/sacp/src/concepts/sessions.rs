@@ -11,7 +11,7 @@
 //! ```
 //! # use sacp::{ClientToAgent, AgentToClient, Component};
 //! # async fn example(transport: impl Component<AgentToClient>) -> Result<(), sacp::Error> {
-//! # Client::builder().run_until(transport, async |cx| {
+//! # Client.connect_from().run_until(transport, async |cx| {
 //! cx.build_session_cwd()?          // Use current working directory
 //!     .block_task()                // Mark as blocking
 //!     .run_until(async |session| {
@@ -30,7 +30,7 @@
 //! ```
 //! # use sacp::{ClientToAgent, AgentToClient, Component};
 //! # async fn example(transport: impl Component<AgentToClient>) -> Result<(), sacp::Error> {
-//! # Client::builder().run_until(transport, async |cx| {
+//! # Client.connect_from().run_until(transport, async |cx| {
 //! cx.build_session("/path/to/project")
 //!     .block_task()
 //!     .run_until(async |session| { Ok(()) })
@@ -49,7 +49,7 @@
 //! ```
 //! # use sacp::{ClientToAgent, AgentToClient, Component};
 //! # async fn example(transport: impl Component<AgentToClient>) -> Result<(), sacp::Error> {
-//! # Client::builder().run_until(transport, async |cx| {
+//! # Client.connect_from().run_until(transport, async |cx| {
 //! # cx.build_session_cwd()?.block_task()
 //! .run_until(async |mut session| {
 //!     // Send a prompt
@@ -82,7 +82,7 @@
 //! # use sacp::mcp_server::McpServer;
 //! # async fn example(transport: impl Component<AgentToClient>) -> Result<(), sacp::Error> {
 //! # let my_mcp_server = McpServer::<ClientToAgent, _>::builder("tools").build();
-//! # Client::builder().run_until(transport, async |cx| {
+//! # Client.connect_from().run_until(transport, async |cx| {
 //! cx.build_session_cwd()?
 //!     .with_mcp_server(my_mcp_server)?
 //!     .block_task()
@@ -105,7 +105,7 @@
 //! # use sacp::{ClientToAgent, AgentToClient, Component};
 //! # use sacp::schema::NewSessionRequest;
 //! # async fn example(transport: impl Component<AgentToClient>) -> Result<(), sacp::Error> {
-//! Client::builder()
+//! Client.connect_from()
 //!     .on_receive_request(async |req: NewSessionRequest, request_cx, cx| {
 //!         cx.build_session_from(req)
 //!             .on_session_start(async |session| {

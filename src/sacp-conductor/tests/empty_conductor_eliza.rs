@@ -6,7 +6,7 @@
 //! 3. Messages flow correctly through the empty conductor to eliza
 //! 4. The full chain works end-to-end
 
-use sacp::{Agent, Client, Conductor, Proxy, Serve};
+use sacp::{Agent, Client, Conductor, Proxy, ConnectTo};
 use sacp_conductor::{ConductorImpl, ProxiesAndAgent};
 use tokio::io::duplex;
 use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
@@ -15,12 +15,12 @@ use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
 /// Creates a nested conductor with no components that acts as a passthrough proxy.
 struct MockEmptyConductor;
 
-impl Serve<Conductor> for MockEmptyConductor {
-    async fn serve(self, client: impl Serve<Proxy>) -> Result<(), sacp::Error> {
+impl ConnectTo<Conductor> for MockEmptyConductor {
+    async fn connect_to(self, client: impl ConnectTo<Proxy>) -> Result<(), sacp::Error> {
         // Create an empty conductor with no components - it should act as a passthrough
         // Use Component::serve instead of .run() to get the ProxyToConductor impl
-        let empty_components: Vec<sacp::DynServe<Conductor>> = vec![];
-        Serve::<Conductor>::serve(
+        let empty_components: Vec<sacp::DynConnectTo<Conductor>> = vec![];
+        ConnectTo::<Conductor>::connect_to(
             ConductorImpl::new_proxy(
                 "empty-conductor".to_string(),
                 empty_components,
@@ -36,9 +36,9 @@ impl Serve<Conductor> for MockEmptyConductor {
 /// Runs the Eliza agent logic in-process instead of spawning a subprocess.
 struct MockEliza;
 
-impl Serve<Client> for MockEliza {
-    async fn serve(self, client: impl Serve<Agent>) -> Result<(), sacp::Error> {
-        Serve::<Client>::serve(elizacp::ElizaAgent::new(true), client).await
+impl ConnectTo<Client> for MockEliza {
+    async fn connect_to(self, client: impl ConnectTo<Agent>) -> Result<(), sacp::Error> {
+        ConnectTo::<Client>::connect_to(elizacp::ElizaAgent::new(true), client).await
     }
 }
 

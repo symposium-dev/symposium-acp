@@ -8,7 +8,7 @@ use sacp::schema::{
     SelectedPermissionOutcome, SessionNotification, TextContent,
 };
 use sacp::util::MatchMessage;
-use sacp::{Agent, Client, Handled, MessageCx, Serve, UntypedMessage};
+use sacp::{Agent, Client, Handled, MessageCx, ConnectTo, UntypedMessage};
 use std::path::PathBuf;
 
 /// Converts a `ContentBlock` to its string representation.
@@ -78,7 +78,7 @@ pub fn content_block_to_string(block: &ContentBlock) -> String {
 /// # }
 /// ```
 pub async fn prompt_with_callback(
-    component: impl Serve<Client>,
+    component: impl ConnectTo<Client>,
     prompt_text: impl ToString,
     mut callback: impl AsyncFnMut(ContentBlock) + Send,
 ) -> Result<(), sacp::Error> {
@@ -86,7 +86,7 @@ pub async fn prompt_with_callback(
     let prompt_text = prompt_text.to_string();
 
     // Run the client
-    Client::builder()
+    Client.connect_from()
         .on_receive_message(
             async |message: MessageCx<UntypedMessage, UntypedMessage>, _cx| {
                 tracing::trace!("received: {:?}", message.message());
@@ -97,7 +97,7 @@ pub async fn prompt_with_callback(
             },
             sacp::on_receive_message!(),
         )
-        .run_until(component, |cx: sacp::ConnectionTo<Agent>| async move {
+        .connect_with(component, |cx: sacp::ConnectionTo<Agent>| async move {
             // Initialize the agent
             let _init_response = cx
                 .send_request(InitializeRequest::new(ProtocolVersion::LATEST))
@@ -210,7 +210,7 @@ pub async fn prompt_with_callback(
 /// # }
 /// ```
 pub async fn prompt(
-    component: impl Serve<Client>,
+    component: impl ConnectTo<Client>,
     prompt_text: impl ToString,
 ) -> Result<String, sacp::Error> {
     let mut accumulated_text = String::new();

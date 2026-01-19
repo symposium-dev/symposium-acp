@@ -7,7 +7,7 @@ use futures::{StreamExt, channel::mpsc};
 use uuid::Uuid;
 
 use crate::{
-    Agent, Client, ConnectionTo, DynServe, HandleMessageFrom, Handled, MessageCx, Role, Serve,
+    Agent, Client, ConnectionTo, DynConnectTo, HandleMessageFrom, Handled, MessageCx, Role, ConnectTo,
     jsonrpc::{
         DynamicHandlerRegistration,
         run::{NullRun, RunWithConnectionTo},
@@ -189,11 +189,11 @@ where
     }
 }
 
-impl<Run> Serve<role::mcp::Client> for McpServer<role::mcp::Client, Run>
+impl<Run> ConnectTo<role::mcp::Client> for McpServer<role::mcp::Client, Run>
 where
     Run: RunWithConnectionTo<role::mcp::Client> + 'static,
 {
-    async fn serve(self, client: impl Serve<role::mcp::Server>) -> Result<(), crate::Error> {
+    async fn connect_to(self, client: impl ConnectTo<role::mcp::Server>) -> Result<(), crate::Error> {
         let Self {
             acp_url,
             connect,
@@ -203,7 +203,7 @@ where
 
         let (tx, mut rx) = mpsc::unbounded();
 
-        role::mcp::Server::builder()
+        role::mcp::Server.connect_from()
             .with_responder(responder)
             .on_receive_message(
                 async |message_from_client: MessageCx, _cx| {
@@ -213,13 +213,13 @@ where
                 crate::on_receive_message!(),
             )
             .with_spawned(async move |server_to_client_cx| {
-                let spawned_server: DynServe<role::mcp::Client> =
+                let spawned_server: DynConnectTo<role::mcp::Client> =
                     connect.connect(McpConnectionTo {
                         acp_url,
                         connection_cx: server_to_client_cx.clone(),
                     });
 
-                role::mcp::Client::builder()
+                role::mcp::Client.connect_from()
                     .on_receive_message(
                         async |message_from_server: MessageCx, _client_to_server_cx| {
                             // when we receive a message from the server, fwd to the client
@@ -227,7 +227,7 @@ where
                         },
                         crate::on_receive_message!(),
                     )
-                    .run_until(spawned_server, async |client_to_server_cx| {
+                    .connect_with(spawned_server, async |client_to_server_cx| {
                         while let Some(message_from_client) = rx.next().await {
                             client_to_server_cx.send_proxied_message(message_from_client)?;
                         }
@@ -235,7 +235,7 @@ where
                     })
                     .await
             })
-            .serve(client)
+            .connect_to(client)
             .await
     }
 }

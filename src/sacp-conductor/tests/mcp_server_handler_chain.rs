@@ -10,7 +10,7 @@ use sacp::schema::{
     AgentCapabilities, InitializeRequest, InitializeResponse, NewSessionRequest,
     NewSessionResponse, ProtocolVersion, SessionId,
 };
-use sacp::{Agent, Client, Conductor, DynServe, Proxy, Serve};
+use sacp::{Agent, Client, Conductor, DynConnectTo, Proxy, ConnectTo};
 use sacp_conductor::{ConductorImpl, ProxiesAndAgent};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -67,10 +67,10 @@ struct ProxyWithMcpAndHandler {
     config: Arc<HandlerConfig>,
 }
 
-impl Serve<Conductor> for ProxyWithMcpAndHandler {
-    async fn serve(
+impl ConnectTo<Conductor> for ProxyWithMcpAndHandler {
+    async fn connect_to(
         self,
-        client: impl Serve<Proxy>,
+        client: impl ConnectTo<Proxy>,
     ) -> Result<(), sacp::Error> {
         let config = Arc::clone(&self.config);
 
@@ -89,7 +89,7 @@ impl Serve<Conductor> for ProxyWithMcpAndHandler {
             )
             .build();
 
-        sacp::Proxy::builder()
+        sacp::Proxy.connect_from()
             .name("proxy-with-mcp-and-handler")
             // Add the MCP server
             .with_mcp_server(mcp_server)
@@ -111,7 +111,7 @@ impl Serve<Conductor> for ProxyWithMcpAndHandler {
                 },
                 sacp::on_receive_request!(),
             )
-            .serve(client)
+            .connect_to(client)
             .await
     }
 }
@@ -119,12 +119,12 @@ impl Serve<Conductor> for ProxyWithMcpAndHandler {
 /// A simple agent that responds to initialization and session requests
 struct SimpleAgent;
 
-impl Serve<Client> for SimpleAgent {
-    async fn serve(
+impl ConnectTo<Client> for SimpleAgent {
+    async fn connect_to(
         self,
-        client: impl Serve<Agent>,
+        client: impl ConnectTo<Agent>,
     ) -> Result<(), sacp::Error> {
-        Agent::builder()
+        Agent.connect_from()
             .name("simple-agent")
             .on_receive_request(
                 async |request: InitializeRequest, request_cx, _cx| {
@@ -143,14 +143,14 @@ impl Serve<Client> for SimpleAgent {
                 },
                 sacp::on_receive_request!(),
             )
-            .serve(client)
+            .connect_to(client)
             .await
     }
 }
 
 async fn run_test(
-    proxies: Vec<DynServe<Conductor>>,
-    agent: DynServe<Client>,
+    proxies: Vec<DynConnectTo<Conductor>>,
+    agent: DynConnectTo<Client>,
     editor_task: impl AsyncFnOnce(sacp::ConnectionTo<Agent>) -> Result<(), sacp::Error>,
 ) -> Result<(), sacp::Error> {
     let (editor_out, conductor_in) = duplex(1024);
@@ -158,7 +158,7 @@ async fn run_test(
 
     let transport = sacp::ByteStreams::new(editor_out.compat_write(), editor_in.compat());
 
-    sacp::Client::builder()
+    sacp::Client.connect_from()
         .name("editor-to-conductor")
         .with_spawned(|_cx| async move {
             ConductorImpl::new_agent(
@@ -172,7 +172,7 @@ async fn run_test(
             ))
             .await
         })
-        .run_until(transport, editor_task)
+        .connect_with(transport, editor_task)
         .await
 }
 
@@ -182,10 +182,10 @@ async fn test_new_session_handler_invoked_with_mcp_server() -> Result<(), sacp::
     let handler_config = HandlerConfig::new();
     let handler_config_clone = Arc::clone(&handler_config);
 
-    let proxy = DynServe::<Conductor>::new(ProxyWithMcpAndHandler {
+    let proxy = DynConnectTo::<Conductor>::new(ProxyWithMcpAndHandler {
         config: handler_config,
     });
-    let agent = DynServe::<Client>::new(SimpleAgent);
+    let agent = DynConnectTo::<Client>::new(SimpleAgent);
 
     run_test(vec![proxy], agent, async |editor_cx| {
         // Initialize first

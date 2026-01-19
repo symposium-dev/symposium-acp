@@ -25,7 +25,7 @@
 //! use sacp::schema::{InitializeRequest, ProtocolVersion};
 //!
 //! # async fn run(transport: impl sacp::Component<sacp::AgentToClient>) -> Result<(), sacp::Error> {
-//! ClientToAgent::builder()
+//! ClientToAgent.connect_from()
 //!     .name("my-client")
 //!     .run_until(transport, async |cx| {
 //!         // Step 1: Initialize the connection
@@ -126,7 +126,7 @@ pub use role::{
     acp::{Agent, Client, Conductor, Proxy},
 };
 
-pub use component::{DynServe, Serve};
+pub use component::{DynConnectTo, ConnectTo};
 
 // Re-export BoxFuture for implementing Component traits
 pub use futures::future::BoxFuture;

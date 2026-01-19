@@ -65,7 +65,7 @@ pub enum LineDirection {
 /// let agent = AcpAgent::from_str("python my_agent.py")?;
 ///
 /// // The agent process will be spawned automatically when served
-/// UntypedRole::builder()
+/// UntypedRole.connect_from()
 ///     .connect_to(agent)?
 ///     .run_until(|cx| async move {
 ///         // Use the connection to communicate with the agent process
@@ -264,10 +264,10 @@ impl AcpAgentCounterpartRole for Client {}
 
 impl AcpAgentCounterpartRole for Conductor {}
 
-impl<Counterpart: AcpAgentCounterpartRole> sacp::Serve<Counterpart> for AcpAgent {
-    async fn serve(
+impl<Counterpart: AcpAgentCounterpartRole> sacp::ConnectTo<Counterpart> for AcpAgent {
+    async fn connect_to(
         self,
-        client: impl sacp::Serve<Counterpart::Counterpart>,
+        client: impl sacp::ConnectTo<Counterpart::Counterpart>,
     ) -> Result<(), sacp::Error> {
         use futures::AsyncBufReadExt;
         use futures::AsyncWriteExt;
@@ -347,7 +347,7 @@ impl<Counterpart: AcpAgentCounterpartRole> sacp::Serve<Counterpart> for AcpAgent
 
         // Race the protocol against child process exit
         // If the child exits early (e.g., with an error), we return that error
-        let protocol_future = sacp::Serve::<Counterpart>::serve(
+        let protocol_future = sacp::ConnectTo::<Counterpart>::connect_to(
             sacp::Lines::new(outgoing_sink, incoming_lines),
             client,
         );

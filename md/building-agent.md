@@ -17,7 +17,7 @@ use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
 
 #[tokio::main]
 async fn main() -> Result<(), sacp::Error> {
-    Agent::builder()
+    Agent.connect_from()
         .name("my-agent")
         .on_receive_request(
             async move |req: InitializeRequest, request_cx, _cx| {
@@ -43,10 +43,10 @@ async fn main() -> Result<(), sacp::Error> {
 
 ### The Builder Pattern
 
-Agents are built using `Agent::builder()`. You register handlers for different message types, then call `.serve()` with a transport:
+Agents are built using `Agent.connect_from()`. You register handlers for different message types, then call `.serve()` with a transport:
 
 ```rust
-Agent::builder()
+Agent.connect_from()
     .name("my-agent")                           // For logging/debugging
     .on_receive_request(handler1, macro1)       // Handle specific request type
     .on_receive_request(handler2, macro2)       // Chain multiple handlers
@@ -153,7 +153,7 @@ pub struct MyAgent {
 
 impl Component for MyAgent {
     async fn serve(self, client: impl Component) -> Result<(), sacp::Error> {
-        Agent::builder()
+        Agent.connect_from()
             .name("my-agent")
             .on_receive_request(
                 async |req: InitializeRequest, request_cx, _cx| {
@@ -190,7 +190,7 @@ Note the difference: `.serve(transport)` for standalone agents vs `.connect_to(c
 Chain multiple `.on_receive_request()` calls to handle different message types. Handlers are tried in order until one matches:
 
 ```rust
-Agent::builder()
+Agent.connect_from()
     .name("my-agent")
     .on_receive_request(
         async |req: InitializeRequest, request_cx, _cx| {
@@ -220,7 +220,7 @@ Agent::builder()
 Use `.on_receive_message()` to handle any message not caught by specific handlers:
 
 ```rust
-Agent::builder()
+Agent.connect_from()
     .name("my-agent")
     .on_receive_request(/* ... specific handlers ... */)
     .on_receive_message(

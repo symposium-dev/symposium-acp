@@ -100,7 +100,7 @@ async fn test_hello_world() {
             let (server_reader, server_writer, client_reader, client_writer) = setup_test_streams();
 
             let server_transport = sacp::ByteStreams::new(server_writer, server_reader);
-            let server = UntypedRole::builder().on_receive_request(
+            let server = UntypedRole.connect_from().on_receive_request(
                 async move |request: PingRequest,
                             request_cx: Responder<PongResponse>,
                             _connection_cx: ConnectionTo<UntypedRole>| {
@@ -113,18 +113,18 @@ async fn test_hello_world() {
             );
 
             let client_transport = sacp::ByteStreams::new(client_writer, client_reader);
-            let client = UntypedRole::builder();
+            let client = UntypedRole.connect_from();
 
             // Spawn the server in the background
             tokio::task::spawn_local(async move {
-                if let Err(e) = server.serve(server_transport).await {
+                if let Err(e) = server.connect_to(server_transport).await {
                     eprintln!("Server error: {:?}", e);
                 }
             });
 
             // Use the client to send a ping and wait for a pong
             let result = client
-                .run_until(
+                .connect_with(
                     client_transport,
                     async |cx| -> std::result::Result<(), sacp::Error> {
                         let request = PingRequest {
@@ -190,7 +190,7 @@ async fn test_notification() {
             let (server_reader, server_writer, client_reader, client_writer) = setup_test_streams();
 
             let server_transport = sacp::ByteStreams::new(server_writer, server_reader);
-            let server = UntypedRole::builder().on_receive_notification(
+            let server = UntypedRole.connect_from().on_receive_notification(
                 {
                     let logs = logs_clone.clone();
                     async move |notification: LogNotification, _cx: ConnectionTo<UntypedRole>| {
@@ -202,16 +202,16 @@ async fn test_notification() {
             );
 
             let client_transport = sacp::ByteStreams::new(client_writer, client_reader);
-            let client = UntypedRole::builder();
+            let client = UntypedRole.connect_from();
 
             tokio::task::spawn_local(async move {
-                if let Err(e) = server.serve(server_transport).await {
+                if let Err(e) = server.connect_to(server_transport).await {
                     eprintln!("Server error: {:?}", e);
                 }
             });
 
             let result = client
-                .run_until(
+                .connect_with(
                     client_transport,
                     async |cx| -> std::result::Result<(), sacp::Error> {
                         // Send a notification (no response expected)
@@ -264,7 +264,7 @@ async fn test_multiple_sequential_requests() {
             let (server_reader, server_writer, client_reader, client_writer) = setup_test_streams();
 
             let server_transport = sacp::ByteStreams::new(server_writer, server_reader);
-            let server = UntypedRole::builder().on_receive_request(
+            let server = UntypedRole.connect_from().on_receive_request(
                 async |request: PingRequest,
                        request_cx: Responder<PongResponse>,
                        _connection_cx: ConnectionTo<UntypedRole>| {
@@ -277,16 +277,16 @@ async fn test_multiple_sequential_requests() {
             );
 
             let client_transport = sacp::ByteStreams::new(client_writer, client_reader);
-            let client = UntypedRole::builder();
+            let client = UntypedRole.connect_from();
 
             tokio::task::spawn_local(async move {
-                if let Err(e) = server.serve(server_transport).await {
+                if let Err(e) = server.connect_to(server_transport).await {
                     eprintln!("Server error: {:?}", e);
                 }
             });
 
             let result = client
-                .run_until(
+                .connect_with(
                     client_transport,
                     async |cx| -> std::result::Result<(), sacp::Error> {
                         // Send multiple requests sequentially
@@ -323,7 +323,7 @@ async fn test_concurrent_requests() {
             let (server_reader, server_writer, client_reader, client_writer) = setup_test_streams();
 
             let server_transport = sacp::ByteStreams::new(server_writer, server_reader);
-            let server = UntypedRole::builder().on_receive_request(
+            let server = UntypedRole.connect_from().on_receive_request(
                 async |request: PingRequest,
                        request_cx: Responder<PongResponse>,
                        _connection_cx: ConnectionTo<UntypedRole>| {
@@ -336,16 +336,16 @@ async fn test_concurrent_requests() {
             );
 
             let client_transport = sacp::ByteStreams::new(client_writer, client_reader);
-            let client = UntypedRole::builder();
+            let client = UntypedRole.connect_from();
 
             tokio::task::spawn_local(async move {
-                if let Err(e) = server.serve(server_transport).await {
+                if let Err(e) = server.connect_to(server_transport).await {
                     eprintln!("Server error: {:?}", e);
                 }
             });
 
             let result = client
-                .run_until(
+                .connect_with(
                     client_transport,
                     async |cx| -> std::result::Result<(), sacp::Error> {
                         // Send multiple requests concurrently

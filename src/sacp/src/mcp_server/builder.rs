@@ -48,7 +48,7 @@ use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
 
 use super::{McpConnectionTo, McpTool};
 use crate::{
-    ByteStreams, DynServe, Serve,
+    ByteStreams, DynConnectTo, ConnectTo,
     jsonrpc::run::{ChainRun, NullRun, RunWithConnectionTo},
     mcp_server::{
         McpServer, McpServerConnect,
@@ -350,8 +350,8 @@ impl<'scope, Counterpart: Role> McpServerConnect<Counterpart> for McpServerBuilt
         self.name.clone()
     }
 
-    fn connect(&self, mcp_cx: McpConnectionTo<Counterpart>) -> DynServe<role::mcp::Client> {
-        DynServe::new(McpServerConnection {
+    fn connect(&self, mcp_cx: McpConnectionTo<Counterpart>) -> DynConnectTo<role::mcp::Client> {
+        DynConnectTo::new(McpServerConnection {
             data: self.data.clone(),
             mcp_cx,
         })
@@ -364,8 +364,8 @@ pub(crate) struct McpServerConnection<Counterpart: Role> {
     mcp_cx: McpConnectionTo<Counterpart>,
 }
 
-impl<Counterpart: Role> Serve<role::mcp::Client> for McpServerConnection<Counterpart> {
-    async fn serve(self, client: impl Serve<role::mcp::Server>) -> Result<(), crate::Error> {
+impl<Counterpart: Role> ConnectTo<role::mcp::Client> for McpServerConnection<Counterpart> {
+    async fn connect_to(self, client: impl ConnectTo<role::mcp::Server>) -> Result<(), crate::Error> {
         // Create tokio byte streams that rmcp expects
         let (mcp_server_stream, mcp_client_stream) = tokio::io::duplex(8192);
         let (mcp_server_read, mcp_server_write) = tokio::io::split(mcp_server_stream);
@@ -376,7 +376,7 @@ impl<Counterpart: Role> Serve<role::mcp::Client> for McpServerConnection<Counter
             let byte_streams =
                 ByteStreams::new(mcp_client_write.compat_write(), mcp_client_read.compat());
             let _ =
-                <ByteStreams<_, _> as Serve<role::mcp::Client>>::serve(byte_streams, client).await;
+                <ByteStreams<_, _> as ConnectTo<role::mcp::Client>>::connect_to(byte_streams, client).await;
             Ok(())
         };
 

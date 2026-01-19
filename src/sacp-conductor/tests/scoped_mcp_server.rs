@@ -6,7 +6,7 @@
 
 use elizacp::ElizaAgent;
 use sacp::mcp_server::McpServer;
-use sacp::{Agent, Conductor, Proxy, Role, RunWithConnectionTo, Serve};
+use sacp::{Agent, Conductor, Proxy, Role, RunWithConnectionTo, ConnectTo};
 use sacp_conductor::{ConductorImpl, McpBridgeMode, ProxiesAndAgent};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -45,8 +45,8 @@ async fn test_scoped_mcp_server_through_proxy() -> Result<(), sacp::Error> {
 #[tokio::test]
 async fn test_scoped_mcp_server_through_session() -> Result<(), sacp::Error> {
     // Run the client
-    sacp::Client::builder()
-        .run_until(
+    sacp::Client.connect_from()
+        .connect_with(
             ConductorImpl::new_agent(
                 "conductor".to_string(),
                 ProxiesAndAgent::new(ElizaAgent::new(true)),
@@ -118,18 +118,18 @@ fn make_mcp_server<'a, Counterpart: Role>(
         .build()
 }
 
-impl Serve<Conductor> for ScopedProxy {
-    async fn serve(self, client: impl Serve<Proxy>) -> Result<(), sacp::Error> {
+impl ConnectTo<Conductor> for ScopedProxy {
+    async fn connect_to(self, client: impl ConnectTo<Proxy>) -> Result<(), sacp::Error> {
         // Stack-local data that the MCP tool will push to
         let values: Mutex<Vec<String>> = Mutex::new(Vec::new());
 
         // Build the MCP server that captures a reference to collected_values
         let mcp_server = make_mcp_server::<sacp::Conductor>(&values);
 
-        Proxy::builder()
+        Proxy.connect_from()
             .name("scoped-mcp-server")
             .with_mcp_server(mcp_server)
-            .serve(client)
+            .connect_to(client)
             .await
     }
 }

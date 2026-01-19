@@ -22,7 +22,7 @@ use sacp::{AgentPeer, ClientPeer, Component, ProxyToConductor};
 use sacp::schema::{ContentBlock, ContentChunk, SessionNotification, SessionUpdate};
 
 pub async fn run_arrow_proxy(transport: impl Component) -> Result<(), sacp::Error> {
-    Proxy::builder()
+    Proxy.connect_from()
         .name("arrow-proxy")
         .on_receive_notification_from(
             AgentPeer,
@@ -71,10 +71,10 @@ cx.send_notification_to(ClientPeer, modified_notification)?;
 
 ### The Builder Pattern
 
-Proxies are built using `Proxy::builder()`:
+Proxies are built using `Proxy.connect_from()`:
 
 ```rust
-Proxy::builder()
+Proxy.connect_from()
     .name("my-proxy")
     // Handle messages from client (default)
     .on_receive_request(handler, sacp::on_receive_request!())
@@ -117,7 +117,7 @@ A proxy that doesn't register any handlers passes all messages through unchanged
 
 ```rust
 pub async fn run_passthrough(transport: impl Component) -> Result<(), sacp::Error> {
-    Proxy::builder()
+    Proxy.connect_from()
         .name("passthrough")
         .connect_to(transport)?
         .serve()
@@ -132,7 +132,7 @@ Modify prompts before they reach the agent:
 ```rust
 use sacp::schema::{ContentBlock, PromptRequest, TextContent};
 
-Proxy::builder()
+Proxy.connect_from()
     .name("context-injector")
     .on_receive_request(
         async |mut request: PromptRequest, _request_cx, cx| {
@@ -159,7 +159,7 @@ Proxy::builder()
 Modify or filter responses from the agent:
 
 ```rust
-Proxy::builder()
+Proxy.connect_from()
     .name("filter-proxy")
     .on_receive_notification_from(
         AgentPeer,
@@ -211,7 +211,7 @@ pub async fn run_mcp_proxy(transport: impl Component) -> Result<(), sacp::Error>
         )
         .build();
 
-    Proxy::builder()
+    Proxy.connect_from()
         .name("mcp-proxy")
         .with_mcp_server(mcp_server)
         .connect_to(transport)?
@@ -235,7 +235,7 @@ pub struct MyProxy {
 
 impl Component for MyProxy {
     async fn serve(self, client: impl Component) -> Result<(), sacp::Error> {
-        Proxy::builder()
+        Proxy.connect_from()
             .name("my-proxy")
             .on_receive_notification_from(
                 AgentPeer,

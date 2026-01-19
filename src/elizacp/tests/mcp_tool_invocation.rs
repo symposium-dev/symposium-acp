@@ -4,7 +4,7 @@ use elizacp::ElizaAgent;
 use expect_test::expect;
 
 use sacp::{
-    Client, Serve,
+    Client, ConnectTo,
     schema::{
         ContentBlock, InitializeRequest, McpServer, McpServerStdio, NewSessionRequest,
         PromptRequest, ProtocolVersion, SessionNotification, TextContent,
@@ -39,7 +39,7 @@ async fn test_elizacp_mcp_tool_call() -> Result<(), sacp::Error> {
     // Create channel to collect session notifications
     let (notification_tx, mut notification_rx) = futures::channel::mpsc::unbounded();
 
-    Client::builder()
+    Client.connect_from()
         .name("test-client")
         .on_receive_notification(
             {
@@ -55,13 +55,13 @@ async fn test_elizacp_mcp_tool_call() -> Result<(), sacp::Error> {
         )
         .with_spawned(|_cx| async move {
             ElizaAgent::new(true)
-                .serve(sacp::ByteStreams::new(
+                .connect_to(sacp::ByteStreams::new(
                     elizacp_out.compat_write(),
                     elizacp_in.compat(),
                 ))
                 .await
         })
-        .run_until(transport, async |client_cx| {
+        .connect_with(transport, async |client_cx| {
             // Initialize
             let _init_response =
                 recv(client_cx.send_request(InitializeRequest::new(ProtocolVersion::LATEST)))

@@ -23,7 +23,7 @@
 //! # use sacp::{ProxyToConductor, Component};
 //! # use sacp::link::ConductorToProxy;
 //! # async fn example(transport: impl Component<ConductorToProxy>) -> Result<(), sacp::Error> {
-//! Proxy::builder()
+//! Proxy.connect_from()
 //!     .serve(transport)
 //!     .await?;
 //! # Ok(())
@@ -41,7 +41,7 @@
 //! # use sacp::link::ConductorToProxy;
 //! # use sacp_test::ProcessRequest;
 //! # async fn example(transport: impl Component<ConductorToProxy>) -> Result<(), sacp::Error> {
-//! Proxy::builder()
+//! Proxy.connect_from()
 //!     // Intercept requests from the client
 //!     .on_receive_request_from(Client, async |req: ProcessRequest, request_cx, cx| {
 //!         // Modify the request
@@ -74,7 +74,7 @@
 //! # use sacp::mcp_server::McpServer;
 //! # async fn example(transport: impl Component<ConductorToProxy>) -> Result<(), sacp::Error> {
 //! # let my_mcp_server = McpServer::<ProxyToConductor, _>::builder("tools").build();
-//! Proxy::builder()
+//! Proxy.connect_from()
 //!     .with_mcp_server(my_mcp_server)
 //!     .serve(transport)
 //!     .await?;
@@ -90,7 +90,7 @@
 //! # use sacp::schema::NewSessionRequest;
 //! # use sacp::mcp_server::McpServer;
 //! # async fn example(transport: impl Component<ConductorToProxy>) -> Result<(), sacp::Error> {
-//! Proxy::builder()
+//! Proxy.connect_from()
 //!     .on_receive_request_from(Client, async |req: NewSessionRequest, request_cx, cx| {
 //!         let my_mcp_server = McpServer::<ProxyToConductor, _>::builder("tools").build();
 //!         cx.build_session_from(req)

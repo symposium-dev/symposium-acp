@@ -10,7 +10,7 @@ use std::time::Instant;
 
 use fxhash::FxHashMap;
 use sacp::schema::{McpOverAcpMessage, SuccessorMessage};
-use sacp::{jsonrpcmsg, DynServe, JsonRpcMessage, Role, UntypedMessage};
+use sacp::{jsonrpcmsg, DynConnectTo, JsonRpcMessage, Role, UntypedMessage};
 use serde::{Deserialize, Serialize};
 
 use crate::ComponentIndex;
@@ -443,9 +443,9 @@ impl TraceHandle {
         &self,
         proxy_index: ComponentIndex,
         successor_index: ComponentIndex,
-        proxy: impl sacp::Serve<R>,
-    ) -> DynServe<R> {
-        DynServe::new(SnooperComponent::new(
+        proxy: impl sacp::ConnectTo<R>,
+    ) -> DynConnectTo<R> {
+        DynConnectTo::new(SnooperComponent::new(
             proxy,
             {
                 let trace_handle = self.clone();

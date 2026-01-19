@@ -11,7 +11,7 @@
 //! # use sacp::{ClientToAgent, AgentToClient, Component};
 //! # use sacp_test::{ValidateRequest, ValidateResponse};
 //! # async fn example(transport: impl Component<AgentToClient>) -> Result<(), sacp::Error> {
-//! Client::builder()
+//! Client.connect_from()
 //!     .on_receive_request(async |req: ValidateRequest, request_cx, cx| {
 //!         // Process the request
 //!         let is_valid = req.data.len() > 0;
@@ -39,7 +39,7 @@
 //! # use sacp::{ClientToAgent, AgentToClient, Component};
 //! # use sacp_test::StatusUpdate;
 //! # async fn example(transport: impl Component<AgentToClient>) -> Result<(), sacp::Error> {
-//! Client::builder()
+//! Client.connect_from()
 //!     .on_receive_notification(async |notif: StatusUpdate, cx| {
 //!         println!("Status: {}", notif.message);
 //!         Ok(())
@@ -57,7 +57,7 @@
 //! # use sacp::{ClientToAgent, AgentToClient, Component};
 //! # use sacp_test::{MyRequest, MyResponse};
 //! # async fn example(transport: impl Component<AgentToClient>) -> Result<(), sacp::Error> {
-//! # Client::builder()
+//! # Client.connect_from()
 //! #   .on_receive_request(async |req: MyRequest, request_cx, cx| {
 //! // Send a successful response
 //! request_cx.respond(MyResponse { status: "ok".into() })?;
@@ -74,7 +74,7 @@
 //! # use sacp::{ClientToAgent, AgentToClient, Component};
 //! # use sacp_test::{MyRequest, MyResponse};
 //! # async fn example(transport: impl Component<AgentToClient>) -> Result<(), sacp::Error> {
-//! # Client::builder()
+//! # Client.connect_from()
 //! #   .on_receive_request(async |req: MyRequest, request_cx, cx| {
 //! request_cx.respond_with_error(sacp::Error::invalid_params())?;
 //! # Ok(())
@@ -96,7 +96,7 @@
 //! # use sacp::{ClientToAgent, AgentToClient, Component};
 //! # use sacp_test::{ValidateRequest, ValidateResponse, ExecuteRequest, ExecuteResponse};
 //! # async fn example(transport: impl Component<AgentToClient>) -> Result<(), sacp::Error> {
-//! Client::builder()
+//! Client.connect_from()
 //!     .on_receive_request(async |req: ValidateRequest, request_cx, cx| {
 //!         // Handle validation requests
 //!         request_cx.respond(ValidateResponse { is_valid: true, error: None })

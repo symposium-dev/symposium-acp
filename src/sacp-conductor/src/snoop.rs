@@ -1,16 +1,16 @@
 use futures::StreamExt;
 use futures_concurrency::future::TryJoin;
-use sacp::{Channel, DynServe, Role, Serve, jsonrpcmsg};
+use sacp::{Channel, DynConnectTo, Role, ConnectTo, jsonrpcmsg};
 
 pub struct SnooperComponent<R: Role> {
-    base_component: DynServe<R>,
+    base_component: DynConnectTo<R>,
     incoming_message: Box<dyn FnMut(&jsonrpcmsg::Message) -> Result<(), sacp::Error> + Send + Sync>,
     outgoing_message: Box<dyn FnMut(&jsonrpcmsg::Message) -> Result<(), sacp::Error> + Send + Sync>,
 }
 
 impl<R: Role> SnooperComponent<R> {
     pub fn new(
-        base_component: impl Serve<R>,
+        base_component: impl ConnectTo<R>,
         incoming_message: impl FnMut(&jsonrpcmsg::Message) -> Result<(), sacp::Error>
         + Send
         + Sync
@@ -21,20 +21,20 @@ impl<R: Role> SnooperComponent<R> {
         + 'static,
     ) -> Self {
         Self {
-            base_component: DynServe::new(base_component),
+            base_component: DynConnectTo::new(base_component),
             incoming_message: Box::new(incoming_message),
             outgoing_message: Box::new(outgoing_message),
         }
     }
 }
 
-impl<R: Role> Serve<R> for SnooperComponent<R> {
-    async fn serve(mut self, client: impl Serve<R::Counterpart>) -> Result<(), sacp::Error> {
+impl<R: Role> ConnectTo<R> for SnooperComponent<R> {
+    async fn connect_to(mut self, client: impl ConnectTo<R::Counterpart>) -> Result<(), sacp::Error> {
         let (client_a, mut client_b) = Channel::duplex();
 
-        let client_future = client.serve(client_a);
+        let client_future = client.connect_to(client_a);
 
-        let (mut base_channel, base_future) = self.base_component.into_server();
+        let (mut base_channel, base_future) = self.base_component.into_channel_and_future();
 
         // Read messages send by `client`. These are 'incoming' to our wrapped
         // component.

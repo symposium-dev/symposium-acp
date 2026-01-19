@@ -151,7 +151,7 @@ async fn test_bidirectional_communication() {
             let (server_reader, server_writer, client_reader, client_writer) = setup_test_streams();
 
             let side_a_transport = sacp::ByteStreams::new(server_writer, server_reader);
-            let side_a = UntypedRole::builder().on_receive_request(
+            let side_a = UntypedRole.connect_from().on_receive_request(
                 async |request: PingRequest,
                        request_cx: Responder<PongResponse>,
                        _connection_cx: ConnectionTo<UntypedRole>| {
@@ -166,12 +166,12 @@ async fn test_bidirectional_communication() {
 
             // Spawn side_a as server
             tokio::task::spawn_local(async move {
-                side_a.serve(side_a_transport).await.ok();
+                side_a.connect_to(side_a_transport).await.ok();
             });
 
             // Use side_b as client
-            let result = UntypedRole::builder()
-                .run_until(side_b_transport, async |cx| -> Result<(), sacp::Error> {
+            let result = UntypedRole.connect_from()
+                .connect_with(side_b_transport, async |cx| -> Result<(), sacp::Error> {
                     let request = PingRequest { value: 10 };
                     let response_future = recv(cx.send_request(request));
                     let response: Result<PongResponse, _> = response_future.await;
@@ -204,7 +204,7 @@ async fn test_request_ids() {
             let (server_reader, server_writer, client_reader, client_writer) = setup_test_streams();
 
             let server_transport = sacp::ByteStreams::new(server_writer, server_reader);
-            let server = UntypedRole::builder().on_receive_request(
+            let server = UntypedRole.connect_from().on_receive_request(
                 async |request: PingRequest,
                        request_cx: Responder<PongResponse>,
                        _connection_cx: ConnectionTo<UntypedRole>| {
@@ -216,14 +216,14 @@ async fn test_request_ids() {
             );
 
             let client_transport = sacp::ByteStreams::new(client_writer, client_reader);
-            let client = UntypedRole::builder();
+            let client = UntypedRole.connect_from();
 
             tokio::task::spawn_local(async move {
-                server.serve(server_transport).await.ok();
+                server.connect_to(server_transport).await.ok();
             });
 
             let result = client
-                .run_until(client_transport, async |cx| -> Result<(), sacp::Error> {
+                .connect_with(client_transport, async |cx| -> Result<(), sacp::Error> {
                     // Send multiple requests and verify responses match
                     let req1 = PingRequest { value: 1 };
                     let req2 = PingRequest { value: 2 };
@@ -266,7 +266,7 @@ async fn test_out_of_order_responses() {
             let (server_reader, server_writer, client_reader, client_writer) = setup_test_streams();
 
             let server_transport = sacp::ByteStreams::new(server_writer, server_reader);
-            let server = UntypedRole::builder().on_receive_request(
+            let server = UntypedRole.connect_from().on_receive_request(
                 async |request: SlowRequest,
                        request_cx: Responder<SlowResponse>,
                        _connection_cx: ConnectionTo<UntypedRole>| {
@@ -278,14 +278,14 @@ async fn test_out_of_order_responses() {
             );
 
             let client_transport = sacp::ByteStreams::new(client_writer, client_reader);
-            let client = UntypedRole::builder();
+            let client = UntypedRole.connect_from();
 
             tokio::task::spawn_local(async move {
-                server.serve(server_transport).await.ok();
+                server.connect_to(server_transport).await.ok();
             });
 
             let result = client
-                .run_until(client_transport, async |cx| -> Result<(), sacp::Error> {
+                .connect_with(client_transport, async |cx| -> Result<(), sacp::Error> {
                     // Send requests with different delays
                     // Request 1: 100ms delay
                     // Request 2: 50ms delay

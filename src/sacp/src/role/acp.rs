@@ -6,7 +6,7 @@ use crate::jsonrpc::{ConnectFrom, handlers::NullHandler, run::NullRun};
 use crate::role::{HasPeer, RemoteStyle};
 use crate::schema::{InitializeProxyRequest, InitializeRequest, METHOD_INITIALIZE_PROXY};
 use crate::util::MatchMessageFrom;
-use crate::{ConnectionTo, HandleMessageFrom, Handled, MessageCx, Role, RoleId};
+use crate::{ConnectTo, ConnectionTo, HandleMessageFrom, Handled, MessageCx, Role, RoleId};
 
 /// The client role - typically an IDE or CLI that controls an agent.
 ///
@@ -39,8 +39,22 @@ impl Role for Client {
 
 impl Client {
     /// Create a connection builder for a client.
-    pub fn builder() -> ConnectFrom<Client, NullHandler, NullRun> {
-        ConnectFrom::new(Client)
+    pub fn connect_from(self) -> ConnectFrom<Client, NullHandler, NullRun> {
+        ConnectFrom::new(self)
+    }
+
+    /// Connect to `agent` and run `main_fn` with the [`ConnectionTo`].
+    /// Returns the result of `main_fn` (or an error if sometihng goes wrong).
+    /// 
+    /// Equivalent to `self.connect_from().connect_with(agent, main_fn)`.
+    pub async fn connect_with<R>(
+        self,
+        agent: impl ConnectTo<Client>, 
+        main_fn: impl AsyncFnOnce(ConnectionTo<Agent>) -> Result<R, crate::Error>,
+    ) -> Result<R, crate::Error> {
+        self.connect_from()
+            .connect_with(agent, main_fn)
+            .await
     }
 }
 
@@ -92,9 +106,8 @@ impl Role for Agent {
 
 impl Agent {
     /// Create a connection builder for an agent.
-    pub fn builder() -> ConnectFrom<Agent, NullHandler, NullRun> {
-        ConnectFrom::new(Agent)
-    }
+    pub fn connect_from(self) -> ConnectFrom<Agent, NullHandler, NullRun> {
+ConnectFrom::new(self)    }
 }
 
 impl HasPeer<Agent> for Agent {
@@ -139,9 +152,8 @@ impl Role for Proxy {
 
 impl Proxy {
     /// Create a connection builder for a proxy.
-    pub fn builder() -> ConnectFrom<Proxy, NullHandler, NullRun> {
-        ConnectFrom::new(Proxy)
-    }
+    pub fn connect_from(self) -> ConnectFrom<Proxy, NullHandler, NullRun> {
+ConnectFrom::new(self)    }
 }
 
 impl HasPeer<Proxy> for Proxy {
@@ -224,9 +236,8 @@ impl Role for Conductor {
 
 impl Conductor {
     /// Create a connection builder for a conductor.
-    pub fn builder() -> ConnectFrom<Conductor, NullHandler, NullRun> {
-        ConnectFrom::new(Conductor)
-    }
+    pub fn connect_from(self) -> ConnectFrom<Conductor, NullHandler, NullRun> {
+ConnectFrom::new(self)    }
 }
 
 impl HasPeer<Client> for Conductor {
