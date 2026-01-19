@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::schema::{METHOD_SUCCESSOR_MESSAGE, SuccessorMessage};
 use crate::util::json_cast;
-use crate::{ConnectFrom, ConnectionTo, Handled, JsonRpcMessage, Dispatch, UntypedMessage};
+use crate::{Builder, ConnectionTo, Handled, JsonRpcMessage, Dispatch, UntypedMessage};
 
 /// Roles for the ACP protocol.
 pub mod acp;
@@ -40,11 +40,11 @@ pub trait Role: Debug + Clone + Send + Sync + 'static + Eq + Ord + Hash {
     type Counterpart: Role<Counterpart = Self>;
 
     /// Creates a new builder playing this role.
-    fn connect_from(self) -> ConnectFrom<Self>
+    fn builder(self) -> Builder<Self>
     where
         Self: Sized,
     {
-        ConnectFrom::new(self)
+        Builder::new(self)
     }
 
     /// Returns a unique identifier for this role.
@@ -270,8 +270,8 @@ pub struct UntypedRole;
 
 impl UntypedRole {
     /// Creates a new builder for a connection from this role.
-    pub fn connect_from(self) -> ConnectFrom<Self> {
-        ConnectFrom::new(self)
+    pub fn builder(self) -> Builder<Self> {
+        Builder::new(self)
     }
 }
 

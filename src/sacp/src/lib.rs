@@ -25,7 +25,7 @@
 //! use sacp::schema::{InitializeRequest, ProtocolVersion};
 //!
 //! # async fn run(transport: impl sacp::ConnectTo<sacp::Client>) -> Result<(), sacp::Error> {
-//! Client.connect_from()
+//! Client.builder()
 //!     .name("my-client")
 //!     .connect_with(transport, async |cx| {
 //!         // Step 1: Initialize the connection
@@ -111,7 +111,7 @@ pub mod jsonrpcmsg {
 }
 
 pub use jsonrpc::{
-    ByteStreams, Channel, ConnectFrom, ConnectionTo, HandleDispatchFrom, Handled, IntoHandled,
+    ByteStreams, Channel, Builder, ConnectionTo, HandleDispatchFrom, Handled, IntoHandled,
     JsonRpcMessage, JsonRpcNotification, JsonRpcRequest, JsonRpcResponse, Lines, Dispatch,
     NullHandler, Responder, ResponseRouter, SentRequest, UntypedMessage,
     run::{ChainRun, NullRun, RunWithConnectionTo},
@@ -168,7 +168,7 @@ macro_rules! tool_fn {
 }
 
 /// This macro is used for the value of the `to_future_hack` parameter of
-/// [`ConnectFrom::on_receive_request`] and [`ConnectFrom::on_receive_request_from`].
+/// [`Builder::on_receive_request`] and [`Builder::on_receive_request_from`].
 ///
 /// It expands to `|f, req, responder, cx| Box::pin(f(req, responder, cx))`.
 ///
@@ -182,7 +182,7 @@ macro_rules! on_receive_request {
 }
 
 /// This macro is used for the value of the `to_future_hack` parameter of
-/// [`ConnectFrom::on_receive_notification`] and [`ConnectFrom::on_receive_notification_from`].
+/// [`Builder::on_receive_notification`] and [`Builder::on_receive_notification_from`].
 ///
 /// It expands to `|f, notif, cx| Box::pin(f(notif, cx))`.
 ///
@@ -196,7 +196,7 @@ macro_rules! on_receive_notification {
 }
 
 /// This macro is used for the value of the `to_future_hack` parameter of
-/// [`ConnectFrom::on_receive_dispatch`] and [`ConnectFrom::on_receive_dispatch_from`].
+/// [`Builder::on_receive_dispatch`] and [`Builder::on_receive_dispatch_from`].
 ///
 /// It expands to `|f, dispatch, cx| Box::pin(f(dispatch, cx))`.
 ///

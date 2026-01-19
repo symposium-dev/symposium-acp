@@ -45,7 +45,7 @@ async fn test_scoped_mcp_server_through_proxy() -> Result<(), sacp::Error> {
 #[tokio::test]
 async fn test_scoped_mcp_server_through_session() -> Result<(), sacp::Error> {
     // Run the client
-    sacp::Client.connect_from()
+    sacp::Client.builder()
         .connect_with(
             ConductorImpl::new_agent(
                 "conductor".to_string(),
@@ -126,7 +126,7 @@ impl ConnectTo<Conductor> for ScopedProxy {
         // Build the MCP server that captures a reference to collected_values
         let mcp_server = make_mcp_server::<sacp::Conductor>(&values);
 
-        Proxy.connect_from()
+        Proxy.builder()
             .name("scoped-mcp-server")
             .with_mcp_server(mcp_server)
             .connect_to(client)

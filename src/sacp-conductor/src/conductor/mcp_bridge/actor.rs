@@ -41,7 +41,7 @@ impl McpBridgeConnectionActor {
             to_mcp_client_rx,
         } = self;
 
-        let result = mcp::Client.connect_from()
+        let result = mcp::Client.builder()
             .name(format!("mpc-client-to-conductor({connection_id})"))
             // When we receive a message from the MCP client, forward it to the conductor
             .on_receive_dispatch(

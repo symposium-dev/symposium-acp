@@ -73,7 +73,7 @@ impl ConnectTo<Conductor> for InitComponent {
         let config = self.config;
         let config2 = Arc::clone(&config);
 
-        Proxy.connect_from()
+        Proxy.builder()
             .name("init-component")
             // Handle InitializeProxyRequest (we're a proxy)
             .on_receive_request_from(
@@ -121,7 +121,7 @@ async fn run_test_with_components(
 
     let transport = sacp::ByteStreams::new(editor_out.compat_write(), editor_in.compat());
 
-    sacp::Client.connect_from()
+    sacp::Client.builder()
         .name("editor-to-connector")
         .with_spawned(|_cx| async move {
             ConductorImpl::new_agent(
@@ -245,7 +245,7 @@ impl ConnectTo<Conductor> for BadProxy {
         self,
         client: impl ConnectTo<Proxy>,
     ) -> Result<(), sacp::Error> {
-        Proxy.connect_from()
+        Proxy.builder()
             .name("bad-proxy")
             .on_receive_request_from(
                 Client,
@@ -275,7 +275,7 @@ async fn run_bad_proxy_test(
 
     let transport = sacp::ByteStreams::new(editor_out.compat_write(), editor_in.compat());
 
-    sacp::Client.connect_from()
+    sacp::Client.builder()
         .name("editor-to-connector")
         .with_spawned(|_cx| async move {
             ConductorImpl::new_agent(

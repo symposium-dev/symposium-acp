@@ -17,13 +17,13 @@
 //!
 //! # The Connection Builder Pattern
 //!
-//! Every role type has a `connect_from()` method that returns a connection builder.
+//! Every role type has a `builder()` method that returns a connection builder.
 //! The builder lets you configure handlers, then connect to a transport:
 //!
 //! ```
 //! # use sacp::{Client, Agent, ConnectTo};
 //! # async fn example(transport: impl ConnectTo<Client>) -> Result<(), sacp::Error> {
-//! Client.connect_from()
+//! Client.builder()
 //!     .name("my-client")
 //!     .connect_with(transport, async |cx| {
 //!         // Use `cx` to send requests and handle responses
@@ -44,7 +44,7 @@
 //! # use sacp::schema::{InitializeRequest, ProtocolVersion};
 //! # use sacp_test::StatusUpdate;
 //! # async fn example(transport: impl ConnectTo<Client>) -> Result<(), sacp::Error> {
-//! # Client.connect_from().connect_with(transport, async |cx| {
+//! # Client.builder().connect_with(transport, async |cx| {
 //! // Send a request and wait for the response
 //! let response = cx.send_request(InitializeRequest::new(ProtocolVersion::LATEST))
 //!     .block_task()
@@ -71,7 +71,7 @@
 //! # use sacp::{Client, Agent, ConnectTo};
 //! # use sacp_test::MyRequest;
 //! # async fn example(transport: impl ConnectTo<Client>) -> Result<(), sacp::Error> {
-//! # Client.connect_from().connect_with(transport, async |cx| {
+//! # Client.builder().connect_with(transport, async |cx| {
 //! let response = cx.send_request(MyRequest {})
 //!     .block_task()
 //!     .await?;
@@ -90,7 +90,7 @@
 //! # use sacp::{Client, Agent, ConnectTo};
 //! # use sacp_test::MyRequest;
 //! # async fn example(transport: impl ConnectTo<Client>) -> Result<(), sacp::Error> {
-//! # Client.connect_from().connect_with(transport, async |cx| {
+//! # Client.builder().connect_with(transport, async |cx| {
 //! cx.send_request(MyRequest {})
 //!     .on_receiving_result(async |result| {
 //!         match result {

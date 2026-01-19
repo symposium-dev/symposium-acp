@@ -45,9 +45,9 @@ v11 introduces a simpler Role-based API that replaces the previous Link/Peer sys
 
 | v10 | v11 |
 |-----|-----|
-| `ClientToAgent::builder()` | `Client.connect_from()` |
-| `AgentToClient::builder()` | `Agent.connect_from()` |
-| `ProxyToConductor::builder()` | `Proxy.connect_from()` |
+| `ClientToAgent::builder()` | `Client.builder()` |
+| `AgentToClient::builder()` | `Agent.builder()` |
+| `ProxyToConductor::builder()` | `Proxy.builder()` |
 | `.serve(transport)` | `.connect_to(transport)` |
 | `.run_until(transport, closure)` | `.connect_with(transport, closure)` |
 | `.connect_to(transport)?.serve()` | `.connect_to(transport)` |
@@ -93,7 +93,7 @@ ClientToAgent::builder()
 ```rust
 use sacp::{Client, ConnectTo};
 
-Client.connect_from()
+Client.builder()
     .name("my-client")
     .connect_with(transport, async |connection| {
         let response = connection.send_request(MyRequest {}).block_task().await?;
@@ -121,7 +121,7 @@ AgentToClient::builder()
 ```rust
 use sacp::{Agent, ConnectTo};
 
-Agent.connect_from()
+Agent.builder()
     .name("my-agent")
     .on_receive_request(async |req: InitializeRequest, responder, _connection| {
         responder.respond(InitializeResponse::new(req.protocol_version))
@@ -154,7 +154,7 @@ use sacp::{ConnectTo, Agent, Client};
 
 impl ConnectTo<Client> for MyAgent {
     async fn connect_to(self, client: impl ConnectTo<Agent>) -> Result<(), sacp::Error> {
-        Agent.connect_from()
+        Agent.builder()
             .name("my-agent")
             // handlers...
             .connect_to(client)
@@ -190,7 +190,7 @@ use sacp::{Proxy, Client, Agent, Conductor, ConnectTo};
 
 impl ConnectTo<Conductor> for MyProxy {
     async fn connect_to(self, client: impl ConnectTo<Proxy>) -> Result<(), sacp::Error> {
-        Proxy.connect_from()
+        Proxy.builder()
             .name("my-proxy")
             .on_receive_request_from(Client, async |req: MyRequest, responder, cx| {
                 cx.send_request_to(Agent, req)
@@ -407,12 +407,12 @@ In v10, peers were separate types (`AgentPeer`, `ClientPeer`) from links.
 In v11, `Agent`, `Client`, `Proxy`, and `Conductor` are both:
 - Role types (used as type parameters)
 - Peer selectors (used in `send_request_to(Agent, ...)`)
-- Builder starters (`Agent.connect_from()`)
+- Builder starters (`Agent.builder()`)
 
 ### Builder Method Naming
 
 The new method names better describe what they do:
-- `connect_from()` - "Start building a connection from this role"
+- `builder()` - "Start building a connection from this role"
 - `connect_to(transport)` - "Connect to this transport (reactive mode)"
 - `connect_with(transport, closure)` - "Connect with this transport and run closure (active mode)"
 
@@ -423,9 +423,9 @@ The new method names better describe what they do:
 1. **Start with imports**: Update your `use` statements first to get the new types in scope.
 
 2. **Search and replace**: Many renames are mechanical:
-   - `ClientToAgent::builder()` → `Client.connect_from()`
-   - `AgentToClient::builder()` → `Agent.connect_from()`
-   - `ProxyToConductor::builder()` → `Proxy.connect_from()`
+   - `ClientToAgent::builder()` → `Client.builder()`
+   - `AgentToClient::builder()` → `Agent.builder()`
+   - `ProxyToConductor::builder()` → `Proxy.builder()`
    - `.serve(` → `.connect_to(`
    - `.run_until(` → `.connect_with(`
    - `request_cx` → `responder`

@@ -5,7 +5,7 @@
 
 use crate::{
     Handled, RoleId,
-    jsonrpc::{ConnectFrom, handlers::NullHandler, run::NullRun},
+    jsonrpc::{Builder, handlers::NullHandler, run::NullRun},
     role::{HasPeer, RemoteStyle, Role},
 };
 
@@ -38,8 +38,9 @@ impl Role for Client {
 
 impl Client {
     /// Create a connection builder for an MCP client.
-    pub fn connect_from(self) -> ConnectFrom<Client, NullHandler, NullRun> {
-ConnectFrom::new(self)    }
+    pub fn builder(self) -> Builder<Client, NullHandler, NullRun> {
+        Builder::new(self)
+    }
 }
 
 impl HasPeer<Client> for Client {
@@ -77,8 +78,9 @@ impl Role for Server {
 
 impl Server {
     /// Create a connection builder for an MCP server.
-    pub fn connect_from(self) -> ConnectFrom<Server, NullHandler, NullRun> {
-ConnectFrom::new(self)    }
+    pub fn builder(self) -> Builder<Server, NullHandler, NullRun> {
+        Builder::new(self)
+    }
 }
 
 impl HasPeer<Server> for Server {

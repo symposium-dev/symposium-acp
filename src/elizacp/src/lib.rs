@@ -368,7 +368,7 @@ fn parse_tool_call(input: &str) -> Option<(String, String, String)> {
 
 impl ConnectTo<Client> for ElizaAgent {
     async fn connect_to(self, client: impl ConnectTo<Agent>) -> Result<(), sacp::Error> {
-        Agent.connect_from()
+        Agent.builder()
             .name("elizacp")
             .on_receive_request(
                 async |initialize: InitializeRequest, responder, _cx| {

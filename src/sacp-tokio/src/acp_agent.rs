@@ -57,7 +57,7 @@ pub enum LineDirection {
 ///
 /// Use as a component to connect to an external agent:
 /// ```ignore
-/// use sacp::{Client, ConnectFrom};
+/// use sacp::{Client, Builder};
 /// use sacp_tokio::AcpAgent;
 /// use std::str::FromStr;
 ///
@@ -65,7 +65,7 @@ pub enum LineDirection {
 /// let agent = AcpAgent::from_str("python my_agent.py")?;
 ///
 /// // The agent process will be spawned automatically when connected
-/// Client.connect_from()
+/// Client.builder()
 ///     .connect_to(agent)
 ///     .await?
 ///     .connect_with(|cx| async move {

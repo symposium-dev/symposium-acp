@@ -4,7 +4,7 @@ use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
 
 #[tokio::main]
 async fn main() -> Result<(), sacp::Error> {
-    Agent.connect_from()
+    Agent.builder()
         .name("my-agent") // for debugging
         .on_receive_request(
             async move |initialize: InitializeRequest, responder, _connection| {

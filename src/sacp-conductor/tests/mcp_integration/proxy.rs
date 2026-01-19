@@ -37,7 +37,7 @@ impl ConnectTo<Conductor> for ProxyComponent {
             )
             .build();
 
-        sacp::Proxy.connect_from()
+        sacp::Proxy.builder()
             .name("proxy-component")
             .with_mcp_server(test_server)
             .connect_to(client)

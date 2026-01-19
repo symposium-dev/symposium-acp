@@ -226,7 +226,7 @@ async fn test_trace_mcp_tool_call() -> Result<(), sacp::Error> {
 
     // Run the client interaction
     let test_result = tokio::time::timeout(std::time::Duration::from_secs(30), async move {
-        sacp::Client.connect_from()
+        sacp::Client.builder()
             .name("test-client")
             .on_receive_notification(
                 {

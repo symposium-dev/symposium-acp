@@ -1,6 +1,6 @@
 ---
 name: sacp-v2-migration
-description: Migrate Rust code from sacp v1.x to v2.0 role-based API. Use when upgrading sacp dependencies, fixing ConnectFrom errors, or when code references MessageAndCx or old connection patterns.
+description: Migrate Rust code from sacp v1.x to v2.0 role-based API. Use when upgrading sacp dependencies, fixing Builder errors, or when code references MessageAndCx or old connection patterns.
 ---
 
 # SACP v2 Migration
@@ -16,9 +16,9 @@ Apply these transformations when migrating from sacp v1.x to v2.0:
 JrHandlerChain::new()
 
 // After - choose based on what you're building:
-Agent.connect_from()     // agent serving a client
-Client.connect_from()     // client connecting to agent
-UntypedRole.connect_from()       // tests or dynamic scenarios
+Agent.builder()     // agent serving a client
+Client.builder()     // client connecting to agent
+UntypedRole.builder()       // tests or dynamic scenarios
 ```
 
 ### 2. Add connection_cx to all handlers

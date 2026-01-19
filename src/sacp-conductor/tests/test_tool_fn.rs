@@ -45,7 +45,7 @@ impl<R: RunWithConnectionTo<Conductor> + 'static + Send> ConnectTo<Conductor>
         self,
         client: impl ConnectTo<Proxy>,
     ) -> Result<(), sacp::Error> {
-        Proxy.connect_from()
+        Proxy.builder()
             .name("greet-proxy")
             .with_mcp_server(self.mcp_server)
             .connect_to(client)

@@ -121,7 +121,7 @@ use sacp::{
     Proxy, Role, RunWithConnectionTo, role::HasPeer, util::MatchDispatch,
 };
 use sacp::{
-    ConnectFrom, ConnectionTo, JsonRpcNotification, JsonRpcRequest, SentRequest, UntypedMessage,
+    Builder, ConnectionTo, JsonRpcNotification, JsonRpcRequest, SentRequest, UntypedMessage,
 };
 use sacp::{
     HandleDispatchFrom,
@@ -251,7 +251,7 @@ impl<Host: ConductorHostRole> ConductorImpl<Host> {
             host: self.host.clone(),
         };
 
-        ConnectFrom::new_with(
+        Builder::new_with(
             self.host.clone(),
             ConductorMessageHandler {
                 conductor_tx,
@@ -729,7 +729,7 @@ where
                 0,
                 ComponentIndex::Client,
                 ComponentIndex::Agent,
-                Proxy.connect_from(),
+                Proxy.builder(),
             )?;
         } else {
             // Spawn each proxy component
@@ -778,11 +778,11 @@ where
     fn connection_to_proxy(
         &mut self,
         component_index: usize,
-    ) -> ConnectFrom<Conductor, impl HandleDispatchFrom<Proxy> + 'static> {
+    ) -> Builder<Conductor, impl HandleDispatchFrom<Proxy> + 'static> {
         type SuccessorDispatch = Dispatch<SuccessorMessage, SuccessorMessage>;
         let mut conductor_tx = self.conductor_tx.clone();
         Conductor
-            .connect_from()
+            .builder()
             .name(format!("conductor-to-component({})", component_index))
             // Intercept messages sent by the proxy.
             .on_receive_dispatch(
@@ -1362,7 +1362,7 @@ impl ConductorHostRole for Agent {
 
         let connection_to_agent = client_connection.spawn_connection(
             Client
-                .connect_from()
+                .builder()
                 .name("conductor-to-agent")
                 // Intercept agent-to-client messages from the agent.
                 .on_receive_dispatch(

@@ -12,7 +12,7 @@ use sacp::{Agent, Client, Proxy, ConnectTo};
 ///
 /// * `transport` - Component to the predecessor (conductor or another proxy)
 pub async fn run_arrow_proxy(transport: impl ConnectTo<Proxy> + 'static) -> Result<(), sacp::Error> {
-    Proxy.connect_from()
+    Proxy.builder()
         .name("arrow-proxy")
         // Intercept session notifications from successor (agent) and modify them.
         // Using on_receive_notification_from(Agent, ...) automatically unwraps

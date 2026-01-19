@@ -100,7 +100,7 @@ async fn test_hello_world() {
             let (server_reader, server_writer, client_reader, client_writer) = setup_test_streams();
 
             let server_transport = sacp::ByteStreams::new(server_writer, server_reader);
-            let server = UntypedRole.connect_from().on_receive_request(
+            let server = UntypedRole.builder().on_receive_request(
                 async move |request: PingRequest,
                             responder: Responder<PongResponse>,
                             _connection: ConnectionTo<UntypedRole>| {
@@ -113,7 +113,7 @@ async fn test_hello_world() {
             );
 
             let client_transport = sacp::ByteStreams::new(client_writer, client_reader);
-            let client = UntypedRole.connect_from();
+            let client = UntypedRole.builder();
 
             // Spawn the server in the background
             tokio::task::spawn_local(async move {
@@ -190,7 +190,7 @@ async fn test_notification() {
             let (server_reader, server_writer, client_reader, client_writer) = setup_test_streams();
 
             let server_transport = sacp::ByteStreams::new(server_writer, server_reader);
-            let server = UntypedRole.connect_from().on_receive_notification(
+            let server = UntypedRole.builder().on_receive_notification(
                 {
                     let logs = logs_clone.clone();
                     async move |notification: LogNotification, _cx: ConnectionTo<UntypedRole>| {
@@ -202,7 +202,7 @@ async fn test_notification() {
             );
 
             let client_transport = sacp::ByteStreams::new(client_writer, client_reader);
-            let client = UntypedRole.connect_from();
+            let client = UntypedRole.builder();
 
             tokio::task::spawn_local(async move {
                 if let Err(e) = server.connect_to(server_transport).await {
@@ -264,7 +264,7 @@ async fn test_multiple_sequential_requests() {
             let (server_reader, server_writer, client_reader, client_writer) = setup_test_streams();
 
             let server_transport = sacp::ByteStreams::new(server_writer, server_reader);
-            let server = UntypedRole.connect_from().on_receive_request(
+            let server = UntypedRole.builder().on_receive_request(
                 async |request: PingRequest,
                        responder: Responder<PongResponse>,
                        _connection: ConnectionTo<UntypedRole>| {
@@ -277,7 +277,7 @@ async fn test_multiple_sequential_requests() {
             );
 
             let client_transport = sacp::ByteStreams::new(client_writer, client_reader);
-            let client = UntypedRole.connect_from();
+            let client = UntypedRole.builder();
 
             tokio::task::spawn_local(async move {
                 if let Err(e) = server.connect_to(server_transport).await {
@@ -323,7 +323,7 @@ async fn test_concurrent_requests() {
             let (server_reader, server_writer, client_reader, client_writer) = setup_test_streams();
 
             let server_transport = sacp::ByteStreams::new(server_writer, server_reader);
-            let server = UntypedRole.connect_from().on_receive_request(
+            let server = UntypedRole.builder().on_receive_request(
                 async |request: PingRequest,
                        responder: Responder<PongResponse>,
                        _connection: ConnectionTo<UntypedRole>| {
@@ -336,7 +336,7 @@ async fn test_concurrent_requests() {
             );
 
             let client_transport = sacp::ByteStreams::new(client_writer, client_reader);
-            let client = UntypedRole.connect_from();
+            let client = UntypedRole.builder();
 
             tokio::task::spawn_local(async move {
                 if let Err(e) = server.connect_to(server_transport).await {

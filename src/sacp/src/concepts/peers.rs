@@ -19,7 +19,7 @@
 //! # use sacp::{Client, Agent, ConnectTo};
 //! # use sacp::schema::{InitializeRequest, ProtocolVersion};
 //! # async fn example(transport: impl ConnectTo<Client>) -> Result<(), sacp::Error> {
-//! # Client.connect_from().connect_with(transport, async |cx| {
+//! # Client.builder().connect_with(transport, async |cx| {
 //! // As a client
 //! cx.send_request(InitializeRequest::new(ProtocolVersion::LATEST));
 //! # Ok(())
@@ -48,7 +48,7 @@
 //! # use sacp::{Client, Agent, ConnectTo};
 //! # use sacp_test::MyRequest;
 //! # async fn example(transport: impl ConnectTo<Client>) -> Result<(), sacp::Error> {
-//! # Client.connect_from().connect_with(transport, async |cx| {
+//! # Client.builder().connect_with(transport, async |cx| {
 //! # let req = MyRequest {};
 //! // These are equivalent for Client:
 //! cx.send_request(req.clone());
@@ -73,7 +73,7 @@
 //! # use sacp::{Proxy, Client, Agent, Conductor, ConnectTo};
 //! # use sacp_test::MyRequest;
 //! # async fn example(transport: impl ConnectTo<Proxy>) -> Result<(), sacp::Error> {
-//! Proxy.connect_from()
+//! Proxy.builder()
 //!     // Receive a request from the client
 //!     .on_receive_request_from(Client, async |req: MyRequest, responder, cx| {
 //!         // Forward it to the agent

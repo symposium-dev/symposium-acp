@@ -66,7 +66,7 @@ where
     }
 }
 
-/// A RunIn created from a closure via [`with_spawned`](crate::ConnectFrom::with_spawned).
+/// A RunIn created from a closure via [`with_spawned`](crate::Builder::with_spawned).
 pub struct SpawnedRun<F> {
     task_fn: F,
     location: &'static std::panic::Location<'static>,

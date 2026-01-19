@@ -57,7 +57,7 @@ async fn test_acp_agent_debug_callback() -> Result<(), Box<dyn std::error::Error
 
     let transport = sacp::ByteStreams::new(client_out.compat_write(), client_in.compat());
 
-    Client.connect_from()
+    Client.builder()
         .name("test-client")
         .with_spawned(|_cx| async move {
             ConnectTo::<Client>::connect_to(

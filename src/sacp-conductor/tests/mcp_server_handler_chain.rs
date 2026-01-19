@@ -89,7 +89,7 @@ impl ConnectTo<Conductor> for ProxyWithMcpAndHandler {
             )
             .build();
 
-        sacp::Proxy.connect_from()
+        sacp::Proxy.builder()
             .name("proxy-with-mcp-and-handler")
             // Add the MCP server
             .with_mcp_server(mcp_server)
@@ -124,7 +124,7 @@ impl ConnectTo<Client> for SimpleAgent {
         self,
         client: impl ConnectTo<Agent>,
     ) -> Result<(), sacp::Error> {
-        Agent.connect_from()
+        Agent.builder()
             .name("simple-agent")
             .on_receive_request(
                 async |request: InitializeRequest, responder, _cx| {
@@ -158,7 +158,7 @@ async fn run_test(
 
     let transport = sacp::ByteStreams::new(editor_out.compat_write(), editor_in.compat());
 
-    sacp::Client.connect_from()
+    sacp::Client.builder()
         .name("editor-to-conductor")
         .with_spawned(|_cx| async move {
             ConductorImpl::new_agent(

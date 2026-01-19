@@ -39,7 +39,7 @@ async fn test_elizacp_mcp_tool_call() -> Result<(), sacp::Error> {
     // Create channel to collect session notifications
     let (notification_tx, mut notification_rx) = futures::channel::mpsc::unbounded();
 
-    Client.connect_from()
+    Client.builder()
         .name("test-client")
         .on_receive_notification(
             {

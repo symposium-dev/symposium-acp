@@ -86,7 +86,7 @@ pub async fn prompt_with_callback(
     let prompt_text = prompt_text.to_string();
 
     // Run the client
-    Client.connect_from()
+    Client.builder()
         .on_receive_dispatch(
             async |message: Dispatch<UntypedMessage, UntypedMessage>, _cx| {
                 tracing::trace!("received: {:?}", message.message());

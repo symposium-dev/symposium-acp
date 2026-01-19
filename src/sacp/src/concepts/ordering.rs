@@ -61,7 +61,7 @@
 //! # use sacp::{Client, Agent, ConnectTo};
 //! # use sacp_test::MyRequest;
 //! # async fn example(transport: impl ConnectTo<Client>) -> Result<(), sacp::Error> {
-//! # Client.connect_from().connect_with(transport, async |cx| {
+//! # Client.builder().connect_with(transport, async |cx| {
 //! cx.spawn({
 //!     let cx = cx.clone();
 //!     async move {
@@ -90,7 +90,7 @@
 //! # use sacp::{Client, Agent, ConnectTo};
 //! # use sacp_test::MyRequest;
 //! # async fn example(transport: impl ConnectTo<Client>) -> Result<(), sacp::Error> {
-//! # Client.connect_from().connect_with(transport, async |cx| {
+//! # Client.builder().connect_with(transport, async |cx| {
 //! cx.send_request(MyRequest {})
 //!     .on_receiving_result(async |result| {
 //!         // Dispatch loop is blocked until this completes
@@ -134,7 +134,7 @@
 //! ```
 //! # use sacp::{Client, Agent, ConnectTo};
 //! # async fn example(transport: impl ConnectTo<Client>) -> Result<(), sacp::Error> {
-//! # Client.connect_from().connect_with(transport, async |cx| {
+//! # Client.builder().connect_with(transport, async |cx| {
 //! cx.build_session_cwd()?
 //!     .block_task()
 //!     .run_until(async |mut session| {
@@ -164,8 +164,8 @@
 //!
 //! - [Proxies and Conductors](super::proxies) - Building message interceptors
 //!
-//! [`on_receive_request`]: crate::ConnectFrom::on_receive_request
-//! [`on_receive_notification`]: crate::ConnectFrom::on_receive_notification
+//! [`on_receive_request`]: crate::Builder::on_receive_request
+//! [`on_receive_notification`]: crate::Builder::on_receive_notification
 //! [`on_receiving_result`]: crate::SentRequest::on_receiving_result
 //! [`on_receiving_ok_result`]: crate::SentRequest::on_receiving_ok_result
 //! [`on_session_start`]: crate::SessionBuilder::on_session_start

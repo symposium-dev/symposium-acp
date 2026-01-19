@@ -72,7 +72,7 @@ where
             let connection_id = connection_id.clone();
             let acp_connection = acp_connection.clone();
 
-            role::mcp::Client.connect_from()
+            role::mcp::Client.builder()
                 .on_receive_dispatch(
                     async move |message: Dispatch, _mcp_connection| {
                         // Wrap the message in McpOverAcp{Request,Notification} and forward to successor

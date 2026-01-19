@@ -11,7 +11,7 @@
 //! ```
 //! # use sacp::{Client, Agent, ConnectTo};
 //! # async fn example(transport: impl ConnectTo<Client>) -> Result<(), sacp::Error> {
-//! # Client.connect_from().connect_with(transport, async |cx| {
+//! # Client.builder().connect_with(transport, async |cx| {
 //! cx.build_session_cwd()?          // Use current working directory
 //!     .block_task()                // Mark as blocking
 //!     .run_until(async |session| {
@@ -30,7 +30,7 @@
 //! ```
 //! # use sacp::{Client, Agent, ConnectTo};
 //! # async fn example(transport: impl ConnectTo<Client>) -> Result<(), sacp::Error> {
-//! # Client.connect_from().connect_with(transport, async |cx| {
+//! # Client.builder().connect_with(transport, async |cx| {
 //! cx.build_session("/path/to/project")
 //!     .block_task()
 //!     .run_until(async |session| { Ok(()) })
@@ -49,7 +49,7 @@
 //! ```
 //! # use sacp::{Client, Agent, ConnectTo};
 //! # async fn example(transport: impl ConnectTo<Client>) -> Result<(), sacp::Error> {
-//! # Client.connect_from().connect_with(transport, async |cx| {
+//! # Client.builder().connect_with(transport, async |cx| {
 //! # cx.build_session_cwd()?.block_task()
 //! .run_until(async |mut session| {
 //!     // Send a prompt
@@ -82,7 +82,7 @@
 //! # use sacp::mcp_server::McpServer;
 //! # async fn example(transport: impl ConnectTo<Client>) -> Result<(), sacp::Error> {
 //! # let my_mcp_server = McpServer::<Agent, _>::builder("tools").build();
-//! # Client.connect_from().connect_with(transport, async |cx| {
+//! # Client.builder().connect_with(transport, async |cx| {
 //! cx.build_session_cwd()?
 //!     .with_mcp_server(my_mcp_server)?
 //!     .block_task()
@@ -105,7 +105,7 @@
 //! # use sacp::{Client, Agent, ConnectTo};
 //! # use sacp::schema::NewSessionRequest;
 //! # async fn example(transport: impl ConnectTo<Client>) -> Result<(), sacp::Error> {
-//! Client.connect_from()
+//! Client.builder()
 //!     .on_receive_request(async |req: NewSessionRequest, responder, cx| {
 //!         cx.build_session_from(req)
 //!             .on_session_start(async |session| {

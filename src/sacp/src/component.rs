@@ -21,7 +21,7 @@
 //! // An agent connects to clients
 //! impl ConnectTo<Client> for MyAgent {
 //!     async fn connect_to(self, client: impl ConnectTo<Agent>) -> Result<(), sacp::Error> {
-//!         sacp::Agent.connect_from()
+//!         sacp::Agent.builder()
 //!             .name("my-agent")
 //!             // configure handlers here
 //!             .connect_to(client)
@@ -78,7 +78,7 @@ use crate::{Channel, role::Role};
 /// impl Serve<Client> for MyAgent {
 ///     async fn serve(self, client: impl Serve<Client::Counterpart>) -> Result<(), sacp::Error> {
 ///         // Set up connection that forwards to client
-///         sacp::Agent.connect_from()
+///         sacp::Agent.builder()
 ///             .name("my-agent")
 ///             .on_receive_request(async |req: MyRequest, cx| {
 ///                 // Handle request
@@ -106,7 +106,7 @@ use crate::{Channel, role::Role};
 ///
 /// [`ByteStreams`]: crate::ByteStreams
 /// [`AcpAgent`]: https://docs.rs/sacp-tokio/latest/sacp_tokio/struct.AcpAgent.html
-/// [`ConnectFrom`]: crate::ConnectFrom
+/// [`Builder`]: crate::Builder
 pub trait ConnectTo<R: Role>: Send + 'static {
     /// Serve this component by forwarding to a client component.
     ///

@@ -14,7 +14,7 @@
 //! let server = McpServer::from_rmcp("my-server", MyRmcpService::new);
 //!
 //! // Use as a handler
-//! Proxy.connect_from()
+//! Proxy.builder()
 //!     .with_handler(server)
 //!     .serve(client)
 //!     .await?;

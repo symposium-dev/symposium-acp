@@ -207,8 +207,8 @@ pub fn process(data: &str) -> Result<String, crate::Error> {
 }
 
 // Helper to create a mock connection for examples
-pub fn mock_connection() -> ConnectFrom<Client> {
-    Client.connect_from()
+pub fn mock_connection() -> Builder<Client> {
+    Client.builder()
 }
 
 pub trait Make {

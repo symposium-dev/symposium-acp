@@ -2,7 +2,7 @@ use std::{fmt::Debug, hash::Hash};
 
 use agent_client_protocol_schema::{NewSessionRequest, NewSessionResponse, SessionId};
 
-use crate::jsonrpc::{ConnectFrom, handlers::NullHandler, run::NullRun};
+use crate::jsonrpc::{Builder, handlers::NullHandler, run::NullRun};
 use crate::role::{HasPeer, RemoteStyle};
 use crate::schema::{InitializeProxyRequest, InitializeRequest, METHOD_INITIALIZE_PROXY};
 use crate::util::MatchDispatchFrom;
@@ -39,20 +39,20 @@ impl Role for Client {
 
 impl Client {
     /// Create a connection builder for a client.
-    pub fn connect_from(self) -> ConnectFrom<Client, NullHandler, NullRun> {
-        ConnectFrom::new(self)
+    pub fn builder(self) -> Builder<Client, NullHandler, NullRun> {
+        Builder::new(self)
     }
 
     /// Connect to `agent` and run `main_fn` with the [`ConnectionTo`].
     /// Returns the result of `main_fn` (or an error if sometihng goes wrong).
     ///
-    /// Equivalent to `self.connect_from().connect_with(agent, main_fn)`.
+    /// Equivalent to `self.builder().connect_with(agent, main_fn)`.
     pub async fn connect_with<R>(
         self,
         agent: impl ConnectTo<Client>,
         main_fn: impl AsyncFnOnce(ConnectionTo<Agent>) -> Result<R, crate::Error>,
     ) -> Result<R, crate::Error> {
-        self.connect_from().connect_with(agent, main_fn).await
+        self.builder().connect_with(agent, main_fn).await
     }
 }
 
@@ -104,8 +104,8 @@ impl Role for Agent {
 
 impl Agent {
     /// Create a connection builder for an agent.
-    pub fn connect_from(self) -> ConnectFrom<Agent, NullHandler, NullRun> {
-        ConnectFrom::new(self)
+    pub fn builder(self) -> Builder<Agent, NullHandler, NullRun> {
+        Builder::new(self)
     }
 }
 
@@ -151,8 +151,8 @@ impl Role for Proxy {
 
 impl Proxy {
     /// Create a connection builder for a proxy.
-    pub fn connect_from(self) -> ConnectFrom<Proxy, NullHandler, NullRun> {
-        ConnectFrom::new(self)
+    pub fn builder(self) -> Builder<Proxy, NullHandler, NullRun> {
+        Builder::new(self)
     }
 }
 
@@ -236,8 +236,8 @@ impl Role for Conductor {
 
 impl Conductor {
     /// Create a connection builder for a conductor.
-    pub fn connect_from(self) -> ConnectFrom<Conductor, NullHandler, NullRun> {
-        ConnectFrom::new(self)
+    pub fn builder(self) -> Builder<Conductor, NullHandler, NullRun> {
+        Builder::new(self)
     }
 }
 

@@ -185,7 +185,7 @@ where
     /// # use sacp::{Client, Agent, ConnectTo};
     /// # use sacp::mcp_server::McpServer;
     /// # async fn example(transport: impl ConnectTo<Client>) -> Result<(), sacp::Error> {
-    /// # Client.connect_from().connect_with(transport, async |cx| {
+    /// # Client.builder().connect_with(transport, async |cx| {
     /// # let mcp = McpServer::<Agent, _>::builder("tools").build();
     /// cx.build_session_cwd()?
     ///     .with_mcp_server(mcp)?
@@ -260,7 +260,7 @@ where
     /// # use sacp::schema::NewSessionRequest;
     /// # use sacp::mcp_server::McpServer;
     /// # async fn example(transport: impl ConnectTo<Proxy>) -> Result<(), sacp::Error> {
-    /// Proxy.connect_from()
+    /// Proxy.builder()
     ///     .on_receive_request_from(Client, async |request: NewSessionRequest, responder, cx| {
     ///         let mcp = McpServer::<Conductor, _>::builder("tools").build();
     ///         cx.build_session_from(request)
@@ -340,7 +340,7 @@ where
     /// [`start_session`](Self::start_session) which block the current task.
     ///
     /// This should not be used from inside a message handler like
-    /// [`ConnectFrom::on_receive_request`](`crate::ConnectFrom::on_receive_request`) or [`HandleDispatchFrom`]
+    /// [`Builder::on_receive_request`](`crate::Builder::on_receive_request`) or [`HandleDispatchFrom`]
     /// implementations.
     pub fn block_task(self) -> SessionBuilder<Counterpart, R, Blocking> {
         SessionBuilder {

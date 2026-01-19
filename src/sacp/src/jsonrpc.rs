@@ -104,14 +104,14 @@ use crate::{Agent, Client, ConnectTo, RoleId};
 ///
 /// # Handler Registration
 ///
-/// Most users register handlers using the builder methods on [`ConnectFrom`]:
+/// Most users register handlers using the builder methods on [`Builder`]:
 ///
 /// ```
 /// # use sacp::{Agent, Client, ConnectTo};
 /// # use sacp::schema::{InitializeRequest, InitializeResponse, AgentCapabilities};
 /// # use sacp_test::StatusUpdate;
 /// # async fn example(transport: impl ConnectTo<Agent>) -> Result<(), sacp::Error> {
-/// Agent.connect_from()
+/// Agent.builder()
 ///     .on_receive_request(async |req: InitializeRequest, responder, cx| {
 ///         responder.respond(
 ///             InitializeResponse::new(req.protocol_version)
@@ -170,7 +170,7 @@ use crate::{Agent, Client, ConnectTo, RoleId};
 /// # use sacp::{Client, Agent, ConnectTo};
 /// # use sacp_test::{expensive_operation, ProcessComplete};
 /// # async fn example(transport: impl ConnectTo<Client>) -> Result<(), sacp::Error> {
-/// # Client.connect_from().connect_with(transport, async |cx| {
+/// # Client.builder().connect_with(transport, async |cx| {
 /// cx.spawn({
 ///     let connection = cx.clone();
 ///     async move {
@@ -188,7 +188,7 @@ use crate::{Agent, Client, ConnectTo, RoleId};
 /// A handler for incoming JSON-RPC messages.
 ///
 /// This trait is implemented by types that can process incoming messages on a connection.
-/// Handlers are registered with a [`ConnectFrom`] and are called in order until
+/// Handlers are registered with a [`Builder`] and are called in order until
 /// one claims the message.
 ///
 /// The type parameter `R` is the role this handler plays - who I am.
@@ -242,10 +242,10 @@ where
 
 /// A JSON-RPC connection that can act as either a server, client, or both.
 ///
-/// [`ConnectFrom`] provides a builder-style API for creating JSON-RPC servers and clients.
-/// You start by calling `Role.connect_from()` (e.g., `Client.connect_from()`), then add message
-/// handlers, and finally drive the connection with either [`connect_to`](ConnectFrom::connect_to)
-/// or [`connect_with`](ConnectFrom::connect_with), providing a component implementation
+/// [`Builder`] provides a builder-style API for creating JSON-RPC servers and clients.
+/// You start by calling `Role.builder()` (e.g., `Client.builder()`), then add message
+/// handlers, and finally drive the connection with either [`connect_to`](Builder::connect_to)
+/// or [`connect_with`](Builder::connect_with), providing a component implementation
 /// (e.g., [`ByteStreams`] for byte streams).
 ///
 /// # JSON-RPC Primer
@@ -398,7 +398,7 @@ where
 ///
 /// ## The Event Loop
 ///
-/// [`ConnectFrom`] runs all handler callbacks on a single async task - the event loop.
+/// [`Builder`] runs all handler callbacks on a single async task - the event loop.
 /// While a handler is running, **the server cannot receive new messages**. This means
 /// any blocking or expensive work in your handlers will stall the entire connection.
 ///
@@ -511,7 +511,7 @@ where
 ///
 /// ```no_run
 /// # use sacp::UntypedRole;
-/// # use sacp::{ConnectFrom};
+/// # use sacp::{Builder};
 /// # use sacp::ByteStreams;
 /// # use sacp::schema::{InitializeRequest, InitializeResponse, PromptRequest, PromptResponse, SessionNotification};
 /// # use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
@@ -521,7 +521,7 @@ where
 ///     tokio::io::stdin().compat(),
 /// );
 ///
-/// UntypedRole.connect_from()
+/// UntypedRole.builder()
 ///     .name("my-agent")  // Optional: for debugging logs
 ///     .on_receive_request(async |init: InitializeRequest, responder, cx| {
 ///         let response: InitializeResponse = todo!();
@@ -542,7 +542,7 @@ where
 /// # }
 /// ```
 #[must_use]
-pub struct ConnectFrom<Host: Role, Handler = NullHandler, Runner = NullRun>
+pub struct Builder<Host: Role, Handler = NullHandler, Runner = NullRun>
 where
     Handler: HandleDispatchFrom<Host::Counterpart>,
     Runner: RunWithConnectionTo<Host::Counterpart>,
@@ -560,7 +560,7 @@ where
     responder: Runner,
 }
 
-impl<Host: Role> ConnectFrom<Host, NullHandler, NullRun> {
+impl<Host: Role> Builder<Host, NullHandler, NullRun> {
     /// Create a new connection builder for the given role.
     /// This type follows a builder pattern; use other methods to configure and then invoke
     /// [`Self::connect_to`] (to use as a server) or [`Self::connect_with`] to use as a client.
@@ -574,7 +574,7 @@ impl<Host: Role> ConnectFrom<Host, NullHandler, NullRun> {
     }
 }
 
-impl<Host: Role, Handler> ConnectFrom<Host, Handler, NullRun>
+impl<Host: Role, Handler> Builder<Host, Handler, NullRun>
 where
     Handler: HandleDispatchFrom<Host::Counterpart>,
 {
@@ -593,7 +593,7 @@ impl<
     Host: Role,
     Handler: HandleDispatchFrom<Host::Counterpart>,
     Runner: RunWithConnectionTo<Host::Counterpart>,
-> ConnectFrom<Host, Handler, Runner>
+> Builder<Host, Handler, Runner>
 {
     /// Set the "name" of this connection -- used only for debugging logs.
     pub fn name(mut self, name: impl ToString) -> Self {
@@ -601,23 +601,23 @@ impl<
         self
     }
 
-    /// Merge another [`ConnectFrom`] into this one.
+    /// Merge another [`Builder`] into this one.
     ///
     /// Prefer [`Self::on_receive_request`] or [`Self::on_receive_notification`].
     /// This is a low-level method that is not intended for general use.
     pub fn with_connection_builder(
         self,
-        other: ConnectFrom<
+        other: Builder<
             Host,
             impl HandleDispatchFrom<Host::Counterpart>,
             impl RunWithConnectionTo<Host::Counterpart>,
         >,
-    ) -> ConnectFrom<
+    ) -> Builder<
         Host,
         impl HandleDispatchFrom<Host::Counterpart>,
         impl RunWithConnectionTo<Host::Counterpart>,
     > {
-        ConnectFrom {
+        Builder {
             host: self.host,
             name: self.name,
             handler: ChainedHandler::new(
@@ -635,8 +635,8 @@ impl<
     pub fn with_handler(
         self,
         handler: impl HandleDispatchFrom<Host::Counterpart>,
-    ) -> ConnectFrom<Host, impl HandleDispatchFrom<Host::Counterpart>, Runner> {
-        ConnectFrom {
+    ) -> Builder<Host, impl HandleDispatchFrom<Host::Counterpart>, Runner> {
+        Builder {
             host: self.host,
             name: self.name,
             handler: ChainedHandler::new(self.handler, handler),
@@ -648,11 +648,11 @@ impl<
     pub fn with_responder<Run1>(
         self,
         responder: Run1,
-    ) -> ConnectFrom<Host, Handler, impl RunWithConnectionTo<Host::Counterpart>>
+    ) -> Builder<Host, Handler, impl RunWithConnectionTo<Host::Counterpart>>
     where
         Run1: RunWithConnectionTo<Host::Counterpart>,
     {
-        ConnectFrom {
+        Builder {
             host: self.host,
             name: self.name,
             handler: self.handler,
@@ -665,7 +665,7 @@ impl<
     pub fn with_spawned<F, Fut>(
         self,
         task: F,
-    ) -> ConnectFrom<Host, Handler, impl RunWithConnectionTo<Host::Counterpart>>
+    ) -> Builder<Host, Handler, impl RunWithConnectionTo<Host::Counterpart>>
     where
         F: FnOnce(ConnectionTo<Host::Counterpart>) -> Fut + Send,
         Fut: Future<Output = Result<(), crate::Error>> + Send,
@@ -725,7 +725,7 @@ impl<
         self,
         op: F,
         to_future_hack: ToFut,
-    ) -> ConnectFrom<Host, impl HandleDispatchFrom<Host::Counterpart>, Runner>
+    ) -> Builder<Host, impl HandleDispatchFrom<Host::Counterpart>, Runner>
     where
         Host::Counterpart: HasPeer<Host::Counterpart>,
         Req: JsonRpcRequest,
@@ -768,9 +768,9 @@ impl<
     ///
     /// ```ignore
     /// # use sacp::UntypedRole;
-    /// # use sacp::{ConnectFrom};
+    /// # use sacp::{Builder};
     /// # use sacp::schema::{PromptRequest, PromptResponse, SessionNotification};
-    /// # fn example<R: sacp::Role>(connection: ConnectFrom<R, impl sacp::HandleMessageAs<R>>) {
+    /// # fn example<R: sacp::Role>(connection: Builder<R, impl sacp::HandleMessageAs<R>>) {
     /// connection.on_receive_request(async |request: PromptRequest, responder, cx| {
     ///     // Send a notification while processing
     ///     let notif: SessionNotification = todo!();
@@ -800,7 +800,7 @@ impl<
         self,
         op: F,
         to_future_hack: ToFut,
-    ) -> ConnectFrom<Host, impl HandleDispatchFrom<Host::Counterpart>, Runner>
+    ) -> Builder<Host, impl HandleDispatchFrom<Host::Counterpart>, Runner>
     where
         Host::Counterpart: HasPeer<Host::Counterpart>,
         F: AsyncFnMut(
@@ -874,7 +874,7 @@ impl<
         self,
         op: F,
         to_future_hack: ToFut,
-    ) -> ConnectFrom<Host, impl HandleDispatchFrom<Host::Counterpart>, Runner>
+    ) -> Builder<Host, impl HandleDispatchFrom<Host::Counterpart>, Runner>
     where
         Host::Counterpart: HasPeer<Host::Counterpart>,
         Notif: JsonRpcNotification,
@@ -924,7 +924,7 @@ impl<
         peer: Peer,
         op: F,
         to_future_hack: ToFut,
-    ) -> ConnectFrom<Host, impl HandleDispatchFrom<Host::Counterpart>, Runner>
+    ) -> Builder<Host, impl HandleDispatchFrom<Host::Counterpart>, Runner>
     where
         Host::Counterpart: HasPeer<Peer>,
         F: AsyncFnMut(
@@ -978,7 +978,7 @@ impl<
         peer: Peer,
         op: F,
         to_future_hack: ToFut,
-    ) -> ConnectFrom<Host, impl HandleDispatchFrom<Host::Counterpart>, Runner>
+    ) -> Builder<Host, impl HandleDispatchFrom<Host::Counterpart>, Runner>
     where
         Host::Counterpart: HasPeer<Peer>,
         F: AsyncFnMut(
@@ -1021,7 +1021,7 @@ impl<
         peer: Peer,
         op: F,
         to_future_hack: ToFut,
-    ) -> ConnectFrom<Host, impl HandleDispatchFrom<Host::Counterpart>, Runner>
+    ) -> Builder<Host, impl HandleDispatchFrom<Host::Counterpart>, Runner>
     where
         Host::Counterpart: HasPeer<Peer>,
         F: AsyncFnMut(Notif, ConnectionTo<Host::Counterpart>) -> Result<T, crate::Error> + Send,
@@ -1044,7 +1044,7 @@ impl<
     pub fn with_mcp_server(
         self,
         mcp_server: McpServer<Host::Counterpart, impl RunWithConnectionTo<Host::Counterpart>>,
-    ) -> ConnectFrom<
+    ) -> Builder<
         Host,
         impl HandleDispatchFrom<Host::Counterpart>,
         impl RunWithConnectionTo<Host::Counterpart>,
@@ -1075,7 +1075,7 @@ impl<
     ///
     /// ```no_run
     /// # use sacp::UntypedRole;
-    /// # use sacp::{ConnectFrom};
+    /// # use sacp::{Builder};
     /// # use sacp::ByteStreams;
     /// # use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
     /// # use sacp_test::*;
@@ -1085,7 +1085,7 @@ impl<
     ///     tokio::io::stdin().compat(),
     /// );
     ///
-    /// UntypedRole.connect_from()
+    /// UntypedRole.builder()
     ///     .on_receive_request(async |req: MyRequest, responder, cx| {
     ///         responder.respond(MyResponse { status: "ok".into() })
     ///     }, sacp::on_receive_request!())
@@ -1119,7 +1119,7 @@ impl<
     ///
     /// ```no_run
     /// # use sacp::UntypedRole;
-    /// # use sacp::{ConnectFrom};
+    /// # use sacp::{Builder};
     /// # use sacp::ByteStreams;
     /// # use sacp::schema::InitializeRequest;
     /// # use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
@@ -1130,7 +1130,7 @@ impl<
     ///     tokio::io::stdin().compat(),
     /// );
     ///
-    /// UntypedRole.connect_from()
+    /// UntypedRole.builder()
     ///     .on_receive_request(async |req: MyRequest, responder, cx| {
     ///         // Handle incoming requests in the background
     ///         responder.respond(MyResponse { status: "ok".into() })
@@ -1246,14 +1246,14 @@ impl<
     }
 }
 
-impl<R, H, Run> ConnectTo<R::Counterpart> for ConnectFrom<R, H, Run>
+impl<R, H, Run> ConnectTo<R::Counterpart> for Builder<R, H, Run>
 where
     R: Role,
     H: HandleDispatchFrom<R::Counterpart> + 'static,
     Run: RunWithConnectionTo<R::Counterpart> + 'static,
 {
     async fn connect_to(self, client: impl ConnectTo<R>) -> Result<(), crate::Error> {
-        ConnectFrom::connect_to(self, client).await
+        Builder::connect_to(self, client).await
     }
 }
 
@@ -1413,7 +1413,7 @@ impl<T> IntoHandled<T> for Handled<T> {
 ///
 /// The transport layer is responsible only for moving `jsonrpcmsg::Message` in and out.
 /// It has no knowledge of protocol semantics like request/response correlation, ID assignment,
-/// or handler dispatch - those are handled by the protocol layer in [`ConnectFrom`].
+/// or handler dispatch - those are handled by the protocol layer in [`Builder`].
 ///
 /// # Example
 ///
@@ -1439,7 +1439,7 @@ impl<T> IntoHandled<T> for Handled<T> {
 /// messages while your handler is running. Use [`spawn`](Self::spawn) to offload any
 /// expensive or blocking work to concurrent tasks.
 ///
-/// See the [Event Loop and Concurrency](ConnectFrom#event-loop-and-concurrency) section
+/// See the [Event Loop and Concurrency](Builder#event-loop-and-concurrency) section
 /// for more details.
 #[derive(Clone, Debug)]
 pub struct ConnectionTo<Counterpart: Role> {
@@ -1534,11 +1534,11 @@ impl<Counterpart: Role> ConnectionTo<Counterpart> {
     ///
     /// ```
     /// # use sacp::UntypedRole;
-    /// # use sacp::{ConnectFrom, ConnectionTo};
+    /// # use sacp::{Builder, ConnectionTo};
     /// # use sacp_test::*;
     /// # async fn example(cx: ConnectionTo<UntypedRole>) -> Result<(), sacp::Error> {
     /// // Set up a backend connection builder
-    /// let backend = UntypedRole.connect_from()
+    /// let backend = UntypedRole.builder()
     ///     .on_receive_request(async |req: MyRequest, responder, _cx| {
     ///         responder.respond(MyResponse { status: "ok".into() })
     ///     }, sacp::on_receive_request!());
@@ -1554,7 +1554,7 @@ impl<Counterpart: Role> ConnectionTo<Counterpart> {
     #[track_caller]
     pub fn spawn_connection<R: Role>(
         &self,
-        builder: ConnectFrom<
+        builder: Builder<
             R,
             impl HandleDispatchFrom<R::Counterpart> + 'static,
             impl RunWithConnectionTo<R::Counterpart> + 'static,
@@ -1899,7 +1899,7 @@ impl<R: Role> Drop for DynamicHandlerRegistration<R> {
 /// [`spawn`](ConnectionTo::spawn) for expensive operations to avoid blocking
 /// the connection.
 ///
-/// See the [Event Loop and Concurrency](ConnectFrom#event-loop-and-concurrency)
+/// See the [Event Loop and Concurrency](Builder#event-loop-and-concurrency)
 /// section for more details.
 #[must_use]
 pub struct Responder<T: JsonRpcResponse = serde_json::Value> {
@@ -2831,11 +2831,11 @@ impl<T: JsonRpcResponse> SentRequest<T> {
     ///
     /// ```
     /// # use sacp::UntypedRole;
-    /// # use sacp::{ConnectFrom, ConnectionTo};
+    /// # use sacp::{Builder, ConnectionTo};
     /// # use sacp_test::*;
     /// # async fn example(cx: ConnectionTo<UntypedRole>) -> Result<(), sacp::Error> {
     /// // Set up backend connection builder
-    /// let backend = UntypedRole.connect_from()
+    /// let backend = UntypedRole.builder()
     ///     .on_receive_request(async |req: MyRequest, responder, cx| {
     ///         responder.respond(MyResponse { status: "ok".into() })
     ///     }, sacp::on_receive_request!());
@@ -2844,7 +2844,7 @@ impl<T: JsonRpcResponse> SentRequest<T> {
     /// let backend_connection = cx.spawn_connection(backend, MockTransport)?;
     ///
     /// // Set up proxy that forwards requests to backend
-    /// UntypedRole.connect_from()
+    /// UntypedRole.builder()
     ///     .on_receive_request({
     ///         let backend_connection = backend_connection.clone();
     ///         async move |req: MyRequest, responder, cx| {
@@ -3264,7 +3264,7 @@ where
 /// );
 ///
 /// // Use as a component in a connection
-/// sacp::UntypedRole.connect_from()
+/// sacp::UntypedRole.builder()
 ///     .name("my-client")
 ///     .connect_to(component)
 ///     .await?;
@@ -3340,13 +3340,13 @@ where
 ///
 /// ```no_run
 /// # use sacp::UntypedRole;
-/// # use sacp::{Channel, ConnectFrom};
+/// # use sacp::{Channel, Builder};
 /// # async fn example() -> Result<(), sacp::Error> {
 /// // Create a pair of connected channels
 /// let (channel_a, channel_b) = Channel::duplex();
 ///
 /// // Each channel can be used by a different component
-/// UntypedRole.connect_from()
+/// UntypedRole.builder()
 ///     .name("connection-a")
 ///     .connect_to(channel_a)
 ///     .await?;

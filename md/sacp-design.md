@@ -11,7 +11,7 @@ For API usage, see the [rustdoc](https://docs.rs/sacp) and [cookbook](https://do
 The core SDK. Provides:
 
 - **Role types** (`Client`, `Agent`, `Proxy`, `Conductor`) - the identities in ACP
-- **Connection builders** (`connect_from()`, `connect_to()`, `connect_with()`)
+- **Connection builders** (`builder()`, `connect_to()`, `connect_with()`)
 - **Message handling** (`on_receive_request`, `on_receive_notification`, `on_receive_dispatch`)
 - **Protocol types** (`sacp::schema::*`) - all ACP message types
 - **MCP server builder** - for adding tools to proxies
@@ -133,7 +133,7 @@ The dispatch loop provides sequential processing:
 
 ```mermaid
 stateDiagram-v2
-    [*] --> Building: connect_from()
+    [*] --> Building: builder()
     Building --> Building: on_receive_*()
     Building --> Connected: connect_to(transport)
     Building --> Connected: connect_with(transport, closure)
@@ -153,8 +153,8 @@ stateDiagram-v2
 |------|---------|
 | `src/sacp/src/role.rs` | Role trait and type definitions |
 | `src/sacp/src/role/acp.rs` | Client, Agent, Proxy, Conductor roles |
-| `src/sacp/src/component.rs` | ConnectTo and ConnectFrom traits |
-| `src/sacp/src/connect_from.rs` | Connection builder implementation |
+| `src/sacp/src/component.rs` | ConnectTo and Builder traits |
+| `src/sacp/src/builder.rs` | Connection builder implementation |
 | `src/sacp/src/dispatch.rs` | Dispatch type and handler matching |
 | `src/sacp/src/mcp_server/` | MCP server builder |
 | `src/sacp/src/concepts/` | Rustdoc concept explanations |

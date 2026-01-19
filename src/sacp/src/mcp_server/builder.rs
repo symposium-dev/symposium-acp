@@ -328,7 +328,7 @@ where
     /// Create an MCP server from this builder.
     ///
     /// This builder can be attached to new sessions (see [`SessionBuilder::with_mcp_server`](`crate::SessionBuilder::with_mcp_server`))
-    /// or served up as part of a proxy (see [`ConnectFrom::with_mcp_server`](`crate::ConnectFrom::with_mcp_server`)).
+    /// or served up as part of a proxy (see [`Builder::with_mcp_server`](`crate::Builder::with_mcp_server`)).
     pub fn build(self) -> McpServer<Counterpart, Responder> {
         McpServer::new(
             McpServerBuilt {

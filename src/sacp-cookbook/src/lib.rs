@@ -12,7 +12,7 @@
 //! # Building Clients
 //!
 //! A client connects to an agent, sends requests, and handles responses. Use
-//! [`Client.connect_from()`](sacp::Client) to build connections.
+//! [`Client.builder()`](sacp::Client) to build connections.
 //!
 //! - [`one_shot_prompt`] - Send a single prompt and get a response (simplest pattern)
 //! - [`connecting_as_client`] - More details on connection setup and permission handling
@@ -20,7 +20,7 @@
 //! # Building Proxies
 //!
 //! A proxy sits between client and agent, intercepting and optionally modifying
-//! messages. The most common use case is adding MCP tools. Use [`Proxy.connect_from()`](sacp::Proxy)
+//! messages. The most common use case is adding MCP tools. Use [`Proxy.builder()`](sacp::Proxy)
 //! to build proxy connections.
 //!
 //! **Important:** Proxies don't run standalone—they need the [`sacp-conductor`] to
@@ -37,7 +37,7 @@
 //!
 //! # Building Agents
 //!
-//! An agent receives prompts and generates responses. Use [`Agent.connect_from()`](sacp::Agent)
+//! An agent receives prompts and generates responses. Use [`Agent.builder()`](sacp::Agent)
 //! to build agent connections.
 //!
 //! - [`building_an_agent`] - Handle initialization, sessions, and prompts
@@ -67,7 +67,7 @@ pub mod one_shot_prompt {
     //!     transport: impl ConnectTo<Client> + 'static,
     //!     prompt: &str,
     //! ) -> Result<String, sacp::Error> {
-    //!     Client.connect_from()
+    //!     Client.builder()
     //!         .name("my-client")
     //!         .connect_with(transport, async |connection| {
     //!             // Initialize the connection
@@ -105,7 +105,7 @@ pub mod one_shot_prompt {
     //! commands or writing files. See [`connecting_as_client`] for how to handle
     //! [`RequestPermissionRequest`] messages.
     //!
-    //! [`connect_with`]: sacp::ConnectFrom::connect_with
+    //! [`connect_with`]: sacp::Builder::connect_with
     //! [`send_request`]: sacp::ConnectionTo::send_request
     //! [`block_task`]: sacp::SentRequest::block_task
     //! [`build_session_cwd`]: sacp::ConnectionTo::build_session_cwd
@@ -131,7 +131,7 @@ pub mod connecting_as_client {
     //! use sacp::schema::{InitializeRequest, ProtocolVersion};
     //!
     //! async fn connect_to_agent(transport: impl ConnectTo<Client>) -> Result<(), sacp::Error> {
-    //!     Client.connect_from()
+    //!     Client.builder()
     //!         .name("my-client")
     //!         .connect_with(transport, async |connection| {
     //!             // Initialize the connection
@@ -171,7 +171,7 @@ pub mod connecting_as_client {
     //! before taking actions. Handle these with [`on_receive_request`]:
     //!
     //! ```ignore
-    //! Client.connect_from()
+    //! Client.builder()
     //!     .on_receive_request(async |req: RequestPermissionRequest, responder, _connection| {
     //!         // Auto-approve by selecting the first option (YOLO mode)
     //!         let option_id = req.options.first().map(|opt| opt.id.clone());
@@ -193,7 +193,7 @@ pub mod connecting_as_client {
     //! as a spawned task, not on the event loop. The event loop continues processing
     //! messages (including the response you're waiting for) while your task blocks.
     //!
-    //! [`connect_with`]: sacp::ConnectFrom::connect_with
+    //! [`connect_with`]: sacp::Builder::connect_with
     //! [`block_task`]: sacp::SentRequest::block_task
     //! [`build_session`]: sacp::ConnectionTo::build_session
     //! [`SessionBuilder`]: sacp::SessionBuilder
@@ -202,7 +202,7 @@ pub mod connecting_as_client {
     //! [`read_to_string`]: sacp::ActiveSession::read_to_string
     //! [`with_mcp_server`]: sacp::SessionBuilder::with_mcp_server
     //! [`RequestPermissionRequest`]: sacp::schema::RequestPermissionRequest
-    //! [`on_receive_request`]: sacp::ConnectFrom::on_receive_request
+    //! [`on_receive_request`]: sacp::Builder::on_receive_request
 }
 
 pub mod building_an_agent {
@@ -214,7 +214,7 @@ pub mod building_an_agent {
     //! 2. Handle [`NewSessionRequest`] to create sessions
     //! 3. Handle [`PromptRequest`] to process prompts
     //!
-    //! Use [`Agent.connect_from()`](sacp::Agent) to build agent connections.
+    //! Use [`Agent.builder()`](sacp::Agent) to build agent connections.
     //!
     //! # Minimal Example
     //!
@@ -227,7 +227,7 @@ pub mod building_an_agent {
     //! };
     //!
     //! async fn run_agent(transport: impl ConnectTo<Agent>) -> Result<(), sacp::Error> {
-    //!     Agent.connect_from()
+    //!     Agent.builder()
     //!         .name("my-agent")
     //!         // Handle initialization
     //!         .on_receive_request(async |req: InitializeRequest, responder, _connection| {
@@ -352,7 +352,7 @@ pub mod reusable_components {
     //!
     //! impl ConnectTo<Client> for MyAgent {
     //!     async fn connect_to(self, client: impl ConnectTo<Agent>) -> Result<(), sacp::Error> {
-    //!         Agent.connect_from()
+    //!         Agent.builder()
     //!             .name(&self.name)
     //!             .on_receive_request(async move |req: InitializeRequest, responder, _connection| {
     //!                 responder.respond(
@@ -481,7 +481,7 @@ pub mod global_mcp_server {
     //!
     //! impl<R: RunWithConnectionTo<Conductor> + Send + 'static> ConnectTo<Conductor> for MyProxy<R> {
     //!     async fn connect_to(self, conductor: impl ConnectTo<Proxy>) -> Result<(), sacp::Error> {
-    //!         Proxy.connect_from()
+    //!         Proxy.builder()
     //!             .with_mcp_server(self.mcp_server)
     //!             .connect_to(conductor)
     //!             .await
@@ -561,7 +561,7 @@ pub mod global_mcp_server {
     //!
     //! [`McpServer::builder`]: sacp::mcp_server::McpServer::builder
     //! [`McpServer::from_rmcp`]: sacp_rmcp::McpServerExt::from_rmcp
-    //! [`with_mcp_server`]: sacp::ConnectFrom::with_mcp_server
+    //! [`with_mcp_server`]: sacp::Builder::with_mcp_server
 }
 
 pub mod per_session_mcp_server {
@@ -588,7 +588,7 @@ pub mod per_session_mcp_server {
     //! use sacp::{Client, Proxy, Conductor, ConnectTo};
     //!
     //! async fn run_proxy(transport: impl ConnectTo<Proxy>) -> Result<(), sacp::Error> {
-    //!     Proxy.connect_from()
+    //!     Proxy.builder()
     //!         .on_receive_request_from(Client, async move |request: NewSessionRequest, responder, connection| {
     //!             // Extract session context from the request
     //!             let workspace_path = request.cwd.clone();
@@ -645,7 +645,7 @@ pub mod per_session_mcp_server {
     //! # use sacp::schema::NewSessionRequest;
     //! # use sacp::{Client, Proxy, Conductor, ConnectTo};
     //! # async fn run_proxy(transport: impl ConnectTo<Proxy>) -> Result<(), sacp::Error> {
-    //!     Proxy.connect_from()
+    //!     Proxy.builder()
     //!         .on_receive_request_from(Client, async |request: NewSessionRequest, responder, connection| {
     //!             let cwd = request.cwd.clone();
     //!             let mcp_server = McpServer::builder("tools")

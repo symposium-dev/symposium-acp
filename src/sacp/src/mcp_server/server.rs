@@ -23,7 +23,7 @@ use crate::{
 /// An MCP server that can be attached to ACP connections.
 ///
 /// `McpServer` wraps an [`McpServerConnect`](`super::McpServerConnect`) implementation and can be used either:
-/// - As a message handler via [`ConnectFrom::with_handler`](`crate::ConnectFrom::with_handler`), automatically
+/// - As a message handler via [`Builder::with_handler`](`crate::Builder::with_handler`), automatically
 ///   attaching to new sessions
 /// - Manually for more control
 ///
@@ -203,7 +203,7 @@ where
 
         let (tx, mut rx) = mpsc::unbounded();
 
-        role::mcp::Server.connect_from()
+        role::mcp::Server.builder()
             .with_responder(responder)
             .on_receive_dispatch(
                 async |message_from_client: Dispatch, _cx| {
@@ -219,7 +219,7 @@ where
                         connection: connection_to_client.clone(),
                     });
 
-                role::mcp::Client.connect_from()
+                role::mcp::Client.builder()
                     .on_receive_dispatch(
                         async |message_from_server: Dispatch, _| {
                             // when we receive a message from the server, fwd to the client
