@@ -107,11 +107,11 @@ use crate::{Agent, Client, RoleId, ConnectTo};
 /// Most users register handlers using the builder methods on [`ConnectFrom`]:
 ///
 /// ```
-/// # use sacp::{AgentToClient, ClientToAgent, Component};
+/// # use sacp::{Agent, Client, ConnectTo};
 /// # use sacp::schema::{InitializeRequest, InitializeResponse, AgentCapabilities};
 /// # use sacp_test::StatusUpdate;
-/// # async fn example(transport: impl Component<ClientToAgent>) -> Result<(), sacp::Error> {
-/// AgentToClient.connect_from()
+/// # async fn example(transport: impl ConnectTo<Agent>) -> Result<(), sacp::Error> {
+/// Agent.connect_from()
 ///     .on_receive_request(async |req: InitializeRequest, request_cx, cx| {
 ///         request_cx.respond(
 ///             InitializeResponse::new(req.protocol_version)
@@ -122,7 +122,7 @@ use crate::{Agent, Client, RoleId, ConnectTo};
 ///         // Process notification
 ///         Ok(())
 ///     }, sacp::on_receive_notification!())
-///     .serve(transport)
+///     .connect_to(transport)
 ///     .await?;
 /// # Ok(())
 /// # }
@@ -167,10 +167,10 @@ use crate::{Agent, Client, RoleId, ConnectTo};
 /// to run work concurrently:
 ///
 /// ```
-/// # use sacp::{ClientToAgent, AgentToClient, Component};
+/// # use sacp::{Client, Agent, ConnectTo};
 /// # use sacp_test::{expensive_operation, ProcessComplete};
-/// # async fn example(transport: impl Component<AgentToClient>) -> Result<(), sacp::Error> {
-/// # ClientToAgent.connect_from().run_until(transport, async |cx| {
+/// # async fn example(transport: impl ConnectTo<Client>) -> Result<(), sacp::Error> {
+/// # Client.connect_from().connect_with(transport, async |cx| {
 /// cx.spawn({
 ///     let connection_cx = cx.clone();
 ///     async move {
@@ -243,7 +243,7 @@ where
 /// A JSON-RPC connection that can act as either a server, client, or both.
 ///
 /// `JrConnection` provides a builder-style API for creating JSON-RPC servers and clients.
-/// You start by calling `Link.connect_from()` (e.g., `ClientToAgent.connect_from()`), then add message
+/// You start by calling `Link.connect_from()` (e.g., `Client.connect_from()`), then add message
 /// handlers, and finally drive the connection with either [`serve`](ConnectFrom::serve)
 /// or [`run_until`](ConnectFrom::run_until), providing a component implementation
 /// (e.g., [`ByteStreams`] for byte streams).
@@ -280,7 +280,7 @@ where
 ///         // Handle only SessionUpdate notifications
 ///         Ok(())
 ///     }, sacp::on_receive_notification!())
-/// # .serve(sacp_test::MockTransport).await?;
+/// # .connect_to(sacp_test::MockTransport).await?;
 /// # Ok(())
 /// # }
 /// ```
@@ -319,7 +319,7 @@ where
 ///         MyRequests::Prompt(prompt) => { request_cx.respond(serde_json::json!({})) }
 ///     }
 /// }, sacp::on_receive_request!())
-/// # .serve(sacp_test::MockTransport).await?;
+/// # .connect_to(sacp_test::MockTransport).await?;
 /// # Ok(())
 /// # }
 /// ```
@@ -349,7 +349,7 @@ where
 ///         }
 ///     }
 /// }, sacp::on_receive_message!())
-/// # .serve(sacp_test::MockTransport).await?;
+/// # .connect_to(sacp_test::MockTransport).await?;
 /// # Ok(())
 /// # }
 /// ```
@@ -387,7 +387,7 @@ where
 ///         // This runs for any message not handled above
 ///         msg.respond_with_error(sacp::util::internal_error("unknown method"), cx)
 ///     }, sacp::on_receive_message!())
-/// # .serve(sacp_test::MockTransport).await?;
+/// # .connect_to(sacp_test::MockTransport).await?;
 /// # Ok(())
 /// # }
 /// ```
@@ -423,7 +423,7 @@ where
 ///     // Respond immediately without blocking
 ///     request_cx.respond(AnalysisStarted { job_id: 42 })
 /// }, sacp::on_receive_request!())
-/// # .serve(sacp_test::MockTransport).await?;
+/// # .connect_to(sacp_test::MockTransport).await?;
 /// # Ok(())
 /// # }
 /// ```
@@ -465,7 +465,7 @@ where
 ///     .on_receive_request(async |req: MyRequest, request_cx, cx| {
 ///         request_cx.respond(MyResponse { status: "ok".into() })
 ///     }, sacp::on_receive_request!())
-///     .serve(MockTransport)  // Runs until connection closes or error occurs
+///     .connect_to(MockTransport)  // Runs until connection closes or error occurs
 ///     .await?;
 /// # Ok(())
 /// # }
@@ -488,7 +488,7 @@ where
 ///     .on_receive_request(async |req: MyRequest, request_cx, cx| {
 ///         request_cx.respond(MyResponse { status: "ok".into() })
 ///     }, sacp::on_receive_request!())
-///     .run_until(MockTransport, async |cx| {
+///     .connect_with(MockTransport, async |cx| {
 ///         // You can send requests to the other side
 ///         let response = cx.send_request(InitializeRequest::make())
 ///             .block_task()
@@ -510,7 +510,7 @@ where
 /// # Example: Complete Agent
 ///
 /// ```no_run
-/// # use sacp::link::UntypedRole;
+/// # use sacp::UntypedRole;
 /// # use sacp::{ConnectFrom};
 /// # use sacp::ByteStreams;
 /// # use sacp::schema::{InitializeRequest, InitializeResponse, PromptRequest, PromptResponse, SessionNotification};
@@ -536,7 +536,7 @@ where
 ///         let response: PromptResponse = todo!();
 ///         request_cx.respond(response)
 ///     }, sacp::on_receive_request!())
-///     .serve(transport)
+///     .connect_to(transport)
 ///     .await?;
 /// # Ok(())
 /// # }
@@ -707,7 +707,7 @@ impl<
     ///         }
     ///     }
     /// }, sacp::on_receive_message!())
-    /// # .serve(sacp_test::MockTransport).await?;
+    /// # .connect_to(sacp_test::MockTransport).await?;
     /// # Ok(())
     /// # }
     /// ```
@@ -767,7 +767,7 @@ impl<
     /// # Example
     ///
     /// ```ignore
-    /// # use sacp::link::UntypedRole;
+    /// # use sacp::UntypedRole;
     /// # use sacp::{ConnectFrom};
     /// # use sacp::schema::{PromptRequest, PromptResponse, SessionNotification};
     /// # fn example<R: sacp::Role>(connection: ConnectFrom<R, impl sacp::HandleMessageAs<R>>) {
@@ -855,7 +855,7 @@ impl<
     ///
     ///     Ok(())
     /// }, sacp::on_receive_notification!())
-    /// # .serve(sacp_test::MockTransport).await?;
+    /// # .connect_to(sacp_test::MockTransport).await?;
     /// # Ok(())
     /// # }
     /// ```
@@ -1074,7 +1074,7 @@ impl<
     /// # Example: Byte Stream Transport
     ///
     /// ```no_run
-    /// # use sacp::link::UntypedRole;
+    /// # use sacp::UntypedRole;
     /// # use sacp::{ConnectFrom};
     /// # use sacp::ByteStreams;
     /// # use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
@@ -1089,7 +1089,7 @@ impl<
     ///     .on_receive_request(async |req: MyRequest, request_cx, cx| {
     ///         request_cx.respond(MyResponse { status: "ok".into() })
     ///     }, sacp::on_receive_request!())
-    ///     .serve(transport)
+    ///     .connect_to(transport)
     ///     .await?;
     /// # Ok(())
     /// # }
@@ -1115,7 +1115,7 @@ impl<
     /// # Example
     ///
     /// ```no_run
-    /// # use sacp::link::UntypedRole;
+    /// # use sacp::UntypedRole;
     /// # use sacp::{ConnectFrom};
     /// # use sacp::ByteStreams;
     /// # use sacp::schema::InitializeRequest;
@@ -1132,8 +1132,7 @@ impl<
     ///         // Handle incoming requests in the background
     ///         request_cx.respond(MyResponse { status: "ok".into() })
     ///     }, sacp::on_receive_request!())
-    ///     .connect_to(transport)?
-    ///     .run_until(async |cx| {
+    ///     .connect_with(transport, async |cx| {
     ///         // Initialize the protocol
     ///         let init_response = cx.send_request(InitializeRequest::make())
     ///             .block_task()
@@ -1496,7 +1495,7 @@ impl<Counterpart: Role> ConnectionTo<Counterpart> {
     ///     // Respond immediately
     ///     request_cx.respond(ProcessResponse { result: "started".into() })
     /// }, sacp::on_receive_request!())
-    /// # .serve(sacp_test::MockTransport).await?;
+    /// # .connect_to(sacp_test::MockTransport).await?;
     /// # Ok(())
     /// # }
     /// ```
@@ -1531,7 +1530,7 @@ impl<Counterpart: Role> ConnectionTo<Counterpart> {
     /// # Example: Proxying to a backend connection
     ///
     /// ```
-    /// # use sacp::link::UntypedRole;
+    /// # use sacp::UntypedRole;
     /// # use sacp::{ConnectFrom, ConnectionTo};
     /// # use sacp_test::*;
     /// # async fn example(cx: ConnectionTo<UntypedRole>) -> Result<(), sacp::Error> {
@@ -1624,7 +1623,7 @@ impl<Counterpart: Role> ConnectionTo<Counterpart> {
     ///
     /// ```compile_fail
     /// # use sacp_test::*;
-    /// # async fn example(cx: sacp::ConnectionTo<sacp::link::UntypedRole>) -> Result<(), sacp::Error> {
+    /// # async fn example(cx: sacp::ConnectionTo<sacp::UntypedRole>) -> Result<(), sacp::Error> {
     /// // ❌ This doesn't compile - prevents blocking the event loop
     /// let response = cx.send_request(MyRequest {}).await?;
     /// # Ok(())
@@ -1633,7 +1632,7 @@ impl<Counterpart: Role> ConnectionTo<Counterpart> {
     ///
     /// ```no_run
     /// # use sacp_test::*;
-    /// # async fn example(cx: sacp::ConnectionTo<sacp::link::UntypedRole>) -> Result<(), sacp::Error> {
+    /// # async fn example(cx: sacp::ConnectionTo<sacp::UntypedRole>) -> Result<(), sacp::Error> {
     /// // ✅ Option 1: Schedule callback (safe in handlers)
     /// cx.send_request(MyRequest {})
     ///     .on_receiving_result(async |result| {
@@ -1886,7 +1885,7 @@ impl<R: Role> Drop for DynamicHandlerRegistration<R> {
 ///     // Respond to the request
 ///     request_cx.respond(ProcessResponse { result })
 /// }, sacp::on_receive_request!())
-/// # .serve(sacp_test::MockTransport).await?;
+/// # .connect_to(sacp_test::MockTransport).await?;
 /// # Ok(())
 /// # }
 /// ```
@@ -2707,7 +2706,7 @@ impl JsonRpcNotification for UntypedMessage {}
 ///
 /// ```no_run
 /// # use sacp_test::*;
-/// # async fn example(cx: sacp::ConnectionTo<sacp::link::UntypedRole>) -> Result<(), sacp::Error> {
+/// # async fn example(cx: sacp::ConnectionTo<sacp::UntypedRole>) -> Result<(), sacp::Error> {
 /// cx.send_request(MyRequest {})
 ///     .on_receiving_result(async |result| {
 ///         match result {
@@ -2732,7 +2731,7 @@ impl JsonRpcNotification for UntypedMessage {}
 ///
 /// ```no_run
 /// # use sacp_test::*;
-/// # async fn example(cx: sacp::ConnectionTo<sacp::link::UntypedRole>) -> Result<(), sacp::Error> {
+/// # async fn example(cx: sacp::ConnectionTo<sacp::UntypedRole>) -> Result<(), sacp::Error> {
 /// // ✅ Safe: Spawned task runs concurrently
 /// cx.spawn({
 ///     let cx = cx.clone();
@@ -2759,7 +2758,7 @@ impl JsonRpcNotification for UntypedMessage {}
 ///         .await?;
 ///     request_cx.respond(response)
 /// }, sacp::on_receive_request!())
-/// # .serve(sacp_test::MockTransport).await?;
+/// # .connect_to(sacp_test::MockTransport).await?;
 /// # Ok(())
 /// # }
 /// ```
@@ -2828,7 +2827,7 @@ impl<T: JsonRpcResponse> SentRequest<T> {
     /// # Example: Proxying requests
     ///
     /// ```
-    /// # use sacp::link::UntypedRole;
+    /// # use sacp::UntypedRole;
     /// # use sacp::{ConnectFrom, ConnectionTo};
     /// # use sacp_test::*;
     /// # async fn example(cx: ConnectionTo<UntypedRole>) -> Result<(), sacp::Error> {
@@ -2907,7 +2906,7 @@ impl<T: JsonRpcResponse> SentRequest<T> {
     ///     // Respond immediately
     ///     request_cx.respond(MyResponse { status: "ok".into() })
     /// }, sacp::on_receive_request!())
-    /// # .serve(sacp_test::MockTransport).await?;
+    /// # .connect_to(sacp_test::MockTransport).await?;
     /// # Ok(())
     /// # }
     /// ```
@@ -2926,7 +2925,7 @@ impl<T: JsonRpcResponse> SentRequest<T> {
     ///
     ///     request_cx.respond(MyResponse { status: response.value })
     /// }, sacp::on_receive_request!())
-    /// # .serve(sacp_test::MockTransport).await?;
+    /// # .connect_to(sacp_test::MockTransport).await?;
     /// # Ok(())
     /// # }
     /// ```
@@ -3007,7 +3006,7 @@ impl<T: JsonRpcResponse> SentRequest<T> {
     ///
     ///     Ok(())
     /// }, sacp::on_receive_request!())
-    /// # .serve(sacp_test::MockTransport).await?;
+    /// # .connect_to(sacp_test::MockTransport).await?;
     /// # Ok(())
     /// # }
     /// ```
@@ -3077,7 +3076,7 @@ impl<T: JsonRpcResponse> SentRequest<T> {
     ///     // Handler continues immediately without waiting
     ///     request_cx.respond(MyResponse { status: "processing".into() })
     /// }, sacp::on_receive_request!())
-    /// # .serve(sacp_test::MockTransport).await?;
+    /// # .connect_to(sacp_test::MockTransport).await?;
     /// # Ok(())
     /// # }
     /// ```
@@ -3251,7 +3250,7 @@ where
 /// Connecting to an agent via stdio:
 ///
 /// ```no_run
-/// use sacp::link::UntypedRole;
+/// use sacp::UntypedRole;
 /// # use sacp::{ByteStreams};
 /// use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
 ///
@@ -3262,9 +3261,9 @@ where
 /// );
 ///
 /// // Use as a component in a connection
-/// sacp::link::UntypedRole.connect_from()
+/// sacp::UntypedRole.connect_from()
 ///     .name("my-client")
-///     .serve(component)
+///     .connect_to(component)
 ///     .await?;
 /// # Ok(())
 /// # }
@@ -3337,7 +3336,7 @@ where
 /// # Example
 ///
 /// ```no_run
-/// # use sacp::link::UntypedRole;
+/// # use sacp::UntypedRole;
 /// # use sacp::{Channel, ConnectFrom};
 /// # async fn example() -> Result<(), sacp::Error> {
 /// // Create a pair of connected channels
@@ -3346,7 +3345,7 @@ where
 /// // Each channel can be used by a different component
 /// UntypedRole.connect_from()
 ///     .name("connection-a")
-///     .serve(channel_a)
+///     .connect_to(channel_a)
 ///     .await?;
 /// # Ok(())
 /// # }

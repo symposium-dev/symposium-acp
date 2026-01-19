@@ -182,11 +182,11 @@ where
     /// # Example
     ///
     /// ```
-    /// # use sacp::{ClientToAgent, AgentToClient, Component};
+    /// # use sacp::{Client, Agent, ConnectTo};
     /// # use sacp::mcp_server::McpServer;
-    /// # async fn example(transport: impl Component<AgentToClient>) -> Result<(), sacp::Error> {
-    /// # Client.connect_from().run_until(transport, async |cx| {
-    /// # let mcp = McpServer::<ClientToAgent, _>::builder("tools").build();
+    /// # async fn example(transport: impl ConnectTo<Client>) -> Result<(), sacp::Error> {
+    /// # Client.connect_from().connect_with(transport, async |cx| {
+    /// # let mcp = McpServer::<Agent, _>::builder("tools").build();
     /// cx.build_session_cwd()?
     ///     .with_mcp_server(mcp)?
     ///     .on_session_start(async |mut session| {
@@ -256,14 +256,13 @@ where
     /// # Example
     ///
     /// ```
-    /// # use sacp::{ProxyToConductor, Client, Component};
-    /// # use sacp::link::ConductorToProxy;
+    /// # use sacp::{Proxy, Client, Conductor, ConnectTo};
     /// # use sacp::schema::NewSessionRequest;
     /// # use sacp::mcp_server::McpServer;
-    /// # async fn example(transport: impl Component<ConductorToProxy>) -> Result<(), sacp::Error> {
+    /// # async fn example(transport: impl ConnectTo<Proxy>) -> Result<(), sacp::Error> {
     /// Proxy.connect_from()
     ///     .on_receive_request_from(Client, async |request: NewSessionRequest, request_cx, cx| {
-    ///         let mcp = McpServer::<ProxyToConductor, _>::builder("tools").build();
+    ///         let mcp = McpServer::<Conductor, _>::builder("tools").build();
     ///         cx.build_session_from(request)
     ///             .with_mcp_server(mcp)?
     ///             .on_proxy_session_start(request_cx, async |session_id| {
@@ -271,7 +270,7 @@ where
     ///                 Ok(())
     ///             })
     ///     }, sacp::on_receive_request!())
-    ///     .serve(transport)
+    ///     .connect_to(transport)
     ///     .await?;
     /// # Ok(())
     /// # }

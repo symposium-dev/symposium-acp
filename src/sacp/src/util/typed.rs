@@ -434,7 +434,7 @@ impl MatchMessage {
 /// # use sacp::MessageCx;
 /// # use sacp::schema::{InitializeRequest, InitializeResponse, PromptRequest, PromptResponse, AgentCapabilities, StopReason};
 /// # use sacp::util::MatchMessageFrom;
-/// # async fn example(message: MessageCx, cx: &sacp::ConnectionTo<sacp::AgentToClient>) -> Result<(), sacp::Error> {
+/// # async fn example(message: MessageCx, cx: &sacp::ConnectionTo<sacp::Client>) -> Result<(), sacp::Error> {
 /// MatchMessageFrom::new(message, cx)
 ///     .if_request(|req: InitializeRequest, request_cx: sacp::Responder<InitializeResponse>| async move {
 ///         // Handle initialization
@@ -823,11 +823,10 @@ impl<Counterpart: Role> MatchMessageFrom<Counterpart> {
 /// # Example
 ///
 /// ```
-/// # use sacp::{UntypedMessage, ConnectionTo};
+/// # use sacp::{UntypedMessage, ConnectionTo, Agent};
 /// # use sacp::schema::SessionNotification;
-/// # use sacp::ClientToAgent;
 /// # use sacp::util::TypeNotification;
-/// # async fn example(message: UntypedMessage, cx: &ConnectionTo<ClientToAgent>) -> Result<(), sacp::Error> {
+/// # async fn example(message: UntypedMessage, cx: &ConnectionTo<Agent>) -> Result<(), sacp::Error> {
 /// TypeNotification::new(message, cx)
 ///     .handle_if(|notif: SessionNotification| async move {
 ///         // Handle session notifications

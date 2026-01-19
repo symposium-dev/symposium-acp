@@ -58,10 +58,10 @@
 //! Use this in spawned tasks where you need to wait for the response:
 //!
 //! ```
-//! # use sacp::{ClientToAgent, AgentToClient, Component};
+//! # use sacp::{Client, Agent, ConnectTo};
 //! # use sacp_test::MyRequest;
-//! # async fn example(transport: impl Component<AgentToClient>) -> Result<(), sacp::Error> {
-//! # Client.connect_from().run_until(transport, async |cx| {
+//! # async fn example(transport: impl ConnectTo<Client>) -> Result<(), sacp::Error> {
+//! # Client.connect_from().connect_with(transport, async |cx| {
 //! cx.spawn({
 //!     let cx = cx.clone();
 //!     async move {
@@ -87,10 +87,10 @@
 //! Use this when you need ordering guarantees:
 //!
 //! ```
-//! # use sacp::{ClientToAgent, AgentToClient, Component};
+//! # use sacp::{Client, Agent, ConnectTo};
 //! # use sacp_test::MyRequest;
-//! # async fn example(transport: impl Component<AgentToClient>) -> Result<(), sacp::Error> {
-//! # Client.connect_from().run_until(transport, async |cx| {
+//! # async fn example(transport: impl ConnectTo<Client>) -> Result<(), sacp::Error> {
+//! # Client.connect_from().connect_with(transport, async |cx| {
 //! cx.send_request(MyRequest {})
 //!     .on_receiving_result(async |result| {
 //!         // Dispatch loop is blocked until this completes
@@ -132,9 +132,9 @@
 //! so awaiting them won't cause deadlocks:
 //!
 //! ```
-//! # use sacp::{ClientToAgent, AgentToClient, Component};
-//! # async fn example(transport: impl Component<AgentToClient>) -> Result<(), sacp::Error> {
-//! # Client.connect_from().run_until(transport, async |cx| {
+//! # use sacp::{Client, Agent, ConnectTo};
+//! # async fn example(transport: impl ConnectTo<Client>) -> Result<(), sacp::Error> {
+//! # Client.connect_from().connect_with(transport, async |cx| {
 //! cx.build_session_cwd()?
 //!     .block_task()
 //!     .run_until(async |mut session| {

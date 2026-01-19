@@ -16,10 +16,10 @@
 //! So when you write:
 //!
 //! ```
-//! # use sacp::{ClientToAgent, AgentToClient, Component};
+//! # use sacp::{Client, Agent, ConnectTo};
 //! # use sacp::schema::{InitializeRequest, ProtocolVersion};
-//! # async fn example(transport: impl Component<AgentToClient>) -> Result<(), sacp::Error> {
-//! # Client.connect_from().run_until(transport, async |cx| {
+//! # async fn example(transport: impl ConnectTo<Client>) -> Result<(), sacp::Error> {
+//! # Client.connect_from().connect_with(transport, async |cx| {
 //! // As a client
 //! cx.send_request(InitializeRequest::new(ProtocolVersion::LATEST));
 //! # Ok(())
@@ -45,10 +45,10 @@
 //! For simple links, the explicit form is equivalent:
 //!
 //! ```
-//! # use sacp::{ClientToAgent, AgentToClient, Agent, Component};
+//! # use sacp::{Client, Agent, ConnectTo};
 //! # use sacp_test::MyRequest;
-//! # async fn example(transport: impl Component<AgentToClient>) -> Result<(), sacp::Error> {
-//! # Client.connect_from().run_until(transport, async |cx| {
+//! # async fn example(transport: impl ConnectTo<Client>) -> Result<(), sacp::Error> {
+//! # Client.connect_from().connect_with(transport, async |cx| {
 //! # let req = MyRequest {};
 //! // These are equivalent for ClientToAgent:
 //! cx.send_request(req.clone());
@@ -70,10 +70,9 @@
 //! When writing proxy code, you need to specify which direction:
 //!
 //! ```
-//! # use sacp::{ProxyToConductor, Client, Agent, Component};
-//! # use sacp::link::ConductorToProxy;
+//! # use sacp::{Proxy, Client, Agent, Conductor, ConnectTo};
 //! # use sacp_test::MyRequest;
-//! # async fn example(transport: impl Component<ConductorToProxy>) -> Result<(), sacp::Error> {
+//! # async fn example(transport: impl ConnectTo<Proxy>) -> Result<(), sacp::Error> {
 //! Proxy.connect_from()
 //!     // Receive a request from the client
 //!     .on_receive_request_from(Client, async |req: MyRequest, request_cx, cx| {
@@ -81,7 +80,7 @@
 //!         cx.send_request_to(Agent, req)
 //!             .forward_to_request_cx(request_cx)
 //!     }, sacp::on_receive_request!())
-//!     .serve(transport)
+//!     .connect_to(transport)
 //!     .await?;
 //! # Ok(())
 //! # }

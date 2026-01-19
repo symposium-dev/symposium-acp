@@ -21,11 +21,11 @@
 //! The builder lets you configure handlers, then connect to a transport:
 //!
 //! ```
-//! # use sacp::{ClientToAgent, AgentToClient, Component};
-//! # async fn example(transport: impl Component<AgentToClient>) -> Result<(), sacp::Error> {
+//! # use sacp::{Client, Agent, ConnectTo};
+//! # async fn example(transport: impl ConnectTo<Client>) -> Result<(), sacp::Error> {
 //! Client.connect_from()
 //!     .name("my-client")
-//!     .run_until(transport, async |cx| {
+//!     .connect_with(transport, async |cx| {
 //!         // Use `cx` to send requests and handle responses
 //!         Ok(())
 //!     })
@@ -40,11 +40,11 @@
 //! lets you interact with the remote peer:
 //!
 //! ```
-//! # use sacp::{ClientToAgent, AgentToClient, Component};
+//! # use sacp::{Client, Agent, ConnectTo};
 //! # use sacp::schema::{InitializeRequest, ProtocolVersion};
 //! # use sacp_test::StatusUpdate;
-//! # async fn example(transport: impl Component<AgentToClient>) -> Result<(), sacp::Error> {
-//! # Client.connect_from().run_until(transport, async |cx| {
+//! # async fn example(transport: impl ConnectTo<Client>) -> Result<(), sacp::Error> {
+//! # Client.connect_from().connect_with(transport, async |cx| {
 //! // Send a request and wait for the response
 //! let response = cx.send_request(InitializeRequest::new(ProtocolVersion::LATEST))
 //!     .block_task()
@@ -68,10 +68,10 @@
 //! Use `block_task()` when you need the response before continuing:
 //!
 //! ```
-//! # use sacp::{ClientToAgent, AgentToClient, Component};
+//! # use sacp::{Client, Agent, ConnectTo};
 //! # use sacp_test::MyRequest;
-//! # async fn example(transport: impl Component<AgentToClient>) -> Result<(), sacp::Error> {
-//! # Client.connect_from().run_until(transport, async |cx| {
+//! # async fn example(transport: impl ConnectTo<Client>) -> Result<(), sacp::Error> {
+//! # Client.connect_from().connect_with(transport, async |cx| {
 //! let response = cx.send_request(MyRequest {})
 //!     .block_task()
 //!     .await?;
@@ -87,10 +87,10 @@
 //! Use `on_receiving_result()` when you want to handle the response asynchronously:
 //!
 //! ```
-//! # use sacp::{ClientToAgent, AgentToClient, Component};
+//! # use sacp::{Client, Agent, ConnectTo};
 //! # use sacp_test::MyRequest;
-//! # async fn example(transport: impl Component<AgentToClient>) -> Result<(), sacp::Error> {
-//! # Client.connect_from().run_until(transport, async |cx| {
+//! # async fn example(transport: impl ConnectTo<Client>) -> Result<(), sacp::Error> {
+//! # Client.connect_from().connect_with(transport, async |cx| {
 //! cx.send_request(MyRequest {})
 //!     .on_receiving_result(async |result| {
 //!         match result {

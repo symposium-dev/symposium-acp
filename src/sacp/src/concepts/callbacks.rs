@@ -8,9 +8,9 @@
 //! Use `on_receive_request` to handle incoming requests that expect a response:
 //!
 //! ```
-//! # use sacp::{ClientToAgent, AgentToClient, Component};
+//! # use sacp::{Client, Agent, ConnectTo};
 //! # use sacp_test::{ValidateRequest, ValidateResponse};
-//! # async fn example(transport: impl Component<AgentToClient>) -> Result<(), sacp::Error> {
+//! # async fn example(transport: impl ConnectTo<Client>) -> Result<(), sacp::Error> {
 //! Client.connect_from()
 //!     .on_receive_request(async |req: ValidateRequest, request_cx, cx| {
 //!         // Process the request
@@ -19,7 +19,7 @@
 //!         // Send the response
 //!         request_cx.respond(ValidateResponse { is_valid, error: None })
 //!     }, sacp::on_receive_request!())
-//!     .run_until(transport, async |cx| { Ok(()) })
+//!     .connect_with(transport, async |cx| { Ok(()) })
 //!     .await?;
 //! # Ok(())
 //! # }
@@ -36,15 +36,15 @@
 //! a response:
 //!
 //! ```
-//! # use sacp::{ClientToAgent, AgentToClient, Component};
+//! # use sacp::{Client, Agent, ConnectTo};
 //! # use sacp_test::StatusUpdate;
-//! # async fn example(transport: impl Component<AgentToClient>) -> Result<(), sacp::Error> {
+//! # async fn example(transport: impl ConnectTo<Client>) -> Result<(), sacp::Error> {
 //! Client.connect_from()
 //!     .on_receive_notification(async |notif: StatusUpdate, cx| {
 //!         println!("Status: {}", notif.message);
 //!         Ok(())
 //!     }, sacp::on_receive_notification!())
-//! #   .run_until(transport, async |_| Ok(())).await?;
+//! #   .connect_with(transport, async |_| Ok(())).await?;
 //! # Ok(())
 //! # }
 //! ```
@@ -54,16 +54,16 @@
 //! The [`Responder`] lets you send a response to the request:
 //!
 //! ```
-//! # use sacp::{ClientToAgent, AgentToClient, Component};
+//! # use sacp::{Client, Agent, ConnectTo};
 //! # use sacp_test::{MyRequest, MyResponse};
-//! # async fn example(transport: impl Component<AgentToClient>) -> Result<(), sacp::Error> {
+//! # async fn example(transport: impl ConnectTo<Client>) -> Result<(), sacp::Error> {
 //! # Client.connect_from()
 //! #   .on_receive_request(async |req: MyRequest, request_cx, cx| {
 //! // Send a successful response
 //! request_cx.respond(MyResponse { status: "ok".into() })?;
 //! # Ok(())
 //! #   }, sacp::on_receive_request!())
-//! #   .run_until(transport, async |_| Ok(())).await?;
+//! #   .connect_with(transport, async |_| Ok(())).await?;
 //! # Ok(())
 //! # }
 //! ```
@@ -71,15 +71,15 @@
 //! Or send an error:
 //!
 //! ```
-//! # use sacp::{ClientToAgent, AgentToClient, Component};
+//! # use sacp::{Client, Agent, ConnectTo};
 //! # use sacp_test::{MyRequest, MyResponse};
-//! # async fn example(transport: impl Component<AgentToClient>) -> Result<(), sacp::Error> {
+//! # async fn example(transport: impl ConnectTo<Client>) -> Result<(), sacp::Error> {
 //! # Client.connect_from()
 //! #   .on_receive_request(async |req: MyRequest, request_cx, cx| {
 //! request_cx.respond_with_error(sacp::Error::invalid_params())?;
 //! # Ok(())
 //! #   }, sacp::on_receive_request!())
-//! #   .run_until(transport, async |_| Ok(())).await?;
+//! #   .connect_with(transport, async |_| Ok(())).await?;
 //! # Ok(())
 //! # }
 //! ```
@@ -93,9 +93,9 @@
 //! handles the message:
 //!
 //! ```
-//! # use sacp::{ClientToAgent, AgentToClient, Component};
+//! # use sacp::{Client, Agent, ConnectTo};
 //! # use sacp_test::{ValidateRequest, ValidateResponse, ExecuteRequest, ExecuteResponse};
-//! # async fn example(transport: impl Component<AgentToClient>) -> Result<(), sacp::Error> {
+//! # async fn example(transport: impl ConnectTo<Client>) -> Result<(), sacp::Error> {
 //! Client.connect_from()
 //!     .on_receive_request(async |req: ValidateRequest, request_cx, cx| {
 //!         // Handle validation requests
@@ -105,7 +105,7 @@
 //!         // Handle execution requests
 //!         request_cx.respond(ExecuteResponse { result: "done".into() })
 //!     }, sacp::on_receive_request!())
-//! #   .run_until(transport, async |_| Ok(())).await?;
+//! #   .connect_with(transport, async |_| Ok(())).await?;
 //! # Ok(())
 //! # }
 //! ```

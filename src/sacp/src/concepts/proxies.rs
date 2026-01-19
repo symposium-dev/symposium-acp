@@ -20,11 +20,10 @@
 //! This means a minimal proxy that does nothing is just:
 //!
 //! ```
-//! # use sacp::{ProxyToConductor, Component};
-//! # use sacp::link::ConductorToProxy;
-//! # async fn example(transport: impl Component<ConductorToProxy>) -> Result<(), sacp::Error> {
+//! # use sacp::{Proxy, Conductor, ConnectTo};
+//! # async fn example(transport: impl ConnectTo<Proxy>) -> Result<(), sacp::Error> {
 //! Proxy.connect_from()
-//!     .serve(transport)
+//!     .connect_to(transport)
 //!     .await?;
 //! # Ok(())
 //! # }
@@ -37,10 +36,9 @@
 //! To intercept specific messages, use `on_receive_*_from` with explicit peers:
 //!
 //! ```
-//! # use sacp::{ProxyToConductor, Client, Agent, Component};
-//! # use sacp::link::ConductorToProxy;
+//! # use sacp::{Proxy, Client, Agent, Conductor, ConnectTo};
 //! # use sacp_test::ProcessRequest;
-//! # async fn example(transport: impl Component<ConductorToProxy>) -> Result<(), sacp::Error> {
+//! # async fn example(transport: impl ConnectTo<Proxy>) -> Result<(), sacp::Error> {
 //! Proxy.connect_from()
 //!     // Intercept requests from the client
 //!     .on_receive_request_from(Client, async |req: ProcessRequest, request_cx, cx| {
@@ -53,7 +51,7 @@
 //!         cx.send_request_to(Agent, modified)
 //!             .forward_to_request_cx(request_cx)
 //!     }, sacp::on_receive_request!())
-//!     .serve(transport)
+//!     .connect_to(transport)
 //!     .await?;
 //! # Ok(())
 //! # }
@@ -69,14 +67,13 @@
 //! ## Global MCP Server
 //!
 //! ```
-//! # use sacp::{ProxyToConductor, Component};
-//! # use sacp::link::ConductorToProxy;
+//! # use sacp::{Proxy, Conductor, ConnectTo};
 //! # use sacp::mcp_server::McpServer;
-//! # async fn example(transport: impl Component<ConductorToProxy>) -> Result<(), sacp::Error> {
-//! # let my_mcp_server = McpServer::<ProxyToConductor, _>::builder("tools").build();
+//! # async fn example(transport: impl ConnectTo<Proxy>) -> Result<(), sacp::Error> {
+//! # let my_mcp_server = McpServer::<Conductor, _>::builder("tools").build();
 //! Proxy.connect_from()
 //!     .with_mcp_server(my_mcp_server)
-//!     .serve(transport)
+//!     .connect_to(transport)
 //!     .await?;
 //! # Ok(())
 //! # }
@@ -85,14 +82,13 @@
 //! ## Per-Session MCP Server
 //!
 //! ```
-//! # use sacp::{ProxyToConductor, Client, Component};
-//! # use sacp::link::ConductorToProxy;
+//! # use sacp::{Proxy, Client, Conductor, ConnectTo};
 //! # use sacp::schema::NewSessionRequest;
 //! # use sacp::mcp_server::McpServer;
-//! # async fn example(transport: impl Component<ConductorToProxy>) -> Result<(), sacp::Error> {
+//! # async fn example(transport: impl ConnectTo<Proxy>) -> Result<(), sacp::Error> {
 //! Proxy.connect_from()
 //!     .on_receive_request_from(Client, async |req: NewSessionRequest, request_cx, cx| {
-//!         let my_mcp_server = McpServer::<ProxyToConductor, _>::builder("tools").build();
+//!         let my_mcp_server = McpServer::<Conductor, _>::builder("tools").build();
 //!         cx.build_session_from(req)
 //!             .with_mcp_server(my_mcp_server)?
 //!             .on_proxy_session_start(request_cx, async |session_id| {
@@ -100,7 +96,7 @@
 //!                 Ok(())
 //!             })
 //!     }, sacp::on_receive_request!())
-//!     .serve(transport)
+//!     .connect_to(transport)
 //!     .await?;
 //! # Ok(())
 //! # }

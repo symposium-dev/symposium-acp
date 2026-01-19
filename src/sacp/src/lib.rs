@@ -21,13 +21,13 @@
 //! and sends a prompt:
 //!
 //! ```no_run
-//! use sacp::ClientToAgent;
+//! use sacp::Client;
 //! use sacp::schema::{InitializeRequest, ProtocolVersion};
 //!
-//! # async fn run(transport: impl sacp::Component<sacp::AgentToClient>) -> Result<(), sacp::Error> {
-//! ClientToAgent.connect_from()
+//! # async fn run(transport: impl sacp::ConnectTo<sacp::Client>) -> Result<(), sacp::Error> {
+//! Client.connect_from()
 //!     .name("my-client")
-//!     .run_until(transport, async |cx| {
+//!     .connect_with(transport, async |cx| {
 //!         // Step 1: Initialize the connection
 //!         cx.send_request(InitializeRequest::new(ProtocolVersion::LATEST))
 //!             .block_task().await?;

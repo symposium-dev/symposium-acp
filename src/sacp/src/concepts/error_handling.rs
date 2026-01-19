@@ -22,9 +22,9 @@
 //! use the request context's `respond` method:
 //!
 //! ```
-//! # use sacp::{ClientToAgent, AgentToClient, Component};
+//! # use sacp::{Client, Agent, ConnectTo};
 //! # use sacp_test::{ValidateRequest, ValidateResponse};
-//! # async fn example(transport: impl Component<AgentToClient>) -> Result<(), sacp::Error> {
+//! # async fn example(transport: impl ConnectTo<Client>) -> Result<(), sacp::Error> {
 //! Client.connect_from()
 //!     .on_receive_request(async |request: ValidateRequest, request_cx, _cx| {
 //!         if request.data.is_empty() {
@@ -37,7 +37,7 @@
 //!         request_cx.respond(ValidateResponse { is_valid: true, error: None })?;
 //!         Ok(())
 //!     }, sacp::on_receive_request!())
-//! #   .run_until(transport, async |_| Ok(())).await?;
+//! #   .connect_with(transport, async |_| Ok(())).await?;
 //! # Ok(())
 //! # }
 //! ```
@@ -46,9 +46,9 @@
 //! [`send_error_notification`][crate::ConnectionTo::send_error_notification]:
 //!
 //! ```
-//! # use sacp::{ClientToAgent, AgentToClient, Component};
-//! # async fn example(transport: impl Component<AgentToClient>) -> Result<(), sacp::Error> {
-//! # Client.connect_from().run_until(transport, async |cx| {
+//! # use sacp::{Client, Agent, ConnectTo};
+//! # async fn example(transport: impl ConnectTo<Client>) -> Result<(), sacp::Error> {
+//! # Client.connect_from().connect_with(transport, async |cx| {
 //! cx.send_error_notification(sacp::Error::internal_error()
 //!     .data("Something went wrong"))?;
 //! # Ok(())
