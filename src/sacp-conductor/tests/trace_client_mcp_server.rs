@@ -15,9 +15,9 @@ use futures::StreamExt;
 use futures::channel::mpsc;
 use sacp::mcp_server::McpServer;
 use sacp::schema::{InitializeRequest, ProtocolVersion};
-use sacp::{ClientToAgent, JrLink, Run};
+use sacp::{Client, Role, RunWithConnectionTo};
 use sacp_conductor::trace::TraceEvent;
-use sacp_conductor::{Conductor, McpBridgeMode, ProxiesAndAgent};
+use sacp_conductor::{ConductorImpl, McpBridgeMode, ProxiesAndAgent};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -184,9 +184,9 @@ impl EventNormalizer {
 }
 
 /// Create an MCP server with an echo tool for testing.
-fn make_echo_mcp_server<Link: JrLink>(
+fn make_echo_mcp_server<R: Role>(
     call_count: &Mutex<usize>,
-) -> McpServer<Link, impl Run<Link>> {
+) -> McpServer<R::Counterpart, impl RunWithConnectionTo<R::Counterpart>> {
     #[derive(Serialize, Deserialize, JsonSchema)]
     struct EchoInput {
         message: String,
@@ -227,7 +227,7 @@ async fn test_trace_client_mcp_server() -> Result<(), sacp::Error> {
 
     // Spawn the conductor with ElizaAgent (no proxies - simple setup)
     let conductor_handle = tokio::spawn(async move {
-        Conductor::new_agent(
+        ConductorImpl::new_agent(
             "conductor".to_string(),
             ProxiesAndAgent::new(ElizaAgent::new(true)),
             McpBridgeMode::default(),
@@ -242,7 +242,7 @@ async fn test_trace_client_mcp_server() -> Result<(), sacp::Error> {
 
     // Run the client with a client-hosted MCP server
     let test_result = tokio::time::timeout(std::time::Duration::from_secs(30), async move {
-        ClientToAgent::builder()
+        sacp::Client::builder()
             .name("test-client")
             .run_until(
                 sacp::ByteStreams::new(client_write.compat_write(), client_read.compat()),
@@ -258,7 +258,7 @@ async fn test_trace_client_mcp_server() -> Result<(), sacp::Error> {
                     // Build session with client-hosted MCP server
                     let result = cx
                         .build_session(".")
-                        .with_mcp_server(make_echo_mcp_server(&call_count))?
+                        .with_mcp_server(make_echo_mcp_server::<Client>(&call_count))?
                         .block_task()
                         .run_until(async |mut session| {
                             // Send prompt that triggers MCP tool call

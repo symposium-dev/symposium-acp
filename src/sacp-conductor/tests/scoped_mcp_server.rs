@@ -6,8 +6,8 @@
 
 use elizacp::ElizaAgent;
 use sacp::mcp_server::McpServer;
-use sacp::{AgentPeer, ClientToAgent, Component, HasPeer, JrLink, Run, ProxyToConductor};
-use sacp_conductor::{Conductor, McpBridgeMode, ProxiesAndAgent};
+use sacp::{Agent, Conductor, Proxy, Role, RunWithConnectionTo, Serve};
+use sacp_conductor::{ConductorImpl, McpBridgeMode, ProxiesAndAgent};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::sync::Mutex;
@@ -18,7 +18,7 @@ use std::sync::Mutex;
 /// a reference to `collected_values` which lives on the stack.
 #[tokio::test]
 async fn test_scoped_mcp_server_through_proxy() -> Result<(), sacp::Error> {
-    let conductor = Conductor::new_agent(
+    let conductor = ConductorImpl::new_agent(
         "conductor".to_string(),
         ProxiesAndAgent::new(ElizaAgent::new(true)).proxy(ScopedProxy),
         Default::default(),
@@ -44,46 +44,51 @@ async fn test_scoped_mcp_server_through_proxy() -> Result<(), sacp::Error> {
 /// the duration of the session.
 #[tokio::test]
 async fn test_scoped_mcp_server_through_session() -> Result<(), sacp::Error> {
-    ClientToAgent::builder()
-        .connect_to(Conductor::new_agent("conductor".to_string(), ProxiesAndAgent::new(ElizaAgent::new(true)), McpBridgeMode::default()))?
-        .run_until(async |cx| {
-            // Initialize first
-            cx.send_request(sacp::schema::InitializeRequest::new(
-                sacp::schema::ProtocolVersion::LATEST,
-            ))
-            .block_task()
-            .await?;
-
-            let collected_values = Mutex::new(Vec::new());
-            let result = cx
-                .build_session(".")
-                .with_mcp_server(make_mcp_server(&collected_values))?
+    // Run the client
+    sacp::Client::builder()
+        .run_until(
+            ConductorImpl::new_agent(
+                "conductor".to_string(),
+                ProxiesAndAgent::new(ElizaAgent::new(true)),
+                McpBridgeMode::default(),
+            ),
+            async |cx| {
+                // Initialize first
+                cx.send_request(sacp::schema::InitializeRequest::new(
+                    sacp::schema::ProtocolVersion::LATEST,
+                ))
                 .block_task()
-                .run_until(async |mut active_session| {
-                    active_session
-                        .send_prompt(r#"Use tool test::push with {"elements": ["Hello", "world"]}"#)?;
-                    active_session.read_to_string().await
-                })
                 .await?;
 
-            expect_test::expect![[r#"
-                "OK: CallToolResult { content: [Annotated { raw: Text(RawTextContent { text: \"2\", meta: None }), annotations: None }], structured_content: None, is_error: Some(false), meta: None }"
-            "#]].assert_debug_eq(&result);
+                let collected_values = Mutex::new(Vec::new());
+                let result = cx
+                    .build_session(".")
+                    .with_mcp_server(make_mcp_server::<Agent>(&collected_values))?
+                    .block_task()
+                    .run_until(async |mut active_session| {
+                        active_session
+                            .send_prompt(r#"Use tool test::push with {"elements": ["Hello", "world"]}"#)?;
+                        active_session.read_to_string().await
+                    })
+                    .await?;
 
-            Ok(())
-        }).await?;
+                expect_test::expect![[r#"
+                    "OK: CallToolResult { content: [Annotated { raw: Text(RawTextContent { text: \"2\", meta: None }), annotations: None }], structured_content: None, is_error: Some(false), meta: None }"
+                "#]].assert_debug_eq(&result);
+
+                Ok(())
+            },
+        )
+        .await?;
 
     Ok(())
 }
 
 struct ScopedProxy;
 
-fn make_mcp_server<'a, Link: JrLink>(
+fn make_mcp_server<'a, Counterpart: Role>(
     values: &'a Mutex<Vec<String>>,
-) -> McpServer<Link, impl Run<Link>>
-where
-    Link: HasPeer<AgentPeer>,
-{
+) -> McpServer<Counterpart, impl RunWithConnectionTo<Counterpart>> {
     #[derive(Serialize, Deserialize, JsonSchema)]
     struct PushInput {
         elements: Vec<String>,
@@ -113,22 +118,18 @@ where
         .build()
 }
 
-impl Component<ProxyToConductor> for ScopedProxy {
-    async fn serve(
-        self,
-        client: impl Component<sacp::link::ConductorToProxy>,
-    ) -> Result<(), sacp::Error> {
+impl Serve<Conductor> for ScopedProxy {
+    async fn serve(self, client: impl Serve<Proxy>) -> Result<(), sacp::Error> {
         // Stack-local data that the MCP tool will push to
         let values: Mutex<Vec<String>> = Mutex::new(Vec::new());
 
         // Build the MCP server that captures a reference to collected_values
-        let mcp_server = make_mcp_server(&values);
+        let mcp_server = make_mcp_server::<sacp::Conductor>(&values);
 
-        ProxyToConductor::builder()
+        Proxy::builder()
             .name("scoped-mcp-server")
             .with_mcp_server(mcp_server)
-            .connect_to(client)?
-            .serve()
+            .serve(client)
             .await
     }
 }

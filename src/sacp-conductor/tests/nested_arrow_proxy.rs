@@ -14,7 +14,7 @@
 //!
 //! Run `just prep-tests` before running this test.
 
-use sacp_conductor::{Conductor, ProxiesAndAgent};
+use sacp_conductor::{ConductorImpl, ProxiesAndAgent};
 use sacp_test::test_binaries::{arrow_proxy_example, elizacp};
 use sacp_tokio::AcpAgent;
 use tokio::io::duplex;
@@ -34,7 +34,7 @@ async fn test_conductor_with_two_external_arrow_proxies() -> Result<(), sacp::Er
 
     // Spawn the conductor with three components
     let conductor_handle = tokio::spawn(async move {
-        Conductor::new_agent(
+        ConductorImpl::new_agent(
             "test-conductor".to_string(),
             ProxiesAndAgent::new(eliza)
                 .proxy(arrow_proxy1)

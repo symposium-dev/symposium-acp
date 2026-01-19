@@ -3,11 +3,9 @@
 //! This test verifies that `tool_fn` works correctly for stateless tools
 //! that don't need mutable state.
 
-use sacp::Component;
-use sacp::ProxyToConductor;
-use sacp::link::AgentToClient;
 use sacp::mcp_server::McpServer;
-use sacp_conductor::{Conductor, ProxiesAndAgent};
+use sacp::{Client, Conductor, DynServe, Proxy, RunWithConnectionTo, Serve};
+use sacp_conductor::{ConductorImpl, ProxiesAndAgent};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use tokio::io::duplex;
@@ -20,7 +18,7 @@ struct GreetInput {
 }
 
 /// Create a proxy that provides an MCP server with a stateless greet tool
-fn create_greet_proxy() -> Result<sacp::DynComponent<ProxyToConductor>, sacp::Error> {
+fn create_greet_proxy() -> Result<DynServe<Conductor>, sacp::Error> {
     // Create MCP server with a stateless greet tool using tool_fn
     let mcp_server = McpServer::builder("greet_server".to_string())
         .instructions("Test MCP server with stateless greet tool")
@@ -33,21 +31,21 @@ fn create_greet_proxy() -> Result<sacp::DynComponent<ProxyToConductor>, sacp::Er
         .build();
 
     // Create proxy component
-    Ok(sacp::DynComponent::new(ProxyWithGreetServer { mcp_server }))
+    Ok(DynServe::new(ProxyWithGreetServer { mcp_server }))
 }
 
-struct ProxyWithGreetServer<R: sacp::Run<ProxyToConductor>> {
-    mcp_server: McpServer<ProxyToConductor, R>,
+struct ProxyWithGreetServer<R: RunWithConnectionTo<Conductor>> {
+    mcp_server: McpServer<Conductor, R>,
 }
 
-impl<R: sacp::Run<ProxyToConductor> + 'static + Send> Component<ProxyToConductor>
+impl<R: RunWithConnectionTo<Conductor> + 'static + Send> Serve<Conductor>
     for ProxyWithGreetServer<R>
 {
     async fn serve(
         self,
-        client: impl Component<sacp::link::ConductorToProxy>,
+        client: impl Serve<Proxy>,
     ) -> Result<(), sacp::Error> {
-        ProxyToConductor::builder()
+        Proxy::builder()
             .name("greet-proxy")
             .with_mcp_server(self.mcp_server)
             .serve(client)
@@ -58,10 +56,10 @@ impl<R: sacp::Run<ProxyToConductor> + 'static + Send> Component<ProxyToConductor
 /// Elizacp agent component wrapper for testing
 struct ElizacpAgentComponent;
 
-impl Component<AgentToClient> for ElizacpAgentComponent {
+impl Serve<Client> for ElizacpAgentComponent {
     async fn serve(
         self,
-        client: impl Component<sacp::link::ClientToAgent>,
+        client: impl Serve<sacp::Agent>,
     ) -> Result<(), sacp::Error> {
         // Create duplex channels for bidirectional communication
         let (elizacp_write, client_read) = duplex(8192);
@@ -76,7 +74,7 @@ impl Component<AgentToClient> for ElizacpAgentComponent {
         // Spawn elizacp in a background task
         tokio::spawn(async move {
             if let Err(e) =
-                Component::<AgentToClient>::serve(elizacp::ElizaAgent::new(true), elizacp_transport)
+                Serve::<Client>::serve(elizacp::ElizaAgent::new(true), elizacp_transport)
                     .await
             {
                 tracing::error!("Elizacp error: {}", e);
@@ -84,14 +82,14 @@ impl Component<AgentToClient> for ElizacpAgentComponent {
         });
 
         // Serve the client with the transport connected to elizacp
-        Component::<AgentToClient>::serve(client_transport, client).await
+        Serve::<Client>::serve(client_transport, client).await
     }
 }
 
 #[tokio::test]
 async fn test_tool_fn_greet() -> Result<(), sacp::Error> {
     let result = yopo::prompt(
-        Conductor::new_agent(
+        ConductorImpl::new_agent(
             "test-conductor".to_string(),
             ProxiesAndAgent::new(ElizacpAgentComponent).proxy(create_greet_proxy()?),
             Default::default(),

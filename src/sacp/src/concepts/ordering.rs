@@ -61,7 +61,7 @@
 //! # use sacp::{ClientToAgent, AgentToClient, Component};
 //! # use sacp_test::MyRequest;
 //! # async fn example(transport: impl Component<AgentToClient>) -> Result<(), sacp::Error> {
-//! # ClientToAgent::builder().run_until(transport, async |cx| {
+//! # Client::builder().run_until(transport, async |cx| {
 //! cx.spawn({
 //!     let cx = cx.clone();
 //!     async move {
@@ -90,7 +90,7 @@
 //! # use sacp::{ClientToAgent, AgentToClient, Component};
 //! # use sacp_test::MyRequest;
 //! # async fn example(transport: impl Component<AgentToClient>) -> Result<(), sacp::Error> {
-//! # ClientToAgent::builder().run_until(transport, async |cx| {
+//! # Client::builder().run_until(transport, async |cx| {
 //! cx.send_request(MyRequest {})
 //!     .on_receiving_result(async |result| {
 //!         // Dispatch loop is blocked until this completes
@@ -134,7 +134,7 @@
 //! ```
 //! # use sacp::{ClientToAgent, AgentToClient, Component};
 //! # async fn example(transport: impl Component<AgentToClient>) -> Result<(), sacp::Error> {
-//! # ClientToAgent::builder().run_until(transport, async |cx| {
+//! # Client::builder().run_until(transport, async |cx| {
 //! cx.build_session_cwd()?
 //!     .block_task()
 //!     .run_until(async |mut session| {

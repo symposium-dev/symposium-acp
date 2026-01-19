@@ -5,14 +5,13 @@
 //! `Handled::No`, which prevented downstream `.on_receive_request_from()` handlers
 //! from being invoked.
 
-use sacp::link::{AgentToClient, ProxyToConductor};
 use sacp::mcp_server::McpServer;
 use sacp::schema::{
     AgentCapabilities, InitializeRequest, InitializeResponse, NewSessionRequest,
     NewSessionResponse, ProtocolVersion, SessionId,
 };
-use sacp::{AgentPeer, ClientPeer, Component};
-use sacp_conductor::{Conductor, ProxiesAndAgent};
+use sacp::{Agent, Client, Conductor, DynServe, Proxy, Serve};
+use sacp_conductor::{ConductorImpl, ProxiesAndAgent};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
@@ -36,7 +35,7 @@ struct EchoOutput {
 
 /// Test helper to receive a JSON-RPC response
 async fn recv<T: sacp::JsonRpcResponse + Send>(
-    response: sacp::JrResponse<T>,
+    response: sacp::SentRequest<T>,
 ) -> Result<T, sacp::Error> {
     let (tx, rx) = tokio::sync::oneshot::channel();
     response.on_receiving_result(async move |result| {
@@ -68,10 +67,10 @@ struct ProxyWithMcpAndHandler {
     config: Arc<HandlerConfig>,
 }
 
-impl Component<ProxyToConductor> for ProxyWithMcpAndHandler {
+impl Serve<Conductor> for ProxyWithMcpAndHandler {
     async fn serve(
         self,
-        client: impl Component<sacp::link::ConductorToProxy>,
+        client: impl Serve<Proxy>,
     ) -> Result<(), sacp::Error> {
         let config = Arc::clone(&self.config);
 
@@ -90,13 +89,13 @@ impl Component<ProxyToConductor> for ProxyWithMcpAndHandler {
             )
             .build();
 
-        ProxyToConductor::builder()
+        sacp::Proxy::builder()
             .name("proxy-with-mcp-and-handler")
             // Add the MCP server
             .with_mcp_server(mcp_server)
             // Add a NewSessionRequest handler - this should be invoked!
             .on_receive_request_from(
-                ClientPeer,
+                Client,
                 async move |request: NewSessionRequest, request_cx, cx| {
                     // Mark that we were called
                     config
@@ -104,12 +103,11 @@ impl Component<ProxyToConductor> for ProxyWithMcpAndHandler {
                         .store(true, Ordering::SeqCst);
 
                     // Forward to agent and relay response
-                    cx.send_request_to(AgentPeer, request).on_receiving_result(
-                        async move |result| {
+                    cx.send_request_to(Agent, request)
+                        .on_receiving_result(async move |result| {
                             let response: NewSessionResponse = result?;
                             request_cx.respond(response)
-                        },
-                    )
+                        })
                 },
                 sacp::on_receive_request!(),
             )
@@ -121,12 +119,12 @@ impl Component<ProxyToConductor> for ProxyWithMcpAndHandler {
 /// A simple agent that responds to initialization and session requests
 struct SimpleAgent;
 
-impl Component<AgentToClient> for SimpleAgent {
+impl Serve<Client> for SimpleAgent {
     async fn serve(
         self,
-        client: impl Component<sacp::link::ClientToAgent>,
+        client: impl Serve<Agent>,
     ) -> Result<(), sacp::Error> {
-        AgentToClient::builder()
+        Agent::builder()
             .name("simple-agent")
             .on_receive_request(
                 async |request: InitializeRequest, request_cx, _cx| {
@@ -145,26 +143,25 @@ impl Component<AgentToClient> for SimpleAgent {
                 },
                 sacp::on_receive_request!(),
             )
-            .connect_to(client)?
-            .serve()
+            .serve(client)
             .await
     }
 }
 
 async fn run_test(
-    proxies: Vec<sacp::DynComponent<ProxyToConductor>>,
-    agent: sacp::DynComponent<AgentToClient>,
-    editor_task: impl AsyncFnOnce(sacp::ConnectionTo<sacp::ClientToAgent>) -> Result<(), sacp::Error>,
+    proxies: Vec<DynServe<Conductor>>,
+    agent: DynServe<Client>,
+    editor_task: impl AsyncFnOnce(sacp::ConnectionTo<Agent>) -> Result<(), sacp::Error>,
 ) -> Result<(), sacp::Error> {
     let (editor_out, conductor_in) = duplex(1024);
     let (conductor_out, editor_in) = duplex(1024);
 
     let transport = sacp::ByteStreams::new(editor_out.compat_write(), editor_in.compat());
 
-    sacp::ClientToAgent::builder()
+    sacp::Client::builder()
         .name("editor-to-conductor")
         .with_spawned(|_cx| async move {
-            Conductor::new_agent(
+            ConductorImpl::new_agent(
                 "conductor".to_string(),
                 ProxiesAndAgent::new(agent).proxies(proxies),
                 Default::default(),
@@ -185,10 +182,10 @@ async fn test_new_session_handler_invoked_with_mcp_server() -> Result<(), sacp::
     let handler_config = HandlerConfig::new();
     let handler_config_clone = Arc::clone(&handler_config);
 
-    let proxy = sacp::DynComponent::<ProxyToConductor>::new(ProxyWithMcpAndHandler {
+    let proxy = DynServe::<Conductor>::new(ProxyWithMcpAndHandler {
         config: handler_config,
     });
-    let agent = sacp::DynComponent::<AgentToClient>::new(SimpleAgent);
+    let agent = DynServe::<Client>::new(SimpleAgent);
 
     run_test(vec![proxy], agent, async |editor_cx| {
         // Initialize first

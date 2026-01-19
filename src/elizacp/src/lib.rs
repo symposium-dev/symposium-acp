@@ -3,14 +3,13 @@ pub mod eliza;
 
 use anyhow::Result;
 use eliza::Eliza;
-use sacp::AgentToClient;
 use sacp::schema::{
     AgentCapabilities, ContentBlock, ContentChunk, InitializeRequest, InitializeResponse,
     LoadSessionRequest, LoadSessionResponse, McpServer, NewSessionRequest, NewSessionResponse,
     PromptRequest, PromptResponse, SessionId, SessionNotification, SessionUpdate, StopReason,
     TextContent,
 };
-use sacp::{Component, ConnectionTo, Responder};
+use sacp::{Agent, Client, ConnectionTo, Responder, Serve};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
@@ -103,8 +102,8 @@ impl ElizaAgent {
     async fn process_prompt(
         &self,
         request: PromptRequest,
-        request_cx: Responder<PromptResponse>,
-        cx: ConnectionTo<AgentToClient>,
+        responder: Responder<PromptResponse>,
+        connection: ConnectionTo<Client>,
     ) -> Result<(), sacp::Error> {
         let session_id = request.session_id.clone();
 
@@ -162,13 +161,13 @@ impl ElizaAgent {
             ?final_response,
             "Eliza sending SessionNotification"
         );
-        cx.send_notification(SessionNotification::new(
+        connection.send_notification(SessionNotification::new(
             session_id.clone(),
             SessionUpdate::AgentMessageChunk(ContentChunk::new(final_response.into())),
         ))?;
 
         // Complete the request
-        request_cx.respond(PromptResponse::new(StopReason::EndTurn))
+        responder.respond(PromptResponse::new(StopReason::EndTurn))
     }
 
     /// Helper function to execute an operation with an MCP client
@@ -367,12 +366,9 @@ fn parse_tool_call(input: &str) -> Option<(String, String, String)> {
     ))
 }
 
-impl Component<sacp::link::AgentToClient> for ElizaAgent {
-    async fn serve(
-        self,
-        client: impl Component<sacp::link::ClientToAgent>,
-    ) -> Result<(), sacp::Error> {
-        AgentToClient::builder()
+impl Serve<Client> for ElizaAgent {
+    async fn serve(self, client: impl Serve<Agent>) -> Result<(), sacp::Error> {
+        Agent::builder()
             .name("elizacp")
             .on_receive_request(
                 async |initialize: InitializeRequest, request_cx, _cx| {
@@ -419,8 +415,7 @@ impl Component<sacp::link::AgentToClient> for ElizaAgent {
                 },
                 sacp::on_receive_request!(),
             )
-            .connect_to(client)?
-            .serve()
+            .serve(client)
             .await
     }
 }

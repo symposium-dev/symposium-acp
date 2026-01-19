@@ -8,11 +8,10 @@
 //! 5. The tool returns the session_id in its response
 //! 6. We verify the session_ids match
 
-use sacp::Component;
-use sacp::ProxyToConductor;
-use sacp::link::AgentToClient;
+use sacp::{Agent, Client, Conductor, DynServe, Proxy, Serve};
 use sacp::mcp_server::McpServer;
-use sacp_conductor::{Conductor, ProxiesAndAgent};
+use sacp::RunWithConnectionTo;
+use sacp_conductor::{ConductorImpl, ProxiesAndAgent};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use tokio::io::duplex;
@@ -29,7 +28,7 @@ struct EchoOutput {
 }
 
 /// Create a proxy that provides an MCP server with a session_id echo tool
-fn create_echo_proxy() -> Result<sacp::DynComponent<ProxyToConductor>, sacp::Error> {
+fn create_echo_proxy() -> Result<DynServe<Conductor>, sacp::Error> {
     // Create MCP server with an echo tool that returns the session_id
     let mcp_server = McpServer::builder("echo_server".to_string())
         .instructions("Test MCP server with session_id echo tool")
@@ -46,21 +45,21 @@ fn create_echo_proxy() -> Result<sacp::DynComponent<ProxyToConductor>, sacp::Err
         .build();
 
     // Create proxy component
-    Ok(sacp::DynComponent::new(ProxyWithEchoServer { mcp_server }))
+    Ok(DynServe::new(ProxyWithEchoServer { mcp_server }))
 }
 
-struct ProxyWithEchoServer<R: sacp::Run<ProxyToConductor>> {
-    mcp_server: McpServer<ProxyToConductor, R>,
+struct ProxyWithEchoServer<R: RunWithConnectionTo<Conductor>> {
+    mcp_server: McpServer<Conductor, R>,
 }
 
-impl<R: sacp::Run<ProxyToConductor> + 'static + Send> Component<ProxyToConductor>
+impl<R: RunWithConnectionTo<Conductor> + 'static + Send> Serve<Conductor>
     for ProxyWithEchoServer<R>
 {
     async fn serve(
         self,
-        client: impl Component<sacp::link::ConductorToProxy>,
+        client: impl Serve<Proxy>,
     ) -> Result<(), sacp::Error> {
-        ProxyToConductor::builder()
+        sacp::Proxy::builder()
             .name("echo-proxy")
             .with_mcp_server(self.mcp_server)
             .serve(client)
@@ -71,10 +70,10 @@ impl<R: sacp::Run<ProxyToConductor> + 'static + Send> Component<ProxyToConductor
 /// Elizacp agent component wrapper for testing
 struct ElizacpAgentComponent;
 
-impl Component<AgentToClient> for ElizacpAgentComponent {
+impl Serve<Client> for ElizacpAgentComponent {
     async fn serve(
         self,
-        client: impl Component<sacp::link::ClientToAgent>,
+        client: impl Serve<Agent>,
     ) -> Result<(), sacp::Error> {
         // Create duplex channels for bidirectional communication
         let (elizacp_write, client_read) = duplex(8192);
@@ -89,7 +88,7 @@ impl Component<AgentToClient> for ElizacpAgentComponent {
         // Spawn elizacp in a background task
         tokio::spawn(async move {
             if let Err(e) =
-                Component::<AgentToClient>::serve(elizacp::ElizaAgent::new(true), elizacp_transport)
+                Serve::<Client>::serve(elizacp::ElizaAgent::new(true), elizacp_transport)
                     .await
             {
                 tracing::error!("Elizacp error: {}", e);
@@ -97,7 +96,7 @@ impl Component<AgentToClient> for ElizacpAgentComponent {
         });
 
         // Serve the client with the transport connected to elizacp
-        Component::<AgentToClient>::serve(client_transport, client).await
+        Serve::<Client>::serve(client_transport, client).await
     }
 }
 
@@ -108,7 +107,7 @@ async fn test_list_tools_from_mcp_server() -> Result<(), sacp::Error> {
     // Create the component chain: proxy with echo server -> eliza
     // Use yopo to send the prompt and get the response
     let result = yopo::prompt(
-        Conductor::new_agent(
+        ConductorImpl::new_agent(
             "test-conductor".to_string(),
             ProxiesAndAgent::new(ElizacpAgentComponent).proxy(create_echo_proxy()?),
             Default::default(),
@@ -129,7 +128,7 @@ async fn test_list_tools_from_mcp_server() -> Result<(), sacp::Error> {
 #[tokio::test]
 async fn test_session_id_delivered_to_mcp_tools() -> Result<(), sacp::Error> {
     let result = yopo::prompt(
-        Conductor::new_agent(
+        ConductorImpl::new_agent(
             "test-conductor".to_string(),
             ProxiesAndAgent::new(ElizacpAgentComponent).proxy(create_echo_proxy()?),
             Default::default(),

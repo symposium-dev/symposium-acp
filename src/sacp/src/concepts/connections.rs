@@ -23,7 +23,7 @@
 //! ```
 //! # use sacp::{ClientToAgent, AgentToClient, Component};
 //! # async fn example(transport: impl Component<AgentToClient>) -> Result<(), sacp::Error> {
-//! ClientToAgent::builder()
+//! Client::builder()
 //!     .name("my-client")
 //!     .run_until(transport, async |cx| {
 //!         // Use `cx` to send requests and handle responses
@@ -44,7 +44,7 @@
 //! # use sacp::schema::{InitializeRequest, ProtocolVersion};
 //! # use sacp_test::StatusUpdate;
 //! # async fn example(transport: impl Component<AgentToClient>) -> Result<(), sacp::Error> {
-//! # ClientToAgent::builder().run_until(transport, async |cx| {
+//! # Client::builder().run_until(transport, async |cx| {
 //! // Send a request and wait for the response
 //! let response = cx.send_request(InitializeRequest::new(ProtocolVersion::LATEST))
 //!     .block_task()
@@ -71,7 +71,7 @@
 //! # use sacp::{ClientToAgent, AgentToClient, Component};
 //! # use sacp_test::MyRequest;
 //! # async fn example(transport: impl Component<AgentToClient>) -> Result<(), sacp::Error> {
-//! # ClientToAgent::builder().run_until(transport, async |cx| {
+//! # Client::builder().run_until(transport, async |cx| {
 //! let response = cx.send_request(MyRequest {})
 //!     .block_task()
 //!     .await?;
@@ -90,7 +90,7 @@
 //! # use sacp::{ClientToAgent, AgentToClient, Component};
 //! # use sacp_test::MyRequest;
 //! # async fn example(transport: impl Component<AgentToClient>) -> Result<(), sacp::Error> {
-//! # ClientToAgent::builder().run_until(transport, async |cx| {
+//! # Client::builder().run_until(transport, async |cx| {
 //! cx.send_request(MyRequest {})
 //!     .on_receiving_result(async |result| {
 //!         match result {

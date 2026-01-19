@@ -1,11 +1,10 @@
-use sacp::AgentToClient;
 use sacp::schema::{AgentCapabilities, InitializeRequest, InitializeResponse};
-use sacp::{ConnectionTo, MessageCx};
+use sacp::{Agent, Client, ConnectionTo, MessageCx};
 use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
 
 #[tokio::main]
 async fn main() -> Result<(), sacp::Error> {
-    AgentToClient::builder()
+    Agent::builder()
         .name("my-agent") // for debugging
         .on_receive_request(
             async move |initialize: InitializeRequest, request_cx, _connection_cx| {
@@ -18,7 +17,7 @@ async fn main() -> Result<(), sacp::Error> {
             sacp::on_receive_request!(),
         )
         .on_receive_message(
-            async move |message: MessageCx, cx: ConnectionTo<AgentToClient>| {
+            async move |message: MessageCx, cx: ConnectionTo<Client>| {
                 // Respond to any other message with an error
                 message.respond_with_error(sacp::util::internal_error("TODO"), cx)
             },

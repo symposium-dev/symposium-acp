@@ -19,7 +19,7 @@ use sacp::schema::{
     SessionNotification, TextContent,
 };
 use sacp_conductor::trace::TraceEvent;
-use sacp_conductor::{Conductor, ProxiesAndAgent};
+use sacp_conductor::{ConductorImpl, ProxiesAndAgent};
 use std::collections::HashMap;
 use tokio::io::duplex;
 use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
@@ -184,7 +184,7 @@ impl EventNormalizer {
 
 /// Test helper to receive a JSON-RPC response
 async fn recv<T: sacp::JsonRpcResponse + Send>(
-    response: sacp::JrResponse<T>,
+    response: sacp::SentRequest<T>,
 ) -> Result<T, sacp::Error> {
     let (tx, rx) = tokio::sync::oneshot::channel();
     response.on_receiving_result(async move |result| {
@@ -210,7 +210,7 @@ async fn test_trace_mcp_tool_call() -> Result<(), sacp::Error> {
     // - ProxyComponent that provides the "test" MCP server with echo tool
     // - Tracing enabled to capture events
     let conductor_handle = tokio::spawn(async move {
-        Conductor::new_agent(
+        ConductorImpl::new_agent(
             "conductor".to_string(),
             ProxiesAndAgent::new(ElizaAgent::new(true))
                 .proxy(mcp_integration::proxy::ProxyComponent),
@@ -226,7 +226,7 @@ async fn test_trace_mcp_tool_call() -> Result<(), sacp::Error> {
 
     // Run the client interaction
     let test_result = tokio::time::timeout(std::time::Duration::from_secs(30), async move {
-        sacp::ClientToAgent::builder()
+        sacp::Client::builder()
             .name("test-client")
             .on_receive_notification(
                 {

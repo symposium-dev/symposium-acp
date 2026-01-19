@@ -35,7 +35,7 @@ pub(super) async fn outgoing_protocol_actor(
         let json_rpc_message = match message {
             OutgoingMessage::Request {
                 id,
-                peer_id,
+                role_id,
                 method,
                 untyped,
                 response_tx,
@@ -44,7 +44,7 @@ pub(super) async fn outgoing_protocol_actor(
                 reply_tx
                     .unbounded_send(ReplyMessage::Subscribe {
                         id: id.clone(),
-                        peer_id,
+                        role_id,
                         method: method,
                         sender: response_tx,
                     })

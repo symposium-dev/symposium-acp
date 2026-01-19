@@ -25,7 +25,7 @@
 //! # use sacp::{ClientToAgent, AgentToClient, Component};
 //! # use sacp_test::{ValidateRequest, ValidateResponse};
 //! # async fn example(transport: impl Component<AgentToClient>) -> Result<(), sacp::Error> {
-//! ClientToAgent::builder()
+//! Client::builder()
 //!     .on_receive_request(async |request: ValidateRequest, request_cx, _cx| {
 //!         if request.data.is_empty() {
 //!             // Send error to peer, keep connection alive
@@ -48,7 +48,7 @@
 //! ```
 //! # use sacp::{ClientToAgent, AgentToClient, Component};
 //! # async fn example(transport: impl Component<AgentToClient>) -> Result<(), sacp::Error> {
-//! # ClientToAgent::builder().run_until(transport, async |cx| {
+//! # Client::builder().run_until(transport, async |cx| {
 //! cx.send_error_notification(sacp::Error::internal_error()
 //!     .data("Something went wrong"))?;
 //! # Ok(())

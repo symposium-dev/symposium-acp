@@ -9,7 +9,7 @@ use futures::{SinkExt, StreamExt as _, channel::mpsc, future::Either, stream::St
 use futures_concurrency::future::FutureExt as _;
 use futures_concurrency::stream::StreamExt as _;
 use fxhash::FxHashMap;
-use sacp::{BoxFuture, Channel, Component, jsonrpcmsg::Message};
+use sacp::{BoxFuture, Channel, Serve, jsonrpcmsg::Message, role::mcp};
 use std::{collections::VecDeque, pin::pin, sync::Arc};
 use tokio::net::TcpListener;
 
@@ -58,9 +58,9 @@ impl HttpMcpBridge {
     }
 }
 
-impl<L: sacp::link::JrLink> sacp::Component<L> for HttpMcpBridge {
-    async fn serve(self, client: impl Component<L::ConnectsTo>) -> Result<(), sacp::Error> {
-        let (channel, serve_self) = Component::<L>::into_server(self);
+impl Serve<mcp::Client> for HttpMcpBridge {
+    async fn serve(self, client: impl Serve<mcp::Server>) -> Result<(), sacp::Error> {
+        let (channel, serve_self) = self.into_server();
         match futures::future::select(pin!(client.serve(channel)), serve_self).await {
             Either::Left((result, _)) => result,
             Either::Right((result, _)) => result,

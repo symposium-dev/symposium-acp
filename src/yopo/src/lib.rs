@@ -2,14 +2,13 @@
 //!
 //! Provides a convenient API for running one-shot prompts against SACP components.
 
-use sacp::ClientToAgent;
 use sacp::schema::{
     AudioContent, ContentBlock, EmbeddedResourceResource, ImageContent, InitializeRequest,
     ProtocolVersion, RequestPermissionOutcome, RequestPermissionRequest, RequestPermissionResponse,
     SelectedPermissionOutcome, SessionNotification, TextContent,
 };
 use sacp::util::MatchMessage;
-use sacp::{Component, Handled, MessageCx, UntypedMessage};
+use sacp::{Agent, Client, Handled, MessageCx, Serve, UntypedMessage};
 use std::path::PathBuf;
 
 /// Converts a `ContentBlock` to its string representation.
@@ -79,7 +78,7 @@ pub fn content_block_to_string(block: &ContentBlock) -> String {
 /// # }
 /// ```
 pub async fn prompt_with_callback(
-    component: impl Component<sacp::link::AgentToClient>,
+    component: impl Serve<Client>,
     prompt_text: impl ToString,
     mut callback: impl AsyncFnMut(ContentBlock) + Send,
 ) -> Result<(), sacp::Error> {
@@ -87,7 +86,7 @@ pub async fn prompt_with_callback(
     let prompt_text = prompt_text.to_string();
 
     // Run the client
-    ClientToAgent::builder()
+    Client::builder()
         .on_receive_message(
             async |message: MessageCx<UntypedMessage, UntypedMessage>, _cx| {
                 tracing::trace!("received: {:?}", message.message());
@@ -98,8 +97,7 @@ pub async fn prompt_with_callback(
             },
             sacp::on_receive_message!(),
         )
-        .connect_to(component)?
-        .run_until(|cx: sacp::ConnectionTo<ClientToAgent>| async move {
+        .run_until(component, |cx: sacp::ConnectionTo<Agent>| async move {
             // Initialize the agent
             let _init_response = cx
                 .send_request(InitializeRequest::new(ProtocolVersion::LATEST))
@@ -212,7 +210,7 @@ pub async fn prompt_with_callback(
 /// # }
 /// ```
 pub async fn prompt(
-    component: impl Component<sacp::link::AgentToClient>,
+    component: impl Serve<Client>,
     prompt_text: impl ToString,
 ) -> Result<String, sacp::Error> {
     let mut accumulated_text = String::new();

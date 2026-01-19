@@ -8,14 +8,13 @@ use futures::channel::mpsc;
 use tokio::sync::oneshot;
 
 use crate::{
-    AgentPeer, ClientPeer, ConnectionTo, HandleMessageFrom, Handled, HasPeer, JrLink, MessageCx,
-    Responder,
+    Agent, Client, ConnectionTo, HandleMessageFrom, Handled, MessageCx, Responder, Role,
     jsonrpc::{
         DynamicHandlerRegistration,
-        run::{ChainRun, NullRun, Run},
+        run::{ChainRun, NullRun, RunWithConnectionTo},
     },
-    link::ProxySessionMessages,
     mcp_server::McpServer,
+    role::{HasPeer, acp::ProxySessionMessages},
     schema::SessionId,
     util::{MatchMessage, MatchMessageFrom, run_until},
 };
@@ -34,12 +33,12 @@ impl SessionBlockState for NonBlocking {}
 /// See [`SessionBuilder::block_task`].
 pub trait SessionBlockState: Send + 'static + Sync + std::fmt::Debug {}
 
-impl<Link: JrLink> ConnectionTo<Link>
+impl<Counterpart: Role> ConnectionTo<Counterpart>
 where
-    Link: HasPeer<AgentPeer>,
+    Counterpart: HasPeer<Agent>,
 {
     /// Session builder for a new session request.
-    pub fn build_session(&self, cwd: impl AsRef<Path>) -> SessionBuilder<Link, NullRun> {
+    pub fn build_session(&self, cwd: impl AsRef<Path>) -> SessionBuilder<Counterpart, NullRun> {
         SessionBuilder::new(self, NewSessionRequest::new(cwd.as_ref()))
     }
 
@@ -49,7 +48,7 @@ where
     /// that uses [`std::env::current_dir`] to get the working directory.
     ///
     /// Returns an error if the current directory cannot be determined.
-    pub fn build_session_cwd(&self) -> Result<SessionBuilder<Link, NullRun>, crate::Error> {
+    pub fn build_session_cwd(&self) -> Result<SessionBuilder<Counterpart, NullRun>, crate::Error> {
         let cwd = std::env::current_dir().map_err(|e| {
             crate::Error::internal_error().data(format!("cannot get current directory: {e}"))
         })?;
@@ -60,7 +59,10 @@ where
     ///
     /// Use this when you've intercepted a `session.new` request and want to
     /// modify it (e.g., inject MCP servers) before forwarding.
-    pub fn build_session_from(&self, request: NewSessionRequest) -> SessionBuilder<Link, NullRun> {
+    pub fn build_session_from(
+        &self,
+        request: NewSessionRequest,
+    ) -> SessionBuilder<Counterpart, NullRun> {
         SessionBuilder::new(self, request)
     }
 
@@ -77,8 +79,8 @@ where
     pub fn attach_session<'responder>(
         &self,
         response: NewSessionResponse,
-        mcp_handler_registrations: Vec<DynamicHandlerRegistration<Link>>,
-    ) -> Result<ActiveSession<'responder, Link>, crate::Error> {
+        mcp_handler_registrations: Vec<DynamicHandlerRegistration<Counterpart>>,
+    ) -> Result<ActiveSession<'responder, Counterpart>, crate::Error> {
         let NewSessionResponse {
             session_id,
             modes,
@@ -87,8 +89,7 @@ where
         } = response;
 
         let (update_tx, update_rx) = mpsc::unbounded();
-        let handler =
-            ActiveSessionHandler::new(Link::default(), session_id.clone(), update_tx.clone());
+        let handler = ActiveSessionHandler::new(session_id.clone(), update_tx.clone());
         let session_handler_registration = self.add_dynamic_handler(handler)?;
 
         Ok(ActiveSession {
@@ -113,22 +114,25 @@ where
 /// - `Blocking` (after calling [`block_task`](Self::block_task)):
 ///   [`run_until`](Self::run_until) and [`start_session`](Self::start_session) become available
 #[must_use = "use `start_session`, `run_until`, or `on_session_start` to start the session"]
-pub struct SessionBuilder<Link, R: Run<Link> = NullRun, BlockState: SessionBlockState = NonBlocking>
-where
-    Link: HasPeer<AgentPeer>,
+pub struct SessionBuilder<
+    Counterpart,
+    Run: RunWithConnectionTo<Counterpart> = NullRun,
+    BlockState: SessionBlockState = NonBlocking,
+> where
+    Counterpart: HasPeer<Agent>,
 {
-    connection: ConnectionTo<Link>,
+    connection: ConnectionTo<Counterpart>,
     request: NewSessionRequest,
-    dynamic_handler_registrations: Vec<DynamicHandlerRegistration<Link>>,
-    responder: R,
+    dynamic_handler_registrations: Vec<DynamicHandlerRegistration<Counterpart>>,
+    responder: Run,
     block_state: PhantomData<BlockState>,
 }
 
-impl<Link> SessionBuilder<Link, NullRun, NonBlocking>
+impl<Counterpart> SessionBuilder<Counterpart, NullRun, NonBlocking>
 where
-    Link: HasPeer<AgentPeer>,
+    Counterpart: HasPeer<Agent>,
 {
-    fn new(connection: &ConnectionTo<Link>, request: NewSessionRequest) -> Self {
+    fn new(connection: &ConnectionTo<Counterpart>, request: NewSessionRequest) -> Self {
         SessionBuilder {
             connection: connection.clone(),
             request,
@@ -139,19 +143,19 @@ where
     }
 }
 
-impl<Link, R, BlockState> SessionBuilder<Link, R, BlockState>
+impl<Counterpart, R, BlockState> SessionBuilder<Counterpart, R, BlockState>
 where
-    Link: HasPeer<AgentPeer>,
-    R: Run<Link>,
+    Counterpart: HasPeer<Agent>,
+    R: RunWithConnectionTo<Counterpart>,
     BlockState: SessionBlockState,
 {
     /// Add the MCP servers from the given registry to this session.
     pub fn with_mcp_server<McpRun>(
         mut self,
-        mcp_server: McpServer<Link, McpRun>,
-    ) -> Result<SessionBuilder<Link, ChainRun<R, McpRun>, BlockState>, crate::Error>
+        mcp_server: McpServer<Counterpart, McpRun>,
+    ) -> Result<SessionBuilder<Counterpart, ChainRun<R, McpRun>, BlockState>, crate::Error>
     where
-        McpRun: Run<Link>,
+        McpRun: RunWithConnectionTo<Counterpart>,
     {
         let (handler, responder) = mcp_server.into_handler_and_responder();
         self.dynamic_handler_registrations
@@ -181,7 +185,7 @@ where
     /// # use sacp::{ClientToAgent, AgentToClient, Component};
     /// # use sacp::mcp_server::McpServer;
     /// # async fn example(transport: impl Component<AgentToClient>) -> Result<(), sacp::Error> {
-    /// # ClientToAgent::builder().run_until(transport, async |cx| {
+    /// # Client::builder().run_until(transport, async |cx| {
     /// # let mcp = McpServer::<ClientToAgent, _>::builder("tools").build();
     /// cx.build_session_cwd()?
     ///     .with_mcp_server(mcp)?
@@ -205,7 +209,7 @@ where
     pub fn on_session_start<F, Fut>(self, op: F) -> Result<(), crate::Error>
     where
         R: 'static,
-        F: FnOnce(ActiveSession<'static, Link>) -> Fut + Send + 'static,
+        F: FnOnce(ActiveSession<'static, Counterpart>) -> Fut + Send + 'static,
         Fut: Future<Output = Result<(), crate::Error>> + Send,
     {
         let Self {
@@ -217,13 +221,13 @@ where
         } = self;
 
         connection
-            .send_request_to(AgentPeer, request)
+            .send_request_to(Agent, request)
             .on_receiving_result({
                 let connection = connection.clone();
                 async move |result| {
                     let response = result?;
 
-                    connection.spawn(responder.run(connection.clone()))?;
+                    connection.spawn(responder.run_with_connection_to(connection.clone()))?;
 
                     let active_session =
                         connection.attach_session(response, dynamic_handler_registrations)?;
@@ -252,13 +256,13 @@ where
     /// # Example
     ///
     /// ```
-    /// # use sacp::{ProxyToConductor, ClientPeer, Component};
+    /// # use sacp::{ProxyToConductor, Client, Component};
     /// # use sacp::link::ConductorToProxy;
     /// # use sacp::schema::NewSessionRequest;
     /// # use sacp::mcp_server::McpServer;
     /// # async fn example(transport: impl Component<ConductorToProxy>) -> Result<(), sacp::Error> {
-    /// ProxyToConductor::builder()
-    ///     .on_receive_request_from(ClientPeer, async |request: NewSessionRequest, request_cx, cx| {
+    /// Proxy::builder()
+    ///     .on_receive_request_from(Client, async |request: NewSessionRequest, request_cx, cx| {
     ///         let mcp = McpServer::<ProxyToConductor, _>::builder("tools").build();
     ///         cx.build_session_from(request)
     ///             .with_mcp_server(mcp)?
@@ -285,7 +289,7 @@ where
     where
         F: FnOnce(SessionId) -> Fut + Send + 'static,
         Fut: Future<Output = Result<(), crate::Error>> + Send,
-        Link: HasPeer<ClientPeer>,
+        Counterpart: HasPeer<Client>,
         R: 'static,
     {
         let Self {
@@ -297,14 +301,14 @@ where
         } = self;
 
         // Spawn off the responder and dynamic handlers to run indefinitely
-        connection.spawn(responder.run(connection.clone()))?;
+        connection.spawn(responder.run_with_connection_to(connection.clone()))?;
         dynamic_handler_registrations
             .into_iter()
             .for_each(|handler| handler.run_indefinitely());
 
         // Send the "new session" request to the agent
         connection
-            .send_request_to(AgentPeer, request)
+            .send_request_to(Agent, request)
             .on_receiving_result({
                 let connection = connection.clone();
                 async move |result| {
@@ -326,10 +330,10 @@ where
     }
 }
 
-impl<Link, R> SessionBuilder<Link, R, NonBlocking>
+impl<Counterpart, R> SessionBuilder<Counterpart, R, NonBlocking>
 where
-    Link: HasPeer<AgentPeer>,
-    R: Run<Link>,
+    Counterpart: HasPeer<Agent>,
+    R: RunWithConnectionTo<Counterpart>,
 {
     /// Mark this session builder as being able to block the current task.
     ///
@@ -339,7 +343,7 @@ where
     /// This should not be used from inside a message handler like
     /// [`ConnectFrom::on_receive_request`](`crate::ConnectFrom::on_receive_request`) or [`HandleMessageFrom`]
     /// implementations.
-    pub fn block_task(self) -> SessionBuilder<Link, R, Blocking> {
+    pub fn block_task(self) -> SessionBuilder<Counterpart, R, Blocking> {
         SessionBuilder {
             connection: self.connection,
             request: self.request,
@@ -350,10 +354,10 @@ where
     }
 }
 
-impl<Link, R> SessionBuilder<Link, R, Blocking>
+impl<Counterpart, R> SessionBuilder<Counterpart, R, Blocking>
 where
-    Link: HasPeer<AgentPeer>,
-    R: Run<Link>,
+    Counterpart: HasPeer<Agent>,
+    R: RunWithConnectionTo<Counterpart>,
 {
     /// Run this session synchronously. The current task will be blocked
     /// and `op` will be executed with the active session information.
@@ -367,7 +371,9 @@ where
     /// Requires calling [`block_task`](Self::block_task) first.
     pub async fn run_until<T>(
         self,
-        op: impl for<'responder> AsyncFnOnce(ActiveSession<'responder, Link>) -> Result<T, crate::Error>,
+        op: impl for<'responder> AsyncFnOnce(
+            ActiveSession<'responder, Counterpart>,
+        ) -> Result<T, crate::Error>,
     ) -> Result<T, crate::Error> {
         let Self {
             connection,
@@ -378,13 +384,17 @@ where
         } = self;
 
         let response = connection
-            .send_request_to(AgentPeer, request)
+            .send_request_to(Agent, request)
             .block_task()
             .await?;
 
         let active_session = connection.attach_session(response, dynamic_handler_registrations)?;
 
-        run_until(responder.run(connection.clone()), op(active_session)).await
+        run_until(
+            responder.run_with_connection_to(connection.clone()),
+            op(active_session),
+        )
+        .await
     }
 
     /// Send the request to create the session and return a handle.
@@ -396,7 +406,7 @@ where
     /// into background tasks that live for the connection lifetime.
     ///
     /// Requires calling [`block_task`](Self::block_task) first.
-    pub async fn start_session(self) -> Result<ActiveSession<'static, Link>, crate::Error>
+    pub async fn start_session(self) -> Result<ActiveSession<'static, Counterpart>, crate::Error>
     where
         R: 'static,
     {
@@ -412,11 +422,11 @@ where
 
         connection.clone().spawn(async move {
             let response = connection
-                .send_request_to(AgentPeer, request)
+                .send_request_to(Agent, request)
                 .block_task()
                 .await?;
 
-            connection.spawn(responder.run(connection.clone()))?;
+            connection.spawn(responder.run_with_connection_to(connection.clone()))?;
 
             let active_session =
                 connection.attach_session(response, dynamic_handler_registrations)?;
@@ -455,7 +465,7 @@ where
         request_cx: Responder<NewSessionResponse>,
     ) -> Result<SessionId, crate::Error>
     where
-        Link: HasPeer<ClientPeer>,
+        Counterpart: HasPeer<Client>,
         R: 'static,
     {
         let active_session = self.start_session().await?;
@@ -476,7 +486,7 @@ where
 /// (since the responders would die when the closure returns).
 pub struct ActiveSession<'responder, Link>
 where
-    Link: HasPeer<AgentPeer>,
+    Link: HasPeer<Agent>,
 {
     session_id: SessionId,
     update_rx: mpsc::UnboundedReceiver<SessionMessage>,
@@ -513,7 +523,7 @@ pub enum SessionMessage {
 
 impl<'responder, Link> ActiveSession<'responder, Link>
 where
-    Link: HasPeer<AgentPeer>,
+    Link: HasPeer<Agent>,
 {
     /// Access the session ID.
     pub fn session_id(&self) -> &SessionId {
@@ -550,7 +560,7 @@ where
         let update_tx = self.update_tx.clone();
         self.connection
             .send_request_to(
-                AgentPeer,
+                Agent,
                 PromptRequest::new(self.session_id.clone(), vec![prompt.to_string().into()]),
             )
             .on_receiving_result(async move |result| {
@@ -610,7 +620,7 @@ where
 
 impl<Link> ActiveSession<'static, Link>
 where
-    Link: HasPeer<AgentPeer>,
+    Link: HasPeer<Agent>,
 {
     /// Proxy all remaining messages for this session between client and agent.
     ///
@@ -642,7 +652,7 @@ where
     /// out of order or lost during the transition.
     pub fn proxy_remaining_messages(self) -> Result<(), crate::Error>
     where
-        Link: HasPeer<ClientPeer>,
+        Link: HasPeer<Client>,
     {
         // Destructure self to get ownership of all fields
         let ActiveSession {
@@ -675,7 +685,7 @@ where
             match message {
                 SessionMessage::SessionMessage(message_cx) => {
                     // Forward the message to the client
-                    connection.send_proxied_message_to(ClientPeer, message_cx)?;
+                    connection.send_proxied_message_to(Client, message_cx)?;
                 }
                 SessionMessage::StopReason(_) => {
                     // StopReason is internal bookkeeping, not forwarded
@@ -699,43 +709,28 @@ where
     }
 }
 
-struct ActiveSessionHandler<Link>
-where
-    Link: HasPeer<AgentPeer>,
-{
-    #[expect(dead_code)]
-    role: Link,
+struct ActiveSessionHandler {
     session_id: SessionId,
     update_tx: mpsc::UnboundedSender<SessionMessage>,
 }
 
-impl<Link> ActiveSessionHandler<Link>
-where
-    Link: HasPeer<AgentPeer>,
-{
-    pub fn new(
-        role: Link,
-        session_id: SessionId,
-        update_tx: mpsc::UnboundedSender<SessionMessage>,
-    ) -> Self {
+impl ActiveSessionHandler {
+    pub fn new(session_id: SessionId, update_tx: mpsc::UnboundedSender<SessionMessage>) -> Self {
         Self {
-            role,
             session_id,
             update_tx,
         }
     }
 }
 
-impl<Link> HandleMessageFrom for ActiveSessionHandler<Link>
+impl<Counterpart: Role> HandleMessageFrom<Counterpart> for ActiveSessionHandler
 where
-    Link: HasPeer<AgentPeer>,
+    Counterpart: HasPeer<Agent>,
 {
-    type Link = Link;
-
-    async fn handle_message(
+    async fn handle_message_from(
         &mut self,
         message: MessageCx,
-        cx: ConnectionTo<Self::Link>,
+        cx: ConnectionTo<Counterpart>,
     ) -> Result<Handled<MessageCx>, crate::Error> {
         // If this is a message for our session, grab it.
         tracing::trace!(
@@ -744,7 +739,7 @@ where
             "ActiveSessionHandler::handle_message"
         );
         MatchMessageFrom::new(message, &cx)
-            .if_message_from(AgentPeer, async |message| {
+            .if_message_from(Agent, async |message| {
                 if let Some(session_id) = message.get_session_id()? {
                     tracing::trace!(
                         message_session_id = ?session_id,

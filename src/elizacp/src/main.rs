@@ -37,7 +37,7 @@
 use anyhow::Result;
 use clap::Parser;
 use elizacp::ElizaAgent;
-use sacp::Component;
+use sacp::Serve;
 use tracing_subscriber::{EnvFilter, layer::SubscriberExt, util::SubscriberInitExt};
 
 #[derive(Parser, Debug)]

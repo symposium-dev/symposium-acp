@@ -2,18 +2,20 @@
 
 use elizacp::ElizaAgent;
 use expect_test::expect;
-use sacp::Component;
-use sacp::link::UntypedLink;
-use sacp::schema::{
-    ContentBlock, InitializeRequest, McpServer, McpServerStdio, NewSessionRequest, PromptRequest,
-    ProtocolVersion, SessionNotification, TextContent,
+
+use sacp::{
+    Client, Serve,
+    schema::{
+        ContentBlock, InitializeRequest, McpServer, McpServerStdio, NewSessionRequest,
+        PromptRequest, ProtocolVersion, SessionNotification, TextContent,
+    },
 };
 use sacp_test::test_binaries;
 use std::path::PathBuf;
 
 /// Test helper to receive a JSON-RPC response
 async fn recv<T: sacp::JsonRpcResponse + Send>(
-    response: sacp::JrResponse<T>,
+    response: sacp::SentRequest<T>,
 ) -> Result<T, sacp::Error> {
     let (tx, rx) = tokio::sync::oneshot::channel();
     response.on_receiving_result(async move |result| {
@@ -37,7 +39,7 @@ async fn test_elizacp_mcp_tool_call() -> Result<(), sacp::Error> {
     // Create channel to collect session notifications
     let (notification_tx, mut notification_rx) = futures::channel::mpsc::unbounded();
 
-    UntypedLink::builder()
+    Client::builder()
         .name("test-client")
         .on_receive_notification(
             {

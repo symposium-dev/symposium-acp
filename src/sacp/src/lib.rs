@@ -88,14 +88,8 @@ pub mod cookbook;
 pub mod handler;
 /// JSON-RPC connection and handler infrastructure
 mod jsonrpc;
-/// Link types for JSON-RPC connections
-pub mod link;
-/// MCP declarations (minimal)
-pub mod mcp;
 /// MCP server support for providing MCP tools over ACP
 pub mod mcp_server;
-/// Peer types for JSON-RPC connections
-pub mod peer;
 /// Role types for ACP connections
 pub mod role;
 /// ACP protocol schema types - all message types, requests, responses, and supporting types
@@ -118,24 +112,21 @@ pub mod jsonrpcmsg {
 
 pub use jsonrpc::{
     ByteStreams, Channel, ConnectFrom, ConnectionTo, HandleMessageFrom, Handled, IntoHandled,
-    JrResponse, JsonRpcMessage, JsonRpcNotification, JsonRpcRequest, JsonRpcResponse, Lines,
-    MessageCx, NullHandler, Responder, ResponseRouter, UntypedMessage,
-    run::{ChainRun, NullRun, Run},
+    JsonRpcMessage, JsonRpcNotification, JsonRpcRequest, JsonRpcResponse, Lines, MessageCx,
+    NullHandler, Responder, ResponseRouter, SentRequest, UntypedMessage,
+    run::{ChainRun, NullRun, RunWithConnectionTo},
 };
 
-/// Deprecated alias for [`HandleMessageFrom`].
-#[deprecated(since = "0.1.0", note = "renamed to HandleMessageFrom")]
+/// Deprecated alias for [`HandleMessageAs`].
+#[deprecated(since = "0.1.0", note = "renamed to HandleMessageAs")]
 pub use HandleMessageFrom as JrMessageHandler;
 
-pub use link::{
-    AgentToClient, ClientToAgent, HasDefaultPeer, HasPeer, JrLink, ProxyToConductor, RemoteStyle,
+pub use role::{
+    Role, RoleId, UntypedRole,
+    acp::{Agent, Client, Conductor, Proxy},
 };
 
-pub use role::{Agent, Client, Conductor, Proxy, Role, RoleId};
-
-pub use peer::{AgentPeer, ClientPeer, ConductorPeer, JrPeer, PeerId};
-
-pub use component::{Component, DynComponent};
+pub use component::{DynServe, Serve};
 
 // Re-export BoxFuture for implementing Component traits
 pub use futures::future::BoxFuture;

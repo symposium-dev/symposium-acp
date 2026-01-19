@@ -1,21 +1,22 @@
-use crate::{ConnectionTo, JrLink};
+use crate::{ConnectionTo, role::Role};
 
 /// Context about the ACP and MCP connection available to an MCP server.
 #[derive(Clone)]
-pub struct McpContext<Link> {
+pub struct McpConnectionTo<Counterpart: Role> {
     pub(super) acp_url: String,
-    pub(super) connection_cx: ConnectionTo<Link>,
+    pub(super) connection_cx: ConnectionTo<Counterpart>,
 }
 
-impl<Link: JrLink> McpContext<Link> {
+impl<Counterpart: Role> McpConnectionTo<Counterpart> {
     /// The `acp:UUID` that was given.
     pub fn acp_url(&self) -> String {
         self.acp_url.clone()
     }
 
-    /// The ACP connection context, which can be used to send ACP requests and notifications
-    /// to your successor.
-    pub fn connection_cx(&self) -> ConnectionTo<Link> {
+    /// The host connection context.
+    ///
+    /// If this MCP server is hosted inside of an ACP context, this will be the ACP connection context.
+    pub fn connection_to(&self) -> ConnectionTo<Counterpart> {
         self.connection_cx.clone()
     }
 }

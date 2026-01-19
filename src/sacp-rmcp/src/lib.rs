@@ -14,20 +14,22 @@
 //! let server = McpServer::from_rmcp("my-server", MyRmcpService::new);
 //!
 //! // Use as a handler
-//! ProxyToConductor::builder()
+//! Proxy::builder()
 //!     .with_handler(server)
 //!     .serve(client)
 //!     .await?;
 //! ```
 
+use futures_concurrency::future::TryJoin as _;
 use rmcp::ServiceExt;
-use sacp::mcp_server::{McpContext, McpServer, McpServerConnect};
-use sacp::{AgentPeer, ByteStreams, Component, DynComponent, HasPeer, JrLink, NullRun};
+use sacp::mcp_server::{McpConnectionTo, McpServer, McpServerConnect};
+use sacp::role::{self, HasPeer};
+use sacp::{Agent, ByteStreams, DynServe, NullRun, Role, Serve};
 use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
 
-pub trait McpServerExt<Link: JrLink>
+pub trait McpServerExt<Counterpart: Role>
 where
-    Link: HasPeer<AgentPeer>,
+    Counterpart: HasPeer<Agent>,
 {
     /// Create an MCP server from something that implements the [`McpServerConnect`] trait.
     ///
@@ -37,7 +39,7 @@ where
     fn from_rmcp<S>(
         name: impl ToString,
         new_fn: impl Fn() -> S + Send + Sync + 'static,
-    ) -> McpServer<Link, NullRun>
+    ) -> McpServer<Counterpart, NullRun>
     where
         S: rmcp::Service<rmcp::RoleServer>,
     {
@@ -46,9 +48,9 @@ where
             new_fn: F,
         }
 
-        impl<Link, F, S> McpServerConnect<Link> for RmcpServer<F>
+        impl<Counterpart, F, S> McpServerConnect<Counterpart> for RmcpServer<F>
         where
-            Link: JrLink,
+            Counterpart: Role,
             F: Fn() -> S + Send + Sync + 'static,
             S: rmcp::Service<rmcp::RoleServer>,
         {
@@ -56,9 +58,9 @@ where
                 self.name.clone()
             }
 
-            fn connect(&self, _cx: McpContext<Link>) -> DynComponent<sacp::mcp::McpServerToClient> {
+            fn connect(&self, _cx: McpConnectionTo<Counterpart>) -> DynServe<role::mcp::Client> {
                 let service = (self.new_fn)();
-                DynComponent::new(RmcpServerComponent { service })
+                DynServe::new(RmcpServerComponent { service })
             }
         }
 
@@ -72,47 +74,54 @@ where
     }
 }
 
-impl<Link: JrLink> McpServerExt<Link> for McpServer<Link> where Link: HasPeer<AgentPeer> {}
+impl<Counterpart: Role> McpServerExt<Counterpart> for McpServer<Counterpart> where
+    Counterpart: HasPeer<Agent>
+{
+}
 
 /// Component wrapper for rmcp services.
 struct RmcpServerComponent<S> {
     service: S,
 }
 
-impl<S> Component<sacp::mcp::McpServerToClient> for RmcpServerComponent<S>
+impl<S> Serve<role::mcp::Client> for RmcpServerComponent<S>
 where
     S: rmcp::Service<rmcp::RoleServer>,
 {
-    async fn serve(
-        self,
-        client: impl Component<sacp::mcp::McpClientToServer>,
-    ) -> Result<(), sacp::Error> {
+    async fn serve(self, client: impl Serve<role::mcp::Server>) -> Result<(), sacp::Error> {
         // Create tokio byte streams that rmcp expects
         let (mcp_server_stream, mcp_client_stream) = tokio::io::duplex(8192);
         let (mcp_server_read, mcp_server_write) = tokio::io::split(mcp_server_stream);
         let (mcp_client_read, mcp_client_write) = tokio::io::split(mcp_client_stream);
 
-        // Create ByteStreams component for the client side
-        let byte_streams =
-            ByteStreams::new(mcp_client_write.compat_write(), mcp_client_read.compat());
+        let bytes_to_sacp = async {
+            // Create ByteStreams component for the client side
+            let byte_streams =
+                ByteStreams::new(mcp_client_write.compat_write(), mcp_client_read.compat());
 
-        // Spawn task to connect byte_streams to the provided client
-        tokio::spawn(async move {
-            let _ = Component::<sacp::mcp::McpServerToClient>::serve(byte_streams, client).await;
-        });
+            // Spawn task to connect byte_streams to the provided client
+            let _ = Serve::<role::mcp::Client>::serve(byte_streams, client).await;
 
-        // Run the rmcp server with the server side of the duplex stream
-        let running_server = self
-            .service
-            .serve((mcp_server_read, mcp_server_write))
-            .await
-            .map_err(sacp::Error::into_internal_error)?;
+            Ok(())
+        };
 
-        // Wait for the server to finish
-        running_server
-            .waiting()
-            .await
-            .map(|_quit_reason| ())
-            .map_err(sacp::Error::into_internal_error)
+        let bytes_to_rmcp = async {
+            // Run the rmcp server with the server side of the duplex stream
+            let running_server = self
+                .service
+                .serve((mcp_server_read, mcp_server_write))
+                .await
+                .map_err(sacp::Error::into_internal_error)?;
+
+            // Wait for the server to finish
+            running_server
+                .waiting()
+                .await
+                .map(|_quit_reason| ())
+                .map_err(sacp::Error::into_internal_error)
+        };
+
+        (bytes_to_sacp, bytes_to_rmcp).try_join().await?;
+        Ok(())
     }
 }

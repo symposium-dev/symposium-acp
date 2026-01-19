@@ -8,19 +8,27 @@ Refactoring the Link/Peer type system to a simpler Role-based API. Goals:
 - Simplify the builder/connection API
 - Move conductor-specific types to sacp-conductor crate
 
-## New Type Mapping
+## Current State (2026-01-19)
+
+**Branch**: `the-big-rename`
+**Status**: Phase 6 complete, all tests passing
+
+The Role-based API migration is complete. The codebase now uses a unified `Role` type system instead of the previous `JrLink`/`JrPeer` system.
+
+## Type Mapping (Final)
 
 | Old | New |
 |-----|-----|
-| `ConnectFrom<AgentToClient>` | `ConnectFrom<Agent>` |
-| `JrConnection<AgentToClient>` | *(removed)* |
-| `JrConnectionCx<AgentToClient>` | `ConnectionTo<Client>` |
-| `JrRequestCx<R>` | `Responder<R>` |
-| `JrResponseCx<R>` | `ResponseRouter<R>` |
-| `JrResponder` | `Run` |
-| `NullResponder` | `NullRun` |
-| `ChainResponder` | `ChainRun` |
-| `SpawnedResponder` | `SpawnedRun` |
+| `Component<L>` | `Serve<R>` |
+| `DynComponent<L>` | `DynServe<R>` |
+| `ClientToAgent` | `Client` |
+| `AgentToClient` | `Agent` |
+| `ProxyToConductor` | `Proxy` / `Conductor` |
+| `AgentPeer`, `ClientPeer` | `Agent`, `Client` (unified) |
+| `Conductor` (struct) | `ConductorImpl` |
+| `Run` (trait) | `RunWithConnectionTo` |
+| `JrLink` | Removed |
+| `JrPeer` | Removed |
 
 ## New API Shape
 
@@ -32,14 +40,8 @@ Agent::builder()
     .await
 
 // Active connection - drive the interaction
-Client::connect_to(transport, async |connection: ConnectionTo<Agent>| {
-    connection.send_request(...).await
-})
-.await
-
-// Equivalent to:
 Client::builder()
-    .connect_to(transport, async |connection: ConnectionTo<Agent>| {
+    .run_until(transport, async |connection: ConnectionTo<Agent>| {
         connection.send_request(...).await
     })
     .await
@@ -51,66 +53,24 @@ Client::builder()
 /// The role that an endpoint can play
 trait Role {
     /// The role that this endpoint connects to.
-    /// For Agent, this is Client.
-    /// For Client, this is Agent.
-    /// For Proxy, this is Conductor.
-    type Counterpart: Role;
-    
-    fn default_handler();
+    type Counterpart: Role<Counterpart = Self>;
+
+    fn role_id(&self) -> RoleId;
+    fn counterpart(&self) -> Self::Counterpart;
+    fn default_handle_message_from(...);
 }
 
 /// A role P *has a peer* Q if P can send/receive messages from Q.
-///
-/// - `Client: HasPeer<Agent>`
-/// - `Agent: HasPeer<Client>`
-/// - `Proxy: HasPeer<Client>`
-/// - `Proxy: HasPeer<Agent>`
-///
-/// Note that nobody has Conductor as their peer.
-/// Even though a proxy connects to the conductor,
-/// it can't logically send messages to the conductor.
 trait HasPeer<Peer: Role>: Role {
-    fn request_style();
+    fn remote_style(&self, peer: Peer) -> RemoteStyle;
 }
 ```
 
-## Core Roles (in sacp crate)
+## Module Structure
 
-- `Agent` - counterpart is `Client`
-- `Client` - counterpart is `Agent`
-- `Proxy` - counterpart is `Conductor`
-
-## Conductor Types (in sacp-conductor crate)
-
-### External presentation
-
-```rust
-struct ConductorImpl<R: ConductorRole> { }
-trait ConductorRole {}
-```
-
-- `ConductorImpl<Agent>` - conductor presenting as agent to clients (was `ConductorToClient`)
-- `ConductorImpl<Proxy>` - conductor presenting as proxy to other conductors (was `ConductorToConductor`)
-
-### Internal connections
-
-The conductor uses standard connection types with custom handlers:
-
-- `ConnectionTo<Agent>` - conductor talking to managed agent
-- `ConnectionTo<Proxy>` - conductor talking to proxy in chain
-
-No special types needed. Handlers intercept all messages so default handler never fires.
-
-### Types that go away
-
-- `ConductorToAgent` - becomes `ConnectionTo<Agent>` with custom handlers
-- `ConductorToProxy` - becomes `ConnectionTo<Proxy>` with custom handlers
-
-## Public API (from sacp crate)
-
-These stay public because external code needs them:
-- `ConductorImpl<Agent>` (was `ConductorToClient`)
-- `ConductorImpl<Proxy>` (was `ConductorToConductor`)
+- `sacp::role` - Role trait and utilities
+- `sacp::role::acp` - ACP roles: `Client`, `Agent`, `Proxy`, `Conductor`
+- `sacp::role::mcp` - MCP roles for MCP server/client connections
 
 ## Migration Phases
 
@@ -120,11 +80,10 @@ These stay public because external code needs them:
 - [x] Implement for `Agent`, `Client`, `Proxy`, `Conductor`
 
 ### Phase 2: Rename JrResponder ecosystem to Run ✅
-- [x] `JrResponder` → `Run`
+- [x] `JrResponder` → `Run` (now `RunWithConnectionTo`)
 - [x] `NullResponder` → `NullRun`
 - [x] `ChainResponder` → `ChainRun`
 - [x] `SpawnedResponder` → `SpawnedRun`
-- [x] Renamed `jsonrpc/responder.rs` → `jsonrpc/run.rs`
 
 ### Phase 3: Rename context types ✅
 - [x] `JrConnectionCx` → `ConnectionTo`
@@ -139,88 +98,32 @@ These stay public because external code needs them:
 ### Phase 5: Rename builder ✅
 - [x] `JrConnectionBuilder` → `ConnectFrom`
 
-### Phase 6: Replace Link and Peer types with Role types
+### Phase 6: Replace Link and Peer types with Role types ✅
+- [x] Migrate `HandleMessageFrom` to use `Role` type parameter
+- [x] Migrate `ConnectionTo` to use `Role` (counterpart's role)
+- [x] Add `builder()` method to Role types (`Client::builder()`, `Agent::builder()`)
+- [x] Delete `JrPeer` types - unified with Role types
+- [x] Rename `Component<L>` → `Serve<R>`
+- [x] Rename `DynComponent<L>` → `DynServe<R>`
+- [x] Update conductor: `Conductor` → `ConductorImpl`
+- [x] Update all crates: sacp, sacp-conductor, sacp-tokio, sacp-test, sacp-cookbook, sacp-rmcp, elizacp, yopo
+- [x] Migrate all test files
+- [x] Remove `sacp-tee` crate (no longer maintained)
 
-**Goal**: Replace `JrLink` and `JrPeer` type systems with unified `Role` types.
+### Phase 7: Documentation ⏳
+- [ ] Update sacp crate doctests (currently failing)
+- [ ] Update examples in documentation
+- [ ] Review and update mdbook docs
 
-**Key mappings**:
-| Current | New |
-|---------|-----|
-| `ConnectionTo<ClientToAgent>` | `ConnectionTo<Agent>` |
-| `ConnectionTo<AgentToClient>` | `ConnectionTo<Client>` |
-| `AgentToClient::builder()` | `Agent::builder()` |
-| `Component<AgentToClient>` | `Component<Agent>` |
-| `send_request_to(AgentPeer, msg)` | `send_request_to(Agent, msg)` |
-| `JrMessageHandler::type Link` | `JrMessageHandler::type Role` |
-| `Link: HasPeer<AgentPeer>` | `R: HasPeer<Agent>` |
+## Files Removed
 
-**Semantics**:
-- `ConnectionTo<R>` = "connection TO someone playing role R" (the counterpart)
-- `R::builder()` = "I am role R, building my side of the connection"
-- `Component<R>` = "I implement role R"
+- `src/sacp/src/peer.rs` - JrPeer system removed
+- `src/sacp/src/mcp.rs` - MCP declarations moved to `role/mcp.rs`
+- `src/sacp-tee/` - Entire crate removed
 
-**HasDefaultPeer removal**:
-- `HasDefaultPeer` trait is removed entirely
-- Methods like `send_request()` (no `_to`) require `MyRole: HasPeer<MyRole::Counterpart>`
-- This is true for `Client` and `Agent` (they can send to their counterpart)
-- This is NOT true for `Proxy` - `Proxy::Counterpart = Conductor`, but `Proxy` doesn't implement `HasPeer<Conductor>`
-- Result: Proxies must use explicit `send_request_to(Agent, msg)` or `send_request_to(Client, msg)`
-- The type system enforces that proxies be explicit about their target
+## Key Patterns Discovered
 
-**Implementation steps**:
-
-#### Step 0: Rename JrMessageHandler → HandleMessageFrom ✅
-- [x] Rename `JrMessageHandler` → `HandleMessageFrom`
-- [x] This is a simple rename before the structural changes
-- [x] The name reflects the semantics: "handle messages from role R"
-
-#### Step 1: Extend Role trait
-- [ ] Add `type State: Default + Send = ()` to Role trait
-- [ ] Add `fn builder()` method to Role trait
-- [ ] Ensure `HasPeer<Peer: Role>` has `remote_style()` method
-
-#### Step 2: Migrate ConnectionTo
-- [ ] Change `ConnectionTo<Link: JrLink>` → `ConnectionTo<R: Role>`
-- [ ] `R` is the **counterpart's role** (who you're talking to)
-- [ ] Update `send_request_to<Peer: JrPeer>` → `send_request_to<Peer: Role>`
-- [ ] Update bounds from `Link: HasPeer<Peer>` → `R::Counterpart: HasPeer<Peer>`
-
-#### Step 3: Migrate JrMessageHandler
-- [ ] Change `type Link: JrLink` → `type Role: Role`
-- [ ] Update all handler implementations in `jsonrpc/handlers.rs`
-
-#### Step 4: Migrate ConnectFrom
-- [ ] Change handler bound to use `H::Role` instead of `H::Link`
-
-#### Step 5: Rename and migrate Component → Serve
-- [ ] Rename `Component<L>` → `Serve<R>`
-- [ ] `R` is the **counterpart's role** (who I serve)
-- [ ] `serve(self, client: impl Serve<R::Counterpart>)`
-- [ ] Example: `impl Serve<Client> for ConnectFrom<Agent>` - an agent builder can serve clients
-
-#### Step 6: Update conductor (keep Link types internal)
-- [ ] Keep conductor-specific link types as internal implementation details
-- [ ] Update `ConductorLink` trait to bridge with roles
-
-#### Step 7: Remove old types
-- [ ] Delete `JrPeer` trait and peer types (`ClientPeer`, `AgentPeer`, etc.)
-- [ ] Delete public Link types (`ClientToAgent`, `AgentToClient`, etc.)
-- [ ] Keep conductor-internal links for now
-- [ ] Update `lib.rs` exports
-
-#### Step 8: Update all usage sites
-- [ ] sacp crate internals
-- [ ] sacp-conductor
-- [ ] sacp-test
-- [ ] sacp-cookbook examples
-- [ ] All test files
-
-### Phase 7: Migrate conductor types (after Phase 6)
-- [ ] Move `ConductorToAgent`, `ConductorToProxy` into sacp-conductor as private
-- [ ] Replace with `ConnectionTo<Agent>`, `ConnectionTo<Proxy>` + custom handlers
-- [ ] Create `ConductorImpl<R>` for external presentation
-
-## Open Questions
-
-- Exact module structure for Role types in sacp
-- Whether `Conductor` itself is a Role or just appears in `ConductorImpl<R>`
+- `ConductorImpl.run_until(transport)` accepts `Serve<Client>` components directly
+- For session-hosted MCP servers: `make_mcp_server::<Agent>()`
+- For proxy-hosted MCP servers: `make_mcp_server::<Conductor>()`
+- `Serve<R>` means "I serve someone playing role R" - an agent implements `Serve<Client>`

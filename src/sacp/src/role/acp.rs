@@ -1,0 +1,291 @@
+use std::{fmt::Debug, hash::Hash};
+
+use agent_client_protocol_schema::{NewSessionRequest, NewSessionResponse, SessionId};
+
+use crate::jsonrpc::{ConnectFrom, handlers::NullHandler, run::NullRun};
+use crate::role::{HasPeer, RemoteStyle};
+use crate::schema::{InitializeProxyRequest, InitializeRequest, METHOD_INITIALIZE_PROXY};
+use crate::util::MatchMessageFrom;
+use crate::{ConnectionTo, HandleMessageFrom, Handled, MessageCx, Role, RoleId};
+
+/// The client role - typically an IDE or CLI that controls an agent.
+///
+/// Clients send prompts and receive responses from agents.
+#[derive(Debug, Default, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct Client;
+
+impl Role for Client {
+    type Counterpart = Agent;
+
+    async fn default_handle_message_from(
+        &self,
+        message: MessageCx,
+        _connection: ConnectionTo<Client>,
+    ) -> Result<Handled<MessageCx>, crate::Error> {
+        Ok(Handled::No {
+            message,
+            retry: false,
+        })
+    }
+
+    fn role_id(&self) -> RoleId {
+        RoleId::from_singleton(self)
+    }
+
+    fn counterpart(&self) -> Self::Counterpart {
+        Agent
+    }
+}
+
+impl Client {
+    /// Create a connection builder for a client.
+    pub fn builder() -> ConnectFrom<Client, NullHandler, NullRun> {
+        ConnectFrom::new(Client)
+    }
+}
+
+impl HasPeer<Client> for Client {
+    fn remote_style(&self, _peer: Client) -> RemoteStyle {
+        RemoteStyle::Counterpart
+    }
+}
+
+/// The agent role - typically an LLM that responds to prompts.
+///
+/// Agents receive prompts from clients and respond with answers,
+/// potentially invoking tools along the way.
+#[derive(Debug, Default, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct Agent;
+
+impl Role for Agent {
+    type Counterpart = Client;
+
+    fn role_id(&self) -> RoleId {
+        RoleId::from_singleton(self)
+    }
+
+    fn counterpart(&self) -> Self::Counterpart {
+        Client
+    }
+
+    async fn default_handle_message_from(
+        &self,
+        message: MessageCx,
+        connection: ConnectionTo<Agent>,
+    ) -> Result<Handled<MessageCx>, crate::Error> {
+        MatchMessageFrom::new(message, &connection)
+            .if_message_from(Agent, async |message: MessageCx| {
+                // Subtle: messages that have a session-id field
+                // should be captured by a dynamic message handler
+                // for that session -- but there is a race condition
+                // between the dynamic handler being added and
+                // possible updates. Therefore, we "retry" all such
+                // messages, so that they will be resent as new handlers
+                // are added.
+                let retry = message.has_session_id();
+                Ok(Handled::No { message, retry })
+            })
+            .await
+            .done()
+    }
+}
+
+impl Agent {
+    /// Create a connection builder for an agent.
+    pub fn builder() -> ConnectFrom<Agent, NullHandler, NullRun> {
+        ConnectFrom::new(Agent)
+    }
+}
+
+impl HasPeer<Agent> for Agent {
+    fn remote_style(&self, _peer: Agent) -> RemoteStyle {
+        RemoteStyle::Counterpart
+    }
+}
+
+/// The proxy role - an intermediary that can intercept and modify messages.
+///
+/// Proxies sit between a client and an agent (or another proxy), and can:
+/// - Add tools via MCP servers
+/// - Filter or transform messages
+/// - Inject additional context
+///
+/// Proxies connect to a [`Conductor`] which orchestrates the proxy chain.
+#[derive(Debug, Default, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct Proxy;
+
+impl Role for Proxy {
+    type Counterpart = Conductor;
+
+    async fn default_handle_message_from(
+        &self,
+        message: crate::MessageCx,
+        _connection: crate::ConnectionTo<Self>,
+    ) -> Result<crate::Handled<crate::MessageCx>, crate::Error> {
+        Ok(Handled::No {
+            message,
+            retry: false,
+        })
+    }
+
+    fn role_id(&self) -> RoleId {
+        RoleId::from_singleton(self)
+    }
+
+    fn counterpart(&self) -> Self::Counterpart {
+        Conductor
+    }
+}
+
+impl Proxy {
+    /// Create a connection builder for a proxy.
+    pub fn builder() -> ConnectFrom<Proxy, NullHandler, NullRun> {
+        ConnectFrom::new(Proxy)
+    }
+}
+
+impl HasPeer<Proxy> for Proxy {
+    fn remote_style(&self, _peer: Proxy) -> RemoteStyle {
+        RemoteStyle::Counterpart
+    }
+}
+
+/// The conductor role - orchestrates proxy chains.
+///
+/// Conductors manage connections between clients, proxies, and agents,
+/// routing messages through the appropriate proxy chain.
+#[derive(Debug, Default, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct Conductor;
+
+impl Role for Conductor {
+    type Counterpart = Proxy;
+
+    fn role_id(&self) -> RoleId {
+        RoleId::from_singleton(self)
+    }
+
+    fn counterpart(&self) -> Self::Counterpart {
+        Proxy
+    }
+
+    async fn default_handle_message_from(
+        &self,
+        message: MessageCx,
+        cx: ConnectionTo<Conductor>,
+    ) -> Result<Handled<MessageCx>, crate::Error> {
+        // Handle various special messages:
+        MatchMessageFrom::new(message, &cx)
+            .if_request_from(Client, async |_req: InitializeRequest, request_cx| {
+                request_cx.respond_with_error(crate::Error::invalid_request().data(format!(
+                    "proxies must be initialized with `{}`",
+                    METHOD_INITIALIZE_PROXY
+                )))
+            })
+            .await
+            // Initialize Proxy coming from the client -- forward to the agent but
+            // convert into a regular initialize.
+            .if_request_from(
+                Client,
+                async |request: InitializeProxyRequest, request_cx| {
+                    let InitializeProxyRequest { initialize } = request;
+                    cx.send_request_to(Agent, initialize)
+                        .forward_to_request_cx(request_cx)
+                },
+            )
+            .await
+            // New session coming from the client -- proxy to the agent
+            // and add a dynamic handler for that session-id.
+            .if_request_from(Client, async |request: NewSessionRequest, request_cx| {
+                cx.send_request_to(Agent, request).on_receiving_result({
+                    let cx = cx.clone();
+                    async move |result| {
+                        if let Ok(NewSessionResponse { session_id, .. }) = &result {
+                            cx.add_dynamic_handler(ProxySessionMessages::new(session_id.clone()))?
+                                .run_indefinitely();
+                        }
+                        request_cx.respond_with_result(result)
+                    }
+                })
+            })
+            .await
+            // Incoming message from the client -- forward to the agent
+            .if_message_from(Client, async |message: MessageCx| {
+                cx.send_proxied_message_to(Agent, message)
+            })
+            .await
+            // Incoming message from the agent -- forward to the client
+            .if_message_from(Agent, async |message: MessageCx| {
+                cx.send_proxied_message_to(Client, message)
+            })
+            .await
+            .done()
+    }
+}
+
+impl Conductor {
+    /// Create a connection builder for a conductor.
+    pub fn builder() -> ConnectFrom<Conductor, NullHandler, NullRun> {
+        ConnectFrom::new(Conductor)
+    }
+}
+
+impl HasPeer<Client> for Conductor {
+    fn remote_style(&self, _peer: Client) -> RemoteStyle {
+        RemoteStyle::Predecessor
+    }
+}
+
+impl HasPeer<Agent> for Conductor {
+    fn remote_style(&self, _peer: Agent) -> RemoteStyle {
+        RemoteStyle::Successor
+    }
+}
+
+/// Dynamic handler that proxies session messages from Agent to Client.
+///
+/// This is used internally to handle session message routing after a
+/// `session.new` request has been forwarded.
+pub(crate) struct ProxySessionMessages {
+    session_id: SessionId,
+}
+
+impl ProxySessionMessages {
+    /// Create a new proxy handler for the given session.
+    pub fn new(session_id: SessionId) -> Self {
+        Self { session_id }
+    }
+}
+
+impl<Counterpart: Role> HandleMessageFrom<Counterpart> for ProxySessionMessages
+where
+    Counterpart: HasPeer<Agent> + HasPeer<Client>,
+{
+    async fn handle_message_from(
+        &mut self,
+        message: MessageCx,
+        connection: ConnectionTo<Counterpart>,
+    ) -> Result<Handled<MessageCx>, crate::Error> {
+        MatchMessageFrom::new(message, &connection)
+            .if_message_from(Agent, async |message| {
+                // If this is for our session-id, proxy it to the client.
+                if let Some(session_id) = message.get_session_id()? {
+                    if session_id == self.session_id {
+                        connection.send_proxied_message_to(Client, message)?;
+                        return Ok(Handled::Yes);
+                    }
+                }
+
+                // Otherwise, leave it alone.
+                Ok(Handled::No {
+                    message,
+                    retry: false,
+                })
+            })
+            .await
+            .done()
+    }
+
+    fn describe_chain(&self) -> impl std::fmt::Debug {
+        format!("ProxySessionMessages({})", self.session_id)
+    }
+}

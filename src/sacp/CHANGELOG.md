@@ -77,7 +77,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - [**breaking**] split Conductor into agent vs proxy mode with ConductorLink trait
 - [**breaking**] rename End type param to Peer, endpoint vars to peer
 - [**breaking**] more endpoint -> peer renames
-- update UntypedRole to UntypedLink in doc examples
+- update UntypedRole to UntypedRole in doc examples
 - [**breaking**] rename Endpoint to Role
 - *(sacp)* rename JrRole to JrLink, Role type param to Link
 - [**breaking**] rename JrRole to JrLink (and the Role associated type to Link)

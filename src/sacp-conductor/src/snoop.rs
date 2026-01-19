@@ -1,16 +1,16 @@
 use futures::StreamExt;
 use futures_concurrency::future::TryJoin;
-use sacp::{Channel, Component, DynComponent, JrLink, jsonrpcmsg};
+use sacp::{Channel, DynServe, Role, Serve, jsonrpcmsg};
 
-pub struct SnooperComponent<L: JrLink> {
-    base_component: DynComponent<L>,
+pub struct SnooperComponent<R: Role> {
+    base_component: DynServe<R>,
     incoming_message: Box<dyn FnMut(&jsonrpcmsg::Message) -> Result<(), sacp::Error> + Send + Sync>,
     outgoing_message: Box<dyn FnMut(&jsonrpcmsg::Message) -> Result<(), sacp::Error> + Send + Sync>,
 }
 
-impl<L: JrLink> SnooperComponent<L> {
+impl<R: Role> SnooperComponent<R> {
     pub fn new(
-        base_component: impl Component<L>,
+        base_component: impl Serve<R>,
         incoming_message: impl FnMut(&jsonrpcmsg::Message) -> Result<(), sacp::Error>
         + Send
         + Sync
@@ -21,18 +21,15 @@ impl<L: JrLink> SnooperComponent<L> {
         + 'static,
     ) -> Self {
         Self {
-            base_component: DynComponent::new(base_component),
+            base_component: DynServe::new(base_component),
             incoming_message: Box::new(incoming_message),
             outgoing_message: Box::new(outgoing_message),
         }
     }
 }
 
-impl<L: JrLink> Component<L> for SnooperComponent<L> {
-    async fn serve(
-        mut self,
-        client: impl Component<<L as JrLink>::ConnectsTo>,
-    ) -> Result<(), sacp::Error> {
+impl<R: Role> Serve<R> for SnooperComponent<R> {
+    async fn serve(mut self, client: impl Serve<R::Counterpart>) -> Result<(), sacp::Error> {
         let (client_a, mut client_b) = Channel::duplex();
 
         let client_future = client.serve(client_a);

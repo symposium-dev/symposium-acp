@@ -8,9 +8,11 @@ use std::{fmt::Debug, hash::Hash};
 use agent_client_protocol_schema::{NewSessionRequest, NewSessionResponse, SessionId};
 
 use crate::{
-    ConnectionTo, HandleMessageFrom, Handled, JsonRpcMessage, MessageCx, UntypedMessage,
+    Agent, Client, ConnectionTo, HandleMessageAs, Handled, JsonRpcMessage, MessageCx,
+    UntypedMessage,
     jsonrpc::{ConnectFrom, handlers::NullHandler},
     peer::{AgentPeer, ClientPeer, ConductorPeer, JrPeer, UntypedPeer},
+    role::{Role, RoleExt},
     schema::{
         InitializeProxyRequest, InitializeRequest, METHOD_INITIALIZE_PROXY,
         METHOD_SUCCESSOR_MESSAGE, SuccessorMessage,
@@ -25,7 +27,7 @@ use crate::{
 /// provides link-specific behavior like handling unhandled messages.
 pub trait JrLink: Debug + Copy + Send + Sync + 'static + Eq + Ord + Hash + Default {
     /// Create a new connection builder for this link.
-    fn builder() -> ConnectFrom<NullHandler<Self>> {
+    fn builder() -> ConnectFrom<NullHandler> {
         ConnectFrom::new(Self::default())
     }
 
@@ -106,21 +108,23 @@ impl RemoteStyle {
     }
 }
 
-pub(crate) async fn handle_incoming_message<Link: JrLink, Peer: JrPeer>(
+pub(crate) async fn handle_incoming_message<MyRole, Peer, Counterpart>(
     peer: Peer,
     message_cx: MessageCx,
-    connection_cx: ConnectionTo<Link>,
+    connection_cx: ConnectionTo<Counterpart>,
     handle_message: impl AsyncFnOnce(
         MessageCx,
-        ConnectionTo<Link>,
+        ConnectionTo<Counterpart>,
     ) -> Result<Handled<MessageCx>, crate::Error>,
 ) -> Result<Handled<MessageCx>, crate::Error>
 where
-    Link: HasPeer<Peer>,
+    MyRole: Role<Counterpart = Counterpart> + crate::role::HasPeer<Peer>,
+    Peer: Role,
+    Counterpart: Role<Counterpart = MyRole>,
 {
     tracing::trace!(
         method = %message_cx.method(),
-        link = std::any::type_name::<Link>(),
+        my_role = std::any::type_name::<MyRole>(),
         peer = ?peer,
         ?message_cx,
         "handle_incoming_message: enter"
@@ -138,12 +142,12 @@ where
     // directed at (and therefore which peer sent us the response).
     if let MessageCx::Response(_, response_cx) = &message_cx {
         tracing::trace!(
-            response_peer = ?response_cx.peer_id(),
-            peer = ?peer.peer_id(),
+            response_role_id = ?response_cx.role_id(),
+            peer_role_id = ?peer.role_id(),
             "handle_incoming_message: response"
         );
 
-        if response_cx.peer_id() == peer.peer_id() {
+        if response_cx.role_id() == peer.role_id() {
             return handle_message(message_cx, connection_cx).await;
         } else {
             return Ok(Handled::No {
@@ -155,7 +159,7 @@ where
 
     // Handle other messages by looking at the 'remote style'
     let method = message_cx.method();
-    match <Link as HasPeer<Peer>>::remote_style(peer) {
+    match <MyRole as crate::role::HasPeer<Peer>>::remote_style(peer) {
         RemoteStyle::Counterpart => {
             // "Counterpart" is the default peer, no special checks required.
             tracing::trace!("handle_incoming_message: Counterpart style, passing through");
@@ -237,30 +241,30 @@ where
 
 /// A generic link for testing scenarios.
 ///
-/// `UntypedLink` can send to and receive from any peer without transformation.
+/// `UntypedRole` can send to and receive from any peer without transformation.
 /// This is useful for tests but generally shouldn't really be used in production code.
 #[derive(Debug, Default, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct UntypedLink;
+pub struct UntypedRole;
 
-impl JrLink for UntypedLink {
-    type ConnectsTo = UntypedLink;
+impl JrLink for UntypedRole {
+    type ConnectsTo = UntypedRole;
     type State = ();
 }
 
-impl HasDefaultPeer for UntypedLink {
+impl HasDefaultPeer for UntypedRole {
     type DefaultPeer = UntypedPeer;
 }
 
-impl HasPeer<UntypedPeer> for UntypedLink {
+impl HasPeer<UntypedPeer> for UntypedRole {
     fn remote_style(_end: UntypedPeer) -> RemoteStyle {
         RemoteStyle::Counterpart
     }
 }
 
-impl UntypedLink {
+impl UntypedRole {
     /// Create a connection builder with an untyped link.
-    pub fn builder() -> ConnectFrom<NullHandler<UntypedLink>> {
-        ConnectFrom::new(UntypedLink)
+    pub fn builder() -> ConnectFrom<NullHandler> {
+        ConnectFrom::new(UntypedRole)
     }
 }
 
@@ -305,6 +309,16 @@ impl HasPeer<AgentPeer> for ClientToAgent {
     }
 }
 
+impl Role for ClientToAgent {
+    type Counterpart = AgentToClient;
+}
+
+impl crate::role::HasPeer<AgentToClient> for ClientToAgent {
+    fn remote_style(_peer: AgentToClient) -> RemoteStyle {
+        RemoteStyle::Counterpart
+    }
+}
+
 /// An agent connecting to its client. This is used when implementing agents.
 #[derive(Debug, Default, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct AgentToClient;
@@ -320,6 +334,16 @@ impl HasDefaultPeer for AgentToClient {
 
 impl HasPeer<ClientPeer> for AgentToClient {
     fn remote_style(_end: ClientPeer) -> RemoteStyle {
+        RemoteStyle::Counterpart
+    }
+}
+
+impl Role for AgentToClient {
+    type Counterpart = ClientToAgent;
+}
+
+impl crate::role::HasPeer<ClientToAgent> for AgentToClient {
+    fn remote_style(_peer: ClientToAgent) -> RemoteStyle {
         RemoteStyle::Counterpart
     }
 }
@@ -345,6 +369,16 @@ impl HasDefaultPeer for ConductorToClient {
 
 impl HasPeer<ClientPeer> for ConductorToClient {
     fn remote_style(_end: ClientPeer) -> RemoteStyle {
+        RemoteStyle::Counterpart
+    }
+}
+
+impl Role for ConductorToClient {
+    type Counterpart = ClientToAgent;
+}
+
+impl crate::role::HasPeer<ClientToAgent> for ConductorToClient {
+    fn remote_style(_peer: ClientToAgent) -> RemoteStyle {
         RemoteStyle::Counterpart
     }
 }
@@ -381,6 +415,16 @@ impl HasPeer<AgentPeer> for ConductorToConductor {
 impl HasPeer<ClientPeer> for ConductorToConductor {
     fn remote_style(_end: ClientPeer) -> RemoteStyle {
         RemoteStyle::Predecessor
+    }
+}
+
+impl Role for ConductorToConductor {
+    type Counterpart = ConductorToProxy;
+}
+
+impl crate::role::HasPeer<ConductorToProxy> for ConductorToConductor {
+    fn remote_style(_peer: ConductorToProxy) -> RemoteStyle {
+        RemoteStyle::Counterpart
     }
 }
 
@@ -567,12 +611,12 @@ impl JrLink for ProxyToConductor {
 ///
 /// This is used internally to handle session message routing after a
 /// `session.new` request has been forwarded.
-pub(crate) struct ProxySessionMessages<Link> {
+pub(crate) struct ProxySessionMessages<Counterpart> {
     session_id: SessionId,
-    _marker: std::marker::PhantomData<Link>,
+    _marker: std::marker::PhantomData<Counterpart>,
 }
 
-impl<Link> ProxySessionMessages<Link> {
+impl<Counterpart> ProxySessionMessages<Counterpart> {
     /// Create a new proxy handler for the given session.
     pub fn new(session_id: SessionId) -> Self {
         Self {
@@ -582,16 +626,14 @@ impl<Link> ProxySessionMessages<Link> {
     }
 }
 
-impl<Link: JrLink> HandleMessageFrom for ProxySessionMessages<Link>
+impl<MyRole: Role> HandleMessageAs<MyRole> for ProxySessionMessages<MyRole::Counterpart>
 where
-    Link: HasPeer<AgentPeer> + HasPeer<ClientPeer>,
+    MyRole: crate::role::HasPeer<Agent> + crate::role::HasPeer<Client>,
 {
-    type Link = Link;
-
     async fn handle_message(
         &mut self,
         message: MessageCx,
-        cx: ConnectionTo<Self::Link>,
+        cx: ConnectionTo<MyRole::Counterpart>,
     ) -> Result<Handled<MessageCx>, crate::Error> {
         MatchMessageFrom::new(message, &cx)
             .if_message_from(AgentPeer, async |message| {
@@ -642,42 +684,42 @@ impl HasPeer<AgentPeer> for ProxyToConductor {
 
 impl ClientToAgent {
     /// Create a connection builder for a client talking to an agent.
-    pub fn builder() -> ConnectFrom<NullHandler<ClientToAgent>> {
+    pub fn builder() -> ConnectFrom<NullHandler> {
         ConnectFrom::new(ClientToAgent)
     }
 }
 
 impl AgentToClient {
     /// Create a connection builder for an agent talking to a client.
-    pub fn builder() -> ConnectFrom<NullHandler<AgentToClient>> {
+    pub fn builder() -> ConnectFrom<NullHandler> {
         ConnectFrom::new(AgentToClient)
     }
 }
 
 impl ProxyToConductor {
     /// Create a connection builder for a proxy talking to a conductor.
-    pub fn builder() -> ConnectFrom<NullHandler<ProxyToConductor>> {
+    pub fn builder() -> ConnectFrom<NullHandler> {
         ConnectFrom::new(ProxyToConductor)
     }
 }
 
 impl ConductorToProxy {
     /// Create a connection builder for a conductor talking to a proxy.
-    pub fn builder() -> ConnectFrom<NullHandler<ConductorToProxy>> {
+    pub fn builder() -> ConnectFrom<NullHandler> {
         ConnectFrom::new(ConductorToProxy)
     }
 }
 
 impl ConductorToAgent {
     /// Create a connection builder for a conductor talking to an agent.
-    pub fn builder() -> ConnectFrom<NullHandler<ConductorToAgent>> {
+    pub fn builder() -> ConnectFrom<NullHandler> {
         ConnectFrom::new(ConductorToAgent)
     }
 }
 
 impl ConductorToClient {
     /// Create a connection builder for a conductor talking to a client.
-    pub fn builder() -> ConnectFrom<NullHandler<ConductorToClient>> {
+    pub fn builder() -> ConnectFrom<NullHandler> {
         ConnectFrom::new(ConductorToClient)
     }
 }

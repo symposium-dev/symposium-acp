@@ -7,15 +7,15 @@
 //! - Client disconnect handling
 
 use futures::{AsyncRead, AsyncWrite};
-use sacp::link::UntypedLink;
 use sacp::{
-    ConnectionTo, Responder, JrResponse, JsonRpcMessage, JsonRpcRequest, JsonRpcResponse,
+    ConnectionTo, JsonRpcMessage, JsonRpcRequest, JsonRpcResponse, Responder, SentRequest,
+    role::UntypedRole,
 };
 use serde::{Deserialize, Serialize};
 use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
 
 /// Test helper to block and wait for a JSON-RPC response.
-async fn recv<T: JsonRpcResponse + Send>(response: JrResponse<T>) -> Result<T, sacp::Error> {
+async fn recv<T: JsonRpcResponse + Send>(response: SentRequest<T>) -> Result<T, sacp::Error> {
     let (tx, rx) = tokio::sync::oneshot::channel();
     response.on_receiving_result(async move |result| {
         tx.send(result).map_err(|_| sacp::Error::internal_error())
@@ -134,10 +134,10 @@ async fn test_empty_request() {
             let (server_reader, server_writer, client_reader, client_writer) = setup_test_streams();
 
             let server_transport = sacp::ByteStreams::new(server_writer, server_reader);
-            let server = UntypedLink::builder().on_receive_request(
+            let server = UntypedRole::builder().on_receive_request(
                 async |_request: EmptyRequest,
                        request_cx: Responder<SimpleResponse>,
-                       _connection_cx: ConnectionTo<UntypedLink>| {
+                       _connection_cx: ConnectionTo<UntypedRole>| {
                     request_cx.respond(SimpleResponse {
                         result: "Got empty request".to_string(),
                     })
@@ -146,7 +146,7 @@ async fn test_empty_request() {
             );
 
             let client_transport = sacp::ByteStreams::new(client_writer, client_reader);
-            let client = UntypedLink::builder();
+            let client = UntypedRole::builder();
 
             tokio::task::spawn_local(async move {
                 server.serve(server_transport).await.ok();
@@ -187,10 +187,10 @@ async fn test_null_params() {
             let (server_reader, server_writer, client_reader, client_writer) = setup_test_streams();
 
             let server_transport = sacp::ByteStreams::new(server_writer, server_reader);
-            let server = UntypedLink::builder().on_receive_request(
+            let server = UntypedRole::builder().on_receive_request(
                 async |_request: OptionalParamsRequest,
                        request_cx: Responder<SimpleResponse>,
-                       _connection_cx: ConnectionTo<UntypedLink>| {
+                       _connection_cx: ConnectionTo<UntypedRole>| {
                     request_cx.respond(SimpleResponse {
                         result: "Has params: true".to_string(),
                     })
@@ -199,7 +199,7 @@ async fn test_null_params() {
             );
 
             let client_transport = sacp::ByteStreams::new(client_writer, client_reader);
-            let client = UntypedLink::builder();
+            let client = UntypedRole::builder();
 
             tokio::task::spawn_local(async move {
                 server.serve(server_transport).await.ok();
@@ -237,10 +237,10 @@ async fn test_server_shutdown() {
             let (server_reader, server_writer, client_reader, client_writer) = setup_test_streams();
 
             let server_transport = sacp::ByteStreams::new(server_writer, server_reader);
-            let server = UntypedLink::builder().on_receive_request(
+            let server = UntypedRole::builder().on_receive_request(
                 async |_request: EmptyRequest,
                        request_cx: Responder<SimpleResponse>,
-                       _connection_cx: ConnectionTo<UntypedLink>| {
+                       _connection_cx: ConnectionTo<UntypedRole>| {
                     request_cx.respond(SimpleResponse {
                         result: "Got empty request".to_string(),
                     })
@@ -249,7 +249,7 @@ async fn test_server_shutdown() {
             );
 
             let client_transport = sacp::ByteStreams::new(client_writer, client_reader);
-            let client = UntypedLink::builder();
+            let client = UntypedRole::builder();
 
             let server_handle = tokio::task::spawn_local(async move {
                 server.serve(server_transport).await.ok();
@@ -309,10 +309,10 @@ async fn test_client_disconnect() {
             let server_writer = server_writer.compat_write();
 
             let server_transport = sacp::ByteStreams::new(server_writer, server_reader);
-            let server = UntypedLink::builder().on_receive_request(
+            let server = UntypedRole::builder().on_receive_request(
                 async |_request: EmptyRequest,
                        request_cx: Responder<SimpleResponse>,
-                       _connection_cx: ConnectionTo<UntypedLink>| {
+                       _connection_cx: ConnectionTo<UntypedRole>| {
                     request_cx.respond(SimpleResponse {
                         result: "Got empty request".to_string(),
                     })

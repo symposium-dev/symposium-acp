@@ -6,7 +6,17 @@
 
 use std::{any::TypeId, fmt::Debug, future::Future, hash::Hash};
 
-use crate::{Handled, ConnectionTo, MessageCx, RemoteStyle};
+use serde::{Deserialize, Serialize};
+
+use crate::schema::{METHOD_SUCCESSOR_MESSAGE, SuccessorMessage};
+use crate::util::json_cast;
+use crate::{ConnectFrom, ConnectionTo, Handled, JsonRpcMessage, MessageCx, UntypedMessage};
+
+/// Roles for the ACP protocol.
+pub mod acp;
+
+/// Roles for the MCP protocol.
+pub mod mcp;
 
 /// The role that an endpoint plays in an ACP connection.
 ///
@@ -19,7 +29,7 @@ use crate::{Handled, ConnectionTo, MessageCx, RemoteStyle};
 /// Each role determines:
 /// - Who the counterpart is (via [`Role::Counterpart`])
 /// - How unhandled messages are processed (via [`Role::default_message_handler`])
-pub trait Role: Debug + Copy + Send + Sync + 'static + Eq + Ord + Hash + Default {
+pub trait Role: Debug + Clone + Send + Sync + 'static + Eq + Ord + Hash {
     /// The role that this endpoint connects to.
     ///
     /// For example:
@@ -29,21 +39,18 @@ pub trait Role: Debug + Copy + Send + Sync + 'static + Eq + Ord + Hash + Default
     /// - `Conductor::Counterpart = Proxy`
     type Counterpart: Role<Counterpart = Self>;
 
+    /// Returns a unique identifier for this role.
+    fn role_id(&self) -> RoleId;
+
     /// Method invoked when there is no defined message handler.
-    ///
-    /// Returns `Handled::No` by default, which will cause an error response
-    /// to be sent for requests.
-    fn default_message_handler(
+    fn default_handle_message_from(
+        &self,
         message: MessageCx,
-        #[expect(unused_variables)] cx: ConnectionTo<Self::Counterpart>,
-    ) -> impl Future<Output = Result<Handled<MessageCx>, crate::Error>> + Send {
-        async move {
-            Ok(Handled::No {
-                message,
-                retry: false,
-            })
-        }
-    }
+        connection: ConnectionTo<Self>,
+    ) -> impl Future<Output = Result<Handled<MessageCx>, crate::Error>> + Send;
+
+    /// Returns the counterpart role.
+    fn counterpart(&self) -> Self::Counterpart;
 }
 
 /// Declares that a role can send messages to a specific peer.
@@ -62,7 +69,37 @@ pub trait Role: Debug + Copy + Send + Sync + 'static + Eq + Ord + Hash + Default
 /// [`SuccessorMessage`]: crate::schema::SuccessorMessage
 pub trait HasPeer<Peer: Role>: Role {
     /// Returns the remote style for sending to this peer.
-    fn remote_style(peer: Peer) -> RemoteStyle;
+    fn remote_style(&self, peer: Peer) -> RemoteStyle;
+}
+
+/// Describes how messages are transformed when sent to a remote peer.
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum RemoteStyle {
+    /// Pass each message through exactly as it is.
+    Counterpart,
+
+    /// Only messages not wrapped in successor.
+    Predecessor,
+
+    /// Wrap messages in a [`SuccessorMessage`] envelope.
+    Successor,
+}
+
+impl RemoteStyle {
+    pub(crate) fn transform_outgoing_message<M: JsonRpcMessage>(
+        &self,
+        msg: M,
+    ) -> Result<UntypedMessage, crate::Error> {
+        match self {
+            RemoteStyle::Counterpart | RemoteStyle::Predecessor => msg.to_untyped_message(),
+            RemoteStyle::Successor => SuccessorMessage {
+                message: msg,
+                meta: None,
+            }
+            .to_untyped_message(),
+        }
+    }
 }
 
 /// Unique identifier for a role instance.
@@ -78,98 +115,183 @@ pub enum RoleId {
 
 impl RoleId {
     /// Create the role ID for a singleton role type.
-    fn from_singleton<R: Role>() -> RoleId {
+    pub fn from_singleton<R: Role>(_role: &R) -> RoleId
+    where
+        R: Default,
+    {
         RoleId::Singleton(std::any::type_name::<R>(), TypeId::of::<R>())
     }
 }
-
-/// Extension trait for getting the role ID from a role instance.
-pub trait RoleExt: Role {
-    /// Return a RoleId that uniquely identifies this role.
-    fn role_id(&self) -> RoleId {
-        RoleId::from_singleton::<Self>()
-    }
-}
-
-impl<R: Role> RoleExt for R {}
 
 // ============================================================================
 // Role implementations
 // ============================================================================
 
-/// The client role - typically an IDE or CLI that controls an agent.
-///
-/// Clients send prompts and receive responses from agents.
-#[derive(Debug, Default, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct Client;
+pub(crate) async fn handle_incoming_message<Counterpart: Role, Peer: Role>(
+    counterpart: Counterpart,
+    peer: Peer,
+    message_cx: MessageCx,
+    connection_cx: ConnectionTo<Counterpart>,
+    handle_message: impl AsyncFnOnce(
+        MessageCx,
+        ConnectionTo<Counterpart>,
+    ) -> Result<Handled<MessageCx>, crate::Error>,
+) -> Result<Handled<MessageCx>, crate::Error>
+where
+    Counterpart: HasPeer<Peer>,
+{
+    tracing::trace!(
+        method = %message_cx.method(),
+        ?counterpart,
+        ?peer,
+        ?message_cx,
+        "handle_incoming_message: enter"
+    );
 
-impl Role for Client {
-    type Counterpart = Agent;
-}
+    // Responses are different from other messages.
+    //
+    // For normal incoming messages, mesages from non-default
+    // peers are tagged with special method names and carry
+    // special payload that have be "unwrapped".
+    //
+    // For responses, the payload is untouched. The response
+    // carries an `id` and we use this `id` to look up information
+    // on the request that was sent to determine which peer it was
+    // directed at (and therefore which peer sent us the response).
+    if let MessageCx::Response(_, response_cx) = &message_cx {
+        tracing::trace!(
+            response_role_id = ?response_cx.role_id(),
+            peer_role_id = ?peer.role_id(),
+            "handle_incoming_message: response"
+        );
 
-impl HasPeer<Agent> for Client {
-    fn remote_style(_peer: Agent) -> RemoteStyle {
-        RemoteStyle::Counterpart
+        if response_cx.role_id() == peer.role_id() {
+            return handle_message(message_cx, connection_cx).await;
+        } else {
+            return Ok(Handled::No {
+                message: message_cx,
+                retry: false,
+            });
+        }
+    }
+
+    // Handle other messages by looking at the 'remote style'
+    let method = message_cx.method();
+    match counterpart.remote_style(peer) {
+        RemoteStyle::Counterpart => {
+            // "Counterpart" is the default peer, no special checks required.
+            tracing::trace!("handle_incoming_message: Counterpart style, passing through");
+            return handle_message(message_cx, connection_cx).await;
+        }
+        RemoteStyle::Predecessor => {
+            // "Predecessor" is the default peer, no special checks required.
+            tracing::trace!("handle_incoming_message: Predecessor style, passing through");
+            if method != METHOD_SUCCESSOR_MESSAGE {
+                return handle_message(message_cx, connection_cx).await;
+            } else {
+                // Methods coming from the successor are not coming from
+                // our counterpart.
+                return Ok(Handled::No {
+                    message: message_cx,
+                    retry: false,
+                });
+            }
+        }
+        RemoteStyle::Successor => {
+            // Successor style means we have to look for a special method name.
+            if method != METHOD_SUCCESSOR_MESSAGE {
+                tracing::trace!(
+                    method,
+                    expected = METHOD_SUCCESSOR_MESSAGE,
+                    "handle_incoming_message: Successor style but method doesn't match, returning Handled::No"
+                );
+                return Ok(Handled::No {
+                    message: message_cx,
+                    retry: false,
+                });
+            }
+
+            tracing::trace!(
+                "handle_incoming_message: Successor style, unwrapping SuccessorMessage"
+            );
+
+            // The outer message has method="_proxy/successor" and params containing the inner message.
+            // We need to deserialize the params (not the whole message) to extract the inner UntypedMessage.
+            let untyped_message = message_cx.message().ok_or_else(|| {
+                crate::util::internal_error(
+                    "Response variant cannot be unwrapped as SuccessorMessage",
+                )
+            })?;
+            let SuccessorMessage { message, meta } = json_cast(untyped_message.params())?;
+            let successor_message_cx = message_cx.try_map_message(|_| Ok(message))?;
+            tracing::trace!(
+                unwrapped_method = %successor_message_cx.method(),
+                "handle_incoming_message: unwrapped to inner message"
+            );
+            match handle_message(successor_message_cx, connection_cx).await? {
+                Handled::Yes => {
+                    tracing::trace!("handle_incoming_message: inner handler returned Handled::Yes");
+                    Ok(Handled::Yes)
+                }
+
+                Handled::No {
+                    message: successor_message_cx,
+                    retry,
+                } => {
+                    tracing::trace!(
+                        "handle_incoming_message: inner handler returned Handled::No, re-wrapping"
+                    );
+                    Ok(Handled::No {
+                        message: successor_message_cx.try_map_message(|message| {
+                            SuccessorMessage { message, meta }.to_untyped_message()
+                        })?,
+                        retry,
+                    })
+                }
+            }
+        }
     }
 }
 
-/// The agent role - typically an LLM that responds to prompts.
-///
-/// Agents receive prompts from clients and respond with answers,
-/// potentially invoking tools along the way.
-#[derive(Debug, Default, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct Agent;
+/// A dummy role you can use to exchange JSON-RPC messages without any knowledge of the underlying protocol.
+/// Don't sue this.
+#[derive(
+    Copy, Clone, Default, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize,
+)]
+pub struct UntypedRole;
 
-impl Role for Agent {
-    type Counterpart = Client;
-}
-
-impl HasPeer<Client> for Agent {
-    fn remote_style(_peer: Client) -> RemoteStyle {
-        RemoteStyle::Counterpart
+impl UntypedRole {
+    /// Creates a new builder for a connection from this role.
+    pub fn builder() -> ConnectFrom<Self> {
+        ConnectFrom::new(UntypedRole)
     }
 }
 
-/// The proxy role - an intermediary that can intercept and modify messages.
-///
-/// Proxies sit between a client and an agent (or another proxy), and can:
-/// - Add tools via MCP servers
-/// - Filter or transform messages
-/// - Inject additional context
-///
-/// Proxies connect to a [`Conductor`] which orchestrates the proxy chain.
-#[derive(Debug, Default, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct Proxy;
+impl Role for UntypedRole {
+    type Counterpart = UntypedRole;
 
-impl Role for Proxy {
-    type Counterpart = Conductor;
-}
+    fn role_id(&self) -> RoleId {
+        RoleId::from_singleton(self)
+    }
 
-impl HasPeer<Client> for Proxy {
-    fn remote_style(_peer: Client) -> RemoteStyle {
-        RemoteStyle::Predecessor
+    async fn default_handle_message_from(
+        &self,
+        message: MessageCx,
+        _connection: ConnectionTo<Self>,
+    ) -> Result<Handled<MessageCx>, crate::Error> {
+        Ok(Handled::No {
+            message,
+            retry: false,
+        })
+    }
+
+    fn counterpart(&self) -> Self::Counterpart {
+        *self
     }
 }
 
-impl HasPeer<Agent> for Proxy {
-    fn remote_style(_peer: Agent) -> RemoteStyle {
-        RemoteStyle::Successor
-    }
-}
-
-/// The conductor role - orchestrates proxy chains.
-///
-/// Conductors manage connections between clients, proxies, and agents,
-/// routing messages through the appropriate proxy chain.
-#[derive(Debug, Default, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct Conductor;
-
-impl Role for Conductor {
-    type Counterpart = Proxy;
-}
-
-impl HasPeer<Proxy> for Conductor {
-    fn remote_style(_peer: Proxy) -> RemoteStyle {
+impl HasPeer<UntypedRole> for UntypedRole {
+    fn remote_style(&self, _peer: UntypedRole) -> RemoteStyle {
         RemoteStyle::Counterpart
     }
 }

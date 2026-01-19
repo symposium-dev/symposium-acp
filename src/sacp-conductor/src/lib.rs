@@ -91,8 +91,7 @@ pub use self::conductor::*;
 
 use clap::{Parser, Subcommand};
 
-use sacp::link::{AgentToClient, ProxyToConductor};
-use sacp::schema::InitializeRequest;
+use sacp::{Client, Conductor, DynServe, schema::InitializeRequest};
 use sacp_tokio::{AcpAgent, Stdio};
 use tracing::Instrument;
 use tracing_subscriber::{EnvFilter, layer::SubscriberExt, util::SubscriberInitExt};
@@ -111,14 +110,10 @@ impl InstantiateProxies for CommandLineComponents {
         req: InitializeRequest,
     ) -> futures::future::BoxFuture<
         'static,
-        Result<(InitializeRequest, Vec<sacp::DynComponent<ProxyToConductor>>), sacp::Error>,
+        Result<(InitializeRequest, Vec<DynServe<Conductor>>), sacp::Error>,
     > {
         Box::pin(async move {
-            let proxies = self
-                .0
-                .into_iter()
-                .map(|c| sacp::DynComponent::new(c))
-                .collect();
+            let proxies = self.0.into_iter().map(|c| DynServe::new(c)).collect();
             Ok((req, proxies))
         })
     }
@@ -133,23 +128,23 @@ impl InstantiateProxiesAndAgent for CommandLineComponents {
         Result<
             (
                 InitializeRequest,
-                Vec<sacp::DynComponent<ProxyToConductor>>,
-                sacp::DynComponent<AgentToClient>,
+                Vec<DynServe<Conductor>>,
+                DynServe<Client>,
             ),
             sacp::Error,
         >,
     > {
         Box::pin(async move {
             let mut iter = self.0.into_iter().peekable();
-            let mut proxies: Vec<sacp::DynComponent<ProxyToConductor>> = Vec::new();
+            let mut proxies: Vec<DynServe<Conductor>> = Vec::new();
 
             // All but the last element are proxies
             while let Some(component) = iter.next() {
                 if iter.peek().is_some() {
-                    proxies.push(sacp::DynComponent::new(component));
+                    proxies.push(DynServe::new(component));
                 } else {
                     // Last element is the agent
-                    let agent = sacp::DynComponent::new(component);
+                    let agent = DynServe::new(component);
                     return Ok((req, proxies, agent));
                 }
             }
@@ -344,7 +339,7 @@ impl ConductorArgs {
                     trace_writer,
                     name,
                     components,
-                    |name, providers, mcp_mode| Conductor::new_agent(name, providers, mcp_mode),
+                    |name, providers, mcp_mode| ConductorImpl::new_agent(name, providers, mcp_mode),
                 )
                 .await
             }
@@ -354,7 +349,7 @@ impl ConductorArgs {
                     trace_writer,
                     name,
                     proxies,
-                    |name, providers, mcp_mode| Conductor::new_proxy(name, providers, mcp_mode),
+                    |name, providers, mcp_mode| ConductorImpl::new_proxy(name, providers, mcp_mode),
                 )
                 .await
             }
@@ -363,12 +358,16 @@ impl ConductorArgs {
     }
 }
 
-async fn initialize_conductor<Link: ConductorLink>(
+async fn initialize_conductor<Host: ConductorHostRole>(
     debug_logger: Option<&debug_logger::DebugLogger>,
     trace_writer: Option<trace::TraceWriter>,
     name: String,
     components: Vec<String>,
-    new_conductor: impl FnOnce(String, CommandLineComponents, crate::McpBridgeMode) -> Conductor<Link>,
+    new_conductor: impl FnOnce(
+        String,
+        CommandLineComponents,
+        crate::McpBridgeMode,
+    ) -> ConductorImpl<Host>,
 ) -> Result<(), sacp::Error> {
     // Parse agents and optionally wrap with debug callbacks
     let providers: Vec<AcpAgent> = components

@@ -5,7 +5,7 @@
 
 use rmcp::{ClientHandler, ServiceExt, model::ClientInfo};
 use sacp::{
-    ByteStreams, Component, mcp::McpServerToClient, mcp_server::McpServer, util::run_until,
+    ByteStreams, RunWithConnectionTo, Serve, mcp_server::McpServer, role::mcp, util::run_until,
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -31,7 +31,7 @@ struct AddOutput {
 }
 
 /// Create a test MCP server with echo and add tools
-fn create_test_server() -> McpServer<McpServerToClient, impl sacp::Run<McpServerToClient>> {
+fn create_test_server() -> McpServer<mcp::Client, impl RunWithConnectionTo<mcp::Client>> {
     McpServer::builder("test-server")
         .instructions("A test MCP server")
         .tool_fn(
@@ -77,7 +77,7 @@ async fn test_standalone_server_list_tools() -> Result<(), sacp::Error> {
     let client_as_component = ByteStreams::new(client_write.compat_write(), client_read.compat());
 
     run_until(
-        Component::<McpServerToClient>::serve(server, client_as_component),
+        Serve::<mcp::Client>::serve(server, client_as_component),
         async move {
             // Create rmcp client on the server side of the duplex (the "other end")
             let client = MinimalClientHandler
@@ -117,7 +117,7 @@ async fn test_standalone_server_call_echo_tool() -> Result<(), sacp::Error> {
     let client_as_component = ByteStreams::new(client_write.compat_write(), client_read.compat());
 
     run_until(
-        Component::<McpServerToClient>::serve(server, client_as_component),
+        Serve::<mcp::Client>::serve(server, client_as_component),
         async move {
             let client = MinimalClientHandler
                 .serve((server_read, server_write))
@@ -165,7 +165,7 @@ async fn test_standalone_server_call_add_tool() -> Result<(), sacp::Error> {
     let client_as_component = ByteStreams::new(client_write.compat_write(), client_read.compat());
 
     run_until(
-        Component::<McpServerToClient>::serve(server, client_as_component),
+        Serve::<mcp::Client>::serve(server, client_as_component),
         async move {
             let client = MinimalClientHandler
                 .serve((server_read, server_write))
@@ -216,7 +216,7 @@ async fn test_standalone_server_tool_not_found() -> Result<(), sacp::Error> {
     let client_as_component = ByteStreams::new(client_write.compat_write(), client_read.compat());
 
     run_until(
-        Component::<McpServerToClient>::serve(server, client_as_component),
+        Serve::<mcp::Client>::serve(server, client_as_component),
         async move {
             let client = MinimalClientHandler
                 .serve((server_read, server_write))
@@ -271,7 +271,7 @@ async fn test_standalone_server_with_disabled_tools() -> Result<(), sacp::Error>
     let client_as_component = ByteStreams::new(client_write.compat_write(), client_read.compat());
 
     run_until(
-        Component::<McpServerToClient>::serve(server, client_as_component),
+        Serve::<mcp::Client>::serve(server, client_as_component),
         async move {
             let client = MinimalClientHandler
                 .serve((server_read, server_write))

@@ -6,73 +6,91 @@
 
 use std::future::Future;
 
-use crate::{ConnectionTo, link::JrLink};
+use crate::{ConnectionTo, role::Role};
 
 /// A background task that runs alongside a connection.
 ///
-/// Run implementations are composed using [`ChainRun`] and run in parallel
+/// `RunIn<R>` means "run in the context of being role R". The task receives
+/// a `ConnectionTo<R::Counterpart>` for communicating with the other side.
+///
+/// Implementations are composed using [`ChainRun`] and run in parallel
 /// when the connection is active.
-pub trait Run<Link: JrLink>: Send {
+pub trait RunWithConnectionTo<Counterpart: Role>: Send {
     /// Run this task to completion.
-    fn run(self, cx: ConnectionTo<Link>)
-    -> impl Future<Output = Result<(), crate::Error>> + Send;
+    fn run_with_connection_to(
+        self,
+        cx: ConnectionTo<Counterpart>,
+    ) -> impl Future<Output = Result<(), crate::Error>> + Send;
 }
 
-/// A no-op Run that completes immediately.
+/// A no-op RunIn that completes immediately.
 #[derive(Default)]
 pub struct NullRun;
 
-impl<Link: JrLink> Run<Link> for NullRun {
-    async fn run(self, _cx: ConnectionTo<Link>) -> Result<(), crate::Error> {
+impl<Counterpart: Role> RunWithConnectionTo<Counterpart> for NullRun {
+    async fn run_with_connection_to(
+        self,
+        _cx: ConnectionTo<Counterpart>,
+    ) -> Result<(), crate::Error> {
         Ok(())
     }
 }
 
-/// Chains two Run implementations to run in parallel.
+/// Chains two RunIn implementations to run in parallel.
 pub struct ChainRun<A, B> {
     a: A,
     b: B,
 }
 
 impl<A, B> ChainRun<A, B> {
-    /// Create a new chained Run from two Run implementations.
+    /// Create a new chained RunIn from two RunIn implementations.
     pub fn new(a: A, b: B) -> Self {
         Self { a, b }
     }
 }
 
-impl<Link: JrLink, A: Run<Link>, B: Run<Link>> Run<Link> for ChainRun<A, B> {
-    async fn run(self, cx: ConnectionTo<Link>) -> Result<(), crate::Error> {
-        // Box the futures to avoid stack overflow with deeply nested Run chains
-        let a_fut = Box::pin(self.a.run(cx.clone()));
-        let b_fut = Box::pin(self.b.run(cx.clone()));
+impl<Counterpart: Role, A, B> RunWithConnectionTo<Counterpart> for ChainRun<A, B>
+where
+    A: RunWithConnectionTo<Counterpart>,
+    B: RunWithConnectionTo<Counterpart>,
+{
+    async fn run_with_connection_to(
+        self,
+        cx: ConnectionTo<Counterpart>,
+    ) -> Result<(), crate::Error> {
+        // Box the futures to avoid stack overflow with deeply nested RunIn chains
+        let a_fut = Box::pin(self.a.run_with_connection_to(cx.clone()));
+        let b_fut = Box::pin(self.b.run_with_connection_to(cx.clone()));
         let ((), ()) = futures::future::try_join(a_fut, b_fut).await?;
         Ok(())
     }
 }
 
-/// A Run created from a closure via [`with_spawned`](crate::ConnectFrom::with_spawned).
+/// A RunIn created from a closure via [`with_spawned`](crate::ConnectFrom::with_spawned).
 pub struct SpawnedRun<F> {
     task_fn: F,
     location: &'static std::panic::Location<'static>,
 }
 
 impl<F> SpawnedRun<F> {
-    /// Create a new spawned Run from a closure.
+    /// Create a new spawned RunIn from a closure.
     pub fn new(location: &'static std::panic::Location<'static>, task_fn: F) -> Self {
         Self { task_fn, location }
     }
 }
 
-impl<Link, F, Fut> Run<Link> for SpawnedRun<F>
+impl<Counterpart, F, Fut> RunWithConnectionTo<Counterpart> for SpawnedRun<F>
 where
-    Link: JrLink,
-    F: FnOnce(ConnectionTo<Link>) -> Fut + Send,
+    Counterpart: Role,
+    F: FnOnce(ConnectionTo<Counterpart>) -> Fut + Send,
     Fut: Future<Output = Result<(), crate::Error>> + Send,
 {
-    async fn run(self, cx: ConnectionTo<Link>) -> Result<(), crate::Error> {
+    async fn run_with_connection_to(
+        self,
+        connection: ConnectionTo<Counterpart>,
+    ) -> Result<(), crate::Error> {
         let location = self.location;
-        (self.task_fn)(cx).await.map_err(|err| {
+        (self.task_fn)(connection).await.map_err(|err| {
             let data = err.data.clone();
             err.data(serde_json::json! {
                 {

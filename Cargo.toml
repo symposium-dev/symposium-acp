@@ -9,7 +9,6 @@ members = [
     "src/elizacp",
     "src/sacp-test",
     "src/yopo",
-    "src/sacp-tee",
     "src/sacp-trace-viewer",
 ]
 resolver = "2"

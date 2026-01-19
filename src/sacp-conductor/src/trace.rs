@@ -10,7 +10,7 @@ use std::time::Instant;
 
 use fxhash::FxHashMap;
 use sacp::schema::{McpOverAcpMessage, SuccessorMessage};
-use sacp::{DynComponent, JsonRpcMessage, UntypedMessage, jsonrpcmsg};
+use sacp::{jsonrpcmsg, DynServe, JsonRpcMessage, Role, UntypedMessage};
 use serde::{Deserialize, Serialize};
 
 use crate::ComponentIndex;
@@ -439,13 +439,13 @@ impl TraceHandle {
     /// - `left_name`: Logical name of the component on the "left" side (e.g., "client", "proxy:0")
     /// - `right_name`: Logical name of the component on the "right" side (e.g., "proxy:0", "agent")
     /// - `component`: The component to wrap
-    pub fn bridge_component<L: sacp::JrLink>(
+    pub fn bridge_component<R: Role>(
         &self,
         proxy_index: ComponentIndex,
         successor_index: ComponentIndex,
-        proxy: impl sacp::Component<L>,
-    ) -> DynComponent<L> {
-        DynComponent::new(SnooperComponent::new(
+        proxy: impl sacp::Serve<R>,
+    ) -> DynServe<R> {
+        DynServe::new(SnooperComponent::new(
             proxy,
             {
                 let trace_handle = self.clone();

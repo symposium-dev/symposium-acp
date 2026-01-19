@@ -1,27 +1,29 @@
 use futures::future::BoxFuture;
 use uuid::Uuid;
 
-use crate::link::JrLink;
+use crate::role::Role;
 use crate::{ConnectionTo, HandleMessageFrom, Handled, MessageCx};
 
-/// Internal dyn-safe wrapper around `HandleMessageFrom`
-pub(crate) trait DynamicHandler<Link>: Send {
-    fn dyn_handle_message(
+/// Internal dyn-safe wrapper around `HandleMessageAs`
+///
+/// The type parameter `R` is the role's counterpart (who we connect to).
+pub(crate) trait DynHandleMessageFrom<Counterpart: Role>: Send {
+    fn dyn_handle_message_from(
         &mut self,
         message: MessageCx,
-        cx: ConnectionTo<Link>,
+        cx: ConnectionTo<Counterpart>,
     ) -> BoxFuture<'_, Result<Handled<MessageCx>, crate::Error>>;
 
     fn dyn_describe_chain(&self) -> String;
 }
 
-impl<H: HandleMessageFrom> DynamicHandler<H::Link> for H {
-    fn dyn_handle_message(
+impl<Counterpart: Role, H: HandleMessageFrom<Counterpart>> DynHandleMessageFrom<Counterpart> for H {
+    fn dyn_handle_message_from(
         &mut self,
         message: MessageCx,
-        cx: ConnectionTo<H::Link>,
+        cx: ConnectionTo<Counterpart>,
     ) -> BoxFuture<'_, Result<Handled<MessageCx>, crate::Error>> {
-        Box::pin(HandleMessageFrom::handle_message(self, message, cx))
+        Box::pin(HandleMessageFrom::handle_message_from(self, message, cx))
     }
 
     fn dyn_describe_chain(&self) -> String {
@@ -30,12 +32,12 @@ impl<H: HandleMessageFrom> DynamicHandler<H::Link> for H {
 }
 
 /// Messages used to add/remove dynamic handlers
-pub(crate) enum DynamicHandlerMessage<Link> {
-    AddDynamicHandler(Uuid, Box<dyn DynamicHandler<Link>>),
+pub(crate) enum DynamicHandlerMessage<Counterpart: Role> {
+    AddDynamicHandler(Uuid, Box<dyn DynHandleMessageFrom<Counterpart>>),
     RemoveDynamicHandler(Uuid),
 }
 
-impl<Link: JrLink> std::fmt::Debug for DynamicHandlerMessage<Link> {
+impl<Counterpart: Role> std::fmt::Debug for DynamicHandlerMessage<Counterpart> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::AddDynamicHandler(arg0, arg1) => f

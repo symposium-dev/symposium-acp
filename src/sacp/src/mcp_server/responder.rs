@@ -6,34 +6,45 @@ use futures::{
     future::BoxFuture,
 };
 
-use crate::{ConnectionTo, JrLink, jsonrpc::run::Run, mcp_server::McpContext};
+use crate::{
+    ConnectionTo, jsonrpc::run::RunWithConnectionTo, mcp_server::McpConnectionTo, role::Role,
+};
 
 /// A tool call request sent through the channel.
-pub(super) struct ToolCall<P, R, Link> {
+pub(super) struct ToolCall<P, R, MyRole: Role> {
     pub(crate) params: P,
-    pub(crate) mcp_cx: McpContext<Link>,
+    pub(crate) mcp_cx: McpConnectionTo<MyRole>,
     pub(crate) result_tx: futures::channel::oneshot::Sender<Result<R, crate::Error>>,
 }
 
 /// Responder for a `tool_fn` closure that receives tool calls through a channel
 /// and invokes the user's async function.
-pub(super) struct ToolFnMutResponder<F, P, R, Link> {
+pub(super) struct ToolFnMutResponder<F, P, R, Counterpart: Role> {
     pub(crate) func: F,
-    pub(crate) call_rx: mpsc::Receiver<ToolCall<P, R, Link>>,
+    pub(crate) call_rx: mpsc::Receiver<ToolCall<P, R, Counterpart>>,
     pub(crate) tool_future_fn: Box<
-        dyn for<'a> Fn(&'a mut F, P, McpContext<Link>) -> BoxFuture<'a, Result<R, crate::Error>>
+        dyn for<'a> Fn(
+                &'a mut F,
+                P,
+                McpConnectionTo<Counterpart>,
+            ) -> BoxFuture<'a, Result<R, crate::Error>>
             + Send,
     >,
 }
 
-impl<F, P, R, Link> Run<Link> for ToolFnMutResponder<F, P, R, Link>
+impl<F, P, R, Counterpart, Counterpart1> RunWithConnectionTo<Counterpart1>
+    for ToolFnMutResponder<F, P, R, Counterpart>
 where
-    Link: JrLink,
+    Counterpart: Role,
+    Counterpart1: Role,
     P: Send,
     R: Send,
     F: Send,
 {
-    async fn run(self, _cx: ConnectionTo<Link>) -> Result<(), crate::Error> {
+    async fn run_with_connection_to(
+        self,
+        _connection: ConnectionTo<Counterpart1>,
+    ) -> Result<(), crate::Error> {
         let ToolFnMutResponder {
             mut func,
             mut call_rx,
@@ -56,24 +67,33 @@ where
 
 /// Responder for a `tool_fn` closure that receives tool calls through a channel
 /// and invokes the user's async function concurrently.
-pub(super) struct ToolFnResponder<F, P, R, Link> {
+pub(super) struct ToolFnResponder<F, P, R, Counterpart: Role> {
     pub(crate) func: F,
-    pub(crate) call_rx: mpsc::Receiver<ToolCall<P, R, Link>>,
+    pub(crate) call_rx: mpsc::Receiver<ToolCall<P, R, Counterpart>>,
     pub(crate) tool_future_fn: Box<
-        dyn for<'a> Fn(&'a F, P, McpContext<Link>) -> BoxFuture<'a, Result<R, crate::Error>>
+        dyn for<'a> Fn(
+                &'a F,
+                P,
+                McpConnectionTo<Counterpart>,
+            ) -> BoxFuture<'a, Result<R, crate::Error>>
             + Send
             + Sync,
     >,
 }
 
-impl<F, P, R, Link> Run<Link> for ToolFnResponder<F, P, R, Link>
+impl<F, P, R, Counterpart, Counterpart1> RunWithConnectionTo<Counterpart1>
+    for ToolFnResponder<F, P, R, Counterpart>
 where
-    Link: JrLink,
+    Counterpart: Role,
+    Counterpart1: Role,
     P: Send,
     R: Send,
     F: Send + Sync,
 {
-    async fn run(self, _cx: ConnectionTo<Link>) -> Result<(), crate::Error> {
+    async fn run_with_connection_to(
+        self,
+        _connection: ConnectionTo<Counterpart1>,
+    ) -> Result<(), crate::Error> {
         let ToolFnResponder {
             func,
             call_rx,
@@ -82,15 +102,15 @@ where
         crate::util::process_stream_concurrently(
             call_rx,
             async |tool_call| {
-                fn hack<'a, F, P, R, Link>(
+                fn hack<'a, F, P, R, MyRole>(
                     func: &'a F,
                     params: P,
-                    mcp_cx: McpContext<Link>,
+                    mcp_cx: McpConnectionTo<MyRole>,
                     tool_future_fn: &'a (
                             dyn Fn(
                         &'a F,
                         P,
-                        McpContext<Link>,
+                        McpConnectionTo<MyRole>,
                     ) -> BoxFuture<'a, Result<R, crate::Error>>
                                 + Send
                                 + Sync
@@ -98,7 +118,7 @@ where
                     result_tx: oneshot::Sender<Result<R, crate::Error>>,
                 ) -> BoxFuture<'a, ()>
                 where
-                    Link: JrLink,
+                    MyRole: Role,
                     P: Send,
                     R: Send,
                     F: Send + Sync,

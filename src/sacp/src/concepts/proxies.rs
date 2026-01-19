@@ -8,8 +8,8 @@
 //!
 //! Proxies use the [`ProxyToConductor`] link type, which has two peers:
 //!
-//! - [`ClientPeer`] - messages from/to the client direction
-//! - [`AgentPeer`] - messages from/to the agent direction
+//! - [`Client`] - messages from/to the client direction
+//! - [`Agent`] - messages from/to the agent direction
 //!
 //! Unlike simpler links, there's no default peer - you must always specify
 //! which direction you're communicating with.
@@ -23,7 +23,7 @@
 //! # use sacp::{ProxyToConductor, Component};
 //! # use sacp::link::ConductorToProxy;
 //! # async fn example(transport: impl Component<ConductorToProxy>) -> Result<(), sacp::Error> {
-//! ProxyToConductor::builder()
+//! Proxy::builder()
 //!     .serve(transport)
 //!     .await?;
 //! # Ok(())
@@ -37,20 +37,20 @@
 //! To intercept specific messages, use `on_receive_*_from` with explicit peers:
 //!
 //! ```
-//! # use sacp::{ProxyToConductor, ClientPeer, AgentPeer, Component};
+//! # use sacp::{ProxyToConductor, Client, Agent, Component};
 //! # use sacp::link::ConductorToProxy;
 //! # use sacp_test::ProcessRequest;
 //! # async fn example(transport: impl Component<ConductorToProxy>) -> Result<(), sacp::Error> {
-//! ProxyToConductor::builder()
+//! Proxy::builder()
 //!     // Intercept requests from the client
-//!     .on_receive_request_from(ClientPeer, async |req: ProcessRequest, request_cx, cx| {
+//!     .on_receive_request_from(Client, async |req: ProcessRequest, request_cx, cx| {
 //!         // Modify the request
 //!         let modified = ProcessRequest {
 //!             data: format!("prefix: {}", req.data),
 //!         };
 //!
 //!         // Forward to agent and relay the response back
-//!         cx.send_request_to(AgentPeer, modified)
+//!         cx.send_request_to(Agent, modified)
 //!             .forward_to_request_cx(request_cx)
 //!     }, sacp::on_receive_request!())
 //!     .serve(transport)
@@ -74,7 +74,7 @@
 //! # use sacp::mcp_server::McpServer;
 //! # async fn example(transport: impl Component<ConductorToProxy>) -> Result<(), sacp::Error> {
 //! # let my_mcp_server = McpServer::<ProxyToConductor, _>::builder("tools").build();
-//! ProxyToConductor::builder()
+//! Proxy::builder()
 //!     .with_mcp_server(my_mcp_server)
 //!     .serve(transport)
 //!     .await?;
@@ -85,13 +85,13 @@
 //! ## Per-Session MCP Server
 //!
 //! ```
-//! # use sacp::{ProxyToConductor, ClientPeer, Component};
+//! # use sacp::{ProxyToConductor, Client, Component};
 //! # use sacp::link::ConductorToProxy;
 //! # use sacp::schema::NewSessionRequest;
 //! # use sacp::mcp_server::McpServer;
 //! # async fn example(transport: impl Component<ConductorToProxy>) -> Result<(), sacp::Error> {
-//! ProxyToConductor::builder()
-//!     .on_receive_request_from(ClientPeer, async |req: NewSessionRequest, request_cx, cx| {
+//! Proxy::builder()
+//!     .on_receive_request_from(Client, async |req: NewSessionRequest, request_cx, cx| {
 //!         let my_mcp_server = McpServer::<ProxyToConductor, _>::builder("tools").build();
 //!         cx.build_session_from(req)
 //!             .with_mcp_server(my_mcp_server)?
@@ -127,8 +127,8 @@
 //! ```
 //!
 //! Each proxy sees messages from its perspective:
-//! - `ClientPeer` is "toward the client" (Proxy A, or conductor if first)
-//! - `AgentPeer` is "toward the agent" (Proxy B, or agent if last)
+//! - `Client` is "toward the client" (Proxy A, or conductor if first)
+//! - `Agent` is "toward the agent" (Proxy B, or agent if last)
 //!
 //! Messages flow through each proxy in order. Each can inspect, modify,
 //! or handle messages before they continue.
@@ -143,6 +143,6 @@
 //! | Add per-session tools | `with_mcp_server` on session builder |
 //!
 //! [`ProxyToConductor`]: crate::ProxyToConductor
-//! [`ClientPeer`]: crate::ClientPeer
-//! [`AgentPeer`]: crate::AgentPeer
+//! [`Client`]: crate::Client
+//! [`Agent`]: crate::Agent
 //! [`sacp-conductor`]: https://crates.io/crates/sacp-conductor

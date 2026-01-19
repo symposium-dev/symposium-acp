@@ -19,7 +19,7 @@
 //! # use sacp::{ClientToAgent, AgentToClient, Component};
 //! # use sacp::schema::{InitializeRequest, ProtocolVersion};
 //! # async fn example(transport: impl Component<AgentToClient>) -> Result<(), sacp::Error> {
-//! # ClientToAgent::builder().run_until(transport, async |cx| {
+//! # Client::builder().run_until(transport, async |cx| {
 //! // As a client
 //! cx.send_request(InitializeRequest::new(ProtocolVersion::LATEST));
 //! # Ok(())
@@ -45,14 +45,14 @@
 //! For simple links, the explicit form is equivalent:
 //!
 //! ```
-//! # use sacp::{ClientToAgent, AgentToClient, AgentPeer, Component};
+//! # use sacp::{ClientToAgent, AgentToClient, Agent, Component};
 //! # use sacp_test::MyRequest;
 //! # async fn example(transport: impl Component<AgentToClient>) -> Result<(), sacp::Error> {
-//! # ClientToAgent::builder().run_until(transport, async |cx| {
+//! # Client::builder().run_until(transport, async |cx| {
 //! # let req = MyRequest {};
 //! // These are equivalent for ClientToAgent:
 //! cx.send_request(req.clone());
-//! cx.send_request_to(AgentPeer, req);
+//! cx.send_request_to(Agent, req);
 //! # Ok(())
 //! # }).await?;
 //! # Ok(())
@@ -64,21 +64,21 @@
 //! Explicit peers become essential when working with proxies. A proxy sits
 //! between a client and an agent, so it has *two* peers:
 //!
-//! - [`ClientPeer`] - the client (or previous proxy in the chain)
-//! - [`AgentPeer`] - the agent (or next proxy in the chain)
+//! - [`Client`] - the client (or previous proxy in the chain)
+//! - [`Agent`] - the agent (or next proxy in the chain)
 //!
 //! When writing proxy code, you need to specify which direction:
 //!
 //! ```
-//! # use sacp::{ProxyToConductor, ClientPeer, AgentPeer, Component};
+//! # use sacp::{ProxyToConductor, Client, Agent, Component};
 //! # use sacp::link::ConductorToProxy;
 //! # use sacp_test::MyRequest;
 //! # async fn example(transport: impl Component<ConductorToProxy>) -> Result<(), sacp::Error> {
-//! ProxyToConductor::builder()
+//! Proxy::builder()
 //!     // Receive a request from the client
-//!     .on_receive_request_from(ClientPeer, async |req: MyRequest, request_cx, cx| {
+//!     .on_receive_request_from(Client, async |req: MyRequest, request_cx, cx| {
 //!         // Forward it to the agent
-//!         cx.send_request_to(AgentPeer, req)
+//!         cx.send_request_to(Agent, req)
 //!             .forward_to_request_cx(request_cx)
 //!     }, sacp::on_receive_request!())
 //!     .serve(transport)
@@ -93,9 +93,9 @@
 //!
 //! | Peer Type | Represents |
 //! |-----------|------------|
-//! | [`ClientPeer`] | The client direction |
-//! | [`AgentPeer`] | The agent direction |
-//! | [`ConductorPeer`] | The conductor (for proxies) |
+//! | [`Client`] | The client direction |
+//! | [`Agent`] | The agent direction |
+//! | [`Conductor`] | The conductor (for proxies) |
 //!
 //! # Next Steps
 //!
@@ -104,6 +104,6 @@
 //!
 //! [`ClientToAgent`]: crate::ClientToAgent
 //! [`AgentToClient`]: crate::AgentToClient
-//! [`ClientPeer`]: crate::ClientPeer
-//! [`AgentPeer`]: crate::AgentPeer
-//! [`ConductorPeer`]: crate::ConductorPeer
+//! [`Client`]: crate::Client
+//! [`Agent`]: crate::Agent
+//! [`Conductor`]: crate::Conductor

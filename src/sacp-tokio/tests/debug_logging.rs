@@ -1,7 +1,6 @@
 //! Integration test for AcpAgent debug logging
 
-use sacp::Component;
-use sacp::link::UntypedLink;
+use sacp::{Client, Serve};
 use sacp::schema::InitializeRequest;
 use sacp_test::test_binaries::elizacp;
 use sacp_tokio::LineDirection;
@@ -9,7 +8,7 @@ use std::sync::{Arc, Mutex};
 
 /// Test helper to receive a JSON-RPC response
 async fn recv<T: sacp::JsonRpcResponse + Send>(
-    response: sacp::JrResponse<T>,
+    response: sacp::SentRequest<T>,
 ) -> Result<T, sacp::Error> {
     let (tx, rx) = tokio::sync::oneshot::channel();
     response.on_receiving_result(async move |result| {
@@ -58,10 +57,10 @@ async fn test_acp_agent_debug_callback() -> Result<(), Box<dyn std::error::Error
 
     let transport = sacp::ByteStreams::new(client_out.compat_write(), client_in.compat());
 
-    UntypedLink::builder()
+    Client::builder()
         .name("test-client")
         .with_spawned(|_cx| async move {
-            Component::<UntypedLink>::serve(
+            Serve::<Client>::serve(
                 agent,
                 sacp::ByteStreams::new(agent_out.compat_write(), agent_in.compat()),
             )

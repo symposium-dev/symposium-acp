@@ -6,15 +6,15 @@
 //! - Out-of-order response handling
 
 use futures::{AsyncRead, AsyncWrite};
-use sacp::link::UntypedLink;
 use sacp::{
-    ConnectionTo, Responder, JrResponse, JsonRpcMessage, JsonRpcRequest, JsonRpcResponse,
+    ConnectionTo, JsonRpcMessage, JsonRpcRequest, JsonRpcResponse, Responder, SentRequest,
+    role::UntypedRole,
 };
 use serde::{Deserialize, Serialize};
 use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
 
 /// Test helper to block and wait for a JSON-RPC response.
-async fn recv<T: JsonRpcResponse + Send>(response: JrResponse<T>) -> Result<T, sacp::Error> {
+async fn recv<T: JsonRpcResponse + Send>(response: SentRequest<T>) -> Result<T, sacp::Error> {
     let (tx, rx) = tokio::sync::oneshot::channel();
     response.on_receiving_result(async move |result| {
         tx.send(result).map_err(|_| sacp::Error::internal_error())
@@ -151,10 +151,10 @@ async fn test_bidirectional_communication() {
             let (server_reader, server_writer, client_reader, client_writer) = setup_test_streams();
 
             let side_a_transport = sacp::ByteStreams::new(server_writer, server_reader);
-            let side_a = UntypedLink::builder().on_receive_request(
+            let side_a = UntypedRole::builder().on_receive_request(
                 async |request: PingRequest,
                        request_cx: Responder<PongResponse>,
-                       _connection_cx: ConnectionTo<UntypedLink>| {
+                       _connection_cx: ConnectionTo<UntypedRole>| {
                     request_cx.respond(PongResponse {
                         value: request.value + 1,
                     })
@@ -163,7 +163,6 @@ async fn test_bidirectional_communication() {
             );
 
             let side_b_transport = sacp::ByteStreams::new(client_writer, client_reader);
-            let side_b = UntypedLink::builder();
 
             // Spawn side_a as server
             tokio::task::spawn_local(async move {
@@ -171,7 +170,7 @@ async fn test_bidirectional_communication() {
             });
 
             // Use side_b as client
-            let result = side_b
+            let result = UntypedRole::builder()
                 .run_until(side_b_transport, async |cx| -> Result<(), sacp::Error> {
                     let request = PingRequest { value: 10 };
                     let response_future = recv(cx.send_request(request));
@@ -205,10 +204,10 @@ async fn test_request_ids() {
             let (server_reader, server_writer, client_reader, client_writer) = setup_test_streams();
 
             let server_transport = sacp::ByteStreams::new(server_writer, server_reader);
-            let server = UntypedLink::builder().on_receive_request(
+            let server = UntypedRole::builder().on_receive_request(
                 async |request: PingRequest,
                        request_cx: Responder<PongResponse>,
-                       _connection_cx: ConnectionTo<UntypedLink>| {
+                       _connection_cx: ConnectionTo<UntypedRole>| {
                     request_cx.respond(PongResponse {
                         value: request.value + 1,
                     })
@@ -217,7 +216,7 @@ async fn test_request_ids() {
             );
 
             let client_transport = sacp::ByteStreams::new(client_writer, client_reader);
-            let client = UntypedLink::builder();
+            let client = UntypedRole::builder();
 
             tokio::task::spawn_local(async move {
                 server.serve(server_transport).await.ok();
@@ -267,10 +266,10 @@ async fn test_out_of_order_responses() {
             let (server_reader, server_writer, client_reader, client_writer) = setup_test_streams();
 
             let server_transport = sacp::ByteStreams::new(server_writer, server_reader);
-            let server = UntypedLink::builder().on_receive_request(
+            let server = UntypedRole::builder().on_receive_request(
                 async |request: SlowRequest,
                        request_cx: Responder<SlowResponse>,
-                       _connection_cx: ConnectionTo<UntypedLink>| {
+                       _connection_cx: ConnectionTo<UntypedRole>| {
                     // Simulate delay
                     tokio::time::sleep(tokio::time::Duration::from_millis(request.delay_ms)).await;
                     request_cx.respond(SlowResponse { id: request.id })
@@ -279,7 +278,7 @@ async fn test_out_of_order_responses() {
             );
 
             let client_transport = sacp::ByteStreams::new(client_writer, client_reader);
-            let client = UntypedLink::builder();
+            let client = UntypedRole::builder();
 
             tokio::task::spawn_local(async move {
                 server.serve(server_transport).await.ok();

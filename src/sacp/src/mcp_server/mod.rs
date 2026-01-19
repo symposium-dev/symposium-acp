@@ -15,7 +15,7 @@
 //!     .build();
 //!
 //! // Use the server as a handler on your connection
-//! ProxyToConductor::builder()
+//! Proxy::builder()
 //!     .with_handler(server)
 //!     .serve(client)
 //!     .await?;
@@ -31,7 +31,7 @@
 //!
 //! struct MyCustomServer;
 //!
-//! impl<Link: JrLink> McpServerConnect<Link> for MyCustomServer {
+//! impl<R: Role> McpServerConnect<Link> for MyCustomServer {
 //!     fn name(&self) -> String {
 //!         "my-custom-server".to_string()
 //!     }
@@ -55,6 +55,6 @@ mod tool;
 
 pub use builder::{EnabledTools, McpServerBuilder};
 pub use connect::McpServerConnect;
-pub use context::McpContext;
+pub use context::McpConnectionTo;
 pub use server::McpServer;
 pub use tool::McpTool;
