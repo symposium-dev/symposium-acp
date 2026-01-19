@@ -7,6 +7,46 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [11.0.0](https://github.com/symposium-dev/symposium-acp/compare/sacp-conductor-v10.0.1...sacp-conductor-v11.0.0) - 2026-01-19
+
+### Added
+
+- *(conductor)* infer response tracing direction from context
+- *(sacp)* add Response variant to MessageCx
+
+### Fixed
+
+- *(sacp)* revert accidental JrMessageHandler and JrRequestCx renames
+- *(conductor)* normalize acp_url field in trace snapshot tests
+- *(conductor)* handle Response variants in message forwarding
+- *(conductor)* panic on Response in forwarding functions
+
+### Other
+
+- go back from `connect_from` to `builder`
+- fix unresolved rustdoc link warnings for v11 API
+- *(sacp)* [**breaking**] rename HandleMessageFrom to HandleDispatchFrom
+- *(sacp)* [**breaking**] rename *_cx variables to descriptive names
+- *(sacp)* [**breaking**] rename MessageCx to Dispatch for clearer semantics
+- *(sacp)* [**breaking**] rename Serve to ConnectTo for clearer semantics
+- *(sacp)* [**breaking**] replace JrLink/JrPeer with unified Role-based API
+- *(sacp)* rename JrMessageHandler to HandleMessageFrom
+- *(sacp)* rename JrConnectionBuilder to ConnectFrom
+- *(sacp)* simplify spawn_connection API
+- *(sacp)* rename context types for clarity
+- *(sacp)* rename JrResponder ecosystem to Run
+- *(sacp)* rename Jr* traits to JsonRpc* for clarity
+- get tracing working
+- refactor tracing
+- *(conductor)* simplify trace bridge API
+- *(conductor)* move tracing to transport layer with bridge wrappers
+- remove into_connection_builder
+- add a test that shows a request going all the way back to the client
+- *(sacp-conductor)* add trace snapshot for client-hosted MCP server
+- *(sacp-conductor)* add trace snapshot test for agent-initiated MCP tool calls
+- wip
+- *(sacp)* introduce JrResponseCx for incoming response handling
+
 ## [10.0.1](https://github.com/symposium-dev/symposium-acp/compare/sacp-conductor-v10.0.0...sacp-conductor-v10.0.1) - 2025-12-31
 
 ### Other
