@@ -1,30 +1,30 @@
-//! Serve abstraction for agents and proxies.
+//! ConnectTo abstraction for agents and proxies.
 //!
-//! This module provides the [`Serve`] trait that defines the interface for things
+//! This module provides the [`ConnectTo`] trait that defines the interface for things
 //! that can be run as part of a conductor's chain - agents, proxies, or any ACP-speaking component.
 //!
 //! ## Usage
 //!
-//! Components serve by forwarding to other components, creating a chain of message processors.
-//! The type parameter `R` is the role that this component serves (its counterpart).
+//! Components connect to other components, creating a chain of message processors.
+//! The type parameter `R` is the role that this component connects to (its counterpart).
 //!
-//! To implement a component, implement the `serve` method:
+//! To implement a component, implement the `connect_to` method:
 //!
 //! ```rust,ignore
-//! use sacp::component::Serve;
-//! use sacp::role::Client;
+//! use sacp::ConnectTo;
+//! use sacp::Client;
 //!
 //! struct MyAgent {
 //!     // configuration fields
 //! }
 //!
-//! // An agent serves clients
-//! impl Serve<Client> for MyAgent {
-//!     async fn serve(self, client: impl Serve<Client::Counterpart>) -> Result<(), sacp::Error> {
+//! // An agent connects to clients
+//! impl ConnectTo<Client> for MyAgent {
+//!     async fn connect_to(self, client: impl ConnectTo<Agent>) -> Result<(), sacp::Error> {
 //!         sacp::Agent.connect_from()
 //!             .name("my-agent")
 //!             // configure handlers here
-//!             .serve(client)
+//!             .connect_to(client)
 //!             .await
 //!     }
 //! }
@@ -92,15 +92,15 @@ use crate::{Channel, role::Role};
 ///
 /// # Heterogeneous Collections
 ///
-/// For storing different component types in the same collection, use [`DynServe`]:
+/// For storing different component types in the same collection, use [`DynConnectTo`]:
 ///
 /// ```rust,ignore
-/// use sacp::role::Client;
+/// use sacp::Client;
 ///
-/// let components: Vec<DynServe<Client>> = vec![
-///     DynServe::new(proxy1),
-///     DynServe::new(proxy2),
-///     DynServe::new(agent),
+/// let components: Vec<DynConnectTo<Client>> = vec![
+///     DynConnectTo::new(proxy1),
+///     DynConnectTo::new(proxy2),
+///     DynConnectTo::new(agent),
 /// ];
 /// ```
 ///
@@ -151,10 +151,10 @@ pub trait ConnectTo<R: Role>: Send + 'static {
     }
 }
 
-/// Type-erased serve trait for object-safe dynamic dispatch.
+/// Type-erased connect trait for object-safe dynamic dispatch.
 ///
-/// This trait is internal and used by [`DynServe`]. Users should implement
-/// [`Serve`] instead, which is automatically converted to `ErasedServe`
+/// This trait is internal and used by [`DynConnectTo`]. Users should implement
+/// [`ConnectTo`] instead, which is automatically converted to `ErasedConnectTo`
 /// via a blanket implementation.
 trait ErasedConnectTo<R: Role>: Send {
     fn type_name(&self) -> String;
@@ -198,7 +198,7 @@ impl<C: ConnectTo<R>, R: Role> ErasedConnectTo<R> for C {
 
 /// A dynamically-typed component for heterogeneous collections.
 ///
-/// This type wraps any [`Serve`] implementation and provides dynamic dispatch,
+/// This type wraps any [`ConnectTo`] implementation and provides dynamic dispatch,
 /// allowing you to store different component types in the same collection.
 ///
 /// The type parameter `R` is the role that all components in the
@@ -207,12 +207,12 @@ impl<C: ConnectTo<R>, R: Role> ErasedConnectTo<R> for C {
 /// # Examples
 ///
 /// ```rust,ignore
-/// use sacp::{DynServe, role::Client};
+/// use sacp::{DynConnectTo, Client};
 ///
-/// let components: Vec<DynServe<Client>> = vec![
-///     DynServe::new(Proxy1),
-///     DynServe::new(Proxy2),
-///     DynServe::new(Agent),
+/// let components: Vec<DynConnectTo<Client>> = vec![
+///     DynConnectTo::new(Proxy1),
+///     DynConnectTo::new(Proxy2),
+///     DynConnectTo::new(Agent),
 /// ];
 /// ```
 pub struct DynConnectTo<R: Role> {
@@ -221,7 +221,7 @@ pub struct DynConnectTo<R: Role> {
 }
 
 impl<R: Role> DynConnectTo<R> {
-    /// Create a new `DynServe` from any type implementing [`Serve`].
+    /// Create a new `DynConnectTo` from any type implementing [`ConnectTo`].
     pub fn new<C: ConnectTo<R>>(component: C) -> Self {
         Self {
             inner: Box::new(component),

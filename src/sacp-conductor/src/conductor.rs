@@ -1023,7 +1023,7 @@ pub enum SourceComponentIndex {
 pub trait InstantiateProxies: Send {
     /// Instantiate proxy components based on the Initialize request.
     ///
-    /// Returns proxy components typed as `DynComponent<ProxyToConductor>` since proxies
+    /// Returns proxy components typed as `DynConnectTo<Conductor>` since proxies
     /// communicate with the conductor.
     fn instantiate_proxies(
         self: Box<Self>,
@@ -1036,7 +1036,7 @@ pub trait InstantiateProxies: Send {
 
 /// Simple implementation: provide all proxy components unconditionally.
 ///
-/// Requires `T: Component<ProxyToConductor>`.
+/// Requires `T: ConnectTo<Conductor>`.
 impl<T> InstantiateProxies for Vec<T>
 where
     T: ConnectTo<Conductor> + 'static,
@@ -1084,8 +1084,8 @@ pub trait InstantiateProxiesAndAgent: Send {
     /// Instantiate proxy and agent components based on the Initialize request.
     ///
     /// Returns the (possibly modified) request, a vector of proxy components
-    /// (typed as `DynComponent<ProxyToConductor>`), and the agent component
-    /// (typed as `DynComponent<AgentToClient>`).
+    /// (typed as `DynConnectTo<Conductor>`), and the agent component
+    /// (typed as `DynConnectTo<Client>`).
     fn instantiate_proxies_and_agent(
         self: Box<Self>,
         req: InitializeRequest,

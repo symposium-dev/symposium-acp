@@ -1,23 +1,23 @@
-//! Establishing connections using link types and connection builders.
+//! Establishing connections using role types and connection builders.
 //!
 //! To communicate over ACP, you need to establish a connection. This involves
-//! choosing a **link type** that matches your role and using a **connection builder**
+//! choosing a **role type** that matches your role and using a **connection builder**
 //! to configure and run the connection.
 //!
-//! # Choosing a Link Type
+//! # Choosing a Role Type
 //!
-//! Your link type determines what messages you can send and who you can send them to.
+//! Your role type determines what messages you can send and who you can send them to.
 //! Choose based on what you're building:
 //!
-//! | You are building... | Use this link type |
+//! | You are building... | Use this role type |
 //! |---------------------|-------------------|
-//! | A client that talks to an agent | [`ClientToAgent`] |
-//! | An agent that responds to clients | [`AgentToClient`] |
-//! | A proxy in a conductor chain | [`ProxyToConductor`] |
+//! | A client that talks to an agent | [`Client`] |
+//! | An agent that responds to clients | [`Agent`] |
+//! | A proxy in a conductor chain | [`Proxy`] |
 //!
 //! # The Connection Builder Pattern
 //!
-//! Every link type has a `builder()` method that returns a connection builder.
+//! Every role type has a `connect_from()` method that returns a connection builder.
 //! The builder lets you configure handlers, then connect to a transport:
 //!
 //! ```
@@ -36,7 +36,7 @@
 //!
 //! # The Connection Context
 //!
-//! Inside `run_until`, you receive a [`ConnectionTo`] (connection context) that
+//! Inside `connect_with`, you receive a [`ConnectionTo`] (connection context) that
 //! lets you interact with the remote peer:
 //!
 //! ```
@@ -60,7 +60,7 @@
 //!
 //! # Sending Requests
 //!
-//! When you call `send_request()`, you get back a [`JrResponse`] that represents
+//! When you call `send_request()`, you get back a [`SentRequest`] that represents
 //! the pending response. You have two main ways to handle it:
 //!
 //! ## Option 1: Block and wait
@@ -113,8 +113,8 @@
 //! - [Sessions](super::sessions) - Create multi-turn conversations
 //! - [Callbacks](super::callbacks) - Handle incoming requests from the remote peer
 //!
-//! [`ClientToAgent`]: crate::ClientToAgent
-//! [`AgentToClient`]: crate::AgentToClient
-//! [`ProxyToConductor`]: crate::ProxyToConductor
+//! [`Client`]: crate::Client
+//! [`Agent`]: crate::Agent
+//! [`Proxy`]: crate::Proxy
 //! [`ConnectionTo`]: crate::ConnectionTo
-//! [`JrResponse`]: crate::JrResponse
+//! [`SentRequest`]: crate::SentRequest

@@ -35,7 +35,7 @@ where
     ///
     /// # See also
     ///
-    /// See [`Self::builder`] to construct MCP servers from Rust code.
+    /// See [`McpServer::builder`] to construct MCP servers from Rust code.
     fn from_rmcp<S>(
         name: impl ToString,
         new_fn: impl Fn() -> S + Send + Sync + 'static,

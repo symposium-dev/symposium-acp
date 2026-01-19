@@ -51,7 +51,7 @@
 //!
 //! # `block_task` vs `on_receiving_result`
 //!
-//! When you send a request, you get a [`JrResponse`] with two ways to handle it:
+//! When you send a request, you get a [`SentRequest`] with two ways to handle it:
 //!
 //! ## `block_task()` - Acks immediately, you process later
 //!
@@ -166,9 +166,9 @@
 //!
 //! [`on_receive_request`]: crate::ConnectFrom::on_receive_request
 //! [`on_receive_notification`]: crate::ConnectFrom::on_receive_notification
-//! [`on_receiving_result`]: crate::JrResponse::on_receiving_result
-//! [`on_receiving_ok_result`]: crate::JrResponse::on_receiving_ok_result
+//! [`on_receiving_result`]: crate::SentRequest::on_receiving_result
+//! [`on_receiving_ok_result`]: crate::SentRequest::on_receiving_ok_result
 //! [`on_session_start`]: crate::SessionBuilder::on_session_start
 //! [`on_proxy_session_start`]: crate::SessionBuilder::on_proxy_session_start
-//! [`JrResponse`]: crate::JrResponse
+//! [`SentRequest`]: crate::SentRequest
 //! [`spawn`]: crate::ConnectionTo::spawn

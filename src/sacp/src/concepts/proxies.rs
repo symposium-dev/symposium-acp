@@ -4,9 +4,9 @@
 //! in both directions. This is how you add capabilities like MCP tools,
 //! logging, or message transformation.
 //!
-//! # The Proxy Link Type
+//! # The Proxy Role Type
 //!
-//! Proxies use the [`ProxyToConductor`] link type, which has two peers:
+//! Proxies use the [`Proxy`] role type, which has two peers:
 //!
 //! - [`Client`] - messages from/to the client direction
 //! - [`Agent`] - messages from/to the agent direction
@@ -16,7 +16,7 @@
 //!
 //! # Default Forwarding
 //!
-//! By default, `ProxyToConductor` forwards all messages it doesn't handle.
+//! By default, [`Proxy`] forwards all messages it doesn't handle.
 //! This means a minimal proxy that does nothing is just:
 //!
 //! ```
@@ -133,12 +133,12 @@
 //!
 //! | Task | Approach |
 //! |------|----------|
-//! | Forward everything | Just `serve(transport)` |
+//! | Forward everything | Just `connect_to(transport)` |
 //! | Intercept specific messages | `on_receive_*_from` with explicit peers |
 //! | Add global tools | `with_mcp_server` on builder |
 //! | Add per-session tools | `with_mcp_server` on session builder |
 //!
-//! [`ProxyToConductor`]: crate::ProxyToConductor
+//! [`Proxy`]: crate::Proxy
 //! [`Client`]: crate::Client
 //! [`Agent`]: crate::Agent
 //! [`sacp-conductor`]: https://crates.io/crates/sacp-conductor

@@ -21,14 +21,14 @@ pub mod mcp;
 /// The role that an endpoint plays in an ACP connection.
 ///
 /// Roles are the fundamental building blocks of ACP's type system:
-/// - [`Client`] connects to [`Agent`]
-/// - [`Agent`] connects to [`Client`]
-/// - [`Proxy`] connects to [`Conductor`]
-/// - [`Conductor`] connects to [`Proxy`]
+/// - [`acp::Client`] connects to [`acp::Agent`]
+/// - [`acp::Agent`] connects to [`acp::Client`]
+/// - [`acp::Proxy`] connects to [`acp::Conductor`]
+/// - [`acp::Conductor`] connects to [`acp::Proxy`]
 ///
 /// Each role determines:
 /// - Who the counterpart is (via [`Role::Counterpart`])
-/// - How unhandled messages are processed (via [`Role::default_message_handler`])
+/// - How unhandled messages are processed (via `Role::default_message_handler`)
 pub trait Role: Debug + Clone + Send + Sync + 'static + Eq + Ord + Hash {
     /// The role that this endpoint connects to.
     ///
@@ -63,7 +63,7 @@ pub trait Role: Debug + Clone + Send + Sync + 'static + Eq + Ord + Hash {
 
 /// Declares that a role can send messages to a specific peer.
 ///
-/// Most roles only communicate with their counterpart, but some (like [`Proxy`])
+/// Most roles only communicate with their counterpart, but some (like [`acp::Proxy`])
 /// can communicate with multiple peers:
 /// - `Proxy: HasPeer<Client>` - proxy can send/receive from clients
 /// - `Proxy: HasPeer<Agent>` - proxy can send/receive from agents

@@ -12,7 +12,7 @@
 //! # Building Clients
 //!
 //! A client connects to an agent, sends requests, and handles responses. Use
-//! [`Client.connect_from()`][Client] to build connections.
+//! [`Client.connect_from()`](sacp::Client) to build connections.
 //!
 //! - [`one_shot_prompt`] - Send a single prompt and get a response (simplest pattern)
 //! - [`connecting_as_client`] - More details on connection setup and permission handling
@@ -20,7 +20,7 @@
 //! # Building Proxies
 //!
 //! A proxy sits between client and agent, intercepting and optionally modifying
-//! messages. The most common use case is adding MCP tools. Use [`Proxy.connect_from()`][Proxy]
+//! messages. The most common use case is adding MCP tools. Use [`Proxy.connect_from()`](sacp::Proxy)
 //! to build proxy connections.
 //!
 //! **Important:** Proxies don't run standalone—they need the [`sacp-conductor`] to
@@ -37,7 +37,7 @@
 //!
 //! # Building Agents
 //!
-//! An agent receives prompts and generates responses. Use [`Agent.connect_from()`][Agent]
+//! An agent receives prompts and generates responses. Use [`Agent.connect_from()`](sacp::Agent)
 //! to build agent connections.
 //!
 //! - [`building_an_agent`] - Handle initialization, sessions, and prompts
@@ -214,7 +214,7 @@ pub mod building_an_agent {
     //! 2. Handle [`NewSessionRequest`] to create sessions
     //! 3. Handle [`PromptRequest`] to process prompts
     //!
-    //! Use [`Agent.connect_from()`][Agent] to build agent connections.
+    //! Use [`Agent.connect_from()`](sacp::Agent) to build agent connections.
     //!
     //! # Minimal Example
     //!
@@ -817,25 +817,25 @@ pub mod running_proxies_with_conductor {
     //!
     //! # Using the conductor as a library
     //!
-    //! For more control, use [`sacp-conductor`] as a library with the [`Conductor`] type:
+    //! For more control, use [`sacp-conductor`] as a library with the `ConductorImpl` type:
     //!
     //! ```ignore
-    //! use sacp_conductor::{Conductor, ProxiesAndAgent};
+    //! use sacp_conductor::{ConductorImpl, ProxiesAndAgent};
     //!
-    //! // Define your proxy as a Component<ProxyToConductor>
+    //! // Define your proxy as a ConnectTo<Conductor>
     //! let my_proxy = MyProxy::new();
     //!
     //! // Spawn the agent process
     //! let agent_process = sacp_tokio::spawn_process("claude-code", &["--agent"]).await?;
     //!
     //! // Create the conductor with your proxy chain
-    //! let conductor = Conductor::new(ProxiesAndAgent {
+    //! let conductor = ConductorImpl::new(ProxiesAndAgent {
     //!     proxies: vec![Box::new(my_proxy)],
     //!     agent: agent_process,
     //! });
     //!
     //! // Run the conductor (it will accept client connections on stdin/stdout)
-    //! conductor.serve(client_transport).await?;
+    //! conductor.connect_to(client_transport).await?;
     //! ```
     //!
     //! # Why can't I just connect my proxy directly to an agent?
@@ -853,7 +853,6 @@ pub mod running_proxies_with_conductor {
     //! running with the conductor.
     //!
     //! [`sacp-conductor`]: https://crates.io/crates/sacp-conductor
-    //! [`Conductor`]: sacp_conductor::Conductor
     //! [`SuccessorMessage`]: sacp::schema::SuccessorMessage
     //! [`sacp-conductor` tests]: https://github.com/symposium-dev/symposium-acp/tree/main/src/sacp-conductor/tests
 }

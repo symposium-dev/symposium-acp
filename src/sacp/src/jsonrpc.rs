@@ -38,7 +38,7 @@ use crate::role::Role;
 use crate::util::json_cast;
 use crate::{Agent, Client, ConnectTo, RoleId};
 
-/// Handlers process incoming JSON-RPC messages on a [`JrConnection`].
+/// Handlers process incoming JSON-RPC messages on a connection.
 ///
 /// When messages arrive, they flow through a chain of handlers. Each handler can
 /// either **claim** the message (handle it) or **decline** it (pass to the next handler).
@@ -69,7 +69,7 @@ use crate::{Agent, Client, ConnectTo, RoleId};
 ///                              ▼
 /// ┌─────────────────────────────────────────────────────────────────┐
 /// │  3. Role Default Handler                                        │
-/// │     - Fallback based on the connection's JrLink                 │
+/// │     - Fallback based on the connection's Role                   │
 /// │     - Handles protocol-level messages (e.g., proxy forwarding)  │
 /// └─────────────────────────────────────────────────────────────────┘
 ///                              │ Handled::No
@@ -242,10 +242,10 @@ where
 
 /// A JSON-RPC connection that can act as either a server, client, or both.
 ///
-/// `JrConnection` provides a builder-style API for creating JSON-RPC servers and clients.
-/// You start by calling `Link.connect_from()` (e.g., `Client.connect_from()`), then add message
-/// handlers, and finally drive the connection with either [`serve`](ConnectFrom::serve)
-/// or [`run_until`](ConnectFrom::run_until), providing a component implementation
+/// [`ConnectFrom`] provides a builder-style API for creating JSON-RPC servers and clients.
+/// You start by calling `Role.connect_from()` (e.g., `Client.connect_from()`), then add message
+/// handlers, and finally drive the connection with either [`connect_to`](ConnectFrom::connect_to)
+/// or [`connect_with`](ConnectFrom::connect_with), providing a component implementation
 /// (e.g., [`ByteStreams`] for byte streams).
 ///
 /// # JSON-RPC Primer
@@ -398,7 +398,7 @@ where
 ///
 /// ## The Event Loop
 ///
-/// `JrConnection` runs all handler callbacks on a single async task - the event loop.
+/// [`ConnectFrom`] runs all handler callbacks on a single async task - the event loop.
 /// While a handler is running, **the server cannot receive new messages**. This means
 /// any blocking or expensive work in your handlers will stall the entire connection.
 ///
@@ -445,17 +445,17 @@ where
 /// * [`send_notification`](ConnectionTo::send_notification) - Send notifications
 /// * [`spawn`](ConnectionTo::spawn) - Run tasks concurrently without blocking the event loop
 ///
-/// The [`JrResponse`] returned by `send_request` provides methods like
-/// [`on_receiving_result`](JrResponse::on_receiving_result) that help you
+/// The [`SentRequest`] returned by `send_request` provides methods like
+/// [`on_receiving_result`](SentRequest::on_receiving_result) that help you
 /// avoid accidentally blocking the event loop while waiting for responses.
 ///
 /// # Driving the Connection
 ///
 /// After adding handlers, you must drive the connection using one of two modes:
 ///
-/// ## Server Mode: `serve()`
+/// ## Server Mode: `connect_to()`
 ///
-/// Use [`serve`](Self::serve) when you only need to respond to incoming messages:
+/// Use [`connect_to`](Self::connect_to) when you only need to respond to incoming messages:
 ///
 /// ```no_run
 /// # use sacp_test::*;
@@ -474,9 +474,9 @@ where
 /// The connection will process incoming messages and invoke your handlers until the
 /// connection is closed or an error occurs.
 ///
-/// ## Client Mode: `run_until()`
+/// ## Client Mode: `connect_with()`
 ///
-/// Use [`run_until`](Self::run_until) when you need to both handle incoming messages
+/// Use [`connect_with`](Self::connect_with) when you need to both handle incoming messages
 /// AND send your own requests/notifications:
 ///
 /// ```no_run
@@ -563,7 +563,7 @@ where
 impl<Host: Role> ConnectFrom<Host, NullHandler, NullRun> {
     /// Create a new connection builder for the given role.
     /// This type follows a builder pattern; use other methods to configure and then invoke
-    /// [`Self::serve`] (to use as a server) or [`Self::run_until`] to use as a client.
+    /// [`Self::connect_to`] (to use as a server) or [`Self::connect_with`] to use as a client.
     pub fn new(role: Host) -> Self {
         Self {
             host: role,
@@ -628,7 +628,7 @@ impl<
         }
     }
 
-    /// Add a new [`HandleMessageAs`] to the chain.
+    /// Add a new [`HandleDispatchFrom`] to the chain.
     ///
     /// Prefer [`Self::on_receive_request`] or [`Self::on_receive_notification`].
     /// This is a low-level method that is not intended for general use.
@@ -644,7 +644,7 @@ impl<
         }
     }
 
-    /// Add a new [`RunIn`] to the chain.
+    /// Add a new [`RunWithConnectionTo`] to the chain.
     pub fn with_responder<Run1>(
         self,
         responder: Run1,
@@ -1069,7 +1069,7 @@ impl<
     ///
     /// Use this mode when you only need to respond to incoming messages and don't need
     /// to initiate your own requests. If you need to send requests to the other side,
-    /// use [`run_until`](Self::run_until) instead.
+    /// use [`connect_with`](Self::connect_with) instead.
     ///
     /// # Example: Byte Stream Transport
     ///
@@ -1113,7 +1113,7 @@ impl<
     ///
     /// Use this mode when you need to initiate communication (send requests/notifications)
     /// in addition to responding to incoming messages. For server-only mode where you just
-    /// respond to messages, use [`serve`](Self::serve) instead.
+    /// respond to messages, use [`connect_to`](Self::connect_to) instead.
     ///
     /// # Example
     ///
@@ -1413,7 +1413,7 @@ impl<T> IntoHandled<T> for Handled<T> {
 ///
 /// The transport layer is responsible only for moving `jsonrpcmsg::Message` in and out.
 /// It has no knowledge of protocol semantics like request/response correlation, ID assignment,
-/// or handler dispatch - those are handled by the protocol layer in `JrConnection`.
+/// or handler dispatch - those are handled by the protocol layer in [`ConnectFrom`].
 ///
 /// # Example
 ///
@@ -1439,7 +1439,7 @@ impl<T> IntoHandled<T> for Handled<T> {
 /// messages while your handler is running. Use [`spawn`](Self::spawn) to offload any
 /// expensive or blocking work to concurrent tasks.
 ///
-/// See the [Event Loop and Concurrency](JrConnection#event-loop-and-concurrency) section
+/// See the [Event Loop and Concurrency](ConnectFrom#event-loop-and-concurrency) section
 /// for more details.
 #[derive(Clone, Debug)]
 pub struct ConnectionTo<Counterpart: Role> {
@@ -1609,14 +1609,14 @@ impl<Counterpart: Role> ConnectionTo<Counterpart> {
         }
     }
 
-    /// Send an outgoing request and return a [`JrResponse`] for handling the reply.
+    /// Send an outgoing request and return a [`SentRequest`] for handling the reply.
     ///
-    /// The returned [`JrResponse`] provides methods for receiving the response without
+    /// The returned [`SentRequest`] provides methods for receiving the response without
     /// blocking the event loop:
     ///
-    /// * [`on_receiving_result`](JrResponse::on_receiving_result) - Schedule
+    /// * [`on_receiving_result`](SentRequest::on_receiving_result) - Schedule
     ///   a callback to run when the response arrives (doesn't block the event loop)
-    /// * [`block_task`](JrResponse::block_task) - Block the current task until the response
+    /// * [`block_task`](SentRequest::block_task) - Block the current task until the response
     ///   arrives (only safe in spawned tasks, not in handlers)
     ///
     /// # Anti-Footgun Design
@@ -1670,7 +1670,7 @@ impl<Counterpart: Role> ConnectionTo<Counterpart> {
 
     /// Send an outgoing request to a specific peer.
     ///
-    /// The message will be transformed according to the [`HasPeer`](crate::HasPeer)
+    /// The message will be transformed according to the [`HasPeer`](crate::role::HasPeer)
     /// implementation before being sent.
     pub fn send_request_to<Peer: Role, Req: JsonRpcRequest>(
         &self,
@@ -1765,7 +1765,7 @@ impl<Counterpart: Role> ConnectionTo<Counterpart> {
 
     /// Send an outgoing notification to a specific peer (no reply expected).
     ///
-    /// The message will be transformed according to the [`HasPeer`](crate::HasPeer)
+    /// The message will be transformed according to the [`HasPeer`](crate::role::HasPeer)
     /// implementation before being sent.
     pub fn send_notification_to<Peer: Role, N: JsonRpcNotification>(
         &self,
@@ -1899,7 +1899,7 @@ impl<R: Role> Drop for DynamicHandlerRegistration<R> {
 /// [`spawn`](ConnectionTo::spawn) for expensive operations to avoid blocking
 /// the connection.
 ///
-/// See the [Event Loop and Concurrency](JrConnection#event-loop-and-concurrency)
+/// See the [Event Loop and Concurrency](ConnectFrom#event-loop-and-concurrency)
 /// section for more details.
 #[must_use]
 pub struct Responder<T: JsonRpcResponse = serde_json::Value> {
@@ -2699,7 +2699,7 @@ impl JsonRpcNotification for UntypedMessage {}
 ///
 /// # Anti-Footgun Design
 ///
-/// You cannot directly `.await` a `JrResponse`. Instead, you must choose how to handle
+/// You cannot directly `.await` a `SentRequest`. Instead, you must choose how to handle
 /// the response:
 ///
 /// ## Option 1: Schedule a Callback (Safe in Handlers)
@@ -3160,7 +3160,7 @@ impl<T: JsonRpcResponse> SentRequest<T> {
 
 /// A component that communicates over line streams.
 ///
-/// `Lines` implements the [`Component`] trait for any pair of line-based streams
+/// `Lines` implements the [`ConnectTo`] trait for any pair of line-based streams
 /// (a `Stream<Item = io::Result<String>>` for incoming and a `Sink<String>` for outgoing),
 /// handling serialization of JSON-RPC messages to/from newline-delimited JSON.
 ///
@@ -3179,7 +3179,7 @@ impl<T: JsonRpcResponse> SentRequest<T> {
 /// Most users should use [`ByteStreams`] instead, which provides a simpler interface
 /// for byte-based I/O.
 ///
-/// [`Component`]: crate::Component
+/// [`ConnectTo`]: crate::ConnectTo
 pub struct Lines<OutgoingSink, IncomingStream> {
     /// Outgoing line sink (where we write serialized JSON-RPC messages)
     pub outgoing: OutgoingSink,
@@ -3237,7 +3237,7 @@ where
 
 /// A component that communicates over byte streams (stdin/stdout, sockets, pipes, etc.).
 ///
-/// `ByteStreams` implements the [`Component`] trait for any pair of `AsyncRead` and `AsyncWrite`
+/// `ByteStreams` implements the [`ConnectTo`] trait for any pair of `AsyncRead` and `AsyncWrite`
 /// streams, handling serialization of JSON-RPC messages to/from newline-delimited JSON.
 /// This is the standard way to communicate with external processes or network connections.
 ///
@@ -3272,7 +3272,7 @@ where
 /// # }
 /// ```
 ///
-/// [`Component`]: crate::Component
+/// [`ConnectTo`]: crate::ConnectTo
 pub struct ByteStreams<OB, IB> {
     /// Outgoing byte stream (where we write serialized messages)
     pub outgoing: OB,

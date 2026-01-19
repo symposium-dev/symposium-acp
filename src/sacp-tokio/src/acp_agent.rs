@@ -24,7 +24,7 @@ pub enum LineDirection {
 
 /// A component representing an external ACP agent running in a separate process.
 ///
-/// `AcpAgent` implements the [`sacp::Serve`] trait for spawning and communicating with
+/// `AcpAgent` implements the [`sacp::ConnectTo`] trait for spawning and communicating with
 /// external agents or proxies via stdio. It handles process spawning, stream setup, and
 /// byte stream serialization automatically. This is the primary way to connect to agents
 /// that run as separate executables.

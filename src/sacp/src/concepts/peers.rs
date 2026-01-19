@@ -2,16 +2,16 @@
 //!
 //! So far, we've used methods like `send_request` and `on_receive_request`
 //! without specifying *who* we're sending to or receiving from. That's because
-//! each link type has a **default peer**.
+//! each role type has a **default peer**.
 //!
 //! # Default Peers
 //!
-//! For simple link types, there's only one peer to talk to:
+//! For simple role types, there's only one peer to talk to:
 //!
-//! | Link Type | Default Peer |
+//! | Role Type | Default Peer |
 //! |-----------|--------------|
-//! | [`ClientToAgent`] | The agent |
-//! | [`AgentToClient`] | The client |
+//! | [`Client`] | The agent |
+//! | [`Agent`] | The client |
 //!
 //! So when you write:
 //!
@@ -42,7 +42,7 @@
 //! | `on_receive_request` | `on_receive_request_from(peer, callback)` |
 //! | `on_receive_notification` | `on_receive_notification_from(peer, callback)` |
 //!
-//! For simple links, the explicit form is equivalent:
+//! For simple role types, the explicit form is equivalent:
 //!
 //! ```
 //! # use sacp::{Client, Agent, ConnectTo};
@@ -50,7 +50,7 @@
 //! # async fn example(transport: impl ConnectTo<Client>) -> Result<(), sacp::Error> {
 //! # Client.connect_from().connect_with(transport, async |cx| {
 //! # let req = MyRequest {};
-//! // These are equivalent for ClientToAgent:
+//! // These are equivalent for Client:
 //! cx.send_request(req.clone());
 //! cx.send_request_to(Agent, req);
 //! # Ok(())
@@ -101,8 +101,6 @@
 //! - [Ordering](super::ordering) - Understand dispatch loop semantics
 //! - [Proxies and Conductors](super::proxies) - Build proxies that use explicit peers
 //!
-//! [`ClientToAgent`]: crate::ClientToAgent
-//! [`AgentToClient`]: crate::AgentToClient
 //! [`Client`]: crate::Client
 //! [`Agent`]: crate::Agent
 //! [`Conductor`]: crate::Conductor
