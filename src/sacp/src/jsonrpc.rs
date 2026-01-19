@@ -140,7 +140,7 @@ use crate::{Agent, Client, ConnectTo, RoleId};
 ///
 /// impl HandleMessageAs<Agent> for MyHandler {
 ///
-///     async fn handle_message(
+///     async fn handle_dispatch(
 ///         &mut self,
 ///         message: Dispatch,
 ///         cx: ConnectionTo<Self::Role>,
@@ -194,7 +194,7 @@ use crate::{Agent, Client, ConnectTo, RoleId};
 /// The type parameter `R` is the role this handler plays - who I am.
 /// For an agent handler, `R = Agent` (I handle messages as an agent).
 /// For a client handler, `R = Client` (I handle messages as a client).
-pub trait HandleMessageFrom<Counterpart: Role>: Send {
+pub trait HandleDispatchFrom<Counterpart: Role>: Send {
     /// Attempt to claim an incoming message (request or notification).
     ///
     /// # Important: do not block
@@ -213,7 +213,7 @@ pub trait HandleMessageFrom<Counterpart: Role>: Send {
     /// * `Ok(Handled::Yes)` if the message was claimed. It will not be propagated further.
     /// * `Ok(Handled::No(message))` if not; the (possibly changed) message will be passed to the remaining handlers.
     /// * `Err` if an internal error occurs (this will bring down the server).
-    fn handle_message_from(
+    fn handle_dispatch_from(
         &mut self,
         message: Dispatch,
         connection: ConnectionTo<Counterpart>,
@@ -223,16 +223,16 @@ pub trait HandleMessageFrom<Counterpart: Role>: Send {
     fn describe_chain(&self) -> impl std::fmt::Debug;
 }
 
-impl<Counterpart: Role, H> HandleMessageFrom<Counterpart> for &mut H
+impl<Counterpart: Role, H> HandleDispatchFrom<Counterpart> for &mut H
 where
-    H: HandleMessageFrom<Counterpart>,
+    H: HandleDispatchFrom<Counterpart>,
 {
-    fn handle_message_from(
+    fn handle_dispatch_from(
         &mut self,
         message: Dispatch,
         cx: ConnectionTo<Counterpart>,
     ) -> impl Future<Output = Result<Handled<Dispatch>, crate::Error>> + Send {
-        H::handle_message_from(self, message, cx)
+        H::handle_dispatch_from(self, message, cx)
     }
 
     fn describe_chain(&self) -> impl std::fmt::Debug {
@@ -544,7 +544,7 @@ where
 #[must_use]
 pub struct ConnectFrom<Host: Role, Handler = NullHandler, Runner = NullRun>
 where
-    Handler: HandleMessageFrom<Host::Counterpart>,
+    Handler: HandleDispatchFrom<Host::Counterpart>,
     Runner: RunWithConnectionTo<Host::Counterpart>,
 {
     /// My role.
@@ -576,7 +576,7 @@ impl<Host: Role> ConnectFrom<Host, NullHandler, NullRun> {
 
 impl<Host: Role, Handler> ConnectFrom<Host, Handler, NullRun>
 where
-    Handler: HandleMessageFrom<Host::Counterpart>,
+    Handler: HandleDispatchFrom<Host::Counterpart>,
 {
     /// Create a new connection builder with the given handler.
     pub fn new_with(role: Host, handler: Handler) -> Self {
@@ -591,7 +591,7 @@ where
 
 impl<
     Host: Role,
-    Handler: HandleMessageFrom<Host::Counterpart>,
+    Handler: HandleDispatchFrom<Host::Counterpart>,
     Runner: RunWithConnectionTo<Host::Counterpart>,
 > ConnectFrom<Host, Handler, Runner>
 {
@@ -609,12 +609,12 @@ impl<
         self,
         other: ConnectFrom<
             Host,
-            impl HandleMessageFrom<Host::Counterpart>,
+            impl HandleDispatchFrom<Host::Counterpart>,
             impl RunWithConnectionTo<Host::Counterpart>,
         >,
     ) -> ConnectFrom<
         Host,
-        impl HandleMessageFrom<Host::Counterpart>,
+        impl HandleDispatchFrom<Host::Counterpart>,
         impl RunWithConnectionTo<Host::Counterpart>,
     > {
         ConnectFrom {
@@ -634,8 +634,8 @@ impl<
     /// This is a low-level method that is not intended for general use.
     pub fn with_handler(
         self,
-        handler: impl HandleMessageFrom<Host::Counterpart>,
-    ) -> ConnectFrom<Host, impl HandleMessageFrom<Host::Counterpart>, Runner> {
+        handler: impl HandleDispatchFrom<Host::Counterpart>,
+    ) -> ConnectFrom<Host, impl HandleDispatchFrom<Host::Counterpart>, Runner> {
         ConnectFrom {
             host: self.host,
             name: self.name,
@@ -725,7 +725,7 @@ impl<
         self,
         op: F,
         to_future_hack: ToFut,
-    ) -> ConnectFrom<Host, impl HandleMessageFrom<Host::Counterpart>, Runner>
+    ) -> ConnectFrom<Host, impl HandleDispatchFrom<Host::Counterpart>, Runner>
     where
         Host::Counterpart: HasPeer<Host::Counterpart>,
         Req: JsonRpcRequest,
@@ -800,7 +800,7 @@ impl<
         self,
         op: F,
         to_future_hack: ToFut,
-    ) -> ConnectFrom<Host, impl HandleMessageFrom<Host::Counterpart>, Runner>
+    ) -> ConnectFrom<Host, impl HandleDispatchFrom<Host::Counterpart>, Runner>
     where
         Host::Counterpart: HasPeer<Host::Counterpart>,
         F: AsyncFnMut(
@@ -874,7 +874,7 @@ impl<
         self,
         op: F,
         to_future_hack: ToFut,
-    ) -> ConnectFrom<Host, impl HandleMessageFrom<Host::Counterpart>, Runner>
+    ) -> ConnectFrom<Host, impl HandleDispatchFrom<Host::Counterpart>, Runner>
     where
         Host::Counterpart: HasPeer<Host::Counterpart>,
         Notif: JsonRpcNotification,
@@ -924,7 +924,7 @@ impl<
         peer: Peer,
         op: F,
         to_future_hack: ToFut,
-    ) -> ConnectFrom<Host, impl HandleMessageFrom<Host::Counterpart>, Runner>
+    ) -> ConnectFrom<Host, impl HandleDispatchFrom<Host::Counterpart>, Runner>
     where
         Host::Counterpart: HasPeer<Peer>,
         F: AsyncFnMut(
@@ -978,7 +978,7 @@ impl<
         peer: Peer,
         op: F,
         to_future_hack: ToFut,
-    ) -> ConnectFrom<Host, impl HandleMessageFrom<Host::Counterpart>, Runner>
+    ) -> ConnectFrom<Host, impl HandleDispatchFrom<Host::Counterpart>, Runner>
     where
         Host::Counterpart: HasPeer<Peer>,
         F: AsyncFnMut(
@@ -1021,7 +1021,7 @@ impl<
         peer: Peer,
         op: F,
         to_future_hack: ToFut,
-    ) -> ConnectFrom<Host, impl HandleMessageFrom<Host::Counterpart>, Runner>
+    ) -> ConnectFrom<Host, impl HandleDispatchFrom<Host::Counterpart>, Runner>
     where
         Host::Counterpart: HasPeer<Peer>,
         F: AsyncFnMut(Notif, ConnectionTo<Host::Counterpart>) -> Result<T, crate::Error> + Send,
@@ -1046,7 +1046,7 @@ impl<
         mcp_server: McpServer<Host::Counterpart, impl RunWithConnectionTo<Host::Counterpart>>,
     ) -> ConnectFrom<
         Host,
-        impl HandleMessageFrom<Host::Counterpart>,
+        impl HandleDispatchFrom<Host::Counterpart>,
         impl RunWithConnectionTo<Host::Counterpart>,
     >
     where
@@ -1249,7 +1249,7 @@ impl<
 impl<R, H, Run> ConnectTo<R::Counterpart> for ConnectFrom<R, H, Run>
 where
     R: Role,
-    H: HandleMessageFrom<R::Counterpart> + 'static,
+    H: HandleDispatchFrom<R::Counterpart> + 'static,
     Run: RunWithConnectionTo<R::Counterpart> + 'static,
 {
     async fn connect_to(self, client: impl ConnectTo<R>) -> Result<(), crate::Error> {
@@ -1556,7 +1556,7 @@ impl<Counterpart: Role> ConnectionTo<Counterpart> {
         &self,
         builder: ConnectFrom<
             R,
-            impl HandleMessageFrom<R::Counterpart> + 'static,
+            impl HandleDispatchFrom<R::Counterpart> + 'static,
             impl RunWithConnectionTo<R::Counterpart> + 'static,
         >,
         transport: impl ConnectTo<R> + 'static,
@@ -1812,7 +1812,7 @@ impl<Counterpart: Role> ConnectionTo<Counterpart> {
     /// The handler will stay registered until the returned registration guard is dropped.
     pub fn add_dynamic_handler(
         &self,
-        handler: impl HandleMessageFrom<Counterpart> + 'static,
+        handler: impl HandleDispatchFrom<Counterpart> + 'static,
     ) -> Result<DynamicHandlerRegistration<Counterpart>, crate::Error> {
         let uuid = Uuid::new_v4();
         self.dynamic_handler_tx

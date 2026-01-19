@@ -7,7 +7,7 @@ use futures::{StreamExt, channel::mpsc};
 use uuid::Uuid;
 
 use crate::{
-    Agent, Client, ConnectionTo, DynConnectTo, HandleMessageFrom, Handled, Dispatch, Role, ConnectTo,
+    Agent, Client, ConnectionTo, DynConnectTo, HandleDispatchFrom, Handled, Dispatch, Role, ConnectTo,
     jsonrpc::{
         DynamicHandlerRegistration,
         run::{NullRun, RunWithConnectionTo},
@@ -159,11 +159,11 @@ where
     }
 }
 
-impl<Counterpart: Role> HandleMessageFrom<Counterpart> for McpNewSessionHandler<Counterpart>
+impl<Counterpart: Role> HandleDispatchFrom<Counterpart> for McpNewSessionHandler<Counterpart>
 where
     Counterpart: HasPeer<Client> + HasPeer<Agent>,
 {
-    async fn handle_message_from(
+    async fn handle_dispatch_from(
         &mut self,
         message: Dispatch,
         cx: ConnectionTo<Counterpart>,

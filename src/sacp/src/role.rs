@@ -51,7 +51,7 @@ pub trait Role: Debug + Clone + Send + Sync + 'static + Eq + Ord + Hash {
     fn role_id(&self) -> RoleId;
 
     /// Method invoked when there is no defined message handler.
-    fn default_handle_message_from(
+    fn default_handle_dispatch_from(
         &self,
         message: Dispatch,
         connection: ConnectionTo<Self>,
@@ -135,12 +135,12 @@ impl RoleId {
 // Role implementations
 // ============================================================================
 
-pub(crate) async fn handle_incoming_message<Counterpart: Role, Peer: Role>(
+pub(crate) async fn handle_incoming_dispatch<Counterpart: Role, Peer: Role>(
     counterpart: Counterpart,
     peer: Peer,
     dispatch: Dispatch,
     connection: ConnectionTo<Counterpart>,
-    handle_message: impl AsyncFnOnce(
+    handle_dispatch: impl AsyncFnOnce(
         Dispatch,
         ConnectionTo<Counterpart>,
     ) -> Result<Handled<Dispatch>, crate::Error>,
@@ -153,7 +153,7 @@ where
         ?counterpart,
         ?peer,
         ?dispatch,
-        "handle_incoming_message: enter"
+        "handle_incoming_dispatch: enter"
     );
 
     // Responses are different from other messages.
@@ -170,11 +170,11 @@ where
         tracing::trace!(
             response_role_id = ?router.role_id(),
             peer_role_id = ?peer.role_id(),
-            "handle_incoming_message: response"
+            "handle_incoming_dispatch: response"
         );
 
         if router.role_id() == peer.role_id() {
-            return handle_message(dispatch, connection).await;
+            return handle_dispatch(dispatch, connection).await;
         } else {
             return Ok(Handled::No {
                 message: dispatch,
@@ -188,14 +188,14 @@ where
     match counterpart.remote_style(peer) {
         RemoteStyle::Counterpart => {
             // "Counterpart" is the default peer, no special checks required.
-            tracing::trace!("handle_incoming_message: Counterpart style, passing through");
-            return handle_message(dispatch, connection).await;
+            tracing::trace!("handle_incoming_dispatch: Counterpart style, passing through");
+            return handle_dispatch(dispatch, connection).await;
         }
         RemoteStyle::Predecessor => {
             // "Predecessor" is the default peer, no special checks required.
-            tracing::trace!("handle_incoming_message: Predecessor style, passing through");
+            tracing::trace!("handle_incoming_dispatch: Predecessor style, passing through");
             if method != METHOD_SUCCESSOR_MESSAGE {
-                return handle_message(dispatch, connection).await;
+                return handle_dispatch(dispatch, connection).await;
             } else {
                 // Methods coming from the successor are not coming from
                 // our counterpart.
@@ -211,7 +211,7 @@ where
                 tracing::trace!(
                     method,
                     expected = METHOD_SUCCESSOR_MESSAGE,
-                    "handle_incoming_message: Successor style but method doesn't match, returning Handled::No"
+                    "handle_incoming_dispatch: Successor style but method doesn't match, returning Handled::No"
                 );
                 return Ok(Handled::No {
                     message: dispatch,
@@ -220,7 +220,7 @@ where
             }
 
             tracing::trace!(
-                "handle_incoming_message: Successor style, unwrapping SuccessorMessage"
+                "handle_incoming_dispatch: Successor style, unwrapping SuccessorMessage"
             );
 
             // The outer message has method="_proxy/successor" and params containing the inner message.
@@ -234,11 +234,11 @@ where
             let successor_dispatch = dispatch.try_map_message(|_| Ok(message))?;
             tracing::trace!(
                 unwrapped_method = %successor_dispatch.method(),
-                "handle_incoming_message: unwrapped to inner message"
+                "handle_incoming_dispatch: unwrapped to inner message"
             );
-            match handle_message(successor_dispatch, connection).await? {
+            match handle_dispatch(successor_dispatch, connection).await? {
                 Handled::Yes => {
-                    tracing::trace!("handle_incoming_message: inner handler returned Handled::Yes");
+                    tracing::trace!("handle_incoming_dispatch: inner handler returned Handled::Yes");
                     Ok(Handled::Yes)
                 }
 
@@ -247,7 +247,7 @@ where
                     retry,
                 } => {
                     tracing::trace!(
-                        "handle_incoming_message: inner handler returned Handled::No, re-wrapping"
+                        "handle_incoming_dispatch: inner handler returned Handled::No, re-wrapping"
                     );
                     Ok(Handled::No {
                         message: successor_dispatch.try_map_message(|message| {
@@ -282,7 +282,7 @@ impl Role for UntypedRole {
         RoleId::from_singleton(self)
     }
 
-    async fn default_handle_message_from(
+    async fn default_handle_dispatch_from(
         &self,
         message: Dispatch,
         _connection: ConnectionTo<Self>,

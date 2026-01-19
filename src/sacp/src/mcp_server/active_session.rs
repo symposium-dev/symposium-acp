@@ -10,7 +10,7 @@ use crate::schema::{
 };
 use crate::util::MatchDispatchFrom;
 use crate::{
-    Agent, Channel, ConnectionTo, HandleMessageFrom, Handled, Dispatch, Responder, Role, ConnectTo,
+    Agent, Channel, ConnectionTo, HandleDispatchFrom, Handled, Dispatch, Responder, Role, ConnectTo,
     UntypedMessage,
 };
 use std::sync::Arc;
@@ -206,7 +206,7 @@ where
     }
 }
 
-impl<Counterpart: Role> HandleMessageFrom<Counterpart> for McpActiveSession<Counterpart>
+impl<Counterpart: Role> HandleDispatchFrom<Counterpart> for McpActiveSession<Counterpart>
 where
     Counterpart: HasPeer<Agent>,
 {
@@ -214,7 +214,7 @@ where
         "McpServerSession"
     }
 
-    async fn handle_message_from(
+    async fn handle_dispatch_from(
         &mut self,
         message: Dispatch,
         connection: ConnectionTo<Counterpart>,

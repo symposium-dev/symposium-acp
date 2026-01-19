@@ -1,6 +1,6 @@
 //! Test that MCP server doesn't break the handler chain for NewSessionRequest.
 //!
-//! This is a regression test for a bug where `McpServer::handle_message` would
+//! This is a regression test for a bug where `McpServer::handle_dispatch` would
 //! forward `NewSessionRequest` directly to the agent instead of returning
 //! `Handled::No`, which prevented downstream `.on_receive_request_from()` handlers
 //! from being invoked.

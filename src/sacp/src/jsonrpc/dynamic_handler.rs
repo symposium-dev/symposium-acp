@@ -2,13 +2,13 @@ use futures::future::BoxFuture;
 use uuid::Uuid;
 
 use crate::role::Role;
-use crate::{ConnectionTo, HandleMessageFrom, Handled, Dispatch};
+use crate::{ConnectionTo, HandleDispatchFrom, Handled, Dispatch};
 
 /// Internal dyn-safe wrapper around `HandleMessageAs`
 ///
 /// The type parameter `R` is the role's counterpart (who we connect to).
-pub(crate) trait DynHandleMessageFrom<Counterpart: Role>: Send {
-    fn dyn_handle_message_from(
+pub(crate) trait DynHandleDispatchFrom<Counterpart: Role>: Send {
+    fn dyn_handle_dispatch_from(
         &mut self,
         message: Dispatch,
         cx: ConnectionTo<Counterpart>,
@@ -17,13 +17,13 @@ pub(crate) trait DynHandleMessageFrom<Counterpart: Role>: Send {
     fn dyn_describe_chain(&self) -> String;
 }
 
-impl<Counterpart: Role, H: HandleMessageFrom<Counterpart>> DynHandleMessageFrom<Counterpart> for H {
-    fn dyn_handle_message_from(
+impl<Counterpart: Role, H: HandleDispatchFrom<Counterpart>> DynHandleDispatchFrom<Counterpart> for H {
+    fn dyn_handle_dispatch_from(
         &mut self,
         message: Dispatch,
         cx: ConnectionTo<Counterpart>,
     ) -> BoxFuture<'_, Result<Handled<Dispatch>, crate::Error>> {
-        Box::pin(HandleMessageFrom::handle_message_from(self, message, cx))
+        Box::pin(HandleDispatchFrom::handle_dispatch_from(self, message, cx))
     }
 
     fn dyn_describe_chain(&self) -> String {
@@ -33,7 +33,7 @@ impl<Counterpart: Role, H: HandleMessageFrom<Counterpart>> DynHandleMessageFrom<
 
 /// Messages used to add/remove dynamic handlers
 pub(crate) enum DynamicHandlerMessage<Counterpart: Role> {
-    AddDynamicHandler(Uuid, Box<dyn DynHandleMessageFrom<Counterpart>>),
+    AddDynamicHandler(Uuid, Box<dyn DynHandleDispatchFrom<Counterpart>>),
     RemoveDynamicHandler(Uuid),
 }
 

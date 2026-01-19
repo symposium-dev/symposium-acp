@@ -35,7 +35,7 @@ Now cleaning up naming conventions:
 | `Run` (trait) | `RunWithConnectionTo` |
 | `JrLink` | Removed |
 | `JrPeer` | Removed |
-| `JrMessageHandler` | `HandleMessageFrom` (alias removed) |
+| `JrMessageHandler` | `HandleDispatchFrom` (alias removed) |
 | `MessageCx` | `Dispatch` |
 | `MatchMessage` | `MatchDispatch` |
 | `on_receive_message` | `on_receive_dispatch` |
@@ -73,7 +73,7 @@ trait Role {
 
     fn role_id(&self) -> RoleId;
     fn counterpart(&self) -> Self::Counterpart;
-    fn default_handle_message_from(...);
+    fn default_handle_dispatch_from(...);
 }
 
 /// A role P *has a peer* Q if P can send/receive messages from Q.
@@ -115,7 +115,7 @@ trait HasPeer<Peer: Role>: Role {
 - [x] `JrConnectionBuilder` → `ConnectFrom`
 
 ### Phase 6: Replace Link and Peer types with Role types ✅
-- [x] Migrate `HandleMessageFrom` to use `Role` type parameter
+- [x] Migrate `HandleDispatchFrom` to use `Role` type parameter
 - [x] Migrate `ConnectionTo` to use `Role` (counterpart's role)
 - [x] Add `builder()` method to Role types (`Client::builder()`, `Agent::builder()`)
 - [x] Delete `JrPeer` types - unified with Role types

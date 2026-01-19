@@ -8,7 +8,7 @@ use futures::channel::mpsc;
 use tokio::sync::oneshot;
 
 use crate::{
-    Agent, Client, ConnectionTo, HandleMessageFrom, Handled, Dispatch, Responder, Role,
+    Agent, Client, ConnectionTo, HandleDispatchFrom, Handled, Dispatch, Responder, Role,
     jsonrpc::{
         DynamicHandlerRegistration,
         run::{ChainRun, NullRun, RunWithConnectionTo},
@@ -340,7 +340,7 @@ where
     /// [`start_session`](Self::start_session) which block the current task.
     ///
     /// This should not be used from inside a message handler like
-    /// [`ConnectFrom::on_receive_request`](`crate::ConnectFrom::on_receive_request`) or [`HandleMessageFrom`]
+    /// [`ConnectFrom::on_receive_request`](`crate::ConnectFrom::on_receive_request`) or [`HandleDispatchFrom`]
     /// implementations.
     pub fn block_task(self) -> SessionBuilder<Counterpart, R, Blocking> {
         SessionBuilder {
@@ -722,11 +722,11 @@ impl ActiveSessionHandler {
     }
 }
 
-impl<Counterpart: Role> HandleMessageFrom<Counterpart> for ActiveSessionHandler
+impl<Counterpart: Role> HandleDispatchFrom<Counterpart> for ActiveSessionHandler
 where
     Counterpart: HasPeer<Agent>,
 {
-    async fn handle_message_from(
+    async fn handle_dispatch_from(
         &mut self,
         message: Dispatch,
         cx: ConnectionTo<Counterpart>,
@@ -735,7 +735,7 @@ where
         tracing::trace!(
             ?message,
             handler_session_id = ?self.session_id,
-            "ActiveSessionHandler::handle_message"
+            "ActiveSessionHandler::handle_dispatch"
         );
         MatchDispatchFrom::new(message, &cx)
             .if_message_from(Agent, async |message| {
@@ -743,7 +743,7 @@ where
                     tracing::trace!(
                         message_session_id = ?session_id,
                         handler_session_id = ?self.session_id,
-                        "ActiveSessionHandler::handle_message"
+                        "ActiveSessionHandler::handle_dispatch"
                     );
                     if session_id == self.session_id {
                         self.update_tx

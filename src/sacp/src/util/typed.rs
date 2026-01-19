@@ -6,7 +6,7 @@
 //!
 //! # When to use which
 //!
-//! - **[`MatchDispatchFrom`]**: Preferred over implementing [`HandleMessageFrom`] directly.
+//! - **[`MatchDispatchFrom`]**: Preferred over implementing [`HandleDispatchFrom`] directly.
 //!   Use this in connection handlers when you need to match on message types with
 //!   proper peer-aware transforms (e.g., unwrapping `SuccessorMessage` envelopes).
 //!
@@ -14,15 +14,15 @@
 //!   just need to parse it, such as inside a [`MatchDispatchFrom`] callback or when
 //!   processing messages that don't need peer transforms.
 //!
-//! [`HandleMessageFrom`]: crate::HandleMessageFrom
+//! [`HandleDispatchFrom`]: crate::HandleDispatchFrom
 
 // Types re-exported from crate root
 use jsonrpcmsg::Params;
 
 use crate::{
-    ConnectionTo, HandleMessageFrom, Handled, JsonRpcNotification, JsonRpcRequest, JsonRpcResponse,
+    ConnectionTo, HandleDispatchFrom, Handled, JsonRpcNotification, JsonRpcRequest, JsonRpcResponse,
     Dispatch, Responder, ResponseRouter, UntypedMessage,
-    role::{HasPeer, Role, handle_incoming_message},
+    role::{HasPeer, Role, handle_incoming_dispatch},
     util::json_cast,
 };
 
@@ -415,7 +415,7 @@ impl MatchDispatch {
 
 /// Role-aware helper for pattern-matching on untyped JSON-RPC requests.
 ///
-/// **Prefer this over implementing [`HandleMessageFrom`] directly.** This provides
+/// **Prefer this over implementing [`HandleDispatchFrom`] directly.** This provides
 /// a more ergonomic API for matching on message types in connection handlers.
 ///
 /// Use this when you need peer-aware transforms (e.g., unwrapping proxy envelopes)
@@ -423,10 +423,10 @@ impl MatchDispatch {
 /// a callback), use [`MatchDispatch`] instead.
 ///
 /// This wraps [`MatchDispatch`] and applies peer-specific message transformations
-/// via `remote_style().handle_incoming_message()` before delegating to `MatchDispatch`
+/// via `remote_style().handle_incoming_dispatch()` before delegating to `MatchDispatch`
 /// for the actual parsing.
 ///
-/// [`HandleMessageFrom`]: crate::HandleMessageFrom
+/// [`HandleDispatchFrom`]: crate::HandleDispatchFrom
 ///
 /// # Example
 ///
@@ -518,7 +518,7 @@ impl<Counterpart: Role> MatchDispatchFrom<Counterpart> {
         H: crate::IntoHandled<(Req, Responder<Req::Response>)>,
     {
         if let Ok(Handled::No { message, retry: _ }) = self.state {
-            self.state = handle_incoming_message(
+            self.state = handle_incoming_dispatch(
                 self.connection.counterpart(),
                 peer,
                 message,
@@ -575,7 +575,7 @@ impl<Counterpart: Role> MatchDispatchFrom<Counterpart> {
         H: crate::IntoHandled<N>,
     {
         if let Ok(Handled::No { message, retry: _ }) = self.state {
-            self.state = handle_incoming_message(
+            self.state = handle_incoming_dispatch(
                 self.connection.counterpart(),
                 peer,
                 message,
@@ -612,7 +612,7 @@ impl<Counterpart: Role> MatchDispatchFrom<Counterpart> {
         H: crate::IntoHandled<Dispatch<Req, N>>,
     {
         if let Ok(Handled::No { message, retry: _ }) = self.state {
-            self.state = handle_incoming_message(
+            self.state = handle_incoming_dispatch(
                 self.connection.counterpart(),
                 peer,
                 message,
@@ -700,7 +700,7 @@ impl<Counterpart: Role> MatchDispatchFrom<Counterpart> {
             )>,
     {
         if let Ok(Handled::No { message, retry: _ }) = self.state {
-            self.state = handle_incoming_message(
+            self.state = handle_incoming_dispatch(
                 self.connection.counterpart(),
                 peer,
                 message,
@@ -785,7 +785,7 @@ impl<Counterpart: Role> MatchDispatchFrom<Counterpart> {
     /// matching chain and get the final result.
     pub async fn otherwise_delegate(
         self,
-        mut handler: impl HandleMessageFrom<Counterpart>,
+        mut handler: impl HandleDispatchFrom<Counterpart>,
     ) -> Result<Handled<Dispatch>, crate::Error> {
         match self.state? {
             Handled::Yes => Ok(Handled::Yes),
@@ -793,7 +793,7 @@ impl<Counterpart: Role> MatchDispatchFrom<Counterpart> {
                 message,
                 retry: outer_retry,
             } => match handler
-                .handle_message_from(message, self.connection.clone())
+                .handle_dispatch_from(message, self.connection.clone())
                 .await?
             {
                 Handled::Yes => Ok(Handled::Yes),

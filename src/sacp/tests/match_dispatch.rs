@@ -2,7 +2,7 @@ use sacp::Role;
 use sacp::role::UntypedRole;
 use sacp::util::MatchDispatch;
 use sacp::{
-    ConnectionTo, HandleMessageFrom, Handled, JsonRpcMessage, JsonRpcRequest, JsonRpcResponse,
+    ConnectionTo, HandleDispatchFrom, Handled, JsonRpcMessage, JsonRpcRequest, JsonRpcResponse,
     Dispatch, Responder, ConnectTo, util::MatchDispatchFrom,
 };
 use serde::{Deserialize, Serialize};
@@ -52,8 +52,8 @@ impl JsonRpcRequest for EchoRequestResponse {
 
 struct EchoHandler;
 
-impl<Counterpart: Role> HandleMessageFrom<Counterpart> for EchoHandler {
-    async fn handle_message_from(
+impl<Counterpart: Role> HandleDispatchFrom<Counterpart> for EchoHandler {
+    async fn handle_dispatch_from(
         &mut self,
         message: Dispatch,
         _connection: ConnectionTo<Counterpart>,
@@ -74,7 +74,7 @@ impl<Counterpart: Role> HandleMessageFrom<Counterpart> for EchoHandler {
 #[tokio::test]
 async fn modify_message_en_route() -> Result<(), sacp::Error> {
     // Demonstrate a case where we modify a message
-    // using a `HandleMessageFrom` invoked from `MatchDispatch`
+    // using a `HandleDispatchFrom` invoked from `MatchDispatch`
 
     struct TestComponent;
 
@@ -94,8 +94,8 @@ async fn modify_message_en_route() -> Result<(), sacp::Error> {
         message: String,
     }
 
-    impl HandleMessageFrom<UntypedRole> for PushHandler {
-        async fn handle_message_from(
+    impl HandleDispatchFrom<UntypedRole> for PushHandler {
+        async fn handle_dispatch_from(
             &mut self,
             message: Dispatch,
             cx: ConnectionTo<UntypedRole>,

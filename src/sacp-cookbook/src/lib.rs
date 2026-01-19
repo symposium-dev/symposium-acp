@@ -390,7 +390,7 @@ pub mod reusable_components {
 pub mod custom_message_handlers {
     //! Pattern: Custom message handlers.
     //!
-    //! For reusable message handling logic, implement [`HandleMessageFrom`] and use
+    //! For reusable message handling logic, implement [`HandleDispatchFrom`] and use
     //! [`MatchDispatch`] or [`MatchDispatchFrom`] for type-safe dispatching.
     //!
     //! This is useful when you need to:
@@ -401,16 +401,16 @@ pub mod custom_message_handlers {
     //! # Example
     //!
     //! ```
-    //! use sacp::{HandleMessageFrom, Dispatch, Handled, ConnectionTo};
+    //! use sacp::{HandleDispatchFrom, Dispatch, Handled, ConnectionTo};
     //! use sacp::schema::{InitializeRequest, InitializeResponse, AgentCapabilities};
     //! use sacp::util::MatchDispatch;
     //!
     //! struct MyHandler;
     //!
-    //! impl HandleMessageFrom for MyHandler {
+    //! impl HandleDispatchFrom for MyHandler {
     //!     type Link = sacp::link::UntypedRole;
     //!
-    //!     async fn handle_message(
+    //!     async fn handle_dispatch(
     //!         &mut self,
     //!         message: Dispatch,
     //!         _cx: ConnectionTo<Self::Link>,
@@ -438,7 +438,7 @@ pub mod custom_message_handlers {
     //! - [`MatchDispatchFrom`] - Use in proxies where messages come from different
     //!   peers (`Client` vs `Agent`) and may need different handling
     //!
-    //! [`HandleMessageFrom`]: sacp::HandleMessageFrom
+    //! [`HandleDispatchFrom`]: sacp::HandleDispatchFrom
     //! [`MatchDispatch`]: sacp::util::MatchDispatch
     //! [`MatchDispatchFrom`]: sacp::util::MatchDispatchFrom
 }

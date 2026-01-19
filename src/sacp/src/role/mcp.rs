@@ -24,7 +24,7 @@ impl Role for Client {
         Server
     }
 
-    async fn default_handle_message_from(
+    async fn default_handle_dispatch_from(
         &self,
         message: crate::Dispatch,
         _connection: crate::ConnectionTo<Self>,
@@ -63,7 +63,7 @@ impl Role for Server {
         Client
     }
 
-    async fn default_handle_message_from(
+    async fn default_handle_dispatch_from(
         &self,
         message: crate::Dispatch,
         _connection: crate::ConnectionTo<Self>,

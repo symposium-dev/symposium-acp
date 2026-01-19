@@ -111,7 +111,7 @@ pub mod jsonrpcmsg {
 }
 
 pub use jsonrpc::{
-    ByteStreams, Channel, ConnectFrom, ConnectionTo, HandleMessageFrom, Handled, IntoHandled,
+    ByteStreams, Channel, ConnectFrom, ConnectionTo, HandleDispatchFrom, Handled, IntoHandled,
     JsonRpcMessage, JsonRpcNotification, JsonRpcRequest, JsonRpcResponse, Lines, Dispatch,
     NullHandler, Responder, ResponseRouter, SentRequest, UntypedMessage,
     run::{ChainRun, NullRun, RunWithConnectionTo},

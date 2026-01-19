@@ -12,11 +12,11 @@ use crate::Dispatch;
 use crate::RoleId;
 use crate::UntypedMessage;
 use crate::jsonrpc::ConnectionTo;
-use crate::jsonrpc::HandleMessageFrom;
+use crate::jsonrpc::HandleDispatchFrom;
 use crate::jsonrpc::ReplyMessage;
 use crate::jsonrpc::Responder;
 use crate::jsonrpc::ResponseRouter;
-use crate::jsonrpc::dynamic_handler::DynHandleMessageFrom;
+use crate::jsonrpc::dynamic_handler::DynHandleDispatchFrom;
 use crate::jsonrpc::dynamic_handler::DynamicHandlerMessage;
 
 use crate::role::Role;
@@ -47,14 +47,14 @@ pub(super) async fn incoming_protocol_actor<Counterpart: Role>(
     transport_rx: mpsc::UnboundedReceiver<Result<jsonrpcmsg::Message, crate::Error>>,
     dynamic_handler_rx: mpsc::UnboundedReceiver<DynamicHandlerMessage<Counterpart>>,
     reply_rx: mpsc::UnboundedReceiver<ReplyMessage>,
-    mut handler: impl HandleMessageFrom<Counterpart>,
+    mut handler: impl HandleDispatchFrom<Counterpart>,
 ) -> Result<(), crate::Error> {
     let mut my_rx = transport_rx
         .map(IncomingProtocolMsg::Transport)
         .merge(dynamic_handler_rx.map(IncomingProtocolMsg::DynamicHandler))
         .merge(reply_rx.map(IncomingProtocolMsg::Reply));
 
-    let mut dynamic_handlers: FxHashMap<Uuid, Box<dyn DynHandleMessageFrom<Counterpart>>> =
+    let mut dynamic_handlers: FxHashMap<Uuid, Box<dyn DynHandleDispatchFrom<Counterpart>>> =
         FxHashMap::default();
     let mut pending_messages: Vec<Dispatch> = vec![];
 
@@ -94,7 +94,7 @@ pub(super) async fn incoming_protocol_actor<Counterpart: Role>(
                     for pending_message in pending_messages {
                         tracing::trace!(method = pending_message.method(), handler = ?handler.dyn_describe_chain(), "Retrying message");
                         match handler
-                            .dyn_handle_message_from(pending_message, connection.clone())
+                            .dyn_handle_dispatch_from(pending_message, connection.clone())
                             .await?
                         {
                             Handled::Yes => {
@@ -241,8 +241,8 @@ async fn dispatch_dispatch<Counterpart: Role>(
     counterpart: Counterpart,
     connection: &ConnectionTo<Counterpart>,
     mut dispatch: Dispatch,
-    dynamic_handlers: &mut FxHashMap<Uuid, Box<dyn DynHandleMessageFrom<Counterpart>>>,
-    handler: &mut impl HandleMessageFrom<Counterpart>,
+    dynamic_handlers: &mut FxHashMap<Uuid, Box<dyn DynHandleDispatchFrom<Counterpart>>>,
+    handler: &mut impl HandleDispatchFrom<Counterpart>,
     pending_messages: &mut Vec<Dispatch>,
 ) -> Result<(), crate::Error> {
     tracing::trace!(?dispatch, "dispatch_dispatch");
@@ -255,7 +255,7 @@ async fn dispatch_dispatch<Counterpart: Role>(
     // First, apply the handlers given by the user.
     tracing::trace!(handler = ?handler.describe_chain(), "Attempting handler chain");
     match handler
-        .handle_message_from(dispatch, connection.clone())
+        .handle_dispatch_from(dispatch, connection.clone())
         .await?
     {
         Handled::Yes => {
@@ -274,7 +274,7 @@ async fn dispatch_dispatch<Counterpart: Role>(
     for dynamic_handler in dynamic_handlers.values_mut() {
         tracing::trace!(handler = ?dynamic_handler.dyn_describe_chain(), "Attempting dynamic handler");
         match dynamic_handler
-            .dyn_handle_message_from(dispatch, connection.clone())
+            .dyn_handle_dispatch_from(dispatch, connection.clone())
             .await?
         {
             Handled::Yes => {
@@ -293,7 +293,7 @@ async fn dispatch_dispatch<Counterpart: Role>(
     // Finally, apply the default handler for the role.
     tracing::trace!(role = ?counterpart, "Attempting default handler");
     match counterpart
-        .default_handle_message_from(dispatch, connection.clone())
+        .default_handle_dispatch_from(dispatch, connection.clone())
         .await?
     {
         Handled::Yes => {

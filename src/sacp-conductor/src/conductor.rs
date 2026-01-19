@@ -124,7 +124,7 @@ use sacp::{
     ConnectFrom, ConnectionTo, JsonRpcNotification, JsonRpcRequest, SentRequest, UntypedMessage,
 };
 use sacp::{
-    HandleMessageFrom,
+    HandleDispatchFrom,
     schema::{InitializeProxyRequest, InitializeRequest, NewSessionRequest},
     util::MatchDispatchFrom,
 };
@@ -303,16 +303,16 @@ struct ConductorMessageHandler<Host: ConductorHostRole> {
     host: Host,
 }
 
-impl<Host: ConductorHostRole> HandleMessageFrom<Host::Counterpart>
+impl<Host: ConductorHostRole> HandleDispatchFrom<Host::Counterpart>
     for ConductorMessageHandler<Host>
 {
-    async fn handle_message_from(
+    async fn handle_dispatch_from(
         &mut self,
         message: Dispatch,
         connection: sacp::ConnectionTo<Host::Counterpart>,
     ) -> Result<sacp::Handled<Dispatch>, sacp::Error> {
         self.host
-            .handle_message(message, connection, &mut self.conductor_tx)
+            .handle_dispatch(message, connection, &mut self.conductor_tx)
             .await
     }
 
@@ -778,7 +778,7 @@ where
     fn connection_to_proxy(
         &mut self,
         component_index: usize,
-    ) -> ConnectFrom<Conductor, impl HandleMessageFrom<Proxy> + 'static> {
+    ) -> ConnectFrom<Conductor, impl HandleDispatchFrom<Proxy> + 'static> {
         type SuccessorDispatch = Dispatch<SuccessorMessage, SuccessorMessage>;
         let mut conductor_tx = self.conductor_tx.clone();
         Conductor
@@ -1311,7 +1311,7 @@ pub trait ConductorHostRole: Role<Counterpart: HasPeer<Client>> {
     ) -> impl Future<Output = Result<Dispatch, sacp::Error>> + Send;
 
     /// Handle an incoming message from the client or conductor, depending on `Self`
-    fn handle_message(
+    fn handle_dispatch(
         &self,
         message: Dispatch,
         connection: ConnectionTo<Self::Counterpart>,
@@ -1393,7 +1393,7 @@ impl ConductorHostRole for Agent {
         ))
     }
 
-    async fn handle_message(
+    async fn handle_dispatch(
         &self,
         message: Dispatch,
         client_connection: ConnectionTo<Client>,
@@ -1401,14 +1401,14 @@ impl ConductorHostRole for Agent {
     ) -> Result<Handled<Dispatch>, sacp::Error> {
         tracing::debug!(
             method = ?message.method(),
-            "ConductorToClient::handle_message"
+            "ConductorToClient::handle_dispatch"
         );
         MatchDispatchFrom::new(message, &client_connection)
             // Any incoming messages from the client are client-to-agent messages targeting the first component.
             .if_message_from(Client, async move |message: Dispatch| {
                 tracing::debug!(
                     method = ?message.method(),
-                    "ConductorToClient::handle_message - matched Client"
+                    "ConductorToClient::handle_dispatch - matched Client"
                 );
                 ConductorImpl::<Self>::incoming_message_from_client(conductor_tx, message).await
             })
@@ -1467,7 +1467,7 @@ impl ConductorHostRole for Proxy {
         ))
     }
 
-    async fn handle_message(
+    async fn handle_dispatch(
         &self,
         message: Dispatch,
         client_connection: ConnectionTo<Conductor>,
@@ -1476,7 +1476,7 @@ impl ConductorHostRole for Proxy {
         tracing::debug!(
             method = ?message.method(),
             ?message,
-            "ConductorToConductor::handle_message"
+            "ConductorToConductor::handle_dispatch"
         );
         MatchDispatchFrom::new(message, &client_connection)
             .if_message_from(Agent, {
@@ -1485,7 +1485,7 @@ impl ConductorHostRole for Proxy {
                 async |message: Dispatch| {
                     tracing::debug!(
                         method = ?message.method(),
-                        "ConductorToConductor::handle_message - matched Agent"
+                        "ConductorToConductor::handle_dispatch - matched Agent"
                     );
                     let mut conductor_tx = conductor_tx.clone();
                     ConductorImpl::<Self>::incoming_message_from_agent(&mut conductor_tx, message)
@@ -1497,7 +1497,7 @@ impl ConductorHostRole for Proxy {
             .if_message_from(Client, async |message: Dispatch| {
                 tracing::debug!(
                     method = ?message.method(),
-                    "ConductorToConductor::handle_message - matched Client"
+                    "ConductorToConductor::handle_dispatch - matched Client"
                 );
                 let mut conductor_tx = conductor_tx.clone();
                 ConductorImpl::<Self>::incoming_message_from_client(&mut conductor_tx, message)

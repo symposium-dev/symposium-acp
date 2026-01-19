@@ -6,7 +6,7 @@ use crate::jsonrpc::{ConnectFrom, handlers::NullHandler, run::NullRun};
 use crate::role::{HasPeer, RemoteStyle};
 use crate::schema::{InitializeProxyRequest, InitializeRequest, METHOD_INITIALIZE_PROXY};
 use crate::util::MatchDispatchFrom;
-use crate::{ConnectTo, ConnectionTo, Dispatch, HandleMessageFrom, Handled, Role, RoleId};
+use crate::{ConnectTo, ConnectionTo, Dispatch, HandleDispatchFrom, Handled, Role, RoleId};
 
 /// The client role - typically an IDE or CLI that controls an agent.
 ///
@@ -17,7 +17,7 @@ pub struct Client;
 impl Role for Client {
     type Counterpart = Agent;
 
-    async fn default_handle_message_from(
+    async fn default_handle_dispatch_from(
         &self,
         message: Dispatch,
         _connection: ConnectionTo<Client>,
@@ -80,7 +80,7 @@ impl Role for Agent {
         Client
     }
 
-    async fn default_handle_message_from(
+    async fn default_handle_dispatch_from(
         &self,
         message: Dispatch,
         connection: ConnectionTo<Agent>,
@@ -129,7 +129,7 @@ pub struct Proxy;
 impl Role for Proxy {
     type Counterpart = Conductor;
 
-    async fn default_handle_message_from(
+    async fn default_handle_dispatch_from(
         &self,
         message: crate::Dispatch,
         _connection: crate::ConnectionTo<Self>,
@@ -180,7 +180,7 @@ impl Role for Conductor {
         Proxy
     }
 
-    async fn default_handle_message_from(
+    async fn default_handle_dispatch_from(
         &self,
         message: Dispatch,
         cx: ConnectionTo<Conductor>,
@@ -268,11 +268,11 @@ impl ProxySessionMessages {
     }
 }
 
-impl<Counterpart: Role> HandleMessageFrom<Counterpart> for ProxySessionMessages
+impl<Counterpart: Role> HandleDispatchFrom<Counterpart> for ProxySessionMessages
 where
     Counterpart: HasPeer<Agent> + HasPeer<Client>,
 {
-    async fn handle_message_from(
+    async fn handle_dispatch_from(
         &mut self,
         message: Dispatch,
         connection: ConnectionTo<Counterpart>,

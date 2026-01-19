@@ -1,6 +1,6 @@
-use crate::jsonrpc::{HandleMessageFrom, Handled, IntoHandled, JsonRpcResponse};
+use crate::jsonrpc::{HandleDispatchFrom, Handled, IntoHandled, JsonRpcResponse};
 
-use crate::role::{HasPeer, Role, handle_incoming_message};
+use crate::role::{HasPeer, Role, handle_incoming_dispatch};
 use crate::{ConnectionTo, JsonRpcNotification, JsonRpcRequest, Dispatch, UntypedMessage};
 // Types re-exported from crate root
 use super::Responder;
@@ -23,12 +23,12 @@ impl Default for NullHandler {
     }
 }
 
-impl<Counterpart: Role> HandleMessageFrom<Counterpart> for NullHandler {
+impl<Counterpart: Role> HandleDispatchFrom<Counterpart> for NullHandler {
     fn describe_chain(&self) -> impl std::fmt::Debug {
         "(null)"
     }
 
-    async fn handle_message_from(
+    async fn handle_dispatch_from(
         &mut self,
         message: Dispatch,
         _cx: ConnectionTo<Counterpart>,
@@ -70,7 +70,7 @@ impl<Counterpart: Role, Peer: Role, Req: JsonRpcRequest, F, ToFut>
     }
 }
 
-impl<Counterpart: Role, Peer: Role, Req, F, T, ToFut> HandleMessageFrom<Counterpart>
+impl<Counterpart: Role, Peer: Role, Req, F, T, ToFut> HandleDispatchFrom<Counterpart>
     for RequestHandler<Counterpart, Peer, Req, F, ToFut>
 where
     Counterpart: HasPeer<Peer>,
@@ -95,12 +95,12 @@ where
         std::any::type_name::<Req>()
     }
 
-    async fn handle_message_from(
+    async fn handle_dispatch_from(
         &mut self,
         dispatch: Dispatch,
         connection: ConnectionTo<Counterpart>,
     ) -> Result<Handled<Dispatch>, crate::Error> {
-        handle_incoming_message(
+        handle_incoming_dispatch(
             self.counterpart.clone(),
             self.peer.clone(),
             dispatch,
@@ -204,7 +204,7 @@ impl<Counterpart: Role, Peer: Role, Notif: JsonRpcNotification, F, ToFut>
     }
 }
 
-impl<Counterpart: Role, Peer: Role, Notif, F, T, ToFut> HandleMessageFrom<Counterpart>
+impl<Counterpart: Role, Peer: Role, Notif, F, T, ToFut> HandleDispatchFrom<Counterpart>
     for NotificationHandler<Counterpart, Peer, Notif, F, ToFut>
 where
     Counterpart: HasPeer<Peer>,
@@ -223,12 +223,12 @@ where
         std::any::type_name::<Notif>()
     }
 
-    async fn handle_message_from(
+    async fn handle_dispatch_from(
         &mut self,
         dispatch: Dispatch,
         connection: ConnectionTo<Counterpart>,
     ) -> Result<Handled<Dispatch>, crate::Error> {
-        handle_incoming_message(
+        handle_incoming_dispatch(
             self.counterpart.clone(),
             self.peer.clone(),
             dispatch,
@@ -239,7 +239,7 @@ where
                         tracing::debug!(
                             request_type = std::any::type_name::<Notif>(),
                             message = ?message,
-                            "NotificationHandler::handle_message"
+                            "NotificationHandler::handle_dispatch"
                         );
                         if !Notif::matches_method(&message.method) {
                             tracing::trace!(
@@ -331,7 +331,7 @@ impl<Counterpart: Role, Peer: Role, Req: JsonRpcRequest, Notif: JsonRpcNotificat
 }
 
 impl<Counterpart: Role, Peer: Role, Req: JsonRpcRequest, Notif: JsonRpcNotification, F, T, ToFut>
-    HandleMessageFrom<Counterpart> for MessageHandler<Counterpart, Peer, Req, Notif, F, ToFut>
+    HandleDispatchFrom<Counterpart> for MessageHandler<Counterpart, Peer, Req, Notif, F, ToFut>
 where
     Counterpart: HasPeer<Peer>,
     F: AsyncFnMut(Dispatch<Req, Notif>, ConnectionTo<Counterpart>) -> Result<T, crate::Error>
@@ -353,12 +353,12 @@ where
         )
     }
 
-    async fn handle_message_from(
+    async fn handle_dispatch_from(
         &mut self,
         dispatch: Dispatch,
         connection: ConnectionTo<Counterpart>,
     ) -> Result<Handled<Dispatch>, crate::Error> {
-        handle_incoming_message(
+        handle_incoming_dispatch(
             self.counterpart.clone(),
             self.peer.clone(),
             dispatch,
@@ -435,7 +435,7 @@ impl<H> NamedHandler<H> {
     }
 }
 
-impl<Counterpart: Role, H: HandleMessageFrom<Counterpart>> HandleMessageFrom<Counterpart>
+impl<Counterpart: Role, H: HandleDispatchFrom<Counterpart>> HandleDispatchFrom<Counterpart>
     for NamedHandler<H>
 {
     fn describe_chain(&self) -> impl std::fmt::Debug {
@@ -446,7 +446,7 @@ impl<Counterpart: Role, H: HandleMessageFrom<Counterpart>> HandleMessageFrom<Cou
         )
     }
 
-    async fn handle_message_from(
+    async fn handle_dispatch_from(
         &mut self,
         message: Dispatch,
         connection: ConnectionTo<Counterpart>,
@@ -454,11 +454,11 @@ impl<Counterpart: Role, H: HandleMessageFrom<Counterpart>> HandleMessageFrom<Cou
         if let Some(name) = &self.name {
             crate::util::instrumented_with_connection_name(
                 name.clone(),
-                self.handler.handle_message_from(message, connection),
+                self.handler.handle_dispatch_from(message, connection),
             )
             .await
         } else {
-            self.handler.handle_message_from(message, connection).await
+            self.handler.handle_dispatch_from(message, connection).await
         }
     }
 }
@@ -476,10 +476,10 @@ impl<H1, H2> ChainedHandler<H1, H2> {
     }
 }
 
-impl<Counterpart: Role, H1, H2> HandleMessageFrom<Counterpart> for ChainedHandler<H1, H2>
+impl<Counterpart: Role, H1, H2> HandleDispatchFrom<Counterpart> for ChainedHandler<H1, H2>
 where
-    H1: HandleMessageFrom<Counterpart>,
-    H2: HandleMessageFrom<Counterpart>,
+    H1: HandleDispatchFrom<Counterpart>,
+    H2: HandleDispatchFrom<Counterpart>,
 {
     fn describe_chain(&self) -> impl std::fmt::Debug {
         format!(
@@ -489,14 +489,14 @@ where
         )
     }
 
-    async fn handle_message_from(
+    async fn handle_dispatch_from(
         &mut self,
         message: Dispatch,
         connection: ConnectionTo<Counterpart>,
     ) -> Result<Handled<Dispatch>, crate::Error> {
         match self
             .handler1
-            .handle_message_from(message, connection.clone())
+            .handle_dispatch_from(message, connection.clone())
             .await?
         {
             Handled::Yes => Ok(Handled::Yes),
@@ -505,7 +505,7 @@ where
                 retry: retry1,
             } => match self
                 .handler2
-                .handle_message_from(message, connection)
+                .handle_dispatch_from(message, connection)
                 .await?
             {
                 Handled::Yes => Ok(Handled::Yes),
