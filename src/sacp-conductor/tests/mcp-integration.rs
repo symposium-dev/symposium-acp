@@ -75,10 +75,10 @@ async fn test_proxy_provides_mcp_tools_stdio() -> Result<(), sacp::Error> {
             conductor_command: conductor_command(),
         },
         ProxiesAndAgent::new(ElizaAgent::new(true)).proxy(mcp_integration::proxy::ProxyComponent),
-        async |editor_cx| {
+        async |connection_to_editor| {
             // Send initialization request
             let init_response =
-                recv(editor_cx.send_request(InitializeRequest::new(ProtocolVersion::LATEST))).await;
+                recv(connection_to_editor.send_request(InitializeRequest::new(ProtocolVersion::LATEST))).await;
 
             assert!(
                 init_response.is_ok(),
@@ -88,7 +88,7 @@ async fn test_proxy_provides_mcp_tools_stdio() -> Result<(), sacp::Error> {
 
             // Send session/new request
             let session_response =
-                recv(editor_cx.send_request(NewSessionRequest::new(std::path::PathBuf::from("/"))))
+                recv(connection_to_editor.send_request(NewSessionRequest::new(std::path::PathBuf::from("/"))))
                     .await;
 
             assert!(
@@ -115,10 +115,10 @@ async fn test_proxy_provides_mcp_tools_http() -> Result<(), sacp::Error> {
     run_test_with_mode(
         McpBridgeMode::Http,
         ProxiesAndAgent::new(ElizaAgent::new(true)).proxy(mcp_integration::proxy::ProxyComponent),
-        async |editor_cx| {
+        async |connection_to_editor| {
             // Send initialization request
             let init_response =
-                recv(editor_cx.send_request(InitializeRequest::new(ProtocolVersion::LATEST))).await;
+                recv(connection_to_editor.send_request(InitializeRequest::new(ProtocolVersion::LATEST))).await;
 
             assert!(
                 init_response.is_ok(),
@@ -128,7 +128,7 @@ async fn test_proxy_provides_mcp_tools_http() -> Result<(), sacp::Error> {
 
             // Send session/new request
             let session_response =
-                recv(editor_cx.send_request(NewSessionRequest::new(std::path::PathBuf::from("/"))))
+                recv(connection_to_editor.send_request(NewSessionRequest::new(std::path::PathBuf::from("/"))))
                     .await;
 
             assert!(
@@ -198,19 +198,19 @@ async fn test_agent_handles_prompt() -> Result<(), sacp::Error> {
         )
         .connect_with(
             sacp::ByteStreams::new(client_write.compat_write(), client_read.compat()),
-            async |editor_cx| {
+            async |connection_to_editor| {
                 // Initialize
-                recv(editor_cx.send_request(InitializeRequest::new(ProtocolVersion::LATEST))).await?;
+                recv(connection_to_editor.send_request(InitializeRequest::new(ProtocolVersion::LATEST))).await?;
 
                 // Create session
                 let session =
-                    recv(editor_cx.send_request(NewSessionRequest::new(std::path::PathBuf::from("/"))))
+                    recv(connection_to_editor.send_request(NewSessionRequest::new(std::path::PathBuf::from("/"))))
                         .await?;
 
                 tracing::debug!(session_id = %session.session_id.0, "Session created");
 
                 // Send a prompt to call the echo tool via ElizACP's command syntax
-                let prompt_response = recv(editor_cx.send_request(PromptRequest::new(
+                let prompt_response = recv(connection_to_editor.send_request(PromptRequest::new(
                     session.session_id.clone(),
                     vec![ContentBlock::Text(TextContent::new(
                         r#"Use tool test::echo with {"message": "Hello from the test!"}"#.to_string(),

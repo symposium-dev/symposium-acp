@@ -96,7 +96,7 @@ impl ConnectTo<Conductor> for ProxyWithMcpAndHandler {
             // Add a NewSessionRequest handler - this should be invoked!
             .on_receive_request_from(
                 Client,
-                async move |request: NewSessionRequest, request_cx, cx| {
+                async move |request: NewSessionRequest, responder, cx| {
                     // Mark that we were called
                     config
                         .new_session_handler_called
@@ -106,7 +106,7 @@ impl ConnectTo<Conductor> for ProxyWithMcpAndHandler {
                     cx.send_request_to(Agent, request)
                         .on_receiving_result(async move |result| {
                             let response: NewSessionResponse = result?;
-                            request_cx.respond(response)
+                            responder.respond(response)
                         })
                 },
                 sacp::on_receive_request!(),
@@ -127,8 +127,8 @@ impl ConnectTo<Client> for SimpleAgent {
         Agent.connect_from()
             .name("simple-agent")
             .on_receive_request(
-                async |request: InitializeRequest, request_cx, _cx| {
-                    request_cx.respond(
+                async |request: InitializeRequest, responder, _cx| {
+                    responder.respond(
                         InitializeResponse::new(request.protocol_version)
                             .agent_capabilities(AgentCapabilities::new()),
                     )
@@ -136,8 +136,8 @@ impl ConnectTo<Client> for SimpleAgent {
                 sacp::on_receive_request!(),
             )
             .on_receive_request(
-                async |_request: NewSessionRequest, request_cx, _cx| {
-                    request_cx.respond(NewSessionResponse::new(SessionId::new(
+                async |_request: NewSessionRequest, responder, _cx| {
+                    responder.respond(NewSessionResponse::new(SessionId::new(
                         uuid::Uuid::new_v4().to_string(),
                     )))
                 },
@@ -187,14 +187,14 @@ async fn test_new_session_handler_invoked_with_mcp_server() -> Result<(), sacp::
     });
     let agent = DynConnectTo::<Client>::new(SimpleAgent);
 
-    run_test(vec![proxy], agent, async |editor_cx| {
+    run_test(vec![proxy], agent, async |connection_to_editor| {
         // Initialize first
         let _init_response =
-            recv(editor_cx.send_request(InitializeRequest::new(ProtocolVersion::LATEST))).await?;
+            recv(connection_to_editor.send_request(InitializeRequest::new(ProtocolVersion::LATEST))).await?;
 
         // Create a new session - this should trigger the handler in the proxy
         let session_response =
-            recv(editor_cx.send_request(NewSessionRequest::new(PathBuf::from("/tmp")))).await?;
+            recv(connection_to_editor.send_request(NewSessionRequest::new(PathBuf::from("/tmp")))).await?;
 
         // Verify we got a valid session ID
         assert!(

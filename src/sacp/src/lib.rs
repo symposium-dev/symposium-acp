@@ -170,14 +170,14 @@ macro_rules! tool_fn {
 /// This macro is used for the value of the `to_future_hack` parameter of
 /// [`ConnectFrom::on_receive_request`] and [`ConnectFrom::on_receive_request_from`].
 ///
-/// It expands to `|f, req, req_cx, cx| Box::pin(f(req, req_cx, cx))`.
+/// It expands to `|f, req, responder, cx| Box::pin(f(req, responder, cx))`.
 ///
 /// This is needed until [return-type notation](https://github.com/rust-lang/rust/issues/109417)
 /// is stabilized.
 #[macro_export]
 macro_rules! on_receive_request {
     () => {
-        |f: &mut _, req, req_cx, cx| Box::pin(f(req, req_cx, cx))
+        |f: &mut _, req, responder, cx| Box::pin(f(req, responder, cx))
     };
 }
 
@@ -198,13 +198,13 @@ macro_rules! on_receive_notification {
 /// This macro is used for the value of the `to_future_hack` parameter of
 /// [`ConnectFrom::on_receive_dispatch`] and [`ConnectFrom::on_receive_dispatch_from`].
 ///
-/// It expands to `|f, msg_cx, cx| Box::pin(f(msg_cx, cx))`.
+/// It expands to `|f, dispatch, cx| Box::pin(f(dispatch, cx))`.
 ///
 /// This is needed until [return-type notation](https://github.com/rust-lang/rust/issues/109417)
 /// is stabilized.
 #[macro_export]
 macro_rules! on_receive_dispatch {
     () => {
-        |f: &mut _, msg_cx, cx| Box::pin(f(msg_cx, cx))
+        |f: &mut _, dispatch, cx| Box::pin(f(dispatch, cx))
     };
 }

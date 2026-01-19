@@ -43,16 +43,16 @@ use crate::{
 /// # use sacp::util::MatchDispatch;
 /// # async fn example(message: Dispatch) -> Result<(), sacp::Error> {
 /// MatchDispatch::new(message)
-///     .if_request(|req: InitializeRequest, request_cx: sacp::Responder<InitializeResponse>| async move {
+///     .if_request(|req: InitializeRequest, responder: sacp::Responder<InitializeResponse>| async move {
 ///         let response = InitializeResponse::new(req.protocol_version)
 ///             .agent_capabilities(AgentCapabilities::new());
-///         request_cx.respond(response)
+///         responder.respond(response)
 ///     })
 ///     .await
 ///     .otherwise(|message| async move {
 ///         match message {
-///             Dispatch::Request(_, request_cx) => {
-///                 request_cx.respond_with_error(sacp::util::internal_error("unknown method"))
+///             Dispatch::Request(_, responder) => {
+///                 responder.respond_with_error(sacp::util::internal_error("unknown method"))
 ///             }
 ///             Dispatch::Notification(_) | Dispatch::Response(_, _) => Ok(()),
 ///         }
@@ -102,28 +102,28 @@ impl MatchDispatch {
         }) = self.state
         {
             self.state = match dispatch {
-                Dispatch::Request(untyped_request, untyped_request_cx) => {
+                Dispatch::Request(untyped_request, untyped_responder) => {
                     if !Req::matches_method(untyped_request.method()) {
                         Ok(Handled::No {
-                            message: Dispatch::Request(untyped_request, untyped_request_cx),
+                            message: Dispatch::Request(untyped_request, untyped_responder),
                             retry,
                         })
                     } else {
                         match Req::parse_message(untyped_request.method(), untyped_request.params())
                         {
                             Ok(typed_request) => {
-                                let typed_request_cx = untyped_request_cx.cast();
-                                match op(typed_request, typed_request_cx).await {
+                                let typed_responder = untyped_responder.cast();
+                                match op(typed_request, typed_responder).await {
                                     Ok(result) => match result.into_handled() {
                                         Handled::Yes => Ok(Handled::Yes),
                                         Handled::No {
-                                            message: (request, request_cx),
+                                            message: (request, responder),
                                             retry: request_retry,
                                         } => match request.to_untyped_message() {
                                             Ok(untyped) => Ok(Handled::No {
                                                 message: Dispatch::Request(
                                                     untyped,
-                                                    request_cx.erase_to_json(),
+                                                    responder.erase_to_json(),
                                                 ),
                                                 retry: retry | request_retry,
                                             }),
@@ -228,10 +228,10 @@ impl MatchDispatch {
                             retry: message_retry,
                         } => {
                             let untyped = match typed_dispatch {
-                                Dispatch::Request(request, request_cx) => {
+                                Dispatch::Request(request, responder) => {
                                     match request.to_untyped_message() {
                                         Ok(untyped) => {
-                                            Dispatch::Request(untyped, request_cx.erase_to_json())
+                                            Dispatch::Request(untyped, responder.erase_to_json())
                                         }
                                         Err(err) => return Self { state: Err(err) },
                                     }
@@ -242,8 +242,8 @@ impl MatchDispatch {
                                         Err(err) => return Self { state: Err(err) },
                                     }
                                 }
-                                Dispatch::Response(result, request_cx) => {
-                                    let method = request_cx.method();
+                                Dispatch::Response(result, router) => {
+                                    let method = router.method();
                                     let untyped_result = match result {
                                         Ok(response) => match response.into_json(method) {
                                             Ok(json) => Ok(json),
@@ -251,7 +251,7 @@ impl MatchDispatch {
                                         },
                                         Err(err) => Err(err),
                                     };
-                                    Dispatch::Response(untyped_result, request_cx.erase_to_json())
+                                    Dispatch::Response(untyped_result, router.erase_to_json())
                                 }
                             };
                             Ok(Handled::No {
@@ -298,40 +298,40 @@ impl MatchDispatch {
         }) = self.state
         {
             self.state = match dispatch {
-                Dispatch::Response(result, response_cx) => {
+                Dispatch::Response(result, router) => {
                     // Check if the request type matches this method
-                    if !Req::matches_method(response_cx.method()) {
+                    if !Req::matches_method(router.method()) {
                         // Method doesn't match, return unhandled
                         Ok(Handled::No {
-                            message: Dispatch::Response(result, response_cx),
+                            message: Dispatch::Response(result, router),
                             retry,
                         })
                     } else {
                         // Method matches, parse the response
-                        let typed_response_cx: ResponseRouter<Req::Response> = response_cx.cast();
+                        let typed_router: ResponseRouter<Req::Response> = router.cast();
                         let typed_result = match result {
                             Ok(value) => {
-                                Req::Response::from_value(typed_response_cx.method(), value)
+                                Req::Response::from_value(typed_router.method(), value)
                             }
                             Err(err) => Err(err),
                         };
 
-                        match op(typed_result, typed_response_cx).await {
+                        match op(typed_result, typed_router).await {
                             Ok(handler_result) => match handler_result.into_handled() {
                                 Handled::Yes => Ok(Handled::Yes),
                                 Handled::No {
-                                    message: (result, response_cx),
+                                    message: (result, router),
                                     retry: response_retry,
                                 } => {
                                     // Convert typed result back to untyped
                                     let untyped_result = match result {
-                                        Ok(response) => response.into_json(response_cx.method()),
+                                        Ok(response) => response.into_json(router.method()),
                                         Err(err) => Err(err),
                                     };
                                     Ok(Handled::No {
                                         message: Dispatch::Response(
                                             untyped_result,
-                                            response_cx.erase_to_json(),
+                                            router.erase_to_json(),
                                         ),
                                         retry: retry | response_retry,
                                     })
@@ -365,22 +365,22 @@ impl MatchDispatch {
     where
         H: crate::IntoHandled<(Req::Response, ResponseRouter<Req::Response>)>,
     {
-        self.if_response_to::<Req, _>(async move |result, response_cx| match result {
+        self.if_response_to::<Req, _>(async move |result, router| match result {
             Ok(response) => {
-                let handler_result = op(response, response_cx).await?;
+                let handler_result = op(response, router).await?;
                 match handler_result.into_handled() {
                     Handled::Yes => Ok(Handled::Yes),
                     Handled::No {
-                        message: (resp, cx),
+                        message: (resp, router),
                         retry,
                     } => Ok(Handled::No {
-                        message: (Ok(resp), cx),
+                        message: (Ok(resp), router),
                         retry,
                     }),
                 }
             }
             Err(err) => Ok(Handled::No {
-                message: (Err(err), response_cx),
+                message: (Err(err), router),
                 retry: false,
             }),
         })
@@ -436,22 +436,22 @@ impl MatchDispatch {
 /// # use sacp::util::MatchDispatchFrom;
 /// # async fn example(message: Dispatch, cx: &sacp::ConnectionTo<sacp::Client>) -> Result<(), sacp::Error> {
 /// MatchDispatchFrom::new(message, cx)
-///     .if_request(|req: InitializeRequest, request_cx: sacp::Responder<InitializeResponse>| async move {
+///     .if_request(|req: InitializeRequest, responder: sacp::Responder<InitializeResponse>| async move {
 ///         // Handle initialization
 ///         let response = InitializeResponse::new(req.protocol_version)
 ///             .agent_capabilities(AgentCapabilities::new());
-///         request_cx.respond(response)
+///         responder.respond(response)
 ///     })
 ///     .await
-///     .if_request(|_req: PromptRequest, request_cx: sacp::Responder<PromptResponse>| async move {
+///     .if_request(|_req: PromptRequest, responder: sacp::Responder<PromptResponse>| async move {
 ///         // Handle prompts
-///         request_cx.respond(PromptResponse::new(StopReason::EndTurn))
+///         responder.respond(PromptResponse::new(StopReason::EndTurn))
 ///     })
 ///     .await
 ///     .otherwise(|message| async move {
 ///         // Fallback for unrecognized messages
 ///         match message {
-///             Dispatch::Request(_, request_cx) => request_cx.respond_with_error(sacp::util::internal_error("unknown method")),
+///             Dispatch::Request(_, responder) => responder.respond_with_error(sacp::util::internal_error("unknown method")),
 ///             Dispatch::Notification(_) | Dispatch::Response(_, _) => Ok(()),
 ///         }
 ///     })
@@ -523,7 +523,7 @@ impl<Counterpart: Role> MatchDispatchFrom<Counterpart> {
                 peer,
                 message,
                 self.connection.clone(),
-                async |dispatch, _connection_cx| {
+                async |dispatch, _connection| {
                     // Delegate to MatchDispatch for parsing
                     MatchDispatch::new(dispatch).if_request(op).await.done()
                 },
@@ -580,7 +580,7 @@ impl<Counterpart: Role> MatchDispatchFrom<Counterpart> {
                 peer,
                 message,
                 self.connection.clone(),
-                async |dispatch, _connection_cx| {
+                async |dispatch, _connection| {
                     // Delegate to MatchDispatch for parsing
                     MatchDispatch::new(dispatch)
                         .if_notification(op)
@@ -617,7 +617,7 @@ impl<Counterpart: Role> MatchDispatchFrom<Counterpart> {
                 peer,
                 message,
                 self.connection.clone(),
-                async |dispatch, _connection_cx| {
+                async |dispatch, _connection| {
                     // Delegate to MatchDispatch for parsing
                     MatchDispatch::new(dispatch).if_message(op).await.done()
                 },
@@ -705,7 +705,7 @@ impl<Counterpart: Role> MatchDispatchFrom<Counterpart> {
                 peer,
                 message,
                 self.connection.clone(),
-                async |dispatch, _connection_cx| {
+                async |dispatch, _connection| {
                     // Delegate to MatchDispatch for parsing
                     MatchDispatch::new(dispatch)
                         .if_response_to::<Req, H>(op)
@@ -731,22 +731,22 @@ impl<Counterpart: Role> MatchDispatchFrom<Counterpart> {
         Counterpart: HasPeer<Peer>,
         H: crate::IntoHandled<(Req::Response, ResponseRouter<Req::Response>)>,
     {
-        self.if_response_to_from::<Req, _, _>(peer, async move |result, response_cx| match result {
+        self.if_response_to_from::<Req, _, _>(peer, async move |result, router| match result {
             Ok(response) => {
-                let handler_result = op(response, response_cx).await?;
+                let handler_result = op(response, router).await?;
                 match handler_result.into_handled() {
                     Handled::Yes => Ok(Handled::Yes),
                     Handled::No {
-                        message: (resp, cx),
+                        message: (resp, router),
                         retry,
                     } => Ok(Handled::No {
-                        message: (Ok(resp), cx),
+                        message: (Ok(resp), router),
                         retry,
                     }),
                 }
             }
             Err(err) => Ok(Handled::No {
-                message: (Err(err), response_cx),
+                message: (Err(err), router),
                 retry: false,
             }),
         })

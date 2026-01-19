@@ -61,10 +61,10 @@ impl McpBridgeConnectionActor {
                 sacp::on_receive_dispatch!(),
             )
             // When we receive messages from the conductor, forward them to the MCP client
-            .connect_with(transport, async move |mcp_client_cx| {
+            .connect_with(transport, async move |mcp_connection_to_client| {
                 let mut to_mcp_client_rx = to_mcp_client_rx;
                 while let Some(message) = to_mcp_client_rx.next().await {
-                    mcp_client_cx.send_proxied_message(message)?;
+                    mcp_connection_to_client.send_proxied_message(message)?;
                 }
                 Ok(())
             })

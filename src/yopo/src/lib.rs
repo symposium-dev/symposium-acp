@@ -132,7 +132,7 @@ pub async fn prompt_with_callback(
                                 Ok(())
                             })
                             .await
-                            .if_request(async |request: RequestPermissionRequest, request_cx| {
+                            .if_request(async |request: RequestPermissionRequest, responder| {
                                 // Auto-approve all permission requests by selecting the first option
                                 // that looks "allow-ish"
                                 let outcome = request
@@ -154,7 +154,7 @@ pub async fn prompt_with_callback(
                                     })
                                     .unwrap_or(RequestPermissionOutcome::Cancelled);
 
-                                request_cx.respond(RequestPermissionResponse::new(outcome))?;
+                                responder.respond(RequestPermissionResponse::new(outcome))?;
 
                                 Ok(())
                             })

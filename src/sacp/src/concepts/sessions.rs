@@ -106,7 +106,7 @@
 //! # use sacp::schema::NewSessionRequest;
 //! # async fn example(transport: impl ConnectTo<Client>) -> Result<(), sacp::Error> {
 //! Client.connect_from()
-//!     .on_receive_request(async |req: NewSessionRequest, request_cx, cx| {
+//!     .on_receive_request(async |req: NewSessionRequest, responder, cx| {
 //!         cx.build_session_from(req)
 //!             .on_session_start(async |session| {
 //!                 // Handle the session

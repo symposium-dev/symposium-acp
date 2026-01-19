@@ -153,9 +153,9 @@ async fn test_bidirectional_communication() {
             let side_a_transport = sacp::ByteStreams::new(server_writer, server_reader);
             let side_a = UntypedRole.connect_from().on_receive_request(
                 async |request: PingRequest,
-                       request_cx: Responder<PongResponse>,
-                       _connection_cx: ConnectionTo<UntypedRole>| {
-                    request_cx.respond(PongResponse {
+                       responder: Responder<PongResponse>,
+                       _connection: ConnectionTo<UntypedRole>| {
+                    responder.respond(PongResponse {
                         value: request.value + 1,
                     })
                 },
@@ -206,9 +206,9 @@ async fn test_request_ids() {
             let server_transport = sacp::ByteStreams::new(server_writer, server_reader);
             let server = UntypedRole.connect_from().on_receive_request(
                 async |request: PingRequest,
-                       request_cx: Responder<PongResponse>,
-                       _connection_cx: ConnectionTo<UntypedRole>| {
-                    request_cx.respond(PongResponse {
+                       responder: Responder<PongResponse>,
+                       _connection: ConnectionTo<UntypedRole>| {
+                    responder.respond(PongResponse {
                         value: request.value + 1,
                     })
                 },
@@ -268,11 +268,11 @@ async fn test_out_of_order_responses() {
             let server_transport = sacp::ByteStreams::new(server_writer, server_reader);
             let server = UntypedRole.connect_from().on_receive_request(
                 async |request: SlowRequest,
-                       request_cx: Responder<SlowResponse>,
-                       _connection_cx: ConnectionTo<UntypedRole>| {
+                       responder: Responder<SlowResponse>,
+                       _connection: ConnectionTo<UntypedRole>| {
                     // Simulate delay
                     tokio::time::sleep(tokio::time::Duration::from_millis(request.delay_ms)).await;
-                    request_cx.respond(SlowResponse { id: request.id })
+                    responder.respond(SlowResponse { id: request.id })
                 },
                 sacp::on_receive_request!(),
             );

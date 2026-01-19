@@ -36,7 +36,7 @@ use crate::mcp_server::McpServer;
 use crate::role::HasPeer;
 use crate::role::Role;
 use crate::util::json_cast;
-use crate::{Agent, Client, RoleId, ConnectTo};
+use crate::{Agent, Client, ConnectTo, RoleId};
 
 /// Handlers process incoming JSON-RPC messages on a [`JrConnection`].
 ///
@@ -112,8 +112,8 @@ use crate::{Agent, Client, RoleId, ConnectTo};
 /// # use sacp_test::StatusUpdate;
 /// # async fn example(transport: impl ConnectTo<Agent>) -> Result<(), sacp::Error> {
 /// Agent.connect_from()
-///     .on_receive_request(async |req: InitializeRequest, request_cx, cx| {
-///         request_cx.respond(
+///     .on_receive_request(async |req: InitializeRequest, responder, cx| {
+///         responder.respond(
 ///             InitializeResponse::new(req.protocol_version)
 ///                 .agent_capabilities(AgentCapabilities::new()),
 ///         )
@@ -172,10 +172,10 @@ use crate::{Agent, Client, RoleId, ConnectTo};
 /// # async fn example(transport: impl ConnectTo<Client>) -> Result<(), sacp::Error> {
 /// # Client.connect_from().connect_with(transport, async |cx| {
 /// cx.spawn({
-///     let connection_cx = cx.clone();
+///     let connection = cx.clone();
 ///     async move {
 ///         let result = expensive_operation("data").await?;
-///         connection_cx.send_notification(ProcessComplete { result })?;
+///         connection.send_notification(ProcessComplete { result })?;
 ///         Ok(())
 ///     }
 /// })?;
@@ -272,9 +272,9 @@ where
 /// # async fn example() -> Result<(), sacp::Error> {
 /// # let connection = mock_connection();
 /// connection
-///     .on_receive_request(async |req: InitializeRequest, request_cx, cx| {
+///     .on_receive_request(async |req: InitializeRequest, responder, cx| {
 ///         // Handle only InitializeRequest messages
-///         request_cx.respond(InitializeResponse::make())
+///         responder.respond(InitializeResponse::make())
 ///     }, sacp::on_receive_request!())
 ///     .on_receive_notification(async |notif: SessionNotification, cx| {
 ///         // Handle only SessionUpdate notifications
@@ -313,10 +313,10 @@ where
 /// impl JsonRpcRequest for MyRequests { type Response = serde_json::Value; }
 ///
 /// // Handle all variants in one place
-/// connection.on_receive_request(async |req: MyRequests, request_cx, cx| {
+/// connection.on_receive_request(async |req: MyRequests, responder, cx| {
 ///     match req {
-///         MyRequests::Initialize(init) => { request_cx.respond(serde_json::json!({})) }
-///         MyRequests::Prompt(prompt) => { request_cx.respond(serde_json::json!({})) }
+///         MyRequests::Initialize(init) => { responder.respond(serde_json::json!({})) }
+///         MyRequests::Prompt(prompt) => { responder.respond(serde_json::json!({})) }
 ///     }
 /// }, sacp::on_receive_request!())
 /// # .connect_to(sacp_test::MockTransport).await?;
@@ -337,15 +337,15 @@ where
 /// // on_receive_dispatch receives Dispatch which can be either a request or notification
 /// connection.on_receive_dispatch(async |msg: Dispatch<InitializeRequest, SessionNotification>, _cx| {
 ///     match msg {
-///         Dispatch::Request(req, request_cx) => {
-///             request_cx.respond(InitializeResponse::make())
+///         Dispatch::Request(req, responder) => {
+///             responder.respond(InitializeResponse::make())
 ///         }
 ///         Dispatch::Notification(notif) => {
 ///             Ok(())
 ///         }
-///         Dispatch::Response(result, request_cx) => {
+///         Dispatch::Response(result, router) => {
 ///             // Forward response to its destination
-///             request_cx.respond_with_result(result)
+///             router.respond_with_result(result)
 ///         }
 ///     }
 /// }, sacp::on_receive_dispatch!())
@@ -375,13 +375,13 @@ where
 /// # async fn example() -> Result<(), sacp::Error> {
 /// # let connection = mock_connection();
 /// connection
-///     .on_receive_request(async |req: InitializeRequest, request_cx, cx| {
+///     .on_receive_request(async |req: InitializeRequest, responder, cx| {
 ///         // This runs first for InitializeRequest
-///         request_cx.respond(InitializeResponse::make())
+///         responder.respond(InitializeResponse::make())
 ///     }, sacp::on_receive_request!())
-///     .on_receive_request(async |req: PromptRequest, request_cx, cx| {
+///     .on_receive_request(async |req: PromptRequest, responder, cx| {
 ///         // This runs first for PromptRequest
-///         request_cx.respond(PromptResponse::make())
+///         responder.respond(PromptResponse::make())
 ///     }, sacp::on_receive_request!())
 ///     .on_receive_dispatch(async |msg: Dispatch, cx| {
 ///         // This runs for any message not handled above
@@ -409,19 +409,19 @@ where
 /// # use sacp_test::*;
 /// # async fn example() -> Result<(), sacp::Error> {
 /// # let connection = mock_connection();
-/// connection.on_receive_request(async |req: AnalyzeRequest, request_cx, cx| {
+/// connection.on_receive_request(async |req: AnalyzeRequest, responder, cx| {
 ///     // Clone cx for the spawned task
 ///     cx.spawn({
-///         let connection_cx = cx.clone();
+///         let connection = cx.clone();
 ///         async move {
 ///             let result = expensive_analysis(&req.data).await?;
-///             connection_cx.send_notification(AnalysisComplete { result })?;
+///             connection.send_notification(AnalysisComplete { result })?;
 ///             Ok(())
 ///         }
 ///     })?;
 ///
 ///     // Respond immediately without blocking
-///     request_cx.respond(AnalysisStarted { job_id: 42 })
+///     responder.respond(AnalysisStarted { job_id: 42 })
 /// }, sacp::on_receive_request!())
 /// # .connect_to(sacp_test::MockTransport).await?;
 /// # Ok(())
@@ -462,8 +462,8 @@ where
 /// # async fn example() -> Result<(), sacp::Error> {
 /// # let connection = mock_connection();
 /// connection
-///     .on_receive_request(async |req: MyRequest, request_cx, cx| {
-///         request_cx.respond(MyResponse { status: "ok".into() })
+///     .on_receive_request(async |req: MyRequest, responder, cx| {
+///         responder.respond(MyResponse { status: "ok".into() })
 ///     }, sacp::on_receive_request!())
 ///     .connect_to(MockTransport)  // Runs until connection closes or error occurs
 ///     .await?;
@@ -485,8 +485,8 @@ where
 /// # async fn example() -> Result<(), sacp::Error> {
 /// # let connection = mock_connection();
 /// connection
-///     .on_receive_request(async |req: MyRequest, request_cx, cx| {
-///         request_cx.respond(MyResponse { status: "ok".into() })
+///     .on_receive_request(async |req: MyRequest, responder, cx| {
+///         responder.respond(MyResponse { status: "ok".into() })
 ///     }, sacp::on_receive_request!())
 ///     .connect_with(MockTransport, async |cx| {
 ///         // You can send requests to the other side
@@ -523,18 +523,18 @@ where
 ///
 /// UntypedRole.connect_from()
 ///     .name("my-agent")  // Optional: for debugging logs
-///     .on_receive_request(async |init: InitializeRequest, request_cx, cx| {
+///     .on_receive_request(async |init: InitializeRequest, responder, cx| {
 ///         let response: InitializeResponse = todo!();
-///         request_cx.respond(response)
+///         responder.respond(response)
 ///     }, sacp::on_receive_request!())
-///     .on_receive_request(async |prompt: PromptRequest, request_cx, cx| {
+///     .on_receive_request(async |prompt: PromptRequest, responder, cx| {
 ///         // You can send notifications while processing a request
 ///         let notif: SessionNotification = todo!();
 ///         cx.send_notification(notif)?;
 ///
 ///         // Then respond to the request
 ///         let response: PromptResponse = todo!();
-///         request_cx.respond(response)
+///         responder.respond(response)
 ///     }, sacp::on_receive_request!())
 ///     .connect_to(transport)
 ///     .await?;
@@ -680,9 +680,9 @@ impl<
     /// notification variants. Your handler receives a [`Dispatch<Req, Notif>`] which
     /// is an enum with two variants:
     ///
-    /// - `Dispatch::Request(request, request_cx)` - A request with its response context
+    /// - `Dispatch::Request(request, responder)` - A request with its response context
     /// - `Dispatch::Notification(notification)` - A notification
-    /// - `Dispatch::Response(result, request_cx)` - A response to a request we sent
+    /// - `Dispatch::Response(result, router)` - A response to a request we sent
     ///
     /// # Example
     ///
@@ -693,17 +693,17 @@ impl<
     /// # let connection = mock_connection();
     /// connection.on_receive_dispatch(async |message: Dispatch<MyRequest, StatusUpdate>, _cx| {
     ///     match message {
-    ///         Dispatch::Request(req, request_cx) => {
+    ///         Dispatch::Request(req, responder) => {
     ///             // Handle request and send response
-    ///             request_cx.respond(MyResponse { status: "ok".into() })
+    ///             responder.respond(MyResponse { status: "ok".into() })
     ///         }
     ///         Dispatch::Notification(notif) => {
     ///             // Handle notification (no response needed)
     ///             Ok(())
     ///         }
-    ///         Dispatch::Response(result, request_cx) => {
+    ///         Dispatch::Response(result, router) => {
     ///             // Forward response to its destination
-    ///             request_cx.respond_with_result(result)
+    ///             router.respond_with_result(result)
     ///         }
     ///     }
     /// }, sacp::on_receive_dispatch!())
@@ -771,7 +771,7 @@ impl<
     /// # use sacp::{ConnectFrom};
     /// # use sacp::schema::{PromptRequest, PromptResponse, SessionNotification};
     /// # fn example<R: sacp::Role>(connection: ConnectFrom<R, impl sacp::HandleMessageAs<R>>) {
-    /// connection.on_receive_request(async |request: PromptRequest, request_cx, cx| {
+    /// connection.on_receive_request(async |request: PromptRequest, responder, cx| {
     ///     // Send a notification while processing
     ///     let notif: SessionNotification = todo!();
     ///     cx.send_notification(notif)?;
@@ -781,7 +781,7 @@ impl<
     ///
     ///     // Send the response
     ///     let response: PromptResponse = todo!();
-    ///     request_cx.respond(response)
+    ///     responder.respond(response)
     /// }, sacp::on_receive_request!());
     /// # }
     /// ```
@@ -962,9 +962,9 @@ impl<
     /// use sacp::schema::InitializeRequest;
     ///
     /// // Conductor receiving from agent direction - messages will be unwrapped from SuccessorMessage
-    /// connection.on_receive_request_from(Agent, async |req: InitializeRequest, request_cx, cx| {
+    /// connection.on_receive_request_from(Agent, async |req: InitializeRequest, responder, cx| {
     ///     // Handle the request
-    ///     request_cx.respond(InitializeResponse::make())
+    ///     responder.respond(InitializeResponse::make())
     /// })
     /// ```
     ///
@@ -1086,15 +1086,18 @@ impl<
     /// );
     ///
     /// UntypedRole.connect_from()
-    ///     .on_receive_request(async |req: MyRequest, request_cx, cx| {
-    ///         request_cx.respond(MyResponse { status: "ok".into() })
+    ///     .on_receive_request(async |req: MyRequest, responder, cx| {
+    ///         responder.respond(MyResponse { status: "ok".into() })
     ///     }, sacp::on_receive_request!())
     ///     .connect_to(transport)
     ///     .await?;
     /// # Ok(())
     /// # }
     /// ```
-    pub async fn connect_to(self, transport: impl ConnectTo<Host> + 'static) -> Result<(), crate::Error> {
+    pub async fn connect_to(
+        self,
+        transport: impl ConnectTo<Host> + 'static,
+    ) -> Result<(), crate::Error> {
         self.connect_with(transport, async move |_cx| future::pending().await)
             .await
     }
@@ -1128,9 +1131,9 @@ impl<
     /// );
     ///
     /// UntypedRole.connect_from()
-    ///     .on_receive_request(async |req: MyRequest, request_cx, cx| {
+    ///     .on_receive_request(async |req: MyRequest, responder, cx| {
     ///         // Handle incoming requests in the background
-    ///         request_cx.respond(MyResponse { status: "ok".into() })
+    ///         responder.respond(MyResponse { status: "ok".into() })
     ///     }, sacp::on_receive_request!())
     ///     .connect_with(transport, async |cx| {
     ///         // Initialize the protocol
@@ -1481,19 +1484,19 @@ impl<Counterpart: Role> ConnectionTo<Counterpart> {
     /// # use sacp_test::*;
     /// # async fn example() -> Result<(), sacp::Error> {
     /// # let connection = mock_connection();
-    /// connection.on_receive_request(async |req: ProcessRequest, request_cx, cx| {
+    /// connection.on_receive_request(async |req: ProcessRequest, responder, cx| {
     ///     // Clone cx for the spawned task
     ///     cx.spawn({
-    ///         let connection_cx = cx.clone();
+    ///         let connection = cx.clone();
     ///         async move {
     ///             let result = expensive_operation(&req.data).await?;
-    ///             connection_cx.send_notification(ProcessComplete { result })?;
+    ///             connection.send_notification(ProcessComplete { result })?;
     ///             Ok(())
     ///         }
     ///     })?;
     ///
     ///     // Respond immediately
-    ///     request_cx.respond(ProcessResponse { result: "started".into() })
+    ///     responder.respond(ProcessResponse { result: "started".into() })
     /// }, sacp::on_receive_request!())
     /// # .connect_to(sacp_test::MockTransport).await?;
     /// # Ok(())
@@ -1536,15 +1539,15 @@ impl<Counterpart: Role> ConnectionTo<Counterpart> {
     /// # async fn example(cx: ConnectionTo<UntypedRole>) -> Result<(), sacp::Error> {
     /// // Set up a backend connection builder
     /// let backend = UntypedRole.connect_from()
-    ///     .on_receive_request(async |req: MyRequest, request_cx, _cx| {
-    ///         request_cx.respond(MyResponse { status: "ok".into() })
+    ///     .on_receive_request(async |req: MyRequest, responder, _cx| {
+    ///         responder.respond(MyResponse { status: "ok".into() })
     ///     }, sacp::on_receive_request!());
     ///
     /// // Spawn it and get a context to send requests to it
-    /// let backend_cx = cx.spawn_connection(backend, MockTransport)?;
+    /// let backend_connection = cx.spawn_connection(backend, MockTransport)?;
     ///
     /// // Now you can forward requests to the backend
-    /// let response = backend_cx.send_request(MyRequest {}).block_task().await?;
+    /// let response = backend_connection.send_request(MyRequest {}).block_task().await?;
     /// # Ok(())
     /// # }
     /// ```
@@ -1595,13 +1598,13 @@ impl<Counterpart: Role> ConnectionTo<Counterpart> {
         Counterpart: HasPeer<Peer>,
     {
         match message {
-            Dispatch::Request(request, request_cx) => self
+            Dispatch::Request(request, responder) => self
                 .send_request_to(peer, request)
-                .forward_to_request_cx(request_cx),
+                .forward_response_to(responder),
             Dispatch::Notification(notification) => self.send_notification_to(peer, notification),
-            Dispatch::Response(result, request_cx) => {
+            Dispatch::Response(result, router) => {
                 // Responses are forwarded directly to their destination
-                request_cx.respond_with_result(result)
+                router.respond_with_result(result)
             }
         }
     }
@@ -1873,7 +1876,7 @@ impl<R: Role> Drop for DynamicHandlerRegistration<R> {
 /// # use sacp_test::*;
 /// # async fn example() -> Result<(), sacp::Error> {
 /// # let connection = mock_connection();
-/// connection.on_receive_request(async |req: ProcessRequest, request_cx, cx| {
+/// connection.on_receive_request(async |req: ProcessRequest, responder, cx| {
 ///     // Send a notification while processing
 ///     cx.send_notification(StatusUpdate {
 ///         message: "processing".into(),
@@ -1883,7 +1886,7 @@ impl<R: Role> Drop for DynamicHandlerRegistration<R> {
 ///     let result = process(&req.data)?;
 ///
 ///     // Respond to the request
-///     request_cx.respond(ProcessResponse { result })
+///     responder.respond(ProcessResponse { result })
 /// }, sacp::on_receive_request!())
 /// # .connect_to(sacp_test::MockTransport).await?;
 /// # Ok(())
@@ -2317,15 +2320,15 @@ impl<Req: JsonRpcRequest, Notif: JsonRpcMessage> Dispatch<Req, Notif> {
         Notif1: JsonRpcMessage,
     {
         match self {
-            Dispatch::Request(request, cx) => {
-                let (new_request, new_cx) = map_request(request, cx);
-                Dispatch::Request(new_request, new_cx)
+            Dispatch::Request(request, responder) => {
+                let (new_request, new_responder) = map_request(request, responder);
+                Dispatch::Request(new_request, new_responder)
             }
             Dispatch::Notification(notification) => {
                 let new_notification = map_notification(notification);
                 Dispatch::Notification(new_notification)
             }
-            Dispatch::Response(result, cx) => Dispatch::Response(result, cx),
+            Dispatch::Response(result, router) => Dispatch::Response(result, router),
         }
     }
 
@@ -2342,9 +2345,9 @@ impl<Req: JsonRpcRequest, Notif: JsonRpcMessage> Dispatch<Req, Notif> {
         cx: ConnectionTo<R>,
     ) -> Result<(), crate::Error> {
         match self {
-            Dispatch::Request(_, request_cx) => request_cx.respond_with_error(error),
+            Dispatch::Request(_, responder) => responder.respond_with_error(error),
             Dispatch::Notification(_) => cx.send_error_notification(error),
-            Dispatch::Response(_, request_cx) => request_cx.respond_with_error(error),
+            Dispatch::Response(_, responder) => responder.respond_with_error(error),
         }
     }
 
@@ -2356,9 +2359,9 @@ impl<Req: JsonRpcRequest, Notif: JsonRpcMessage> Dispatch<Req, Notif> {
     /// parsed. This returns an error for Response variants.
     pub fn erase_to_json(self) -> Result<Dispatch, crate::Error> {
         match self {
-            Dispatch::Request(response, request_cx) => Ok(Dispatch::Request(
+            Dispatch::Request(response, responder) => Ok(Dispatch::Request(
                 response.to_untyped_message()?,
-                request_cx.erase_to_json(),
+                responder.erase_to_json(),
             )),
             Dispatch::Notification(notification) => {
                 Ok(Dispatch::Notification(notification.to_untyped_message()?))
@@ -2388,9 +2391,9 @@ impl<Req: JsonRpcRequest, Notif: JsonRpcMessage> Dispatch<Req, Notif> {
     /// Note: Response variants cannot be converted. This returns an error for Response variants.
     pub fn into_untyped_dispatch(self) -> Result<Dispatch, crate::Error> {
         match self {
-            Dispatch::Request(request, request_cx) => Ok(Dispatch::Request(
+            Dispatch::Request(request, responder) => Ok(Dispatch::Request(
                 request.to_untyped_message()?,
-                request_cx.erase_to_json(),
+                responder.erase_to_json(),
             )),
             Dispatch::Notification(notification) => {
                 Ok(Dispatch::Notification(notification.to_untyped_message()?))
@@ -2440,15 +2443,15 @@ impl Dispatch {
             "into_typed_dispatch"
         );
         match self {
-            Dispatch::Request(message, request_cx) => {
+            Dispatch::Request(message, responder) => {
                 if !Req::matches_method(&message.method) {
                     tracing::trace!("method doesn't match");
-                    Ok(Err(Dispatch::Request(message, request_cx)))
+                    Ok(Err(Dispatch::Request(message, responder)))
                 } else {
                     match Req::parse_message(&message.method, &message.params) {
                         Ok(req) => {
                             tracing::trace!(?req, "parsed ok");
-                            Ok(Ok(Dispatch::Request(req, request_cx.cast())))
+                            Ok(Ok(Dispatch::Request(req, responder.cast())))
                         }
                         Err(err) => {
                             tracing::trace!(?err, "parse error");
@@ -2575,12 +2578,12 @@ impl Dispatch {
         self,
     ) -> Result<Result<(Req, Responder<Req::Response>), Dispatch>, crate::Error> {
         match self {
-            Dispatch::Request(msg, request_cx) => {
+            Dispatch::Request(msg, responder) => {
                 if !Req::matches_method(&msg.method) {
-                    return Ok(Err(Dispatch::Request(msg, request_cx)));
+                    return Ok(Err(Dispatch::Request(msg, responder)));
                 }
                 match Req::parse_message(&msg.method, &msg.params) {
-                    Ok(req) => Ok(Ok((req, request_cx.cast()))),
+                    Ok(req) => Ok(Ok((req, responder.cast()))),
                     Err(err) => Err(err),
                 }
             }
@@ -2752,11 +2755,11 @@ impl JsonRpcNotification for UntypedMessage {}
 /// # async fn example() -> Result<(), sacp::Error> {
 /// # let connection = mock_connection();
 /// // ❌ NEVER do this in a handler - blocks the event loop!
-/// connection.on_receive_request(async |req: MyRequest, request_cx, cx| {
+/// connection.on_receive_request(async |req: MyRequest, responder, cx| {
 ///     let response = cx.send_request(MyRequest {})
 ///         .block_task()  // This will deadlock!
 ///         .await?;
-///     request_cx.respond(response)
+///     responder.respond(response)
 /// }, sacp::on_receive_request!())
 /// # .connect_to(sacp_test::MockTransport).await?;
 /// # Ok(())
@@ -2833,21 +2836,21 @@ impl<T: JsonRpcResponse> SentRequest<T> {
     /// # async fn example(cx: ConnectionTo<UntypedRole>) -> Result<(), sacp::Error> {
     /// // Set up backend connection builder
     /// let backend = UntypedRole.connect_from()
-    ///     .on_receive_request(async |req: MyRequest, request_cx, cx| {
-    ///         request_cx.respond(MyResponse { status: "ok".into() })
+    ///     .on_receive_request(async |req: MyRequest, responder, cx| {
+    ///         responder.respond(MyResponse { status: "ok".into() })
     ///     }, sacp::on_receive_request!());
     ///
     /// // Spawn backend and get a context to send to it
-    /// let backend_cx = cx.spawn_connection(backend, MockTransport)?;
+    /// let backend_connection = cx.spawn_connection(backend, MockTransport)?;
     ///
     /// // Set up proxy that forwards requests to backend
     /// UntypedRole.connect_from()
     ///     .on_receive_request({
-    ///         let backend_cx = backend_cx.clone();
-    ///         async move |req: MyRequest, request_cx, cx| {
+    ///         let backend_connection = backend_connection.clone();
+    ///         async move |req: MyRequest, responder, cx| {
     ///             // Forward the request to backend and proxy the response back
-    ///             backend_cx.send_request(req)
-    ///                 .forward_to_request_cx(request_cx)?;
+    ///             backend_connection.send_request(req)
+    ///                 .forward_response_to(responder)?;
     ///             Ok(())
     ///         }
     ///     }, sacp::on_receive_request!());
@@ -2869,11 +2872,11 @@ impl<T: JsonRpcResponse> SentRequest<T> {
     ///
     /// This is equivalent to calling `on_receiving_result` and manually forwarding
     /// the result, but more concise.
-    pub fn forward_to_request_cx(self, request_cx: Responder<T>) -> Result<(), crate::Error>
+    pub fn forward_response_to(self, responder: Responder<T>) -> Result<(), crate::Error>
     where
         T: Send,
     {
-        self.on_receiving_result(async move |result| request_cx.respond_with_result(result))
+        self.on_receiving_result(async move |result| responder.respond_with_result(result))
     }
 
     /// Block the current task until the response is received.
@@ -2888,13 +2891,13 @@ impl<T: JsonRpcResponse> SentRequest<T> {
     /// # use sacp_test::*;
     /// # async fn example() -> Result<(), sacp::Error> {
     /// # let connection = mock_connection();
-    /// connection.on_receive_request(async |req: MyRequest, request_cx, cx| {
+    /// connection.on_receive_request(async |req: MyRequest, responder, cx| {
     ///     // Spawn a task to handle the request
     ///     cx.spawn({
-    ///         let connection_cx = cx.clone();
+    ///         let connection = cx.clone();
     ///         async move {
     ///             // Safe: We're in a spawned task, not blocking the event loop
-    ///             let response = connection_cx.send_request(OtherRequest {})
+    ///             let response = connection.send_request(OtherRequest {})
     ///                 .block_task()
     ///                 .await?;
     ///
@@ -2904,7 +2907,7 @@ impl<T: JsonRpcResponse> SentRequest<T> {
     ///     })?;
     ///
     ///     // Respond immediately
-    ///     request_cx.respond(MyResponse { status: "ok".into() })
+    ///     responder.respond(MyResponse { status: "ok".into() })
     /// }, sacp::on_receive_request!())
     /// # .connect_to(sacp_test::MockTransport).await?;
     /// # Ok(())
@@ -2917,13 +2920,13 @@ impl<T: JsonRpcResponse> SentRequest<T> {
     /// # use sacp_test::*;
     /// # async fn example() -> Result<(), sacp::Error> {
     /// # let connection = mock_connection();
-    /// connection.on_receive_request(async |req: MyRequest, request_cx, cx| {
+    /// connection.on_receive_request(async |req: MyRequest, responder, cx| {
     ///     // ❌ DEADLOCK: Handler blocks event loop, which can't process the response
     ///     let response = cx.send_request(OtherRequest {})
     ///         .block_task()
     ///         .await?;
     ///
-    ///     request_cx.respond(MyResponse { status: response.value })
+    ///     responder.respond(MyResponse { status: response.value })
     /// }, sacp::on_receive_request!())
     /// # .connect_to(sacp_test::MockTransport).await?;
     /// # Ok(())
@@ -2982,7 +2985,7 @@ impl<T: JsonRpcResponse> SentRequest<T> {
     /// # Behavior
     ///
     /// - If the response is `Ok(value)`, your task receives the value and the request context
-    /// - If the response is `Err(error)`, the error is automatically sent to `request_cx`
+    /// - If the response is `Err(error)`, the error is automatically sent to `responder`
     ///   and your task is not called
     ///
     /// # Example: Chaining requests
@@ -2991,16 +2994,16 @@ impl<T: JsonRpcResponse> SentRequest<T> {
     /// # use sacp_test::*;
     /// # async fn example() -> Result<(), sacp::Error> {
     /// # let connection = mock_connection();
-    /// connection.on_receive_request(async |req: ValidateRequest, request_cx, cx| {
+    /// connection.on_receive_request(async |req: ValidateRequest, responder, cx| {
     ///     // Send initial request
     ///     cx.send_request(ValidateRequest { data: req.data.clone() })
-    ///         .on_receiving_ok_result(request_cx, async |validation, request_cx| {
+    ///         .on_receiving_ok_result(responder, async |validation, responder| {
     ///             // Only runs if validation succeeded
     ///             if validation.is_valid {
     ///                 // Respond to original request
-    ///                 request_cx.respond(ValidateResponse { is_valid: true, error: None })
+    ///                 responder.respond(ValidateResponse { is_valid: true, error: None })
     ///             } else {
-    ///                 request_cx.respond_with_error(sacp::util::internal_error("validation failed"))
+    ///                 responder.respond_with_error(sacp::util::internal_error("validation failed"))
     ///             }
     ///         })?;
     ///
@@ -3028,7 +3031,7 @@ impl<T: JsonRpcResponse> SentRequest<T> {
     #[track_caller]
     pub fn on_receiving_ok_result<F>(
         self,
-        request_cx: Responder<T>,
+        responder: Responder<T>,
         task: impl FnOnce(T, Responder<T>) -> F + 'static + Send,
     ) -> Result<(), crate::Error>
     where
@@ -3036,8 +3039,8 @@ impl<T: JsonRpcResponse> SentRequest<T> {
         T: Send,
     {
         self.on_receiving_result(async move |result| match result {
-            Ok(value) => task(value, request_cx).await,
-            Err(err) => request_cx.respond_with_error(err),
+            Ok(value) => task(value, responder).await,
+            Err(err) => responder.respond_with_error(err),
         })
     }
 
@@ -3052,17 +3055,17 @@ impl<T: JsonRpcResponse> SentRequest<T> {
     /// # use sacp_test::*;
     /// # async fn example() -> Result<(), sacp::Error> {
     /// # let connection = mock_connection();
-    /// connection.on_receive_request(async |req: MyRequest, request_cx, cx| {
+    /// connection.on_receive_request(async |req: MyRequest, responder, cx| {
     ///     // Send a request and schedule a callback for the response
     ///     cx.send_request(QueryRequest { id: 22 })
     ///         .on_receiving_result({
-    ///             let connection_cx = cx.clone();
+    ///             let connection = cx.clone();
     ///             async move |result| {
     ///                 match result {
     ///                     Ok(response) => {
     ///                         println!("Got response: {:?}", response);
     ///                         // Can send more messages here
-    ///                         connection_cx.send_notification(QueryComplete {})?;
+    ///                         connection.send_notification(QueryComplete {})?;
     ///                         Ok(())
     ///                 }
     ///                     Err(error) => {
@@ -3074,7 +3077,7 @@ impl<T: JsonRpcResponse> SentRequest<T> {
     ///         })?;
     ///
     ///     // Handler continues immediately without waiting
-    ///     request_cx.respond(MyResponse { status: "processing".into() })
+    ///     responder.respond(MyResponse { status: "processing".into() })
     /// }, sacp::on_receive_request!())
     /// # .connect_to(sacp_test::MockTransport).await?;
     /// # Ok(())

@@ -41,7 +41,7 @@
 //! # async fn example(transport: impl ConnectTo<Proxy>) -> Result<(), sacp::Error> {
 //! Proxy.connect_from()
 //!     // Intercept requests from the client
-//!     .on_receive_request_from(Client, async |req: ProcessRequest, request_cx, cx| {
+//!     .on_receive_request_from(Client, async |req: ProcessRequest, responder, cx| {
 //!         // Modify the request
 //!         let modified = ProcessRequest {
 //!             data: format!("prefix: {}", req.data),
@@ -49,7 +49,7 @@
 //!
 //!         // Forward to agent and relay the response back
 //!         cx.send_request_to(Agent, modified)
-//!             .forward_to_request_cx(request_cx)
+//!             .forward_response_to(responder)
 //!     }, sacp::on_receive_request!())
 //!     .connect_to(transport)
 //!     .await?;
@@ -87,11 +87,11 @@
 //! # use sacp::mcp_server::McpServer;
 //! # async fn example(transport: impl ConnectTo<Proxy>) -> Result<(), sacp::Error> {
 //! Proxy.connect_from()
-//!     .on_receive_request_from(Client, async |req: NewSessionRequest, request_cx, cx| {
+//!     .on_receive_request_from(Client, async |req: NewSessionRequest, responder, cx| {
 //!         let my_mcp_server = McpServer::<Conductor, _>::builder("tools").build();
 //!         cx.build_session_from(req)
 //!             .with_mcp_server(my_mcp_server)?
-//!             .on_proxy_session_start(request_cx, async |session_id| {
+//!             .on_proxy_session_start(responder, async |session_id| {
 //!                 // Session started with MCP server attached
 //!                 Ok(())
 //!             })

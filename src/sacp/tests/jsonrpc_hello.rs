@@ -102,12 +102,12 @@ async fn test_hello_world() {
             let server_transport = sacp::ByteStreams::new(server_writer, server_reader);
             let server = UntypedRole.connect_from().on_receive_request(
                 async move |request: PingRequest,
-                            request_cx: Responder<PongResponse>,
-                            _connection_cx: ConnectionTo<UntypedRole>| {
+                            responder: Responder<PongResponse>,
+                            _connection: ConnectionTo<UntypedRole>| {
                     let pong = PongResponse {
                         echo: format!("pong: {}", request.message),
                     };
-                    request_cx.respond(pong)
+                    responder.respond(pong)
                 },
                 sacp::on_receive_request!(),
             );
@@ -266,12 +266,12 @@ async fn test_multiple_sequential_requests() {
             let server_transport = sacp::ByteStreams::new(server_writer, server_reader);
             let server = UntypedRole.connect_from().on_receive_request(
                 async |request: PingRequest,
-                       request_cx: Responder<PongResponse>,
-                       _connection_cx: ConnectionTo<UntypedRole>| {
+                       responder: Responder<PongResponse>,
+                       _connection: ConnectionTo<UntypedRole>| {
                     let pong = PongResponse {
                         echo: format!("pong: {}", request.message),
                     };
-                    request_cx.respond(pong)
+                    responder.respond(pong)
                 },
                 sacp::on_receive_request!(),
             );
@@ -325,12 +325,12 @@ async fn test_concurrent_requests() {
             let server_transport = sacp::ByteStreams::new(server_writer, server_reader);
             let server = UntypedRole.connect_from().on_receive_request(
                 async |request: PingRequest,
-                       request_cx: Responder<PongResponse>,
-                       _connection_cx: ConnectionTo<UntypedRole>| {
+                       responder: Responder<PongResponse>,
+                       _connection: ConnectionTo<UntypedRole>| {
                     let pong = PongResponse {
                         echo: format!("pong: {}", request.message),
                     };
-                    request_cx.respond(pong)
+                    responder.respond(pong)
                 },
                 sacp::on_receive_request!(),
             );

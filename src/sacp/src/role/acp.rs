@@ -6,7 +6,7 @@ use crate::jsonrpc::{ConnectFrom, handlers::NullHandler, run::NullRun};
 use crate::role::{HasPeer, RemoteStyle};
 use crate::schema::{InitializeProxyRequest, InitializeRequest, METHOD_INITIALIZE_PROXY};
 use crate::util::MatchDispatchFrom;
-use crate::{ConnectTo, ConnectionTo, HandleMessageFrom, Handled, Dispatch, Role, RoleId};
+use crate::{ConnectTo, ConnectionTo, Dispatch, HandleMessageFrom, Handled, Role, RoleId};
 
 /// The client role - typically an IDE or CLI that controls an agent.
 ///
@@ -45,16 +45,14 @@ impl Client {
 
     /// Connect to `agent` and run `main_fn` with the [`ConnectionTo`].
     /// Returns the result of `main_fn` (or an error if sometihng goes wrong).
-    /// 
+    ///
     /// Equivalent to `self.connect_from().connect_with(agent, main_fn)`.
     pub async fn connect_with<R>(
         self,
-        agent: impl ConnectTo<Client>, 
+        agent: impl ConnectTo<Client>,
         main_fn: impl AsyncFnOnce(ConnectionTo<Agent>) -> Result<R, crate::Error>,
     ) -> Result<R, crate::Error> {
-        self.connect_from()
-            .connect_with(agent, main_fn)
-            .await
+        self.connect_from().connect_with(agent, main_fn).await
     }
 }
 
@@ -107,7 +105,8 @@ impl Role for Agent {
 impl Agent {
     /// Create a connection builder for an agent.
     pub fn connect_from(self) -> ConnectFrom<Agent, NullHandler, NullRun> {
-ConnectFrom::new(self)    }
+        ConnectFrom::new(self)
+    }
 }
 
 impl HasPeer<Agent> for Agent {
@@ -153,7 +152,8 @@ impl Role for Proxy {
 impl Proxy {
     /// Create a connection builder for a proxy.
     pub fn connect_from(self) -> ConnectFrom<Proxy, NullHandler, NullRun> {
-ConnectFrom::new(self)    }
+        ConnectFrom::new(self)
+    }
 }
 
 impl HasPeer<Proxy> for Proxy {
@@ -187,8 +187,8 @@ impl Role for Conductor {
     ) -> Result<Handled<Dispatch>, crate::Error> {
         // Handle various special messages:
         MatchDispatchFrom::new(message, &cx)
-            .if_request_from(Client, async |_req: InitializeRequest, request_cx| {
-                request_cx.respond_with_error(crate::Error::invalid_request().data(format!(
+            .if_request_from(Client, async |_req: InitializeRequest, responder| {
+                responder.respond_with_error(crate::Error::invalid_request().data(format!(
                     "proxies must be initialized with `{}`",
                     METHOD_INITIALIZE_PROXY
                 )))
@@ -198,16 +198,16 @@ impl Role for Conductor {
             // convert into a regular initialize.
             .if_request_from(
                 Client,
-                async |request: InitializeProxyRequest, request_cx| {
+                async |request: InitializeProxyRequest, responder| {
                     let InitializeProxyRequest { initialize } = request;
                     cx.send_request_to(Agent, initialize)
-                        .forward_to_request_cx(request_cx)
+                        .forward_response_to(responder)
                 },
             )
             .await
             // New session coming from the client -- proxy to the agent
             // and add a dynamic handler for that session-id.
-            .if_request_from(Client, async |request: NewSessionRequest, request_cx| {
+            .if_request_from(Client, async |request: NewSessionRequest, responder| {
                 cx.send_request_to(Agent, request).on_receiving_result({
                     let cx = cx.clone();
                     async move |result| {
@@ -215,7 +215,7 @@ impl Role for Conductor {
                             cx.add_dynamic_handler(ProxySessionMessages::new(session_id.clone()))?
                                 .run_indefinitely();
                         }
-                        request_cx.respond_with_result(result)
+                        responder.respond_with_result(result)
                     }
                 })
             })
@@ -237,7 +237,8 @@ impl Role for Conductor {
 impl Conductor {
     /// Create a connection builder for a conductor.
     pub fn connect_from(self) -> ConnectFrom<Conductor, NullHandler, NullRun> {
-ConnectFrom::new(self)    }
+        ConnectFrom::new(self)
+    }
 }
 
 impl HasPeer<Client> for Conductor {

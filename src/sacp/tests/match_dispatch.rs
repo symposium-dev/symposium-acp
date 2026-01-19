@@ -151,11 +151,11 @@ async fn modify_message_en_route_inline() -> Result<(), sacp::Error> {
             UntypedRole.connect_from()
                 .on_receive_request(
                     async move |mut request: EchoRequestResponse,
-                                request_cx: Responder<EchoRequestResponse>,
-                                _connection_cx: ConnectionTo<UntypedRole>| {
+                                responder: Responder<EchoRequestResponse>,
+                                _connection: ConnectionTo<UntypedRole>| {
                         request.text.push("b".to_string());
                         Ok(Handled::No {
-                            message: (request, request_cx),
+                            message: (request, responder),
                             retry: false,
                         })
                     },
@@ -202,19 +202,19 @@ async fn modify_message_and_stop() -> Result<(), sacp::Error> {
             UntypedRole.connect_from()
                 .on_receive_request(
                     async move |request: EchoRequestResponse,
-                                request_cx: Responder<EchoRequestResponse>,
-                                _connection_cx: ConnectionTo<UntypedRole>| {
-                        request_cx.respond(request)
+                                responder: Responder<EchoRequestResponse>,
+                                _connection: ConnectionTo<UntypedRole>| {
+                        responder.respond(request)
                     },
                     sacp::on_receive_request!(),
                 )
                 .on_receive_request(
                     async move |mut request: EchoRequestResponse,
-                                request_cx: Responder<EchoRequestResponse>,
-                                _connection_cx: ConnectionTo<UntypedRole>| {
+                                responder: Responder<EchoRequestResponse>,
+                                _connection: ConnectionTo<UntypedRole>| {
                         request.text.push("b".to_string());
                         Ok(Handled::No {
-                            message: (request, request_cx),
+                            message: (request, responder),
                             retry: false,
                         })
                     },

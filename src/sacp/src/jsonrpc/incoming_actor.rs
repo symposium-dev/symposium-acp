@@ -191,7 +191,7 @@ enum IncomingProtocolMsg<Counterpart: Role> {
 /// Dispatches a JSON-RPC request to the handler.
 /// Report an error back to the server if it does not get handled.
 fn dispatch_from_request<Counterpart: Role>(
-    json_rpc_cx: &ConnectionTo<Counterpart>,
+    connection: &ConnectionTo<Counterpart>,
     request: jsonrpcmsg::Request,
 ) -> Dispatch {
     let message = UntypedMessage::new(&request.method, &request.params).expect("well-formed JSON");
@@ -200,7 +200,7 @@ fn dispatch_from_request<Counterpart: Role>(
         Some(id) => Dispatch::Request(
             message,
             Responder::new(
-                json_rpc_cx.message_tx.clone(),
+                connection.message_tx.clone(),
                 request.method.clone(),
                 id.clone(),
             ),
@@ -228,8 +228,8 @@ fn dispatch_from_response(
     } = pending_reply;
 
     // Create a Dispatch::Response with a ResponseRouter that routes to the oneshot
-    let response_cx = ResponseRouter::new(method.clone(), id.clone(), role_id, sender);
-    Dispatch::Response(result, response_cx)
+    let router = ResponseRouter::new(method.clone(), id.clone(), role_id, sender);
+    Dispatch::Response(result, router)
 }
 
 #[tracing::instrument(
@@ -326,9 +326,9 @@ async fn dispatch_dispatch<Counterpart: Role>(
                     connection.clone(),
                 )
             }
-            Dispatch::Response(result, response_cx) => {
+            Dispatch::Response(result, router) => {
                 tracing::trace!(?method, "Forwarding response");
-                response_cx.respond_with_result(result)
+                router.respond_with_result(result)
             }
         }
     }

@@ -61,16 +61,16 @@ async fn test_elizacp_mcp_tool_call() -> Result<(), sacp::Error> {
                 ))
                 .await
         })
-        .connect_with(transport, async |client_cx| {
+        .connect_with(transport, async |connection_to_client| {
             // Initialize
             let _init_response =
-                recv(client_cx.send_request(InitializeRequest::new(ProtocolVersion::LATEST)))
+                recv(connection_to_client.send_request(InitializeRequest::new(ProtocolVersion::LATEST)))
                     .await?;
 
             // Create session with an MCP server
             // Use the mcp-echo-server from sacp-test (pre-built binary)
             let mcp_server_binary = test_binaries::mcp_echo_server_binary();
-            let session_response = recv(client_cx.send_request(
+            let session_response = recv(connection_to_client.send_request(
                 NewSessionRequest::new(PathBuf::from("/tmp")).mcp_servers(vec![McpServer::Stdio(
                     McpServerStdio::new("test".to_string(), mcp_server_binary),
                 )]),
@@ -80,7 +80,7 @@ async fn test_elizacp_mcp_tool_call() -> Result<(), sacp::Error> {
             let session_id = session_response.session_id;
 
             // Send a prompt to invoke the MCP tool
-            let _prompt_response = recv(client_cx.send_request(PromptRequest::new(
+            let _prompt_response = recv(connection_to_client.send_request(PromptRequest::new(
                 session_id.clone(),
                 vec![ContentBlock::Text(TextContent::new(
                     r#"Use tool test::echo with {"message": "Hello from test!"}"#.to_string(),

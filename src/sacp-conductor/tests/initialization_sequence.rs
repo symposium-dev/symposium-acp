@@ -78,7 +78,7 @@ impl ConnectTo<Conductor> for InitComponent {
             // Handle InitializeProxyRequest (we're a proxy)
             .on_receive_request_from(
                 Client,
-                async move |request: InitializeProxyRequest, request_cx, cx| {
+                async move |request: InitializeProxyRequest, responder, cx| {
                     *config.received_init_type.lock().expect("unpoisoned") =
                         Some(InitRequestType::InitializeProxy);
 
@@ -86,7 +86,7 @@ impl ConnectTo<Conductor> for InitComponent {
                     cx.send_request_to(sacp::Agent, request.initialize)
                         .on_receiving_result(async move |response| {
                             let response: InitializeResponse = response?;
-                            request_cx.respond(response)
+                            responder.respond(response)
                         })
                 },
                 sacp::on_receive_request!(),
@@ -94,7 +94,7 @@ impl ConnectTo<Conductor> for InitComponent {
             // Handle InitializeRequest (we're the agent)
             .on_receive_request_from(
                 Client,
-                async move |request: InitializeRequest, request_cx, _cx| {
+                async move |request: InitializeRequest, responder, _cx| {
                     *config2.received_init_type.lock().expect("unpoisoned") =
                         Some(InitRequestType::Initialize);
 
@@ -102,7 +102,7 @@ impl ConnectTo<Conductor> for InitComponent {
                     let response = InitializeResponse::new(request.protocol_version)
                         .agent_capabilities(AgentCapabilities::new());
 
-                    request_cx.respond(response)
+                    responder.respond(response)
                 },
                 sacp::on_receive_request!(),
             )
@@ -143,9 +143,9 @@ async fn run_test_with_components(
 async fn test_single_component_gets_initialize_request() -> Result<(), sacp::Error> {
     // Single component (agent) should receive InitializeRequest - we use ElizaAgent
     // which properly handles InitializeRequest
-    run_test_with_components(vec![], async |editor_cx| {
+    run_test_with_components(vec![], async |connection_to_editor| {
         let init_response =
-            recv(editor_cx.send_request(InitializeRequest::new(ProtocolVersion::LATEST))).await;
+            recv(connection_to_editor.send_request(InitializeRequest::new(ProtocolVersion::LATEST))).await;
 
         assert!(
             init_response.is_ok(),
@@ -166,9 +166,9 @@ async fn test_two_components_proxy_gets_initialize_proxy() -> Result<(), sacp::E
     // Second component (agent, ElizaAgent) gets InitializeRequest
     let component1 = InitConfig::new();
 
-    run_test_with_components(vec![InitComponent::new(&component1)], async |editor_cx| {
+    run_test_with_components(vec![InitComponent::new(&component1)], async |connection_to_editor| {
         let init_response =
-            recv(editor_cx.send_request(InitializeRequest::new(ProtocolVersion::LATEST))).await;
+            recv(connection_to_editor.send_request(InitializeRequest::new(ProtocolVersion::LATEST))).await;
 
         assert!(
             init_response.is_ok(),
@@ -204,9 +204,9 @@ async fn test_three_components_all_proxies_get_initialize_proxy() -> Result<(), 
             InitComponent::new(&component1),
             InitComponent::new(&component2),
         ],
-        async |editor_cx| {
+        async |connection_to_editor| {
             let init_response =
-                recv(editor_cx.send_request(InitializeRequest::new(ProtocolVersion::LATEST))).await;
+                recv(connection_to_editor.send_request(InitializeRequest::new(ProtocolVersion::LATEST))).await;
 
             assert!(
                 init_response.is_ok(),
@@ -249,12 +249,12 @@ impl ConnectTo<Conductor> for BadProxy {
             .name("bad-proxy")
             .on_receive_request_from(
                 Client,
-                async move |request: InitializeProxyRequest, request_cx, cx| {
+                async move |request: InitializeProxyRequest, responder, cx| {
                     // BUG: forwards InitializeProxyRequest instead of request.initialize
                     cx.send_request_to(Agent, request)
                         .on_receiving_result(async move |response| {
                             let response: InitializeResponse = response?;
-                            request_cx.respond(response)
+                            responder.respond(response)
                         })
                 },
                 sacp::on_receive_request!(),
@@ -300,9 +300,9 @@ async fn test_conductor_rejects_initialize_proxy_forwarded_to_agent() -> Result<
     let result = run_bad_proxy_test(
         vec![DynConnectTo::new(BadProxy)],
         DynConnectTo::new(ElizaAgent::new(true)),
-        async |editor_cx| {
+        async |connection_to_editor| {
             let init_response =
-                recv(editor_cx.send_request(InitializeRequest::new(ProtocolVersion::LATEST))).await;
+                recv(connection_to_editor.send_request(InitializeRequest::new(ProtocolVersion::LATEST))).await;
 
             if let Err(err) = init_response {
                 assert!(
@@ -341,9 +341,9 @@ async fn test_conductor_rejects_initialize_proxy_forwarded_to_proxy() -> Result<
             DynConnectTo::new(InitComponent::new(&InitConfig::new())), // This proxy will receive the bad request
         ],
         DynConnectTo::new(ElizaAgent::new(true)), // Agent
-        async |editor_cx| {
+        async |connection_to_editor| {
             let init_response =
-                recv(editor_cx.send_request(InitializeRequest::new(ProtocolVersion::LATEST))).await;
+                recv(connection_to_editor.send_request(InitializeRequest::new(ProtocolVersion::LATEST))).await;
 
             // The error may come through recv() or bubble up through the test harness
             if let Err(err) = init_response {

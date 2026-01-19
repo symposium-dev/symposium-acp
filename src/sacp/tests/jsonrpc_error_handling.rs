@@ -273,10 +273,10 @@ async fn test_handler_returns_error() {
             let server_transport = sacp::ByteStreams::new(server_writer, server_reader);
             let server = UntypedRole.connect_from().on_receive_request(
                 async |_request: ErrorRequest,
-                       request_cx: Responder<SimpleResponse>,
-                       _connection_cx: ConnectionTo<UntypedRole>| {
+                       responder: Responder<SimpleResponse>,
+                       _connection: ConnectionTo<UntypedRole>| {
                     // Explicitly return an error
-                    request_cx.respond_with_error(sacp::Error::internal_error())
+                    responder.respond_with_error(sacp::Error::internal_error())
                 },
                 sacp::on_receive_request!(),
             );
@@ -357,14 +357,14 @@ async fn test_missing_required_params() {
             let server_transport = sacp::ByteStreams::new(server_writer, server_reader);
             let server = UntypedRole.connect_from().on_receive_request(
                 async |_request: EmptyRequest,
-                       request_cx: Responder<SimpleResponse>,
-                       _connection_cx: ConnectionTo<UntypedRole>| {
+                       responder: Responder<SimpleResponse>,
+                       _connection: ConnectionTo<UntypedRole>| {
                     // This will be called, but EmptyRequest parsing already succeeded
                     // The test is actually checking if EmptyRequest (no params) fails to parse as SimpleRequest
                     // But with the new API, EmptyRequest parses successfully since it expects no params
                     // We need to manually check - but actually the parse_request for EmptyRequest
                     // accepts anything for "strict_method", so the error must come from somewhere else
-                    request_cx.respond_with_error(sacp::Error::invalid_params())
+                    responder.respond_with_error(sacp::Error::invalid_params())
                 },
                 sacp::on_receive_request!(),
             );

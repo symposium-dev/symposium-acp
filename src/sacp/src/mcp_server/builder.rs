@@ -350,10 +350,10 @@ impl<'scope, Counterpart: Role> McpServerConnect<Counterpart> for McpServerBuilt
         self.name.clone()
     }
 
-    fn connect(&self, mcp_cx: McpConnectionTo<Counterpart>) -> DynConnectTo<role::mcp::Client> {
+    fn connect(&self, mcp_connection: McpConnectionTo<Counterpart>) -> DynConnectTo<role::mcp::Client> {
         DynConnectTo::new(McpServerConnection {
             data: self.data.clone(),
-            mcp_cx,
+            mcp_connection,
         })
     }
 }
@@ -361,7 +361,7 @@ impl<'scope, Counterpart: Role> McpServerConnect<Counterpart> for McpServerBuilt
 /// An MCP server instance connected to the ACP framework.
 pub(crate) struct McpServerConnection<Counterpart: Role> {
     data: Arc<McpServerData<Counterpart>>,
-    mcp_cx: McpConnectionTo<Counterpart>,
+    mcp_connection: McpConnectionTo<Counterpart>,
 }
 
 impl<Counterpart: Role> ConnectTo<role::mcp::Client> for McpServerConnection<Counterpart> {
@@ -427,7 +427,7 @@ impl<R: Role> ServerHandler for McpServerConnection<R> {
         // Execute the user's tool, unless cancellation occurs
         let has_structured_output = registered.has_structured_output;
         match futures::future::select(
-            registered.tool.call_tool(serde_value, self.mcp_cx.clone()),
+            registered.tool.call_tool(serde_value, self.mcp_connection.clone()),
             pin!(context.ct.cancelled()),
         )
         .await
@@ -572,14 +572,14 @@ where
         self.description.clone()
     }
 
-    async fn call_tool(&self, params: P, mcp_cx: McpConnectionTo<R>) -> Result<Ret, crate::Error> {
+    async fn call_tool(&self, params: P, mcp_connection: McpConnectionTo<R>) -> Result<Ret, crate::Error> {
         let (result_tx, result_rx) = oneshot::channel();
 
         self.call_tx
             .clone()
             .send(ToolCall {
                 params,
-                mcp_cx,
+                mcp_connection,
                 result_tx,
             })
             .await

@@ -38,11 +38,11 @@
 //! ```ignore
 //! // DEADLOCK: This blocks the loop waiting for a response,
 //! // but the response can't arrive because the loop is blocked!
-//! builder.on_receive_request(async |request: MyRequest, request_cx, cx| {
+//! builder.on_receive_request(async |request: MyRequest, responder, cx| {
 //!     let response = cx.send_request(SomeRequest { ... })
 //!         .block_task()  // <-- Waits for response
 //!         .await?;       // <-- But response can never arrive!
-//!     request_cx.respond(response)
+//!     responder.respond(response)
 //! }, on_receive_request!());
 //! ```
 //!
@@ -113,7 +113,7 @@
 //! Use [`spawn`] to run work outside the dispatch loop:
 //!
 //! ```ignore
-//! builder.on_receive_request(async |request: MyRequest, request_cx, cx| {
+//! builder.on_receive_request(async |request: MyRequest, responder, cx| {
 //!     cx.spawn(async move {
 //!         // This runs outside the loop - other messages may be processed
 //!         let response = cx.send_request(SomeRequest { ... })
@@ -122,7 +122,7 @@
 //!         // ...
 //!         Ok(())
 //!     })?;
-//!     request_cx.respond(MyResponse { ... })  // Return immediately
+//!     responder.respond(MyResponse { ... })  // Return immediately
 //! }, on_receive_request!());
 //! ```
 //!

@@ -12,12 +12,12 @@
 //! # use sacp_test::{ValidateRequest, ValidateResponse};
 //! # async fn example(transport: impl ConnectTo<Client>) -> Result<(), sacp::Error> {
 //! Client.connect_from()
-//!     .on_receive_request(async |req: ValidateRequest, request_cx, cx| {
+//!     .on_receive_request(async |req: ValidateRequest, responder, cx| {
 //!         // Process the request
 //!         let is_valid = req.data.len() > 0;
 //!
 //!         // Send the response
-//!         request_cx.respond(ValidateResponse { is_valid, error: None })
+//!         responder.respond(ValidateResponse { is_valid, error: None })
 //!     }, sacp::on_receive_request!())
 //!     .connect_with(transport, async |cx| { Ok(()) })
 //!     .await?;
@@ -58,9 +58,9 @@
 //! # use sacp_test::{MyRequest, MyResponse};
 //! # async fn example(transport: impl ConnectTo<Client>) -> Result<(), sacp::Error> {
 //! # Client.connect_from()
-//! #   .on_receive_request(async |req: MyRequest, request_cx, cx| {
+//! #   .on_receive_request(async |req: MyRequest, responder, cx| {
 //! // Send a successful response
-//! request_cx.respond(MyResponse { status: "ok".into() })?;
+//! responder.respond(MyResponse { status: "ok".into() })?;
 //! # Ok(())
 //! #   }, sacp::on_receive_request!())
 //! #   .connect_with(transport, async |_| Ok(())).await?;
@@ -75,8 +75,8 @@
 //! # use sacp_test::{MyRequest, MyResponse};
 //! # async fn example(transport: impl ConnectTo<Client>) -> Result<(), sacp::Error> {
 //! # Client.connect_from()
-//! #   .on_receive_request(async |req: MyRequest, request_cx, cx| {
-//! request_cx.respond_with_error(sacp::Error::invalid_params())?;
+//! #   .on_receive_request(async |req: MyRequest, responder, cx| {
+//! responder.respond_with_error(sacp::Error::invalid_params())?;
 //! # Ok(())
 //! #   }, sacp::on_receive_request!())
 //! #   .connect_with(transport, async |_| Ok(())).await?;
@@ -97,13 +97,13 @@
 //! # use sacp_test::{ValidateRequest, ValidateResponse, ExecuteRequest, ExecuteResponse};
 //! # async fn example(transport: impl ConnectTo<Client>) -> Result<(), sacp::Error> {
 //! Client.connect_from()
-//!     .on_receive_request(async |req: ValidateRequest, request_cx, cx| {
+//!     .on_receive_request(async |req: ValidateRequest, responder, cx| {
 //!         // Handle validation requests
-//!         request_cx.respond(ValidateResponse { is_valid: true, error: None })
+//!         responder.respond(ValidateResponse { is_valid: true, error: None })
 //!     }, sacp::on_receive_request!())
-//!     .on_receive_request(async |req: ExecuteRequest, request_cx, cx| {
+//!     .on_receive_request(async |req: ExecuteRequest, responder, cx| {
 //!         // Handle execution requests
-//!         request_cx.respond(ExecuteResponse { result: "done".into() })
+//!         responder.respond(ExecuteResponse { result: "done".into() })
 //!     }, sacp::on_receive_request!())
 //! #   .connect_with(transport, async |_| Ok(())).await?;
 //! # Ok(())

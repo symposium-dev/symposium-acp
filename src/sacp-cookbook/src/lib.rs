@@ -175,10 +175,10 @@ pub mod connecting_as_client {
     //!
     //! ```ignore
     //! Client.connect_from()
-    //!     .on_receive_request(async |req: RequestPermissionRequest, request_cx, _cx| {
+    //!     .on_receive_request(async |req: RequestPermissionRequest, responder, _cx| {
     //!         // Auto-approve by selecting the first option (YOLO mode)
     //!         let option_id = req.options.first().map(|opt| opt.id.clone());
-    //!         request_cx.respond(RequestPermissionResponse {
+    //!         responder.respond(RequestPermissionResponse {
     //!             outcome: match option_id {
     //!                 Some(id) => RequestPermissionOutcome::Selected { option_id: id },
     //!                 None => RequestPermissionOutcome::Cancelled,
@@ -234,23 +234,23 @@ pub mod building_an_agent {
     //!     Agent.connect_from()
     //!         .name("my-agent")
     //!         // Handle initialization
-    //!         .on_receive_request(async |req: InitializeRequest, request_cx, _cx| {
-    //!             request_cx.respond(
+    //!         .on_receive_request(async |req: InitializeRequest, responder, _cx| {
+    //!             responder.respond(
     //!                 InitializeResponse::new(req.protocol_version)
     //!                     .agent_capabilities(AgentCapabilities::new())
     //!             )
     //!         }, sacp::on_receive_request!())
     //!         // Handle session creation
-    //!         .on_receive_request(async |req: NewSessionRequest, request_cx, _cx| {
-    //!             request_cx.respond(NewSessionResponse::new(SessionId::new("session-1")))
+    //!         .on_receive_request(async |req: NewSessionRequest, responder, _cx| {
+    //!             responder.respond(NewSessionResponse::new(SessionId::new("session-1")))
     //!         }, sacp::on_receive_request!())
     //!         // Handle prompts
-    //!         .on_receive_request(async |req: PromptRequest, request_cx, cx| {
+    //!         .on_receive_request(async |req: PromptRequest, responder, cx| {
     //!             // Send streaming updates via notifications
     //!             // cx.send_notification(SessionNotification { ... })?;
     //!
     //!             // Return final response
-    //!             request_cx.respond(PromptResponse::new(StopReason::EndTurn))
+    //!             responder.respond(PromptResponse::new(StopReason::EndTurn))
     //!         }, sacp::on_receive_request!())
     //!         // Reject unknown messages
     //!         .on_receive_dispatch(async |message: Dispatch, cx: ConnectionTo<AgentToClient>| {
@@ -267,7 +267,7 @@ pub mod building_an_agent {
     //! while processing a prompt:
     //!
     //! ```ignore
-    //! .on_receive_request(async |req: PromptRequest, request_cx, cx| {
+    //! .on_receive_request(async |req: PromptRequest, responder, cx| {
     //!     // Stream some text
     //!     cx.send_notification(SessionNotification {
     //!         session_id: req.session_id.clone(),
@@ -287,7 +287,7 @@ pub mod building_an_agent {
     //!         meta: None,
     //!     })?;
     //!
-    //!     request_cx.respond(PromptResponse {
+    //!     responder.respond(PromptResponse {
     //!         stop_reason: StopReason::EndTurn,
     //!         meta: None,
     //!     })
@@ -359,8 +359,8 @@ pub mod reusable_components {
     //!     async fn serve(self, client: impl Component<<AgentToClient as JrLink>::ConnectsTo>) -> Result<(), sacp::Error> {
     //!         Agent.connect_from()
     //!             .name(&self.name)
-    //!             .on_receive_request(async move |req: InitializeRequest, request_cx, _cx| {
-    //!                 request_cx.respond(
+    //!             .on_receive_request(async move |req: InitializeRequest, responder, _cx| {
+    //!                 responder.respond(
     //!                     InitializeResponse::new(req.protocol_version)
     //!                         .agent_capabilities(AgentCapabilities::new())
     //!                 )
@@ -416,8 +416,8 @@ pub mod custom_message_handlers {
     //!         _cx: ConnectionTo<Self::Link>,
     //!     ) -> Result<Handled<Dispatch>, sacp::Error> {
     //!         MatchDispatch::new(message)
-    //!             .if_request(async |req: InitializeRequest, request_cx| {
-    //!                 request_cx.respond(
+    //!             .if_request(async |req: InitializeRequest, responder| {
+    //!                 responder.respond(
     //!                     InitializeResponse::new(req.protocol_version)
     //!                         .agent_capabilities(AgentCapabilities::new())
     //!                 )
@@ -597,7 +597,7 @@ pub mod per_session_mcp_server {
     //!
     //! async fn run_proxy(transport: impl Component<ConductorToProxy>) -> Result<(), sacp::Error> {
     //!     Proxy.connect_from()
-    //!         .on_receive_request_from(Client, async move |request: NewSessionRequest, request_cx, cx| {
+    //!         .on_receive_request_from(Client, async move |request: NewSessionRequest, responder, cx| {
     //!             // Extract session context from the request
     //!             let workspace_path = request.cwd.clone();
     //!
@@ -613,7 +613,7 @@ pub mod per_session_mcp_server {
     //!             // Build the session and run code after it starts
     //!             cx.build_session_from(request)
     //!                 .with_mcp_server(mcp_server)?
-    //!                 .on_proxy_session_start(request_cx, async move |session_id| {
+    //!                 .on_proxy_session_start(responder, async move |session_id| {
     //!                     // This callback runs after the session-id has been sent to the
     //!                     // client but before any further messages from the client or agent
     //!                     // related to this session have been processed.
@@ -655,7 +655,7 @@ pub mod per_session_mcp_server {
     //! # use sacp::link::ConductorToProxy;
     //! # async fn run_proxy(transport: impl Component<ConductorToProxy>) -> Result<(), sacp::Error> {
     //!     Proxy.connect_from()
-    //!         .on_receive_request_from(Client, async |request: NewSessionRequest, request_cx, cx| {
+    //!         .on_receive_request_from(Client, async |request: NewSessionRequest, responder, cx| {
     //!             let cwd = request.cwd.clone();
     //!             let mcp_server = McpServer::builder("tools")
     //!                 .tool_fn("get_cwd", "Returns working directory", {
@@ -666,7 +666,7 @@ pub mod per_session_mcp_server {
     //!             let session_id = cx.build_session_from(request)
     //!                 .with_mcp_server(mcp_server)?
     //!                 .block_task()
-    //!                 .start_session_proxy(request_cx)
+    //!                 .start_session_proxy(responder)
     //!                 .await?;
     //!
     //!             tracing::info!(%session_id, "Session started");

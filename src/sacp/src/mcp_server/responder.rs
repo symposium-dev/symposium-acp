@@ -13,7 +13,7 @@ use crate::{
 /// A tool call request sent through the channel.
 pub(super) struct ToolCall<P, R, MyRole: Role> {
     pub(crate) params: P,
-    pub(crate) mcp_cx: McpConnectionTo<MyRole>,
+    pub(crate) mcp_connection: McpConnectionTo<MyRole>,
     pub(crate) result_tx: futures::channel::oneshot::Sender<Result<R, crate::Error>>,
 }
 
@@ -52,11 +52,11 @@ where
         } = self;
         while let Some(ToolCall {
             params,
-            mcp_cx,
+            mcp_connection,
             result_tx,
         }) = call_rx.next().await
         {
-            let result = tool_future_fn(&mut func, params, mcp_cx).await;
+            let result = tool_future_fn(&mut func, params, mcp_connection).await;
             result_tx
                 .send(result)
                 .map_err(|_| crate::util::internal_error("failed to send MCP result"))?;
@@ -105,7 +105,7 @@ where
                 fn hack<'a, F, P, R, MyRole>(
                     func: &'a F,
                     params: P,
-                    mcp_cx: McpConnectionTo<MyRole>,
+                    mcp_connection: McpConnectionTo<MyRole>,
                     tool_future_fn: &'a (
                             dyn Fn(
                         &'a F,
@@ -124,7 +124,7 @@ where
                     F: Send + Sync,
                 {
                     Box::pin(async move {
-                        let result = tool_future_fn(func, params, mcp_cx).await;
+                        let result = tool_future_fn(func, params, mcp_connection).await;
                         // Ignore send errors - the receiver may have been dropped
                         let _ = result_tx.send(result);
                     })
@@ -132,11 +132,11 @@ where
 
                 let ToolCall {
                     params,
-                    mcp_cx,
+                    mcp_connection,
                     result_tx,
                 } = tool_call;
 
-                hack(&func, params, mcp_cx, &*tool_future_fn, result_tx).await;
+                hack(&func, params, mcp_connection, &*tool_future_fn, result_tx).await;
                 Ok(())
             },
             |a, b| Box::pin(a(b)),

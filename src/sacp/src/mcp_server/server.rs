@@ -171,10 +171,10 @@ where
         MatchDispatchFrom::new(message, &cx)
             .if_request_from(
                 Client,
-                async |mut request: NewSessionRequest, request_cx| {
+                async |mut request: NewSessionRequest, responder| {
                     self.modify_new_session_request(&mut request);
                     Ok(Handled::No {
-                        message: (request, request_cx),
+                        message: (request, responder),
                         retry: false,
                     })
                 },
@@ -212,24 +212,24 @@ where
                 },
                 crate::on_receive_dispatch!(),
             )
-            .with_spawned(async move |server_to_client_cx| {
+            .with_spawned(async move |connection_to_client| {
                 let spawned_server: DynConnectTo<role::mcp::Client> =
                     connect.connect(McpConnectionTo {
                         acp_url,
-                        connection_cx: server_to_client_cx.clone(),
+                        connection: connection_to_client.clone(),
                     });
 
                 role::mcp::Client.connect_from()
                     .on_receive_dispatch(
-                        async |message_from_server: Dispatch, _client_to_server_cx| {
+                        async |message_from_server: Dispatch, _| {
                             // when we receive a message from the server, fwd to the client
-                            server_to_client_cx.send_proxied_message(message_from_server)
+                            connection_to_client.send_proxied_message(message_from_server)
                         },
                         crate::on_receive_dispatch!(),
                     )
-                    .connect_with(spawned_server, async |client_to_server_cx| {
+                    .connect_with(spawned_server, async |connection_to_server| {
                         while let Some(message_from_client) = rx.next().await {
-                            client_to_server_cx.send_proxied_message(message_from_client)?;
+                            connection_to_server.send_proxied_message(message_from_client)?;
                         }
                         Ok(())
                     })

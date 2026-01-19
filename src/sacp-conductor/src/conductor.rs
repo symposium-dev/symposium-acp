@@ -117,8 +117,8 @@ use futures::{
     channel::mpsc::{self},
 };
 use sacp::{
-    Agent, BoxFuture, Client, Conductor, DynConnectTo, Error, JsonRpcMessage, Dispatch, Proxy, Role,
-    RunWithConnectionTo, ConnectTo, role::HasPeer, util::MatchDispatch,
+    Agent, BoxFuture, Client, Conductor, ConnectTo, Dispatch, DynConnectTo, Error, JsonRpcMessage,
+    Proxy, Role, RunWithConnectionTo, role::HasPeer, util::MatchDispatch,
 };
 use sacp::{
     ConnectFrom, ConnectionTo, JsonRpcNotification, JsonRpcRequest, SentRequest, UntypedMessage,
@@ -504,14 +504,14 @@ where
                 message,
             } => {
                 let wrapped = message.map(
-                    |request, request_cx| {
+                    |request, responder| {
                         (
                             McpOverAcpMessage {
                                 connection_id: connection_id.clone(),
                                 message: request,
                                 meta: None,
                             },
-                            request_cx,
+                            responder,
                         )
                     },
                     |notification| McpOverAcpMessage {
@@ -566,15 +566,15 @@ where
         };
 
         match message {
-            Dispatch::Request(request, request_cx) => self
+            Dispatch::Request(request, responder) => self
                 .send_request_to_predecessor_of(client, source_component_index, request)
-                .forward_to_request_cx(request_cx),
+                .forward_response_to(responder),
             Dispatch::Notification(notification) => self.send_notification_to_predecessor_of(
                 client,
                 source_component_index,
                 notification,
             ),
-            Dispatch::Response(result, response_cx) => response_cx.respond_with_result(result),
+            Dispatch::Response(result, router) => router.respond_with_result(result),
         }
     }
 
@@ -781,7 +781,8 @@ where
     ) -> ConnectFrom<Conductor, impl HandleMessageFrom<Proxy> + 'static> {
         type SuccessorDispatch = Dispatch<SuccessorMessage, SuccessorMessage>;
         let mut conductor_tx = self.conductor_tx.clone();
-        Conductor.connect_from()
+        Conductor
+            .connect_from()
             .name(format!("conductor-to-component({})", component_index))
             // Intercept messages sent by the proxy.
             .on_receive_dispatch(
@@ -854,14 +855,14 @@ where
         tracing::debug!(?message, "forward_message_to_proxy");
 
         MatchDispatch::new(message)
-            .if_request(async |_request: InitializeProxyRequest, request_cx| {
-                request_cx.respond_with_error(
+            .if_request(async |_request: InitializeProxyRequest, responder| {
+                responder.respond_with_error(
                     sacp::Error::invalid_request()
                         .data("initialize/proxy requests are only sent by the conductor"),
                 )
             })
             .await
-            .if_request(async |request: InitializeRequest, request_cx| {
+            .if_request(async |request: InitializeRequest, responder| {
                 // The pattern for `Initialize` messages is a bit subtle.
                 // Proxy receive incoming `Initialize` messages as if they
                 // were a client. The conductor (us) intercepts these and
@@ -873,7 +874,7 @@ where
                     .send_request(InitializeProxyRequest::from(request))
                     .on_receiving_result(async move |result| {
                         tracing::debug!(?result, "got initialize_proxy response from proxy");
-                        request_cx.respond_with_result(result)
+                        responder.respond_with_result(result)
                     })
             })
             .await
@@ -918,7 +919,7 @@ where
 
                 agent_connection
                     .send_request(request)
-                    .forward_to_request_cx(responder)
+                    .forward_response_to(responder)
             })
             .await
             .if_request(
@@ -1157,7 +1158,8 @@ impl ProxiesAndAgent {
         P: ConnectTo<Conductor> + 'static,
         I: IntoIterator<Item = P>,
     {
-        self.proxies.extend(proxies.into_iter().map(DynConnectTo::new));
+        self.proxies
+            .extend(proxies.into_iter().map(DynConnectTo::new));
         self
     }
 }
@@ -1332,12 +1334,12 @@ impl ConductorHostRole for Agent {
 
         // Not yet initialized - expect an initialize request.
         // Error if we get anything else.
-        let Dispatch::Request(request, request_cx) = message else {
+        let Dispatch::Request(request, init_responder) = message else {
             message.respond_with_error(invalid_request(), client_connection.clone())?;
             return Err(invalid_request());
         };
         if !InitializeRequest::matches_method(request.method()) {
-            request_cx.respond_with_error(invalid_request())?;
+            init_responder.respond_with_error(invalid_request())?;
             return Err(invalid_request());
         }
 
@@ -1345,7 +1347,7 @@ impl ConductorHostRole for Agent {
             match InitializeRequest::parse_message(request.method(), request.params()) {
                 Ok(r) => r,
                 Err(error) => {
-                    request_cx.respond_with_error(error)?;
+                    init_responder.respond_with_error(error)?;
                     return Err(invalid_request());
                 }
             };
@@ -1358,8 +1360,9 @@ impl ConductorHostRole for Agent {
         // Spawn the agent component
         debug!(?agent_component, "spawning agent");
 
-        let agent_cx = client_connection.spawn_connection(
-            Client.connect_from()
+        let connection_to_agent = client_connection.spawn_connection(
+            Client
+                .connect_from()
                 .name("conductor-to-agent")
                 // Intercept agent-to-client messages from the agent.
                 .on_receive_dispatch(
@@ -1379,14 +1382,14 @@ impl ConductorHostRole for Agent {
                 ),
             agent_component,
         )?;
-        responder.successor = Arc::new(agent_cx);
+        responder.successor = Arc::new(connection_to_agent);
 
         // Spawn the proxy components
         responder.spawn_proxies(client_connection.clone(), proxy_components)?;
 
         Ok(Dispatch::Request(
             modified_req.to_untyped_message()?,
-            request_cx,
+            init_responder,
         ))
     }
 
@@ -1429,12 +1432,12 @@ impl ConductorHostRole for Proxy {
 
         // Not yet initialized - expect an InitializeProxy request.
         // Error if we get anything else.
-        let Dispatch::Request(request, request_cx) = message else {
+        let Dispatch::Request(request, init_responder) = message else {
             message.respond_with_error(invalid_request(), client_connection.clone())?;
             return Err(invalid_request());
         };
         if !InitializeProxyRequest::matches_method(request.method()) {
-            request_cx.respond_with_error(invalid_request())?;
+            init_responder.respond_with_error(invalid_request())?;
             return Err(invalid_request());
         }
 
@@ -1442,7 +1445,7 @@ impl ConductorHostRole for Proxy {
             match InitializeProxyRequest::parse_message(request.method(), request.params()) {
                 Ok(r) => r,
                 Err(error) => {
-                    request_cx.respond_with_error(error)?;
+                    init_responder.respond_with_error(error)?;
                     return Err(invalid_request());
                 }
             };
@@ -1460,7 +1463,7 @@ impl ConductorHostRole for Proxy {
 
         Ok(Dispatch::Request(
             modified_req.to_untyped_message()?,
-            request_cx,
+            init_responder,
         ))
     }
 
@@ -1510,7 +1513,7 @@ pub trait ConductorSuccessor<Host: ConductorHostRole>: Send + Sync + 'static {
     fn send_message<'a>(
         &self,
         message: Dispatch,
-        conductor_cx: ConnectionTo<Host::Counterpart>,
+        connection_to_conductor: ConnectionTo<Host::Counterpart>,
         responder: &'a mut ConductorResponder<Host>,
     ) -> BoxFuture<'a, Result<(), sacp::Error>>;
 }
@@ -1519,7 +1522,7 @@ impl<Host: ConductorHostRole> ConductorSuccessor<Host> for sacp::Error {
     fn send_message<'a>(
         &self,
         #[expect(unused_variables)] message: Dispatch,
-        #[expect(unused_variables)] conductor_cx: ConnectionTo<Host::Counterpart>,
+        #[expect(unused_variables)] connection_to_conductor: ConnectionTo<Host::Counterpart>,
         #[expect(unused_variables)] responder: &'a mut ConductorResponder<Host>,
     ) -> BoxFuture<'a, Result<(), sacp::Error>> {
         let error = self.clone();
@@ -1563,11 +1566,11 @@ impl ConductorSuccessor<Agent> for ConnectionTo<Agent> {
         connection: ConnectionTo<Client>,
         responder: &'a mut ConductorResponder<Agent>,
     ) -> BoxFuture<'a, Result<(), sacp::Error>> {
-        let agent_cx = self.clone();
+        let connection_to_agent = self.clone();
         Box::pin(async move {
             debug!("Proxy mode: forwarding successor message to conductor's successor");
             responder
-                .forward_message_to_agent(connection, message, agent_cx)
+                .forward_message_to_agent(connection, message, connection_to_agent)
                 .await
         })
     }

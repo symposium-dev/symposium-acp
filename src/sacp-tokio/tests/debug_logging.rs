@@ -66,9 +66,9 @@ async fn test_acp_agent_debug_callback() -> Result<(), Box<dyn std::error::Error
             )
             .await
         })
-        .connect_with(transport, async |client_cx| {
+        .connect_with(transport, async |connection_to_client| {
             // Send an initialize request
-            let _init_response = recv(client_cx.send_request(InitializeRequest::new(
+            let _init_response = recv(connection_to_client.send_request(InitializeRequest::new(
                 sacp::schema::ProtocolVersion::LATEST,
             )))
             .await?;

@@ -140,9 +140,9 @@ async fn test_multiple_handlers_different_methods() {
             let server = UntypedRole.connect_from()
                 .on_receive_request(
                     async |request: FooRequest,
-                           request_cx: Responder<FooResponse>,
-                           _connection_cx: ConnectionTo<UntypedRole>| {
-                        request_cx.respond(FooResponse {
+                           responder: Responder<FooResponse>,
+                           _connection: ConnectionTo<UntypedRole>| {
+                        responder.respond(FooResponse {
                             result: format!("foo: {}", request.value),
                         })
                     },
@@ -150,9 +150,9 @@ async fn test_multiple_handlers_different_methods() {
                 )
                 .on_receive_request(
                     async |request: BarRequest,
-                           request_cx: Responder<BarResponse>,
-                           _connection_cx: ConnectionTo<UntypedRole>| {
-                        request_cx.respond(BarResponse {
+                           responder: Responder<BarResponse>,
+                           _connection: ConnectionTo<UntypedRole>| {
+                        responder.respond(BarResponse {
                             result: format!("bar: {}", request.value),
                         })
                     },
@@ -260,10 +260,10 @@ async fn test_handler_priority_ordering() {
             let server = UntypedRole.connect_from()
                 .on_receive_request(
                     async move |request: TrackRequest,
-                                request_cx: Responder<FooResponse>,
-                                _connection_cx: ConnectionTo<UntypedRole>| {
+                                responder: Responder<FooResponse>,
+                                _connection: ConnectionTo<UntypedRole>| {
                         handled_clone1.lock().unwrap().push("handler1".to_string());
-                        request_cx.respond(FooResponse {
+                        responder.respond(FooResponse {
                             result: format!("handler1: {}", request.value),
                         })
                     },
@@ -271,10 +271,10 @@ async fn test_handler_priority_ordering() {
                 )
                 .on_receive_request(
                     async move |request: TrackRequest,
-                                request_cx: Responder<FooResponse>,
-                                _connection_cx: ConnectionTo<UntypedRole>| {
+                                responder: Responder<FooResponse>,
+                                _connection: ConnectionTo<UntypedRole>| {
                         handled_clone2.lock().unwrap().push("handler2".to_string());
-                        request_cx.respond(FooResponse {
+                        responder.respond(FooResponse {
                             result: format!("handler2: {}", request.value),
                         })
                     },
@@ -408,10 +408,10 @@ async fn test_fallthrough_behavior() {
             let server = UntypedRole.connect_from()
                 .on_receive_request(
                     async move |request: Method1Request,
-                                request_cx: Responder<FooResponse>,
-                                _connection_cx: ConnectionTo<UntypedRole>| {
+                                responder: Responder<FooResponse>,
+                                _connection: ConnectionTo<UntypedRole>| {
                         handled_clone1.lock().unwrap().push("method1".to_string());
-                        request_cx.respond(FooResponse {
+                        responder.respond(FooResponse {
                             result: format!("method1: {}", request.value),
                         })
                     },
@@ -419,10 +419,10 @@ async fn test_fallthrough_behavior() {
                 )
                 .on_receive_request(
                     async move |request: Method2Request,
-                                request_cx: Responder<FooResponse>,
-                                _connection_cx: ConnectionTo<UntypedRole>| {
+                                responder: Responder<FooResponse>,
+                                _connection: ConnectionTo<UntypedRole>| {
                         handled_clone2.lock().unwrap().push("method2".to_string());
-                        request_cx.respond(FooResponse {
+                        responder.respond(FooResponse {
                             result: format!("method2: {}", request.value),
                         })
                     },
@@ -491,9 +491,9 @@ async fn test_no_handler_claims() {
             let server_transport = sacp::ByteStreams::new(server_writer, server_reader);
             let server = UntypedRole.connect_from().on_receive_request(
                 async |request: FooRequest,
-                       request_cx: Responder<FooResponse>,
-                       _connection_cx: ConnectionTo<UntypedRole>| {
-                    request_cx.respond(FooResponse {
+                       responder: Responder<FooResponse>,
+                       _connection: ConnectionTo<UntypedRole>| {
+                    responder.respond(FooResponse {
                         result: format!("foo: {}", request.value),
                     })
                 },
@@ -586,7 +586,7 @@ async fn test_handler_claims_notification() {
             let server_transport = sacp::ByteStreams::new(server_writer, server_reader);
             let server = UntypedRole.connect_from().on_receive_notification(
                 async move |notification: EventNotification,
-                            _notification_cx: ConnectionTo<UntypedRole>| {
+                            _connection: ConnectionTo<UntypedRole>| {
                     events_clone.lock().unwrap().push(notification.event);
                     Ok(())
                 },
@@ -646,9 +646,9 @@ async fn test_connection_builder_as_component() -> Result<(), sacp::Error> {
     // Create a connection builder (server side)
     let server_builder = UntypedRole.connect_from().on_receive_request(
         async |request: FooRequest,
-               request_cx: Responder<FooResponse>,
+               responder: Responder<FooResponse>,
                _cx: ConnectionTo<UntypedRole>| {
-            request_cx.respond(FooResponse {
+            responder.respond(FooResponse {
                 result: format!("component: {}", request.value),
             })
         },

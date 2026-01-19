@@ -26,15 +26,15 @@
 //! # use sacp_test::{ValidateRequest, ValidateResponse};
 //! # async fn example(transport: impl ConnectTo<Client>) -> Result<(), sacp::Error> {
 //! Client.connect_from()
-//!     .on_receive_request(async |request: ValidateRequest, request_cx, _cx| {
+//!     .on_receive_request(async |request: ValidateRequest, responder, _cx| {
 //!         if request.data.is_empty() {
 //!             // Send error to peer, keep connection alive
-//!             request_cx.respond_with_error(sacp::Error::invalid_params())?;
+//!             responder.respond_with_error(sacp::Error::invalid_params())?;
 //!             return Ok(());
 //!         }
 //!
 //!         // Process valid request...
-//!         request_cx.respond(ValidateResponse { is_valid: true, error: None })?;
+//!         responder.respond(ValidateResponse { is_valid: true, error: None })?;
 //!         Ok(())
 //!     }, sacp::on_receive_request!())
 //! #   .connect_with(transport, async |_| Ok(())).await?;
@@ -110,7 +110,7 @@
 //!
 //! | Situation | What to do |
 //! |-----------|------------|
-//! | Send error response to request | `request_cx.respond(Err(error))` then `Ok(())` |
+//! | Send error response to request | `responder.respond(Err(error))` then `Ok(())` |
 //! | Send error notification | `cx.send_error_notification(error)` then `Ok(())` |
 //! | Shut down connection | Return `Err(error)` from callback |
 //! | Convert external error | `.map_err(Error::into_internal_error)?` |

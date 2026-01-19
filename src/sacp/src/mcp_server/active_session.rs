@@ -74,17 +74,17 @@ where
 
             role::mcp::Client.connect_from()
                 .on_receive_dispatch(
-                    async move |message: Dispatch, _mcp_cx| {
+                    async move |message: Dispatch, _mcp_connection| {
                         // Wrap the message in McpOverAcp{Request,Notification} and forward to successor
                         let wrapped = message.map(
-                            |request, request_cx| {
+                            |request, responder| {
                                 (
                                     McpOverAcpMessage {
                                         connection_id: connection_id.clone(),
                                         message: request,
                                         meta: None,
                                     },
-                                    request_cx,
+                                    responder,
                                 )
                             },
                             |notification| McpOverAcpMessage {
@@ -97,11 +97,11 @@ where
                     },
                     crate::on_receive_dispatch!(),
                 )
-                .with_spawned(move |mcp_cx| async move {
+                .with_spawned(move |mcp_connection| async move {
                     // Messages we pull off this channel were sent from the agent.
                     // Forward them back to the MCP server.
                     while let Some(msg) = mcp_server_rx.next().await {
-                        mcp_cx.send_proxied_message_to(role::mcp::Server, msg)?;
+                        mcp_connection.send_proxied_message_to(role::mcp::Server, msg)?;
                     }
                     Ok(())
                 })
@@ -110,7 +110,7 @@ where
         // Get the MCP server component
         let spawned_server = self.mcp_connect.connect(McpConnectionTo {
             acp_url: request.acp_url.clone(),
-            connection_cx: acp_connection.clone(),
+            connection: acp_connection.clone(),
         });
 
         // Spawn both sides of the connection
@@ -141,7 +141,7 @@ where
     async fn handle_mcp_over_acp_request(
         &mut self,
         request: McpOverAcpMessage<UntypedMessage>,
-        request_cx: Responder<serde_json::Value>,
+        responder: Responder<serde_json::Value>,
     ) -> Result<
         Handled<(
             McpOverAcpMessage<UntypedMessage>,
@@ -152,13 +152,13 @@ where
         // Check if we have a registered server with the given URL. If not, don't try to handle the request.
         let Some(mcp_server_tx) = self.connections.get_mut(&request.connection_id) else {
             return Ok(Handled::No {
-                message: (request, request_cx),
+                message: (request, responder),
                 retry: false,
             });
         };
 
         mcp_server_tx
-            .send(Dispatch::Request(request.message, request_cx))
+            .send(Dispatch::Request(request.message, responder))
             .await
             .map_err(crate::Error::into_internal_error)?;
 
@@ -217,18 +217,18 @@ where
     async fn handle_message_from(
         &mut self,
         message: Dispatch,
-        connection_cx: ConnectionTo<Counterpart>,
+        connection: ConnectionTo<Counterpart>,
     ) -> Result<Handled<Dispatch>, crate::Error> {
-        MatchDispatchFrom::new(message, &connection_cx)
+        MatchDispatchFrom::new(message, &connection)
             // MCP connect requests come from the Agent direction (wrapped in SuccessorMessage)
-            .if_request_from(Agent, async |request, request_cx| {
-                self.handle_connect_request(request, request_cx, &connection_cx)
+            .if_request_from(Agent, async |request, responder| {
+                self.handle_connect_request(request, responder, &connection)
                     .await
             })
             .await
             // MCP over ACP requests come from the Agent direction
-            .if_request_from(Agent, async |request, request_cx| {
-                self.handle_mcp_over_acp_request(request, request_cx).await
+            .if_request_from(Agent, async |request, responder| {
+                self.handle_mcp_over_acp_request(request, responder).await
             })
             .await
             // MCP over ACP notifications come from the Agent direction

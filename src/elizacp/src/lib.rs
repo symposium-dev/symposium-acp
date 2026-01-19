@@ -74,7 +74,7 @@ impl ElizaAgent {
     async fn handle_new_session(
         &self,
         request: NewSessionRequest,
-        request_cx: Responder<NewSessionResponse>,
+        responder: Responder<NewSessionResponse>,
     ) -> Result<(), sacp::Error> {
         tracing::debug!("New session request with cwd: {:?}", request.cwd);
 
@@ -82,20 +82,20 @@ impl ElizaAgent {
         let session_id = SessionId::new(uuid::Uuid::new_v4().to_string());
         self.create_session(&session_id, request.mcp_servers);
 
-        request_cx.respond(NewSessionResponse::new(session_id))
+        responder.respond(NewSessionResponse::new(session_id))
     }
 
     async fn handle_load_session(
         &self,
         request: LoadSessionRequest,
-        request_cx: Responder<LoadSessionResponse>,
+        responder: Responder<LoadSessionResponse>,
     ) -> Result<(), sacp::Error> {
         tracing::debug!("Load session request: {:?}", request.session_id);
 
         // For Eliza, we just create a fresh session with no MCP servers
         self.create_session(&request.session_id, vec![]);
 
-        request_cx.respond(LoadSessionResponse::new())
+        responder.respond(LoadSessionResponse::new())
     }
 
     /// Process the prompt and send response - this runs in a spawned task
@@ -371,10 +371,10 @@ impl ConnectTo<Client> for ElizaAgent {
         Agent.connect_from()
             .name("elizacp")
             .on_receive_request(
-                async |initialize: InitializeRequest, request_cx, _cx| {
+                async |initialize: InitializeRequest, responder, _cx| {
                     tracing::debug!("Received initialize request");
 
-                    request_cx.respond(
+                    responder.respond(
                         InitializeResponse::new(initialize.protocol_version)
                             .agent_capabilities(AgentCapabilities::new()),
                     )
@@ -384,8 +384,8 @@ impl ConnectTo<Client> for ElizaAgent {
             .on_receive_request(
                 {
                     let agent = self.clone();
-                    async move |request: NewSessionRequest, request_cx, _cx| {
-                        agent.handle_new_session(request, request_cx).await
+                    async move |request: NewSessionRequest, responder, _cx| {
+                        agent.handle_new_session(request, responder).await
                     }
                 },
                 sacp::on_receive_request!(),
@@ -393,8 +393,8 @@ impl ConnectTo<Client> for ElizaAgent {
             .on_receive_request(
                 {
                     let agent = self.clone();
-                    async move |request: LoadSessionRequest, request_cx, _cx| {
-                        agent.handle_load_session(request, request_cx).await
+                    async move |request: LoadSessionRequest, responder, _cx| {
+                        agent.handle_load_session(request, responder).await
                     }
                 },
                 sacp::on_receive_request!(),
@@ -402,14 +402,14 @@ impl ConnectTo<Client> for ElizaAgent {
             .on_receive_request(
                 {
                     let agent = self.clone();
-                    async move |request: PromptRequest, request_cx, cx| {
+                    async move |request: PromptRequest, responder, cx| {
                         // Spawn prompt processing to avoid blocking the event loop.
                         // This allows the agent to handle other requests (like session/new)
                         // while processing a prompt.
                         let cx_clone = cx.clone();
                         cx.spawn({
                             let agent = agent.clone();
-                            async move { agent.process_prompt(request, request_cx, cx_clone).await }
+                            async move { agent.process_prompt(request, responder, cx_clone).await }
                         })
                     }
                 },

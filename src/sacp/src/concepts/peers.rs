@@ -75,10 +75,10 @@
 //! # async fn example(transport: impl ConnectTo<Proxy>) -> Result<(), sacp::Error> {
 //! Proxy.connect_from()
 //!     // Receive a request from the client
-//!     .on_receive_request_from(Client, async |req: MyRequest, request_cx, cx| {
+//!     .on_receive_request_from(Client, async |req: MyRequest, responder, cx| {
 //!         // Forward it to the agent
 //!         cx.send_request_to(Agent, req)
-//!             .forward_to_request_cx(request_cx)
+//!             .forward_response_to(responder)
 //!     }, sacp::on_receive_request!())
 //!     .connect_to(transport)
 //!     .await?;

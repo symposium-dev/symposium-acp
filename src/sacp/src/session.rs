@@ -124,7 +124,7 @@ pub struct SessionBuilder<
     connection: ConnectionTo<Counterpart>,
     request: NewSessionRequest,
     dynamic_handler_registrations: Vec<DynamicHandlerRegistration<Counterpart>>,
-    responder: Run,
+    run: Run,
     block_state: PhantomData<BlockState>,
 }
 
@@ -137,7 +137,7 @@ where
             connection: connection.clone(),
             request,
             dynamic_handler_registrations: Default::default(),
-            responder: NullRun,
+            run: NullRun,
             block_state: PhantomData,
         }
     }
@@ -157,14 +157,14 @@ where
     where
         McpRun: RunWithConnectionTo<Counterpart>,
     {
-        let (handler, responder) = mcp_server.into_handler_and_responder();
+        let (handler, mcp_run) = mcp_server.into_handler_and_responder();
         self.dynamic_handler_registrations
             .push(handler.into_dynamic_handler(&mut self.request, &self.connection)?);
         Ok(SessionBuilder {
             connection: self.connection,
             request: self.request,
             dynamic_handler_registrations: self.dynamic_handler_registrations,
-            responder: ChainRun::new(self.responder, responder),
+            run: ChainRun::new(self.run, mcp_run),
             block_state: self.block_state,
         })
     }
@@ -216,7 +216,7 @@ where
             connection,
             request,
             dynamic_handler_registrations,
-            responder,
+            run,
             block_state: _,
         } = self;
 
@@ -227,7 +227,7 @@ where
                 async move |result| {
                     let response = result?;
 
-                    connection.spawn(responder.run_with_connection_to(connection.clone()))?;
+                    connection.spawn(run.run_with_connection_to(connection.clone()))?;
 
                     let active_session =
                         connection.attach_session(response, dynamic_handler_registrations)?;
@@ -261,11 +261,11 @@ where
     /// # use sacp::mcp_server::McpServer;
     /// # async fn example(transport: impl ConnectTo<Proxy>) -> Result<(), sacp::Error> {
     /// Proxy.connect_from()
-    ///     .on_receive_request_from(Client, async |request: NewSessionRequest, request_cx, cx| {
+    ///     .on_receive_request_from(Client, async |request: NewSessionRequest, responder, cx| {
     ///         let mcp = McpServer::<Conductor, _>::builder("tools").build();
     ///         cx.build_session_from(request)
     ///             .with_mcp_server(mcp)?
-    ///             .on_proxy_session_start(request_cx, async |session_id| {
+    ///             .on_proxy_session_start(responder, async |session_id| {
     ///                 // Session started
     ///                 Ok(())
     ///             })
@@ -282,7 +282,7 @@ where
     /// callback completes. See the [`ordering`](crate::concepts::ordering) module for details.
     pub fn on_proxy_session_start<F, Fut>(
         self,
-        request_cx: Responder<NewSessionResponse>,
+        responder: Responder<NewSessionResponse>,
         op: F,
     ) -> Result<(), crate::Error>
     where
@@ -295,12 +295,12 @@ where
             connection,
             request,
             dynamic_handler_registrations,
-            responder,
+            run,
             block_state: _,
         } = self;
 
-        // Spawn off the responder and dynamic handlers to run indefinitely
-        connection.spawn(responder.run_with_connection_to(connection.clone()))?;
+        // Spawn off the run and dynamic handlers to run indefinitely
+        connection.spawn(run.run_with_connection_to(connection.clone()))?;
         dynamic_handler_registrations
             .into_iter()
             .for_each(|handler| handler.run_indefinitely());
@@ -316,7 +316,7 @@ where
                     // Extract the session-id from the response and forward
                     // the response back to the client
                     let session_id = response.session_id.clone();
-                    request_cx.respond(response)?;
+                    responder.respond(response)?;
 
                     // Install a dynamic handler to proxy messages from this session
                     connection
@@ -347,7 +347,7 @@ where
             connection: self.connection,
             request: self.request,
             dynamic_handler_registrations: self.dynamic_handler_registrations,
-            responder: self.responder,
+            run: self.run,
             block_state: PhantomData,
         }
     }
@@ -378,7 +378,7 @@ where
             connection,
             request,
             dynamic_handler_registrations,
-            responder,
+            run,
             block_state: _,
         } = self;
 
@@ -390,7 +390,7 @@ where
         let active_session = connection.attach_session(response, dynamic_handler_registrations)?;
 
         run_until(
-            responder.run_with_connection_to(connection.clone()),
+            run.run_with_connection_to(connection.clone()),
             op(active_session),
         )
         .await
@@ -413,7 +413,7 @@ where
             connection,
             request,
             dynamic_handler_registrations,
-            responder,
+            run,
             block_state: _,
         } = self;
 
@@ -425,7 +425,7 @@ where
                 .block_task()
                 .await?;
 
-            connection.spawn(responder.run_with_connection_to(connection.clone()))?;
+            connection.spawn(run.run_with_connection_to(connection.clone()))?;
 
             let active_session =
                 connection.attach_session(response, dynamic_handler_registrations)?;
@@ -461,7 +461,7 @@ where
     /// Requires calling [`block_task`](Self::block_task) first.
     pub async fn start_session_proxy(
         self,
-        request_cx: Responder<NewSessionResponse>,
+        responder: Responder<NewSessionResponse>,
     ) -> Result<SessionId, crate::Error>
     where
         Counterpart: HasPeer<Client>,
@@ -469,7 +469,7 @@ where
     {
         let active_session = self.start_session().await?;
         let session_id = active_session.session_id().clone();
-        request_cx.respond(active_session.response())?;
+        responder.respond(active_session.response())?;
         active_session.proxy_remaining_messages()?;
         Ok(session_id)
     }
@@ -550,7 +550,7 @@ where
     }
 
     /// Access the underlying connection context used to communicate with the agent.
-    pub fn connection_cx(&self) -> ConnectionTo<Link> {
+    pub fn connection(&self) -> ConnectionTo<Link> {
         self.connection.clone()
     }
 

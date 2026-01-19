@@ -105,9 +105,9 @@ where
             self.peer.clone(),
             dispatch,
             connection,
-            async |dispatch, connection_cx| {
+            async |dispatch, connection| {
                 match dispatch {
-                    Dispatch::Request(message, request_cx) => {
+                    Dispatch::Request(message, responder) => {
                         tracing::debug!(
                             request_type = std::any::type_name::<Req>(),
                             message = ?message,
@@ -116,7 +116,7 @@ where
                         if !Req::matches_method(&message.method) {
                             tracing::trace!("RequestHandler::handle_request: method doesn't match");
                             Ok(Handled::No {
-                                message: Dispatch::Request(message, request_cx),
+                                message: Dispatch::Request(message, responder),
                                 retry: false,
                             })
                         } else {
@@ -126,18 +126,18 @@ where
                                         ?req,
                                         "RequestHandler::handle_request: parse completed"
                                     );
-                                    let typed_request_cx = request_cx.cast();
+                                    let typed_responder = responder.cast();
                                     let result = (self.to_future_hack)(
                                         &mut self.handler,
                                         req,
-                                        typed_request_cx,
-                                        connection_cx,
+                                        typed_responder,
+                                        connection,
                                     )
                                     .await?;
                                     match result.into_handled() {
                                         Handled::Yes => Ok(Handled::Yes),
                                         Handled::No {
-                                            message: (request, request_cx),
+                                            message: (request, responder),
                                             retry,
                                         } => {
                                             // Handler returned the request back, convert to untyped
@@ -145,7 +145,7 @@ where
                                             Ok(Handled::No {
                                                 message: Dispatch::Request(
                                                     untyped,
-                                                    request_cx.erase_to_json(),
+                                                    responder.erase_to_json(),
                                                 ),
                                                 retry,
                                             })
@@ -226,14 +226,14 @@ where
     async fn handle_message_from(
         &mut self,
         dispatch: Dispatch,
-        connection_cx: ConnectionTo<Counterpart>,
+        connection: ConnectionTo<Counterpart>,
     ) -> Result<Handled<Dispatch>, crate::Error> {
         handle_incoming_message(
             self.counterpart.clone(),
             self.peer.clone(),
             dispatch,
-            connection_cx,
-            async |dispatch, connection_cx| {
+            connection,
+            async |dispatch, connection| {
                 match dispatch {
                     Dispatch::Notification(message) => {
                         tracing::debug!(
@@ -259,7 +259,7 @@ where
                                     let result = (self.to_future_hack)(
                                         &mut self.handler,
                                         notif,
-                                        connection_cx,
+                                        connection,
                                     )
                                     .await?;
                                     match result.into_handled() {
@@ -356,29 +356,29 @@ where
     async fn handle_message_from(
         &mut self,
         dispatch: Dispatch,
-        connection_cx: ConnectionTo<Counterpart>,
+        connection: ConnectionTo<Counterpart>,
     ) -> Result<Handled<Dispatch>, crate::Error> {
         handle_incoming_message(
             self.counterpart.clone(),
             self.peer.clone(),
             dispatch,
-            connection_cx,
-            async |dispatch, connection_cx| match dispatch
+            connection,
+            async |dispatch, connection| match dispatch
                 .into_typed_dispatch::<Req, Notif>()?
             {
                 Ok(typed_dispatch) => {
                     let result =
-                        (self.to_future_hack)(&mut self.handler, typed_dispatch, connection_cx)
+                        (self.to_future_hack)(&mut self.handler, typed_dispatch, connection)
                             .await?;
                     match result.into_handled() {
                         Handled::Yes => Ok(Handled::Yes),
                         Handled::No {
-                            message: Dispatch::Request(request, request_cx),
+                            message: Dispatch::Request(request, responder),
                             retry,
                         } => {
                             let untyped = request.to_untyped_message()?;
                             Ok(Handled::No {
-                                message: Dispatch::Request(untyped, request_cx.erase_to_json()),
+                                message: Dispatch::Request(untyped, responder.erase_to_json()),
                                 retry,
                             })
                         }
@@ -393,10 +393,10 @@ where
                             })
                         }
                         Handled::No {
-                            message: Dispatch::Response(result, request_cx),
+                            message: Dispatch::Response(result, responder),
                             retry,
                         } => {
-                            let method = request_cx.method();
+                            let method = responder.method();
                             let untyped_result = match result {
                                 Ok(response) => response.into_json(method).map(Ok),
                                 Err(err) => Ok(Err(err)),
@@ -404,7 +404,7 @@ where
                             Ok(Handled::No {
                                 message: Dispatch::Response(
                                     untyped_result,
-                                    request_cx.erase_to_json(),
+                                    responder.erase_to_json(),
                                 ),
                                 retry,
                             })
@@ -492,11 +492,11 @@ where
     async fn handle_message_from(
         &mut self,
         message: Dispatch,
-        connection_cx: ConnectionTo<Counterpart>,
+        connection: ConnectionTo<Counterpart>,
     ) -> Result<Handled<Dispatch>, crate::Error> {
         match self
             .handler1
-            .handle_message_from(message, connection_cx.clone())
+            .handle_message_from(message, connection.clone())
             .await?
         {
             Handled::Yes => Ok(Handled::Yes),
@@ -505,7 +505,7 @@ where
                 retry: retry1,
             } => match self
                 .handler2
-                .handle_message_from(message, connection_cx)
+                .handle_message_from(message, connection)
                 .await?
             {
                 Handled::Yes => Ok(Handled::Yes),

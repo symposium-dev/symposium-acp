@@ -7,9 +7,9 @@ async fn main() -> Result<(), sacp::Error> {
     Agent.connect_from()
         .name("my-agent") // for debugging
         .on_receive_request(
-            async move |initialize: InitializeRequest, request_cx, _connection_cx| {
+            async move |initialize: InitializeRequest, responder, _connection| {
                 // Respond to initialize successfully
-                request_cx.respond(
+                responder.respond(
                     InitializeResponse::new(initialize.protocol_version)
                         .agent_capabilities(AgentCapabilities::new()),
                 )

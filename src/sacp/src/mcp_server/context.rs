@@ -4,7 +4,7 @@ use crate::{ConnectionTo, role::Role};
 #[derive(Clone)]
 pub struct McpConnectionTo<Counterpart: Role> {
     pub(super) acp_url: String,
-    pub(super) connection_cx: ConnectionTo<Counterpart>,
+    pub(super) connection: ConnectionTo<Counterpart>,
 }
 
 impl<Counterpart: Role> McpConnectionTo<Counterpart> {
@@ -17,6 +17,6 @@ impl<Counterpart: Role> McpConnectionTo<Counterpart> {
     ///
     /// If this MCP server is hosted inside of an ACP context, this will be the ACP connection context.
     pub fn connection_to(&self) -> ConnectionTo<Counterpart> {
-        self.connection_cx.clone()
+        self.connection.clone()
     }
 }
