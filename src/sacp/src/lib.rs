@@ -112,14 +112,10 @@ pub mod jsonrpcmsg {
 
 pub use jsonrpc::{
     ByteStreams, Channel, ConnectFrom, ConnectionTo, HandleMessageFrom, Handled, IntoHandled,
-    JsonRpcMessage, JsonRpcNotification, JsonRpcRequest, JsonRpcResponse, Lines, MessageCx,
+    JsonRpcMessage, JsonRpcNotification, JsonRpcRequest, JsonRpcResponse, Lines, Dispatch,
     NullHandler, Responder, ResponseRouter, SentRequest, UntypedMessage,
     run::{ChainRun, NullRun, RunWithConnectionTo},
 };
-
-/// Deprecated alias for [`HandleMessageAs`].
-#[deprecated(since = "0.1.0", note = "renamed to HandleMessageAs")]
-pub use HandleMessageFrom as JrMessageHandler;
 
 pub use role::{
     Role, RoleId, UntypedRole,
@@ -200,14 +196,14 @@ macro_rules! on_receive_notification {
 }
 
 /// This macro is used for the value of the `to_future_hack` parameter of
-/// [`ConnectFrom::on_receive_message`] and [`ConnectFrom::on_receive_message_from`].
+/// [`ConnectFrom::on_receive_dispatch`] and [`ConnectFrom::on_receive_dispatch_from`].
 ///
 /// It expands to `|f, msg_cx, cx| Box::pin(f(msg_cx, cx))`.
 ///
 /// This is needed until [return-type notation](https://github.com/rust-lang/rust/issues/109417)
 /// is stabilized.
 #[macro_export]
-macro_rules! on_receive_message {
+macro_rules! on_receive_dispatch {
     () => {
         |f: &mut _, msg_cx, cx| Box::pin(f(msg_cx, cx))
     };

@@ -222,7 +222,7 @@ pub mod building_an_agent {
     //! # Minimal Example
     //!
     //! ```
-    //! use sacp::{AgentToClient, Component, MessageCx, ConnectionTo};
+    //! use sacp::{AgentToClient, Component, Dispatch, ConnectionTo};
     //! use sacp::link::JrLink;
     //! use sacp::schema::{
     //!     InitializeRequest, InitializeResponse, AgentCapabilities,
@@ -253,9 +253,9 @@ pub mod building_an_agent {
     //!             request_cx.respond(PromptResponse::new(StopReason::EndTurn))
     //!         }, sacp::on_receive_request!())
     //!         // Reject unknown messages
-    //!         .on_receive_message(async |message: MessageCx, cx: ConnectionTo<AgentToClient>| {
+    //!         .on_receive_dispatch(async |message: Dispatch, cx: ConnectionTo<AgentToClient>| {
     //!             message.respond_with_error(sacp::Error::method_not_found(), cx)
-    //!         }, sacp::on_receive_message!())
+    //!         }, sacp::on_receive_dispatch!())
     //!         .serve(transport)
     //!         .await
     //! }
@@ -391,7 +391,7 @@ pub mod custom_message_handlers {
     //! Pattern: Custom message handlers.
     //!
     //! For reusable message handling logic, implement [`HandleMessageFrom`] and use
-    //! [`MatchMessage`] or [`MatchMessageFrom`] for type-safe dispatching.
+    //! [`MatchDispatch`] or [`MatchDispatchFrom`] for type-safe dispatching.
     //!
     //! This is useful when you need to:
     //! - Share message handling logic across multiple components
@@ -401,9 +401,9 @@ pub mod custom_message_handlers {
     //! # Example
     //!
     //! ```
-    //! use sacp::{HandleMessageFrom, MessageCx, Handled, ConnectionTo};
+    //! use sacp::{HandleMessageFrom, Dispatch, Handled, ConnectionTo};
     //! use sacp::schema::{InitializeRequest, InitializeResponse, AgentCapabilities};
-    //! use sacp::util::MatchMessage;
+    //! use sacp::util::MatchDispatch;
     //!
     //! struct MyHandler;
     //!
@@ -412,10 +412,10 @@ pub mod custom_message_handlers {
     //!
     //!     async fn handle_message(
     //!         &mut self,
-    //!         message: MessageCx,
+    //!         message: Dispatch,
     //!         _cx: ConnectionTo<Self::Link>,
-    //!     ) -> Result<Handled<MessageCx>, sacp::Error> {
-    //!         MatchMessage::new(message)
+    //!     ) -> Result<Handled<Dispatch>, sacp::Error> {
+    //!         MatchDispatch::new(message)
     //!             .if_request(async |req: InitializeRequest, request_cx| {
     //!                 request_cx.respond(
     //!                     InitializeResponse::new(req.protocol_version)
@@ -432,15 +432,15 @@ pub mod custom_message_handlers {
     //! }
     //! ```
     //!
-    //! # When to use `MatchMessage` vs `MatchMessageFrom`
+    //! # When to use `MatchDispatch` vs `MatchDispatchFrom`
     //!
-    //! - [`MatchMessage`] - Use when you don't need peer-aware handling
-    //! - [`MatchMessageFrom`] - Use in proxies where messages come from different
+    //! - [`MatchDispatch`] - Use when you don't need peer-aware handling
+    //! - [`MatchDispatchFrom`] - Use in proxies where messages come from different
     //!   peers (`Client` vs `Agent`) and may need different handling
     //!
     //! [`HandleMessageFrom`]: sacp::HandleMessageFrom
-    //! [`MatchMessage`]: sacp::util::MatchMessage
-    //! [`MatchMessageFrom`]: sacp::util::MatchMessageFrom
+    //! [`MatchDispatch`]: sacp::util::MatchDispatch
+    //! [`MatchDispatchFrom`]: sacp::util::MatchDispatchFrom
 }
 
 pub mod global_mcp_server {

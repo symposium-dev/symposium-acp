@@ -8,9 +8,9 @@ use crate::role::HasPeer;
 use crate::schema::{
     McpConnectRequest, McpConnectResponse, McpDisconnectNotification, McpOverAcpMessage,
 };
-use crate::util::MatchMessageFrom;
+use crate::util::MatchDispatchFrom;
 use crate::{
-    Agent, Channel, ConnectionTo, HandleMessageFrom, Handled, MessageCx, Responder, Role, ConnectTo,
+    Agent, Channel, ConnectionTo, HandleMessageFrom, Handled, Dispatch, Responder, Role, ConnectTo,
     UntypedMessage,
 };
 use std::sync::Arc;
@@ -27,7 +27,7 @@ pub(super) struct McpActiveSession<Counterpart: Role> {
     mcp_connect: Arc<dyn McpServerConnect<Counterpart>>,
 
     /// Active connections to MCP server tasks
-    connections: FxHashMap<String, mpsc::Sender<MessageCx>>,
+    connections: FxHashMap<String, mpsc::Sender<Dispatch>>,
 }
 
 impl<Counterpart: Role> McpActiveSession<Counterpart>
@@ -73,8 +73,8 @@ where
             let acp_connection = acp_connection.clone();
 
             role::mcp::Client.connect_from()
-                .on_receive_message(
-                    async move |message: MessageCx, _mcp_cx| {
+                .on_receive_dispatch(
+                    async move |message: Dispatch, _mcp_cx| {
                         // Wrap the message in McpOverAcp{Request,Notification} and forward to successor
                         let wrapped = message.map(
                             |request, request_cx| {
@@ -95,7 +95,7 @@ where
                         );
                         acp_connection.send_proxied_message_to(Agent, wrapped)
                     },
-                    crate::on_receive_message!(),
+                    crate::on_receive_dispatch!(),
                 )
                 .with_spawned(move |mcp_cx| async move {
                     // Messages we pull off this channel were sent from the agent.
@@ -158,7 +158,7 @@ where
         };
 
         mcp_server_tx
-            .send(MessageCx::Request(request.message, request_cx))
+            .send(Dispatch::Request(request.message, request_cx))
             .await
             .map_err(crate::Error::into_internal_error)?;
 
@@ -179,7 +179,7 @@ where
         };
 
         mcp_server_tx
-            .send(MessageCx::Notification(notification.message))
+            .send(Dispatch::Notification(notification.message))
             .await
             .map_err(crate::Error::into_internal_error)?;
 
@@ -216,10 +216,10 @@ where
 
     async fn handle_message_from(
         &mut self,
-        message: MessageCx,
+        message: Dispatch,
         connection_cx: ConnectionTo<Counterpart>,
-    ) -> Result<Handled<MessageCx>, crate::Error> {
-        MatchMessageFrom::new(message, &connection_cx)
+    ) -> Result<Handled<Dispatch>, crate::Error> {
+        MatchDispatchFrom::new(message, &connection_cx)
             // MCP connect requests come from the Agent direction (wrapped in SuccessorMessage)
             .if_request_from(Agent, async |request, request_cx| {
                 self.handle_connect_request(request, request_cx, &connection_cx)

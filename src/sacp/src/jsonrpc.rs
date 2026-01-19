@@ -142,9 +142,9 @@ use crate::{Agent, Client, RoleId, ConnectTo};
 ///
 ///     async fn handle_message(
 ///         &mut self,
-///         message: MessageCx,
+///         message: Dispatch,
 ///         cx: ConnectionTo<Self::Role>,
-///     ) -> Result<Handled<MessageCx>, Error> {
+///     ) -> Result<Handled<Dispatch>, Error> {
 ///         if message.method() == "my/custom/method" {
 ///             // Handle it
 ///             Ok(Handled::Yes)
@@ -215,9 +215,9 @@ pub trait HandleMessageFrom<Counterpart: Role>: Send {
     /// * `Err` if an internal error occurs (this will bring down the server).
     fn handle_message_from(
         &mut self,
-        message: MessageCx,
+        message: Dispatch,
         connection: ConnectionTo<Counterpart>,
-    ) -> impl Future<Output = Result<Handled<MessageCx>, crate::Error>> + Send;
+    ) -> impl Future<Output = Result<Handled<Dispatch>, crate::Error>> + Send;
 
     /// Returns a debug description of the registered handlers for diagnostics.
     fn describe_chain(&self) -> impl std::fmt::Debug;
@@ -229,9 +229,9 @@ where
 {
     fn handle_message_from(
         &mut self,
-        message: MessageCx,
+        message: Dispatch,
         cx: ConnectionTo<Counterpart>,
-    ) -> impl Future<Output = Result<Handled<MessageCx>, crate::Error>> + Send {
+    ) -> impl Future<Output = Result<Handled<Dispatch>, crate::Error>> + Send {
         H::handle_message_from(self, message, cx)
     }
 
@@ -326,29 +326,29 @@ where
 ///
 /// ## Mixed Message Types
 ///
-/// For enums containing both requests AND notifications, use [`on_receive_message`](Self::on_receive_message):
+/// For enums containing both requests AND notifications, use [`on_receive_dispatch`](Self::on_receive_dispatch):
 ///
 /// ```no_run
 /// # use sacp_test::*;
-/// # use sacp::MessageCx;
+/// # use sacp::Dispatch;
 /// # use sacp::schema::{InitializeRequest, InitializeResponse, SessionNotification};
 /// # async fn example() -> Result<(), sacp::Error> {
 /// # let connection = mock_connection();
-/// // on_receive_message receives MessageCx which can be either a request or notification
-/// connection.on_receive_message(async |msg: MessageCx<InitializeRequest, SessionNotification>, _cx| {
+/// // on_receive_dispatch receives Dispatch which can be either a request or notification
+/// connection.on_receive_dispatch(async |msg: Dispatch<InitializeRequest, SessionNotification>, _cx| {
 ///     match msg {
-///         MessageCx::Request(req, request_cx) => {
+///         Dispatch::Request(req, request_cx) => {
 ///             request_cx.respond(InitializeResponse::make())
 ///         }
-///         MessageCx::Notification(notif) => {
+///         Dispatch::Notification(notif) => {
 ///             Ok(())
 ///         }
-///         MessageCx::Response(result, request_cx) => {
+///         Dispatch::Response(result, request_cx) => {
 ///             // Forward response to its destination
 ///             request_cx.respond_with_result(result)
 ///         }
 ///     }
-/// }, sacp::on_receive_message!())
+/// }, sacp::on_receive_dispatch!())
 /// # .connect_to(sacp_test::MockTransport).await?;
 /// # Ok(())
 /// # }
@@ -360,7 +360,7 @@ where
 ///
 /// * [`on_receive_request`](Self::on_receive_request) - Handle JSON-RPC requests (messages expecting responses)
 /// * [`on_receive_notification`](Self::on_receive_notification) - Handle JSON-RPC notifications (fire-and-forget)
-/// * [`on_receive_message`](Self::on_receive_message) - Handle enums containing both requests and notifications
+/// * [`on_receive_dispatch`](Self::on_receive_dispatch) - Handle enums containing both requests and notifications
 /// * [`with_handler`](Self::with_handler) - Low-level primitive for maximum flexibility
 ///
 /// ## Handler Ordering
@@ -370,7 +370,7 @@ where
 ///
 /// ```no_run
 /// # use sacp_test::*;
-/// # use sacp::{MessageCx, UntypedMessage};
+/// # use sacp::{Dispatch, UntypedMessage};
 /// # use sacp::schema::{InitializeRequest, InitializeResponse, PromptRequest, PromptResponse};
 /// # async fn example() -> Result<(), sacp::Error> {
 /// # let connection = mock_connection();
@@ -383,10 +383,10 @@ where
 ///         // This runs first for PromptRequest
 ///         request_cx.respond(PromptResponse::make())
 ///     }, sacp::on_receive_request!())
-///     .on_receive_message(async |msg: MessageCx, cx| {
+///     .on_receive_dispatch(async |msg: Dispatch, cx| {
 ///         // This runs for any message not handled above
 ///         msg.respond_with_error(sacp::util::internal_error("unknown method"), cx)
-///     }, sacp::on_receive_message!())
+///     }, sacp::on_receive_dispatch!())
 /// # .connect_to(sacp_test::MockTransport).await?;
 /// # Ok(())
 /// # }
@@ -677,36 +677,36 @@ impl<
     /// Register a handler for messages that can be either requests OR notifications.
     ///
     /// Use this when you want to handle an enum type that contains both request and
-    /// notification variants. Your handler receives a [`MessageCx<Req, Notif>`] which
+    /// notification variants. Your handler receives a [`Dispatch<Req, Notif>`] which
     /// is an enum with two variants:
     ///
-    /// - `MessageCx::Request(request, request_cx)` - A request with its response context
-    /// - `MessageCx::Notification(notification)` - A notification
-    /// - `MessageCx::Response(result, request_cx)` - A response to a request we sent
+    /// - `Dispatch::Request(request, request_cx)` - A request with its response context
+    /// - `Dispatch::Notification(notification)` - A notification
+    /// - `Dispatch::Response(result, request_cx)` - A response to a request we sent
     ///
     /// # Example
     ///
     /// ```no_run
     /// # use sacp_test::*;
-    /// # use sacp::MessageCx;
+    /// # use sacp::Dispatch;
     /// # async fn example() -> Result<(), sacp::Error> {
     /// # let connection = mock_connection();
-    /// connection.on_receive_message(async |message: MessageCx<MyRequest, StatusUpdate>, _cx| {
+    /// connection.on_receive_dispatch(async |message: Dispatch<MyRequest, StatusUpdate>, _cx| {
     ///     match message {
-    ///         MessageCx::Request(req, request_cx) => {
+    ///         Dispatch::Request(req, request_cx) => {
     ///             // Handle request and send response
     ///             request_cx.respond(MyResponse { status: "ok".into() })
     ///         }
-    ///         MessageCx::Notification(notif) => {
+    ///         Dispatch::Notification(notif) => {
     ///             // Handle notification (no response needed)
     ///             Ok(())
     ///         }
-    ///         MessageCx::Response(result, request_cx) => {
+    ///         Dispatch::Response(result, request_cx) => {
     ///             // Forward response to its destination
     ///             request_cx.respond_with_result(result)
     ///         }
     ///     }
-    /// }, sacp::on_receive_message!())
+    /// }, sacp::on_receive_dispatch!())
     /// # .connect_to(sacp_test::MockTransport).await?;
     /// # Ok(())
     /// # }
@@ -721,7 +721,7 @@ impl<
     /// This callback runs inside the dispatch loop and blocks further message processing
     /// until it completes. See the [`ordering`](crate::concepts::ordering) module for details on
     /// ordering guarantees and how to avoid deadlocks.
-    pub fn on_receive_message<Req, Notif, F, T, ToFut>(
+    pub fn on_receive_dispatch<Req, Notif, F, T, ToFut>(
         self,
         op: F,
         to_future_hack: ToFut,
@@ -731,14 +731,14 @@ impl<
         Req: JsonRpcRequest,
         Notif: JsonRpcNotification,
         F: AsyncFnMut(
-                MessageCx<Req, Notif>,
+                Dispatch<Req, Notif>,
                 ConnectionTo<Host::Counterpart>,
             ) -> Result<T, crate::Error>
             + Send,
-        T: IntoHandled<MessageCx<Req, Notif>>,
+        T: IntoHandled<Dispatch<Req, Notif>>,
         ToFut: Fn(
                 &mut F,
-                MessageCx<Req, Notif>,
+                Dispatch<Req, Notif>,
                 ConnectionTo<Host::Counterpart>,
             ) -> crate::BoxFuture<'_, Result<T, crate::Error>>
             + Send
@@ -899,20 +899,20 @@ impl<
 
     /// Register a handler for messages from a specific peer.
     ///
-    /// This is similar to [`on_receive_message`](Self::on_receive_message), but allows
+    /// This is similar to [`on_receive_dispatch`](Self::on_receive_dispatch), but allows
     /// specifying the source peer explicitly. This is useful when receiving messages
     /// from a peer that requires message transformation (e.g., unwrapping `SuccessorMessage`
     /// envelopes when receiving from an agent via a proxy).
     ///
     /// For the common case of receiving from the default counterpart, use
-    /// [`on_receive_message`](Self::on_receive_message) instead.
+    /// [`on_receive_dispatch`](Self::on_receive_dispatch) instead.
     ///
     /// # Ordering
     ///
     /// This callback runs inside the dispatch loop and blocks further message processing
     /// until it completes. See the [`ordering`](crate::concepts::ordering) module for details on
     /// ordering guarantees and how to avoid deadlocks.
-    pub fn on_receive_message_from<
+    pub fn on_receive_dispatch_from<
         Req: JsonRpcRequest,
         Notif: JsonRpcNotification,
         Peer: Role,
@@ -928,14 +928,14 @@ impl<
     where
         Host::Counterpart: HasPeer<Peer>,
         F: AsyncFnMut(
-                MessageCx<Req, Notif>,
+                Dispatch<Req, Notif>,
                 ConnectionTo<Host::Counterpart>,
             ) -> Result<T, crate::Error>
             + Send,
-        T: IntoHandled<MessageCx<Req, Notif>>,
+        T: IntoHandled<Dispatch<Req, Notif>>,
         ToFut: Fn(
                 &mut F,
-                MessageCx<Req, Notif>,
+                Dispatch<Req, Notif>,
                 ConnectionTo<Host::Counterpart>,
             ) -> crate::BoxFuture<'_, Result<T, crate::Error>>
             + Send
@@ -1570,7 +1570,7 @@ impl<Counterpart: Role> ConnectionTo<Counterpart> {
     /// enabling type-safe message forwarding.
     pub fn send_proxied_message<Req: JsonRpcRequest<Response: Send>, Notif: JsonRpcNotification>(
         &self,
-        message: MessageCx<Req, Notif>,
+        message: Dispatch<Req, Notif>,
     ) -> Result<(), crate::Error>
     where
         Counterpart: HasPeer<Counterpart>,
@@ -1589,17 +1589,17 @@ impl<Counterpart: Role> ConnectionTo<Counterpart> {
     >(
         &self,
         peer: Peer,
-        message: MessageCx<Req, Notif>,
+        message: Dispatch<Req, Notif>,
     ) -> Result<(), crate::Error>
     where
         Counterpart: HasPeer<Peer>,
     {
         match message {
-            MessageCx::Request(request, request_cx) => self
+            Dispatch::Request(request, request_cx) => self
                 .send_request_to(peer, request)
                 .forward_to_request_cx(request_cx),
-            MessageCx::Notification(notification) => self.send_notification_to(peer, notification),
-            MessageCx::Response(result, request_cx) => {
+            Dispatch::Notification(notification) => self.send_notification_to(peer, notification),
+            Dispatch::Response(result, request_cx) => {
                 // Responses are forwarded directly to their destination
                 request_cx.respond_with_result(result)
             }
@@ -2284,7 +2284,7 @@ pub trait JsonRpcRequest: JsonRpcMessage {
 /// By default, both are `UntypedMessage` for dynamic dispatch.
 /// The request context's response type matches the request's response type.
 #[derive(Debug)]
-pub enum MessageCx<Req: JsonRpcRequest = UntypedMessage, Notif: JsonRpcMessage = UntypedMessage> {
+pub enum Dispatch<Req: JsonRpcRequest = UntypedMessage, Notif: JsonRpcMessage = UntypedMessage> {
     /// Incoming request and the context where the response should be sent.
     Request(Req, Responder<Req::Response>),
 
@@ -2302,7 +2302,7 @@ pub enum MessageCx<Req: JsonRpcRequest = UntypedMessage, Notif: JsonRpcMessage =
     ),
 }
 
-impl<Req: JsonRpcRequest, Notif: JsonRpcMessage> MessageCx<Req, Notif> {
+impl<Req: JsonRpcRequest, Notif: JsonRpcMessage> Dispatch<Req, Notif> {
     /// Map the request and notification types to new types.
     ///
     /// Note: Response variants are passed through unchanged since they don't
@@ -2311,21 +2311,21 @@ impl<Req: JsonRpcRequest, Notif: JsonRpcMessage> MessageCx<Req, Notif> {
         self,
         map_request: impl FnOnce(Req, Responder<Req::Response>) -> (Req1, Responder<Req1::Response>),
         map_notification: impl FnOnce(Notif) -> Notif1,
-    ) -> MessageCx<Req1, Notif1>
+    ) -> Dispatch<Req1, Notif1>
     where
         Req1: JsonRpcRequest<Response = Req::Response>,
         Notif1: JsonRpcMessage,
     {
         match self {
-            MessageCx::Request(request, cx) => {
+            Dispatch::Request(request, cx) => {
                 let (new_request, new_cx) = map_request(request, cx);
-                MessageCx::Request(new_request, new_cx)
+                Dispatch::Request(new_request, new_cx)
             }
-            MessageCx::Notification(notification) => {
+            Dispatch::Notification(notification) => {
                 let new_notification = map_notification(notification);
-                MessageCx::Notification(new_notification)
+                Dispatch::Notification(new_notification)
             }
-            MessageCx::Response(result, cx) => MessageCx::Response(result, cx),
+            Dispatch::Response(result, cx) => Dispatch::Response(result, cx),
         }
     }
 
@@ -2342,9 +2342,9 @@ impl<Req: JsonRpcRequest, Notif: JsonRpcMessage> MessageCx<Req, Notif> {
         cx: ConnectionTo<R>,
     ) -> Result<(), crate::Error> {
         match self {
-            MessageCx::Request(_, request_cx) => request_cx.respond_with_error(error),
-            MessageCx::Notification(_) => cx.send_error_notification(error),
-            MessageCx::Response(_, request_cx) => request_cx.respond_with_error(error),
+            Dispatch::Request(_, request_cx) => request_cx.respond_with_error(error),
+            Dispatch::Notification(_) => cx.send_error_notification(error),
+            Dispatch::Response(_, request_cx) => request_cx.respond_with_error(error),
         }
     }
 
@@ -2354,16 +2354,16 @@ impl<Req: JsonRpcRequest, Notif: JsonRpcMessage> MessageCx<Req, Notif> {
     ///
     /// Note: Response variants cannot be erased since their payload is already
     /// parsed. This returns an error for Response variants.
-    pub fn erase_to_json(self) -> Result<MessageCx, crate::Error> {
+    pub fn erase_to_json(self) -> Result<Dispatch, crate::Error> {
         match self {
-            MessageCx::Request(response, request_cx) => Ok(MessageCx::Request(
+            Dispatch::Request(response, request_cx) => Ok(Dispatch::Request(
                 response.to_untyped_message()?,
                 request_cx.erase_to_json(),
             )),
-            MessageCx::Notification(notification) => {
-                Ok(MessageCx::Notification(notification.to_untyped_message()?))
+            Dispatch::Notification(notification) => {
+                Ok(Dispatch::Notification(notification.to_untyped_message()?))
             }
-            MessageCx::Response(_, _) => Err(crate::util::internal_error(
+            Dispatch::Response(_, _) => Err(crate::util::internal_error(
                 "cannot erase Response variant to JSON",
             )),
         }
@@ -2375,9 +2375,9 @@ impl<Req: JsonRpcRequest, Notif: JsonRpcMessage> MessageCx<Req, Notif> {
     /// This returns an error for Response variants.
     pub fn to_untyped_message(&self) -> Result<UntypedMessage, crate::Error> {
         match self {
-            MessageCx::Request(request, _) => request.to_untyped_message(),
-            MessageCx::Notification(notification) => notification.to_untyped_message(),
-            MessageCx::Response(_, _) => Err(crate::util::internal_error(
+            Dispatch::Request(request, _) => request.to_untyped_message(),
+            Dispatch::Notification(notification) => notification.to_untyped_message(),
+            Dispatch::Response(_, _) => Err(crate::util::internal_error(
                 "Response variant has no untyped message representation",
             )),
         }
@@ -2386,16 +2386,16 @@ impl<Req: JsonRpcRequest, Notif: JsonRpcMessage> MessageCx<Req, Notif> {
     /// Convert self to an untyped message context.
     ///
     /// Note: Response variants cannot be converted. This returns an error for Response variants.
-    pub fn into_untyped_message_cx(self) -> Result<MessageCx, crate::Error> {
+    pub fn into_untyped_dispatch(self) -> Result<Dispatch, crate::Error> {
         match self {
-            MessageCx::Request(request, request_cx) => Ok(MessageCx::Request(
+            Dispatch::Request(request, request_cx) => Ok(Dispatch::Request(
                 request.to_untyped_message()?,
                 request_cx.erase_to_json(),
             )),
-            MessageCx::Notification(notification) => {
-                Ok(MessageCx::Notification(notification.to_untyped_message()?))
+            Dispatch::Notification(notification) => {
+                Ok(Dispatch::Notification(notification.to_untyped_message()?))
             }
-            MessageCx::Response(_, _) => Err(crate::util::internal_error(
+            Dispatch::Response(_, _) => Err(crate::util::internal_error(
                 "cannot convert Response variant to untyped message context",
             )),
         }
@@ -2404,9 +2404,9 @@ impl<Req: JsonRpcRequest, Notif: JsonRpcMessage> MessageCx<Req, Notif> {
     /// Returns the request ID if this is a request or response, None if notification.
     pub fn id(&self) -> Option<serde_json::Value> {
         match self {
-            MessageCx::Request(_, cx) => Some(cx.id()),
-            MessageCx::Notification(_) => None,
-            MessageCx::Response(_, cx) => Some(cx.id()),
+            Dispatch::Request(_, cx) => Some(cx.id()),
+            Dispatch::Notification(_) => None,
+            Dispatch::Response(_, cx) => Some(cx.id()),
         }
     }
 
@@ -2416,14 +2416,14 @@ impl<Req: JsonRpcRequest, Notif: JsonRpcMessage> MessageCx<Req, Notif> {
     /// For responses, this is the method of the original request.
     pub fn method(&self) -> &str {
         match self {
-            MessageCx::Request(msg, _) => msg.method(),
-            MessageCx::Notification(msg) => msg.method(),
-            MessageCx::Response(_, cx) => cx.method(),
+            Dispatch::Request(msg, _) => msg.method(),
+            Dispatch::Notification(msg) => msg.method(),
+            Dispatch::Response(_, cx) => cx.method(),
         }
     }
 }
 
-impl MessageCx {
+impl Dispatch {
     /// Attempts to parse `self` into a typed message context.
     ///
     /// # Returns
@@ -2432,23 +2432,23 @@ impl MessageCx {
     /// * `Ok(Err(self))` if not
     /// * `Err` if has the correct method for the given types but parsing fails
     #[tracing::instrument(skip(self), fields(Request = ?std::any::type_name::<Req>(), Notif = ?std::any::type_name::<Notif>()), level = "trace", ret)]
-    pub(crate) fn into_typed_message_cx<Req: JsonRpcRequest, Notif: JsonRpcNotification>(
+    pub(crate) fn into_typed_dispatch<Req: JsonRpcRequest, Notif: JsonRpcNotification>(
         self,
-    ) -> Result<Result<MessageCx<Req, Notif>, MessageCx>, crate::Error> {
+    ) -> Result<Result<Dispatch<Req, Notif>, Dispatch>, crate::Error> {
         tracing::debug!(
             message = ?self,
-            "into_typed_message_cx"
+            "into_typed_dispatch"
         );
         match self {
-            MessageCx::Request(message, request_cx) => {
+            Dispatch::Request(message, request_cx) => {
                 if !Req::matches_method(&message.method) {
                     tracing::trace!("method doesn't match");
-                    Ok(Err(MessageCx::Request(message, request_cx)))
+                    Ok(Err(Dispatch::Request(message, request_cx)))
                 } else {
                     match Req::parse_message(&message.method, &message.params) {
                         Ok(req) => {
                             tracing::trace!(?req, "parsed ok");
-                            Ok(Ok(MessageCx::Request(req, request_cx.cast())))
+                            Ok(Ok(Dispatch::Request(req, request_cx.cast())))
                         }
                         Err(err) => {
                             tracing::trace!(?err, "parse error");
@@ -2458,15 +2458,15 @@ impl MessageCx {
                 }
             }
 
-            MessageCx::Notification(message) => {
+            Dispatch::Notification(message) => {
                 if !Notif::matches_method(&message.method) {
                     tracing::trace!("method doesn't match");
-                    Ok(Err(MessageCx::Notification(message)))
+                    Ok(Err(Dispatch::Notification(message)))
                 } else {
                     match Notif::parse_message(&message.method, &message.params) {
                         Ok(notif) => {
                             tracing::trace!(?notif, "parse ok");
-                            Ok(Ok(MessageCx::Notification(notif)))
+                            Ok(Ok(Dispatch::Notification(notif)))
                         }
                         Err(err) => {
                             tracing::trace!(?err, "parse error");
@@ -2476,11 +2476,11 @@ impl MessageCx {
                 }
             }
 
-            MessageCx::Response(result, cx) => {
+            Dispatch::Response(result, cx) => {
                 let method = cx.method();
                 if !Req::matches_method(method) {
                     tracing::trace!("method doesn't match");
-                    Ok(Err(MessageCx::Response(result, cx)))
+                    Ok(Err(Dispatch::Response(result, cx)))
                 } else {
                     // Parse the response result
                     let typed_result = match result {
@@ -2501,7 +2501,7 @@ impl MessageCx {
                             Err(err)
                         }
                     };
-                    Ok(Ok(MessageCx::Response(typed_result, cx.cast())))
+                    Ok(Ok(Dispatch::Response(typed_result, cx.cast())))
                 }
             }
         }
@@ -2548,19 +2548,19 @@ impl MessageCx {
     /// * `Err` if has the correct method for the given types but parsing fails
     pub fn into_notification<N: JsonRpcNotification>(
         self,
-    ) -> Result<Result<N, MessageCx>, crate::Error> {
+    ) -> Result<Result<N, Dispatch>, crate::Error> {
         match self {
-            MessageCx::Request(..) => Ok(Err(self)),
-            MessageCx::Notification(msg) => {
+            Dispatch::Request(..) => Ok(Err(self)),
+            Dispatch::Notification(msg) => {
                 if !N::matches_method(&msg.method) {
-                    return Ok(Err(MessageCx::Notification(msg)));
+                    return Ok(Err(Dispatch::Notification(msg)));
                 }
                 match N::parse_message(&msg.method, &msg.params) {
                     Ok(n) => Ok(Ok(n)),
                     Err(err) => Err(err),
                 }
             }
-            MessageCx::Response(..) => Ok(Err(self)),
+            Dispatch::Response(..) => Ok(Err(self)),
         }
     }
 
@@ -2573,32 +2573,32 @@ impl MessageCx {
     /// * `Err` if has the correct method for the given types but parsing fails
     pub fn into_request<Req: JsonRpcRequest>(
         self,
-    ) -> Result<Result<(Req, Responder<Req::Response>), MessageCx>, crate::Error> {
+    ) -> Result<Result<(Req, Responder<Req::Response>), Dispatch>, crate::Error> {
         match self {
-            MessageCx::Request(msg, request_cx) => {
+            Dispatch::Request(msg, request_cx) => {
                 if !Req::matches_method(&msg.method) {
-                    return Ok(Err(MessageCx::Request(msg, request_cx)));
+                    return Ok(Err(Dispatch::Request(msg, request_cx)));
                 }
                 match Req::parse_message(&msg.method, &msg.params) {
                     Ok(req) => Ok(Ok((req, request_cx.cast()))),
                     Err(err) => Err(err),
                 }
             }
-            MessageCx::Notification(..) => Ok(Err(self)),
-            MessageCx::Response(..) => Ok(Err(self)),
+            Dispatch::Notification(..) => Ok(Err(self)),
+            Dispatch::Response(..) => Ok(Err(self)),
         }
     }
 }
 
-impl<M: JsonRpcRequest + JsonRpcNotification> MessageCx<M, M> {
+impl<M: JsonRpcRequest + JsonRpcNotification> Dispatch<M, M> {
     /// Returns the message payload for requests and notifications.
     ///
     /// Returns `None` for Response variants since they don't contain a message payload.
     pub fn message(&self) -> Option<&M> {
         match self {
-            MessageCx::Request(msg, _) => Some(msg),
-            MessageCx::Notification(msg) => Some(msg),
-            MessageCx::Response(_, _) => None,
+            Dispatch::Request(msg, _) => Some(msg),
+            Dispatch::Notification(msg) => Some(msg),
+            Dispatch::Response(_, _) => None,
         }
     }
 
@@ -2608,13 +2608,13 @@ impl<M: JsonRpcRequest + JsonRpcNotification> MessageCx<M, M> {
     pub(crate) fn try_map_message(
         self,
         map_message: impl FnOnce(M) -> Result<M, crate::Error>,
-    ) -> Result<MessageCx<M, M>, crate::Error> {
+    ) -> Result<Dispatch<M, M>, crate::Error> {
         match self {
-            MessageCx::Request(request, cx) => Ok(MessageCx::Request(map_message(request)?, cx)),
-            MessageCx::Notification(notification) => {
-                Ok(MessageCx::<M, M>::Notification(map_message(notification)?))
+            Dispatch::Request(request, cx) => Ok(Dispatch::Request(map_message(request)?, cx)),
+            Dispatch::Notification(notification) => {
+                Ok(Dispatch::<M, M>::Notification(map_message(notification)?))
             }
-            MessageCx::Response(result, cx) => Ok(MessageCx::Response(result, cx)),
+            Dispatch::Response(result, cx) => Ok(Dispatch::Response(result, cx)),
         }
     }
 }

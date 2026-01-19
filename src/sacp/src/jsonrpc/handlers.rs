@@ -1,7 +1,7 @@
 use crate::jsonrpc::{HandleMessageFrom, Handled, IntoHandled, JsonRpcResponse};
 
 use crate::role::{HasPeer, Role, handle_incoming_message};
-use crate::{ConnectionTo, JsonRpcNotification, JsonRpcRequest, MessageCx, UntypedMessage};
+use crate::{ConnectionTo, JsonRpcNotification, JsonRpcRequest, Dispatch, UntypedMessage};
 // Types re-exported from crate root
 use super::Responder;
 use std::marker::PhantomData;
@@ -30,9 +30,9 @@ impl<Counterpart: Role> HandleMessageFrom<Counterpart> for NullHandler {
 
     async fn handle_message_from(
         &mut self,
-        message: MessageCx,
+        message: Dispatch,
         _cx: ConnectionTo<Counterpart>,
-    ) -> Result<Handled<MessageCx>, crate::Error> {
+    ) -> Result<Handled<Dispatch>, crate::Error> {
         Ok(Handled::No {
             message,
             retry: false,
@@ -97,17 +97,17 @@ where
 
     async fn handle_message_from(
         &mut self,
-        message_cx: MessageCx,
+        dispatch: Dispatch,
         connection: ConnectionTo<Counterpart>,
-    ) -> Result<Handled<MessageCx>, crate::Error> {
+    ) -> Result<Handled<Dispatch>, crate::Error> {
         handle_incoming_message(
             self.counterpart.clone(),
             self.peer.clone(),
-            message_cx,
+            dispatch,
             connection,
-            async |message_cx, connection_cx| {
-                match message_cx {
-                    MessageCx::Request(message, request_cx) => {
+            async |dispatch, connection_cx| {
+                match dispatch {
+                    Dispatch::Request(message, request_cx) => {
                         tracing::debug!(
                             request_type = std::any::type_name::<Req>(),
                             message = ?message,
@@ -116,7 +116,7 @@ where
                         if !Req::matches_method(&message.method) {
                             tracing::trace!("RequestHandler::handle_request: method doesn't match");
                             Ok(Handled::No {
-                                message: MessageCx::Request(message, request_cx),
+                                message: Dispatch::Request(message, request_cx),
                                 retry: false,
                             })
                         } else {
@@ -143,7 +143,7 @@ where
                                             // Handler returned the request back, convert to untyped
                                             let untyped = request.to_untyped_message()?;
                                             Ok(Handled::No {
-                                                message: MessageCx::Request(
+                                                message: Dispatch::Request(
                                                     untyped,
                                                     request_cx.erase_to_json(),
                                                 ),
@@ -163,8 +163,8 @@ where
                         }
                     }
 
-                    MessageCx::Notification(..) | MessageCx::Response(..) => Ok(Handled::No {
-                        message: message_cx,
+                    Dispatch::Notification(..) | Dispatch::Response(..) => Ok(Handled::No {
+                        message: dispatch,
                         retry: false,
                     }),
                 }
@@ -225,17 +225,17 @@ where
 
     async fn handle_message_from(
         &mut self,
-        message_cx: MessageCx,
+        dispatch: Dispatch,
         connection_cx: ConnectionTo<Counterpart>,
-    ) -> Result<Handled<MessageCx>, crate::Error> {
+    ) -> Result<Handled<Dispatch>, crate::Error> {
         handle_incoming_message(
             self.counterpart.clone(),
             self.peer.clone(),
-            message_cx,
+            dispatch,
             connection_cx,
-            async |message_cx, connection_cx| {
-                match message_cx {
-                    MessageCx::Notification(message) => {
+            async |dispatch, connection_cx| {
+                match dispatch {
+                    Dispatch::Notification(message) => {
                         tracing::debug!(
                             request_type = std::any::type_name::<Notif>(),
                             message = ?message,
@@ -246,7 +246,7 @@ where
                                 "NotificationHandler::handle_notification: method doesn't match"
                             );
                             Ok(Handled::No {
-                                message: MessageCx::Notification(message),
+                                message: Dispatch::Notification(message),
                                 retry: false,
                             })
                         } else {
@@ -271,7 +271,7 @@ where
                                             // Handler returned the notification back, convert to untyped
                                             let untyped = notification.to_untyped_message()?;
                                             Ok(Handled::No {
-                                                message: MessageCx::Notification(untyped),
+                                                message: Dispatch::Notification(untyped),
                                                 retry,
                                             })
                                         }
@@ -288,8 +288,8 @@ where
                         }
                     }
 
-                    MessageCx::Request(..) | MessageCx::Response(..) => Ok(Handled::No {
-                        message: message_cx,
+                    Dispatch::Request(..) | Dispatch::Response(..) => Ok(Handled::No {
+                        message: dispatch,
                         retry: false,
                     }),
                 }
@@ -312,7 +312,7 @@ pub struct MessageHandler<
     peer: Peer,
     handler: F,
     to_future_hack: ToFut,
-    phantom: PhantomData<fn(MessageCx<Req, Notif>)>,
+    phantom: PhantomData<fn(Dispatch<Req, Notif>)>,
 }
 
 impl<Counterpart: Role, Peer: Role, Req: JsonRpcRequest, Notif: JsonRpcNotification, F, ToFut>
@@ -334,12 +334,12 @@ impl<Counterpart: Role, Peer: Role, Req: JsonRpcRequest, Notif: JsonRpcNotificat
     HandleMessageFrom<Counterpart> for MessageHandler<Counterpart, Peer, Req, Notif, F, ToFut>
 where
     Counterpart: HasPeer<Peer>,
-    F: AsyncFnMut(MessageCx<Req, Notif>, ConnectionTo<Counterpart>) -> Result<T, crate::Error>
+    F: AsyncFnMut(Dispatch<Req, Notif>, ConnectionTo<Counterpart>) -> Result<T, crate::Error>
         + Send,
-    T: IntoHandled<MessageCx<Req, Notif>>,
+    T: IntoHandled<Dispatch<Req, Notif>>,
     ToFut: Fn(
             &mut F,
-            MessageCx<Req, Notif>,
+            Dispatch<Req, Notif>,
             ConnectionTo<Counterpart>,
         ) -> crate::BoxFuture<'_, Result<T, crate::Error>>
         + Send
@@ -355,45 +355,45 @@ where
 
     async fn handle_message_from(
         &mut self,
-        message_cx: MessageCx,
+        dispatch: Dispatch,
         connection_cx: ConnectionTo<Counterpart>,
-    ) -> Result<Handled<MessageCx>, crate::Error> {
+    ) -> Result<Handled<Dispatch>, crate::Error> {
         handle_incoming_message(
             self.counterpart.clone(),
             self.peer.clone(),
-            message_cx,
+            dispatch,
             connection_cx,
-            async |message_cx, connection_cx| match message_cx
-                .into_typed_message_cx::<Req, Notif>()?
+            async |dispatch, connection_cx| match dispatch
+                .into_typed_dispatch::<Req, Notif>()?
             {
-                Ok(typed_message_cx) => {
+                Ok(typed_dispatch) => {
                     let result =
-                        (self.to_future_hack)(&mut self.handler, typed_message_cx, connection_cx)
+                        (self.to_future_hack)(&mut self.handler, typed_dispatch, connection_cx)
                             .await?;
                     match result.into_handled() {
                         Handled::Yes => Ok(Handled::Yes),
                         Handled::No {
-                            message: MessageCx::Request(request, request_cx),
+                            message: Dispatch::Request(request, request_cx),
                             retry,
                         } => {
                             let untyped = request.to_untyped_message()?;
                             Ok(Handled::No {
-                                message: MessageCx::Request(untyped, request_cx.erase_to_json()),
+                                message: Dispatch::Request(untyped, request_cx.erase_to_json()),
                                 retry,
                             })
                         }
                         Handled::No {
-                            message: MessageCx::Notification(notification),
+                            message: Dispatch::Notification(notification),
                             retry,
                         } => {
                             let untyped = notification.to_untyped_message()?;
                             Ok(Handled::No {
-                                message: MessageCx::Notification(untyped),
+                                message: Dispatch::Notification(untyped),
                                 retry,
                             })
                         }
                         Handled::No {
-                            message: MessageCx::Response(result, request_cx),
+                            message: Dispatch::Response(result, request_cx),
                             retry,
                         } => {
                             let method = request_cx.method();
@@ -402,7 +402,7 @@ where
                                 Err(err) => Ok(Err(err)),
                             }?;
                             Ok(Handled::No {
-                                message: MessageCx::Response(
+                                message: Dispatch::Response(
                                     untyped_result,
                                     request_cx.erase_to_json(),
                                 ),
@@ -412,8 +412,8 @@ where
                     }
                 }
 
-                Err(message_cx) => Ok(Handled::No {
-                    message: message_cx,
+                Err(dispatch) => Ok(Handled::No {
+                    message: dispatch,
                     retry: false,
                 }),
             },
@@ -448,9 +448,9 @@ impl<Counterpart: Role, H: HandleMessageFrom<Counterpart>> HandleMessageFrom<Cou
 
     async fn handle_message_from(
         &mut self,
-        message: MessageCx,
+        message: Dispatch,
         connection: ConnectionTo<Counterpart>,
-    ) -> Result<Handled<MessageCx>, crate::Error> {
+    ) -> Result<Handled<Dispatch>, crate::Error> {
         if let Some(name) = &self.name {
             crate::util::instrumented_with_connection_name(
                 name.clone(),
@@ -491,9 +491,9 @@ where
 
     async fn handle_message_from(
         &mut self,
-        message: MessageCx,
+        message: Dispatch,
         connection_cx: ConnectionTo<Counterpart>,
-    ) -> Result<Handled<MessageCx>, crate::Error> {
+    ) -> Result<Handled<Dispatch>, crate::Error> {
         match self
             .handler1
             .handle_message_from(message, connection_cx.clone())

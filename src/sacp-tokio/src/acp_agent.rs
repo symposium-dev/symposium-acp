@@ -56,18 +56,19 @@ pub enum LineDirection {
 /// ```
 ///
 /// Use as a component to connect to an external agent:
-/// ```no_run
-/// # use sacp::link::UntypedRole;
-/// # use sacp::ConnectFrom;
-/// # use sacp_tokio::AcpAgent;
-/// # use std::str::FromStr;
+/// ```ignore
+/// use sacp::{Client, ConnectFrom};
+/// use sacp_tokio::AcpAgent;
+/// use std::str::FromStr;
+///
 /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
 /// let agent = AcpAgent::from_str("python my_agent.py")?;
 ///
-/// // The agent process will be spawned automatically when served
-/// UntypedRole.connect_from()
-///     .connect_to(agent)?
-///     .run_until(|cx| async move {
+/// // The agent process will be spawned automatically when connected
+/// Client.connect_from()
+///     .connect_to(agent)
+///     .await?
+///     .connect_with(|cx| async move {
 ///         // Use the connection to communicate with the agent process
 ///         Ok(())
 ///     })

@@ -7,7 +7,7 @@ use futures::{StreamExt, channel::mpsc};
 use uuid::Uuid;
 
 use crate::{
-    Agent, Client, ConnectionTo, DynConnectTo, HandleMessageFrom, Handled, MessageCx, Role, ConnectTo,
+    Agent, Client, ConnectionTo, DynConnectTo, HandleMessageFrom, Handled, Dispatch, Role, ConnectTo,
     jsonrpc::{
         DynamicHandlerRegistration,
         run::{NullRun, RunWithConnectionTo},
@@ -17,7 +17,7 @@ use crate::{
         builder::McpServerBuilder,
     },
     role::{self, HasPeer},
-    util::MatchMessageFrom,
+    util::MatchDispatchFrom,
 };
 
 /// An MCP server that can be attached to ACP connections.
@@ -165,10 +165,10 @@ where
 {
     async fn handle_message_from(
         &mut self,
-        message: MessageCx,
+        message: Dispatch,
         cx: ConnectionTo<Counterpart>,
-    ) -> Result<Handled<MessageCx>, crate::Error> {
-        MatchMessageFrom::new(message, &cx)
+    ) -> Result<Handled<Dispatch>, crate::Error> {
+        MatchDispatchFrom::new(message, &cx)
             .if_request_from(
                 Client,
                 async |mut request: NewSessionRequest, request_cx| {
@@ -205,12 +205,12 @@ where
 
         role::mcp::Server.connect_from()
             .with_responder(responder)
-            .on_receive_message(
-                async |message_from_client: MessageCx, _cx| {
+            .on_receive_dispatch(
+                async |message_from_client: Dispatch, _cx| {
                     tx.unbounded_send(message_from_client)
                         .map_err(|_| crate::util::internal_error("nobody listening to mcp server"))
                 },
-                crate::on_receive_message!(),
+                crate::on_receive_dispatch!(),
             )
             .with_spawned(async move |server_to_client_cx| {
                 let spawned_server: DynConnectTo<role::mcp::Client> =
@@ -220,12 +220,12 @@ where
                     });
 
                 role::mcp::Client.connect_from()
-                    .on_receive_message(
-                        async |message_from_server: MessageCx, _client_to_server_cx| {
+                    .on_receive_dispatch(
+                        async |message_from_server: Dispatch, _client_to_server_cx| {
                             // when we receive a message from the server, fwd to the client
                             server_to_client_cx.send_proxied_message(message_from_server)
                         },
-                        crate::on_receive_message!(),
+                        crate::on_receive_dispatch!(),
                     )
                     .connect_with(spawned_server, async |client_to_server_cx| {
                         while let Some(message_from_client) = rx.next().await {

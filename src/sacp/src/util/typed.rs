@@ -1,17 +1,17 @@
 //! Utilities for pattern matching on untyped JSON-RPC messages.
 //!
-//! When handling [`UntypedMessage`]s, you can use [`MatchMessage`] for simple parsing
-//! or [`MatchMessageFrom`] when you need peer-aware transforms (e.g., unwrapping
+//! When handling [`UntypedMessage`]s, you can use [`MatchDispatch`] for simple parsing
+//! or [`MatchDispatchFrom`] when you need peer-aware transforms (e.g., unwrapping
 //! proxy envelopes).
 //!
 //! # When to use which
 //!
-//! - **[`MatchMessageFrom`]**: Preferred over implementing [`HandleMessageFrom`] directly.
+//! - **[`MatchDispatchFrom`]**: Preferred over implementing [`HandleMessageFrom`] directly.
 //!   Use this in connection handlers when you need to match on message types with
 //!   proper peer-aware transforms (e.g., unwrapping `SuccessorMessage` envelopes).
 //!
-//! - **[`MatchMessage`]**: Use this when you already have an unwrapped message and
-//!   just need to parse it, such as inside a [`MatchMessageFrom`] callback or when
+//! - **[`MatchDispatch`]**: Use this when you already have an unwrapped message and
+//!   just need to parse it, such as inside a [`MatchDispatchFrom`] callback or when
 //!   processing messages that don't need peer transforms.
 //!
 //! [`HandleMessageFrom`]: crate::HandleMessageFrom
@@ -21,7 +21,7 @@ use jsonrpcmsg::Params;
 
 use crate::{
     ConnectionTo, HandleMessageFrom, Handled, JsonRpcNotification, JsonRpcRequest, JsonRpcResponse,
-    MessageCx, Responder, ResponseRouter, UntypedMessage,
+    Dispatch, Responder, ResponseRouter, UntypedMessage,
     role::{HasPeer, Role, handle_incoming_message},
     util::json_cast,
 };
@@ -29,20 +29,20 @@ use crate::{
 /// Role-agnostic helper for pattern-matching on untyped JSON-RPC messages.
 ///
 /// Use this when you already have an unwrapped message and just need to parse it,
-/// such as inside a [`MatchMessageFrom`] callback or when processing messages
+/// such as inside a [`MatchDispatchFrom`] callback or when processing messages
 /// that don't need peer transforms.
 ///
 /// For connection handlers where you need proper peer-aware transforms,
-/// use [`MatchMessageFrom`] instead.
+/// use [`MatchDispatchFrom`] instead.
 ///
 /// # Example
 ///
 /// ```
-/// # use sacp::MessageCx;
+/// # use sacp::Dispatch;
 /// # use sacp::schema::{InitializeRequest, InitializeResponse, AgentCapabilities};
-/// # use sacp::util::MatchMessage;
-/// # async fn example(message: MessageCx) -> Result<(), sacp::Error> {
-/// MatchMessage::new(message)
+/// # use sacp::util::MatchDispatch;
+/// # async fn example(message: Dispatch) -> Result<(), sacp::Error> {
+/// MatchDispatch::new(message)
 ///     .if_request(|req: InitializeRequest, request_cx: sacp::Responder<InitializeResponse>| async move {
 ///         let response = InitializeResponse::new(req.protocol_version)
 ///             .agent_capabilities(AgentCapabilities::new());
@@ -51,23 +51,23 @@ use crate::{
 ///     .await
 ///     .otherwise(|message| async move {
 ///         match message {
-///             MessageCx::Request(_, request_cx) => {
+///             Dispatch::Request(_, request_cx) => {
 ///                 request_cx.respond_with_error(sacp::util::internal_error("unknown method"))
 ///             }
-///             MessageCx::Notification(_) | MessageCx::Response(_, _) => Ok(()),
+///             Dispatch::Notification(_) | Dispatch::Response(_, _) => Ok(()),
 ///         }
 ///     })
 ///     .await
 /// # }
 /// ```
 #[must_use]
-pub struct MatchMessage {
-    state: Result<Handled<MessageCx>, crate::Error>,
+pub struct MatchDispatch {
+    state: Result<Handled<Dispatch>, crate::Error>,
 }
 
-impl MatchMessage {
+impl MatchDispatch {
     /// Create a new pattern matcher for the given message.
-    pub fn new(message: MessageCx) -> Self {
+    pub fn new(message: Dispatch) -> Self {
         Self {
             state: Ok(Handled::No {
                 message,
@@ -78,9 +78,9 @@ impl MatchMessage {
 
     /// Create a pattern matcher from an existing `Handled` state.
     ///
-    /// This is useful when composing with [`MatchMessageFrom`] which applies
-    /// peer transforms before delegating to `MatchMessage` for parsing.
-    pub fn from_handled(state: Result<Handled<MessageCx>, crate::Error>) -> Self {
+    /// This is useful when composing with [`MatchDispatchFrom`] which applies
+    /// peer transforms before delegating to `MatchDispatch` for parsing.
+    pub fn from_handled(state: Result<Handled<Dispatch>, crate::Error>) -> Self {
         Self { state }
     }
 
@@ -97,15 +97,15 @@ impl MatchMessage {
         H: crate::IntoHandled<(Req, Responder<Req::Response>)>,
     {
         if let Ok(Handled::No {
-            message: message_cx,
+            message: dispatch,
             retry,
         }) = self.state
         {
-            self.state = match message_cx {
-                MessageCx::Request(untyped_request, untyped_request_cx) => {
+            self.state = match dispatch {
+                Dispatch::Request(untyped_request, untyped_request_cx) => {
                     if !Req::matches_method(untyped_request.method()) {
                         Ok(Handled::No {
-                            message: MessageCx::Request(untyped_request, untyped_request_cx),
+                            message: Dispatch::Request(untyped_request, untyped_request_cx),
                             retry,
                         })
                     } else {
@@ -121,7 +121,7 @@ impl MatchMessage {
                                             retry: request_retry,
                                         } => match request.to_untyped_message() {
                                             Ok(untyped) => Ok(Handled::No {
-                                                message: MessageCx::Request(
+                                                message: Dispatch::Request(
                                                     untyped,
                                                     request_cx.erase_to_json(),
                                                 ),
@@ -137,8 +137,8 @@ impl MatchMessage {
                         }
                     }
                 }
-                MessageCx::Notification(_) | MessageCx::Response(_, _) => Ok(Handled::No {
-                    message: message_cx,
+                Dispatch::Notification(_) | Dispatch::Response(_, _) => Ok(Handled::No {
+                    message: dispatch,
                     retry,
                 }),
             };
@@ -158,15 +158,15 @@ impl MatchMessage {
         H: crate::IntoHandled<N>,
     {
         if let Ok(Handled::No {
-            message: message_cx,
+            message: dispatch,
             retry,
         }) = self.state
         {
-            self.state = match message_cx {
-                MessageCx::Notification(untyped_notification) => {
+            self.state = match dispatch {
+                Dispatch::Notification(untyped_notification) => {
                     if !N::matches_method(untyped_notification.method()) {
                         Ok(Handled::No {
-                            message: MessageCx::Notification(untyped_notification),
+                            message: Dispatch::Notification(untyped_notification),
                             retry,
                         })
                     } else {
@@ -182,7 +182,7 @@ impl MatchMessage {
                                         retry: notification_retry,
                                     } => match notification.to_untyped_message() {
                                         Ok(untyped) => Ok(Handled::No {
-                                            message: MessageCx::Notification(untyped),
+                                            message: Dispatch::Notification(untyped),
                                             retry: retry | notification_retry,
                                         }),
                                         Err(err) => Err(err),
@@ -194,8 +194,8 @@ impl MatchMessage {
                         }
                     }
                 }
-                MessageCx::Request(_, _) | MessageCx::Response(_, _) => Ok(Handled::No {
-                    message: message_cx,
+                Dispatch::Request(_, _) | Dispatch::Response(_, _) => Ok(Handled::No {
+                    message: dispatch,
                     retry,
                 }),
             };
@@ -203,46 +203,46 @@ impl MatchMessage {
         self
     }
 
-    /// Try to handle the message as a typed `MessageCx<R, N>`.
+    /// Try to handle the message as a typed `Dispatch<R, N>`.
     ///
     /// This attempts to parse the message as either request type `R` or notification type `N`,
-    /// providing a typed `MessageCx` to the handler if successful.
+    /// providing a typed `Dispatch` to the handler if successful.
     pub async fn if_message<R: JsonRpcRequest, N: JsonRpcNotification, H>(
         mut self,
-        op: impl AsyncFnOnce(MessageCx<R, N>) -> Result<H, crate::Error>,
+        op: impl AsyncFnOnce(Dispatch<R, N>) -> Result<H, crate::Error>,
     ) -> Self
     where
-        H: crate::IntoHandled<MessageCx<R, N>>,
+        H: crate::IntoHandled<Dispatch<R, N>>,
     {
         if let Ok(Handled::No {
-            message: message_cx,
+            message: dispatch,
             retry,
         }) = self.state
         {
-            self.state = match message_cx.into_typed_message_cx::<R, N>() {
-                Ok(Ok(typed_message_cx)) => match op(typed_message_cx).await {
+            self.state = match dispatch.into_typed_dispatch::<R, N>() {
+                Ok(Ok(typed_dispatch)) => match op(typed_dispatch).await {
                     Ok(result) => match result.into_handled() {
                         Handled::Yes => Ok(Handled::Yes),
                         Handled::No {
-                            message: typed_message_cx,
+                            message: typed_dispatch,
                             retry: message_retry,
                         } => {
-                            let untyped = match typed_message_cx {
-                                MessageCx::Request(request, request_cx) => {
+                            let untyped = match typed_dispatch {
+                                Dispatch::Request(request, request_cx) => {
                                     match request.to_untyped_message() {
                                         Ok(untyped) => {
-                                            MessageCx::Request(untyped, request_cx.erase_to_json())
+                                            Dispatch::Request(untyped, request_cx.erase_to_json())
                                         }
                                         Err(err) => return Self { state: Err(err) },
                                     }
                                 }
-                                MessageCx::Notification(notification) => {
+                                Dispatch::Notification(notification) => {
                                     match notification.to_untyped_message() {
-                                        Ok(untyped) => MessageCx::Notification(untyped),
+                                        Ok(untyped) => Dispatch::Notification(untyped),
                                         Err(err) => return Self { state: Err(err) },
                                     }
                                 }
-                                MessageCx::Response(result, request_cx) => {
+                                Dispatch::Response(result, request_cx) => {
                                     let method = request_cx.method();
                                     let untyped_result = match result {
                                         Ok(response) => match response.into_json(method) {
@@ -251,7 +251,7 @@ impl MatchMessage {
                                         },
                                         Err(err) => Err(err),
                                     };
-                                    MessageCx::Response(untyped_result, request_cx.erase_to_json())
+                                    Dispatch::Response(untyped_result, request_cx.erase_to_json())
                                 }
                             };
                             Ok(Handled::No {
@@ -262,8 +262,8 @@ impl MatchMessage {
                     },
                     Err(err) => Err(err),
                 },
-                Ok(Err(message_cx)) => Ok(Handled::No {
-                    message: message_cx,
+                Ok(Err(dispatch)) => Ok(Handled::No {
+                    message: dispatch,
                     retry,
                 }),
                 Err(err) => Err(err),
@@ -293,17 +293,17 @@ impl MatchMessage {
             )>,
     {
         if let Ok(Handled::No {
-            message: message_cx,
+            message: dispatch,
             retry,
         }) = self.state
         {
-            self.state = match message_cx {
-                MessageCx::Response(result, response_cx) => {
+            self.state = match dispatch {
+                Dispatch::Response(result, response_cx) => {
                     // Check if the request type matches this method
                     if !Req::matches_method(response_cx.method()) {
                         // Method doesn't match, return unhandled
                         Ok(Handled::No {
-                            message: MessageCx::Response(result, response_cx),
+                            message: Dispatch::Response(result, response_cx),
                             retry,
                         })
                     } else {
@@ -329,7 +329,7 @@ impl MatchMessage {
                                         Err(err) => Err(err),
                                     };
                                     Ok(Handled::No {
-                                        message: MessageCx::Response(
+                                        message: Dispatch::Response(
                                             untyped_result,
                                             response_cx.erase_to_json(),
                                         ),
@@ -341,8 +341,8 @@ impl MatchMessage {
                         }
                     }
                 }
-                MessageCx::Request(_, _) | MessageCx::Notification(_) => Ok(Handled::No {
-                    message: message_cx,
+                Dispatch::Request(_, _) | Dispatch::Notification(_) => Ok(Handled::No {
+                    message: dispatch,
                     retry,
                 }),
             };
@@ -388,14 +388,14 @@ impl MatchMessage {
     }
 
     /// Complete matching, returning `Handled::No` if no match was found.
-    pub fn done(self) -> Result<Handled<MessageCx>, crate::Error> {
+    pub fn done(self) -> Result<Handled<Dispatch>, crate::Error> {
         self.state
     }
 
     /// Handle messages that didn't match any previous handler.
     pub async fn otherwise(
         self,
-        op: impl AsyncFnOnce(MessageCx) -> Result<(), crate::Error>,
+        op: impl AsyncFnOnce(Dispatch) -> Result<(), crate::Error>,
     ) -> Result<(), crate::Error> {
         match self.state {
             Ok(Handled::Yes) => Ok(()),
@@ -420,10 +420,10 @@ impl MatchMessage {
 ///
 /// Use this when you need peer-aware transforms (e.g., unwrapping proxy envelopes)
 /// before parsing messages. For simple parsing without peer awareness (e.g., inside
-/// a callback), use [`MatchMessage`] instead.
+/// a callback), use [`MatchDispatch`] instead.
 ///
-/// This wraps [`MatchMessage`] and applies peer-specific message transformations
-/// via `remote_style().handle_incoming_message()` before delegating to `MatchMessage`
+/// This wraps [`MatchDispatch`] and applies peer-specific message transformations
+/// via `remote_style().handle_incoming_message()` before delegating to `MatchDispatch`
 /// for the actual parsing.
 ///
 /// [`HandleMessageFrom`]: crate::HandleMessageFrom
@@ -431,11 +431,11 @@ impl MatchMessage {
 /// # Example
 ///
 /// ```
-/// # use sacp::MessageCx;
+/// # use sacp::Dispatch;
 /// # use sacp::schema::{InitializeRequest, InitializeResponse, PromptRequest, PromptResponse, AgentCapabilities, StopReason};
-/// # use sacp::util::MatchMessageFrom;
-/// # async fn example(message: MessageCx, cx: &sacp::ConnectionTo<sacp::Client>) -> Result<(), sacp::Error> {
-/// MatchMessageFrom::new(message, cx)
+/// # use sacp::util::MatchDispatchFrom;
+/// # async fn example(message: Dispatch, cx: &sacp::ConnectionTo<sacp::Client>) -> Result<(), sacp::Error> {
+/// MatchDispatchFrom::new(message, cx)
 ///     .if_request(|req: InitializeRequest, request_cx: sacp::Responder<InitializeResponse>| async move {
 ///         // Handle initialization
 ///         let response = InitializeResponse::new(req.protocol_version)
@@ -451,22 +451,22 @@ impl MatchMessage {
 ///     .otherwise(|message| async move {
 ///         // Fallback for unrecognized messages
 ///         match message {
-///             MessageCx::Request(_, request_cx) => request_cx.respond_with_error(sacp::util::internal_error("unknown method")),
-///             MessageCx::Notification(_) | MessageCx::Response(_, _) => Ok(()),
+///             Dispatch::Request(_, request_cx) => request_cx.respond_with_error(sacp::util::internal_error("unknown method")),
+///             Dispatch::Notification(_) | Dispatch::Response(_, _) => Ok(()),
 ///         }
 ///     })
 ///     .await
 /// # }
 /// ```
 #[must_use]
-pub struct MatchMessageFrom<Counterpart: Role> {
-    state: Result<Handled<MessageCx>, crate::Error>,
+pub struct MatchDispatchFrom<Counterpart: Role> {
+    state: Result<Handled<Dispatch>, crate::Error>,
     connection: ConnectionTo<Counterpart>,
 }
 
-impl<Counterpart: Role> MatchMessageFrom<Counterpart> {
+impl<Counterpart: Role> MatchDispatchFrom<Counterpart> {
     /// Create a new pattern matcher for the given untyped request message.
-    pub fn new(message: MessageCx, cx: &ConnectionTo<Counterpart>) -> Self {
+    pub fn new(message: Dispatch, cx: &ConnectionTo<Counterpart>) -> Self {
         Self {
             state: Ok(Handled::No {
                 message,
@@ -523,9 +523,9 @@ impl<Counterpart: Role> MatchMessageFrom<Counterpart> {
                 peer,
                 message,
                 self.connection.clone(),
-                async |message_cx, _connection_cx| {
-                    // Delegate to MatchMessage for parsing
-                    MatchMessage::new(message_cx).if_request(op).await.done()
+                async |dispatch, _connection_cx| {
+                    // Delegate to MatchDispatch for parsing
+                    MatchDispatch::new(dispatch).if_request(op).await.done()
                 },
             )
             .await;
@@ -580,9 +580,9 @@ impl<Counterpart: Role> MatchMessageFrom<Counterpart> {
                 peer,
                 message,
                 self.connection.clone(),
-                async |message_cx, _connection_cx| {
-                    // Delegate to MatchMessage for parsing
-                    MatchMessage::new(message_cx)
+                async |dispatch, _connection_cx| {
+                    // Delegate to MatchDispatch for parsing
+                    MatchDispatch::new(dispatch)
                         .if_notification(op)
                         .await
                         .done()
@@ -593,9 +593,9 @@ impl<Counterpart: Role> MatchMessageFrom<Counterpart> {
         self
     }
 
-    /// Try to handle the message as a typed `MessageCx<Req, N>` from a specific peer.
+    /// Try to handle the message as a typed `Dispatch<Req, N>` from a specific peer.
     ///
-    /// This is similar to [`MatchMessage::if_message`], but first applies peer-specific
+    /// This is similar to [`MatchDispatch::if_message`], but first applies peer-specific
     /// message transformation (e.g., unwrapping `SuccessorMessage` envelopes).
     ///
     /// # Parameters
@@ -605,11 +605,11 @@ impl<Counterpart: Role> MatchMessageFrom<Counterpart> {
     pub async fn if_message_from<Peer: Role, Req: JsonRpcRequest, N: JsonRpcNotification, H>(
         mut self,
         peer: Peer,
-        op: impl AsyncFnOnce(MessageCx<Req, N>) -> Result<H, crate::Error>,
+        op: impl AsyncFnOnce(Dispatch<Req, N>) -> Result<H, crate::Error>,
     ) -> Self
     where
         Counterpart: HasPeer<Peer>,
-        H: crate::IntoHandled<MessageCx<Req, N>>,
+        H: crate::IntoHandled<Dispatch<Req, N>>,
     {
         if let Ok(Handled::No { message, retry: _ }) = self.state {
             self.state = handle_incoming_message(
@@ -617,9 +617,9 @@ impl<Counterpart: Role> MatchMessageFrom<Counterpart> {
                 peer,
                 message,
                 self.connection.clone(),
-                async |message_cx, _connection_cx| {
-                    // Delegate to MatchMessage for parsing
-                    MatchMessage::new(message_cx).if_message(op).await.done()
+                async |dispatch, _connection_cx| {
+                    // Delegate to MatchDispatch for parsing
+                    MatchDispatch::new(dispatch).if_message(op).await.done()
                 },
             )
             .await;
@@ -634,7 +634,7 @@ impl<Counterpart: Role> MatchMessageFrom<Counterpart> {
     ///
     /// Unlike requests and notifications, responses don't need peer-specific transforms
     /// (they don't have the `SuccessorMessage` envelope structure), so this method
-    /// delegates directly to [`MatchMessage::if_response_to`].
+    /// delegates directly to [`MatchDispatch::if_response_to`].
     pub async fn if_response_to<Req: JsonRpcRequest, H>(
         mut self,
         op: impl AsyncFnOnce(
@@ -649,7 +649,7 @@ impl<Counterpart: Role> MatchMessageFrom<Counterpart> {
             )>,
     {
         if let Ok(Handled::No { message, retry: _ }) = self.state {
-            self.state = MatchMessage::new(message)
+            self.state = MatchDispatch::new(message)
                 .if_response_to::<Req, H>(op)
                 .await
                 .done();
@@ -705,9 +705,9 @@ impl<Counterpart: Role> MatchMessageFrom<Counterpart> {
                 peer,
                 message,
                 self.connection.clone(),
-                async |message_cx, _connection_cx| {
-                    // Delegate to MatchMessage for parsing
-                    MatchMessage::new(message_cx)
+                async |dispatch, _connection_cx| {
+                    // Delegate to MatchDispatch for parsing
+                    MatchDispatch::new(dispatch)
                         .if_response_to::<Req, H>(op)
                         .await
                         .done()
@@ -754,7 +754,7 @@ impl<Counterpart: Role> MatchMessageFrom<Counterpart> {
     }
 
     /// Complete matching, returning `Handled::No` if no match was found.
-    pub fn done(self) -> Result<Handled<MessageCx>, crate::Error> {
+    pub fn done(self) -> Result<Handled<Dispatch>, crate::Error> {
         match self.state {
             Ok(Handled::Yes) => Ok(Handled::Yes),
             Ok(Handled::No { message, retry }) => Ok(Handled::No { message, retry }),
@@ -769,7 +769,7 @@ impl<Counterpart: Role> MatchMessageFrom<Counterpart> {
     /// matching chain and get the final result.
     pub async fn otherwise(
         self,
-        op: impl AsyncFnOnce(MessageCx) -> Result<(), crate::Error>,
+        op: impl AsyncFnOnce(Dispatch) -> Result<(), crate::Error>,
     ) -> Result<(), crate::Error> {
         match self.state {
             Ok(Handled::Yes) => Ok(()),
@@ -786,7 +786,7 @@ impl<Counterpart: Role> MatchMessageFrom<Counterpart> {
     pub async fn otherwise_delegate(
         self,
         mut handler: impl HandleMessageFrom<Counterpart>,
-    ) -> Result<Handled<MessageCx>, crate::Error> {
+    ) -> Result<Handled<Dispatch>, crate::Error> {
         match self.state? {
             Handled::Yes => Ok(Handled::Yes),
             Handled::No {
@@ -811,7 +811,7 @@ impl<Counterpart: Role> MatchMessageFrom<Counterpart> {
 
 /// Builder for pattern-matching on untyped JSON-RPC notifications.
 ///
-/// Similar to [`MatchMessage`] but specifically for notifications (fire-and-forget messages with no response).
+/// Similar to [`MatchDispatch`] but specifically for notifications (fire-and-forget messages with no response).
 ///
 /// # Pattern
 ///

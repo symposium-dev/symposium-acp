@@ -5,8 +5,8 @@ use agent_client_protocol_schema::{NewSessionRequest, NewSessionResponse, Sessio
 use crate::jsonrpc::{ConnectFrom, handlers::NullHandler, run::NullRun};
 use crate::role::{HasPeer, RemoteStyle};
 use crate::schema::{InitializeProxyRequest, InitializeRequest, METHOD_INITIALIZE_PROXY};
-use crate::util::MatchMessageFrom;
-use crate::{ConnectTo, ConnectionTo, HandleMessageFrom, Handled, MessageCx, Role, RoleId};
+use crate::util::MatchDispatchFrom;
+use crate::{ConnectTo, ConnectionTo, HandleMessageFrom, Handled, Dispatch, Role, RoleId};
 
 /// The client role - typically an IDE or CLI that controls an agent.
 ///
@@ -19,9 +19,9 @@ impl Role for Client {
 
     async fn default_handle_message_from(
         &self,
-        message: MessageCx,
+        message: Dispatch,
         _connection: ConnectionTo<Client>,
-    ) -> Result<Handled<MessageCx>, crate::Error> {
+    ) -> Result<Handled<Dispatch>, crate::Error> {
         Ok(Handled::No {
             message,
             retry: false,
@@ -84,11 +84,11 @@ impl Role for Agent {
 
     async fn default_handle_message_from(
         &self,
-        message: MessageCx,
+        message: Dispatch,
         connection: ConnectionTo<Agent>,
-    ) -> Result<Handled<MessageCx>, crate::Error> {
-        MatchMessageFrom::new(message, &connection)
-            .if_message_from(Agent, async |message: MessageCx| {
+    ) -> Result<Handled<Dispatch>, crate::Error> {
+        MatchDispatchFrom::new(message, &connection)
+            .if_message_from(Agent, async |message: Dispatch| {
                 // Subtle: messages that have a session-id field
                 // should be captured by a dynamic message handler
                 // for that session -- but there is a race condition
@@ -132,9 +132,9 @@ impl Role for Proxy {
 
     async fn default_handle_message_from(
         &self,
-        message: crate::MessageCx,
+        message: crate::Dispatch,
         _connection: crate::ConnectionTo<Self>,
-    ) -> Result<crate::Handled<crate::MessageCx>, crate::Error> {
+    ) -> Result<crate::Handled<crate::Dispatch>, crate::Error> {
         Ok(Handled::No {
             message,
             retry: false,
@@ -182,11 +182,11 @@ impl Role for Conductor {
 
     async fn default_handle_message_from(
         &self,
-        message: MessageCx,
+        message: Dispatch,
         cx: ConnectionTo<Conductor>,
-    ) -> Result<Handled<MessageCx>, crate::Error> {
+    ) -> Result<Handled<Dispatch>, crate::Error> {
         // Handle various special messages:
-        MatchMessageFrom::new(message, &cx)
+        MatchDispatchFrom::new(message, &cx)
             .if_request_from(Client, async |_req: InitializeRequest, request_cx| {
                 request_cx.respond_with_error(crate::Error::invalid_request().data(format!(
                     "proxies must be initialized with `{}`",
@@ -221,12 +221,12 @@ impl Role for Conductor {
             })
             .await
             // Incoming message from the client -- forward to the agent
-            .if_message_from(Client, async |message: MessageCx| {
+            .if_message_from(Client, async |message: Dispatch| {
                 cx.send_proxied_message_to(Agent, message)
             })
             .await
             // Incoming message from the agent -- forward to the client
-            .if_message_from(Agent, async |message: MessageCx| {
+            .if_message_from(Agent, async |message: Dispatch| {
                 cx.send_proxied_message_to(Client, message)
             })
             .await
@@ -273,10 +273,10 @@ where
 {
     async fn handle_message_from(
         &mut self,
-        message: MessageCx,
+        message: Dispatch,
         connection: ConnectionTo<Counterpart>,
-    ) -> Result<Handled<MessageCx>, crate::Error> {
-        MatchMessageFrom::new(message, &connection)
+    ) -> Result<Handled<Dispatch>, crate::Error> {
+        MatchDispatchFrom::new(message, &connection)
             .if_message_from(Agent, async |message| {
                 // If this is for our session-id, proxy it to the client.
                 if let Some(session_id) = message.get_session_id()? {

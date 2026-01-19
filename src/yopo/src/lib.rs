@@ -7,8 +7,8 @@ use sacp::schema::{
     ProtocolVersion, RequestPermissionOutcome, RequestPermissionRequest, RequestPermissionResponse,
     SelectedPermissionOutcome, SessionNotification, TextContent,
 };
-use sacp::util::MatchMessage;
-use sacp::{Agent, Client, Handled, MessageCx, ConnectTo, UntypedMessage};
+use sacp::util::MatchDispatch;
+use sacp::{Agent, Client, Handled, Dispatch, ConnectTo, UntypedMessage};
 use std::path::PathBuf;
 
 /// Converts a `ContentBlock` to its string representation.
@@ -87,15 +87,15 @@ pub async fn prompt_with_callback(
 
     // Run the client
     Client.connect_from()
-        .on_receive_message(
-            async |message: MessageCx<UntypedMessage, UntypedMessage>, _cx| {
+        .on_receive_dispatch(
+            async |message: Dispatch<UntypedMessage, UntypedMessage>, _cx| {
                 tracing::trace!("received: {:?}", message.message());
                 Ok(Handled::No {
                     message,
                     retry: false,
                 })
             },
-            sacp::on_receive_message!(),
+            sacp::on_receive_dispatch!(),
         )
         .connect_with(component, |cx: sacp::ConnectionTo<Agent>| async move {
             // Initialize the agent
@@ -116,7 +116,7 @@ pub async fn prompt_with_callback(
                 let update = session.read_update().await?;
                 match update {
                     sacp::SessionMessage::SessionMessage(message) => {
-                        MatchMessage::new(message)
+                        MatchDispatch::new(message)
                             .if_notification(async |notification: SessionNotification| {
                                 tracing::debug!(
                                     ?notification,

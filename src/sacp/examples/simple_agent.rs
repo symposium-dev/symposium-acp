@@ -1,5 +1,5 @@
 use sacp::schema::{AgentCapabilities, InitializeRequest, InitializeResponse};
-use sacp::{Agent, Client, ConnectionTo, MessageCx};
+use sacp::{Agent, Client, ConnectionTo, Dispatch};
 use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
 
 #[tokio::main]
@@ -16,12 +16,12 @@ async fn main() -> Result<(), sacp::Error> {
             },
             sacp::on_receive_request!(),
         )
-        .on_receive_message(
-            async move |message: MessageCx, cx: ConnectionTo<Client>| {
+        .on_receive_dispatch(
+            async move |message: Dispatch, cx: ConnectionTo<Client>| {
                 // Respond to any other message with an error
                 message.respond_with_error(sacp::util::internal_error("TODO"), cx)
             },
-            sacp::on_receive_message!(),
+            sacp::on_receive_dispatch!(),
         )
         .connect_to(sacp::ByteStreams::new(
             tokio::io::stdout().compat_write(),

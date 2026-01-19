@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::schema::{METHOD_SUCCESSOR_MESSAGE, SuccessorMessage};
 use crate::util::json_cast;
-use crate::{ConnectFrom, ConnectionTo, Handled, JsonRpcMessage, MessageCx, UntypedMessage};
+use crate::{ConnectFrom, ConnectionTo, Handled, JsonRpcMessage, Dispatch, UntypedMessage};
 
 /// Roles for the ACP protocol.
 pub mod acp;
@@ -53,9 +53,9 @@ pub trait Role: Debug + Clone + Send + Sync + 'static + Eq + Ord + Hash {
     /// Method invoked when there is no defined message handler.
     fn default_handle_message_from(
         &self,
-        message: MessageCx,
+        message: Dispatch,
         connection: ConnectionTo<Self>,
-    ) -> impl Future<Output = Result<Handled<MessageCx>, crate::Error>> + Send;
+    ) -> impl Future<Output = Result<Handled<Dispatch>, crate::Error>> + Send;
 
     /// Returns the counterpart role.
     fn counterpart(&self) -> Self::Counterpart;
@@ -138,21 +138,21 @@ impl RoleId {
 pub(crate) async fn handle_incoming_message<Counterpart: Role, Peer: Role>(
     counterpart: Counterpart,
     peer: Peer,
-    message_cx: MessageCx,
+    dispatch: Dispatch,
     connection_cx: ConnectionTo<Counterpart>,
     handle_message: impl AsyncFnOnce(
-        MessageCx,
+        Dispatch,
         ConnectionTo<Counterpart>,
-    ) -> Result<Handled<MessageCx>, crate::Error>,
-) -> Result<Handled<MessageCx>, crate::Error>
+    ) -> Result<Handled<Dispatch>, crate::Error>,
+) -> Result<Handled<Dispatch>, crate::Error>
 where
     Counterpart: HasPeer<Peer>,
 {
     tracing::trace!(
-        method = %message_cx.method(),
+        method = %dispatch.method(),
         ?counterpart,
         ?peer,
-        ?message_cx,
+        ?dispatch,
         "handle_incoming_message: enter"
     );
 
@@ -166,7 +166,7 @@ where
     // carries an `id` and we use this `id` to look up information
     // on the request that was sent to determine which peer it was
     // directed at (and therefore which peer sent us the response).
-    if let MessageCx::Response(_, response_cx) = &message_cx {
+    if let Dispatch::Response(_, response_cx) = &dispatch {
         tracing::trace!(
             response_role_id = ?response_cx.role_id(),
             peer_role_id = ?peer.role_id(),
@@ -174,33 +174,33 @@ where
         );
 
         if response_cx.role_id() == peer.role_id() {
-            return handle_message(message_cx, connection_cx).await;
+            return handle_message(dispatch, connection_cx).await;
         } else {
             return Ok(Handled::No {
-                message: message_cx,
+                message: dispatch,
                 retry: false,
             });
         }
     }
 
     // Handle other messages by looking at the 'remote style'
-    let method = message_cx.method();
+    let method = dispatch.method();
     match counterpart.remote_style(peer) {
         RemoteStyle::Counterpart => {
             // "Counterpart" is the default peer, no special checks required.
             tracing::trace!("handle_incoming_message: Counterpart style, passing through");
-            return handle_message(message_cx, connection_cx).await;
+            return handle_message(dispatch, connection_cx).await;
         }
         RemoteStyle::Predecessor => {
             // "Predecessor" is the default peer, no special checks required.
             tracing::trace!("handle_incoming_message: Predecessor style, passing through");
             if method != METHOD_SUCCESSOR_MESSAGE {
-                return handle_message(message_cx, connection_cx).await;
+                return handle_message(dispatch, connection_cx).await;
             } else {
                 // Methods coming from the successor are not coming from
                 // our counterpart.
                 return Ok(Handled::No {
-                    message: message_cx,
+                    message: dispatch,
                     retry: false,
                 });
             }
@@ -214,7 +214,7 @@ where
                     "handle_incoming_message: Successor style but method doesn't match, returning Handled::No"
                 );
                 return Ok(Handled::No {
-                    message: message_cx,
+                    message: dispatch,
                     retry: false,
                 });
             }
@@ -225,32 +225,32 @@ where
 
             // The outer message has method="_proxy/successor" and params containing the inner message.
             // We need to deserialize the params (not the whole message) to extract the inner UntypedMessage.
-            let untyped_message = message_cx.message().ok_or_else(|| {
+            let untyped_message = dispatch.message().ok_or_else(|| {
                 crate::util::internal_error(
                     "Response variant cannot be unwrapped as SuccessorMessage",
                 )
             })?;
             let SuccessorMessage { message, meta } = json_cast(untyped_message.params())?;
-            let successor_message_cx = message_cx.try_map_message(|_| Ok(message))?;
+            let successor_dispatch = dispatch.try_map_message(|_| Ok(message))?;
             tracing::trace!(
-                unwrapped_method = %successor_message_cx.method(),
+                unwrapped_method = %successor_dispatch.method(),
                 "handle_incoming_message: unwrapped to inner message"
             );
-            match handle_message(successor_message_cx, connection_cx).await? {
+            match handle_message(successor_dispatch, connection_cx).await? {
                 Handled::Yes => {
                     tracing::trace!("handle_incoming_message: inner handler returned Handled::Yes");
                     Ok(Handled::Yes)
                 }
 
                 Handled::No {
-                    message: successor_message_cx,
+                    message: successor_dispatch,
                     retry,
                 } => {
                     tracing::trace!(
                         "handle_incoming_message: inner handler returned Handled::No, re-wrapping"
                     );
                     Ok(Handled::No {
-                        message: successor_message_cx.try_map_message(|message| {
+                        message: successor_dispatch.try_map_message(|message| {
                             SuccessorMessage { message, meta }.to_untyped_message()
                         })?,
                         retry,
@@ -284,9 +284,9 @@ impl Role for UntypedRole {
 
     async fn default_handle_message_from(
         &self,
-        message: MessageCx,
+        message: Dispatch,
         _connection: ConnectionTo<Self>,
-    ) -> Result<Handled<MessageCx>, crate::Error> {
+    ) -> Result<Handled<Dispatch>, crate::Error> {
         Ok(Handled::No {
             message,
             retry: false,

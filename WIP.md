@@ -11,9 +11,15 @@ Refactoring the Link/Peer type system to a simpler Role-based API. Goals:
 ## Current State (2026-01-19)
 
 **Branch**: `the-big-rename`
-**Status**: Phase 6b complete, all tests passing
+**Status**: Phase 7 (naming cleanup) in progress
 
 The Role-based API migration is complete. The codebase now uses a unified `Role` type system instead of the previous `JrLink`/`JrPeer` system, with `ConnectTo<R>` as the core trait.
+
+Now cleaning up naming conventions:
+- Removed all `Jr*` type definitions and aliases
+- Renamed `MessageCx` → `Dispatch` (the incoming message + response machinery)
+- Renamed `MatchMessage` → `MatchDispatch`
+- Renamed `on_receive_message` → `on_receive_dispatch`
 
 ## Type Mapping (Final)
 
@@ -29,6 +35,10 @@ The Role-based API migration is complete. The codebase now uses a unified `Role`
 | `Run` (trait) | `RunWithConnectionTo` |
 | `JrLink` | Removed |
 | `JrPeer` | Removed |
+| `JrMessageHandler` | `HandleMessageFrom` (alias removed) |
+| `MessageCx` | `Dispatch` |
+| `MatchMessage` | `MatchDispatch` |
+| `on_receive_message` | `on_receive_dispatch` |
 | `Serve<R>` | `ConnectTo<R>` |
 | `DynServe<R>` | `DynConnectTo<R>` |
 | `::builder()` | `.connect_from()` |
@@ -125,9 +135,15 @@ trait HasPeer<Peer: Role>: Role {
 - [x] Rename `.into_server()` → `.into_channel_and_future()`
 - [x] Update all crates and documentation
 
-### Phase 7: Documentation ⏳
-- [ ] Update sacp crate doctests (currently failing)
-- [ ] Update examples in documentation
+### Phase 7: Naming cleanup ⏳
+- [x] Remove `JrMessageHandler` backward-compat alias
+- [x] Rename `MessageCx` → `Dispatch`
+- [x] Rename `MatchMessage` → `MatchDispatch`
+- [x] Rename `on_receive_message` → `on_receive_dispatch`
+- [ ] Clean up stale `Jr*` references in docs/comments
+- [ ] Clean up `cx` variable naming convention
+- [ ] Update sacp-cookbook doctests (12 failing)
+- [ ] Update sacp-tokio README
 - [ ] Review and update mdbook docs
 
 ## Files Removed

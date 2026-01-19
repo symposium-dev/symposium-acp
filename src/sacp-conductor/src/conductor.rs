@@ -117,8 +117,8 @@ use futures::{
     channel::mpsc::{self},
 };
 use sacp::{
-    Agent, BoxFuture, Client, Conductor, DynConnectTo, Error, JsonRpcMessage, MessageCx, Proxy, Role,
-    RunWithConnectionTo, ConnectTo, role::HasPeer, util::MatchMessage,
+    Agent, BoxFuture, Client, Conductor, DynConnectTo, Error, JsonRpcMessage, Dispatch, Proxy, Role,
+    RunWithConnectionTo, ConnectTo, role::HasPeer, util::MatchDispatch,
 };
 use sacp::{
     ConnectFrom, ConnectionTo, JsonRpcNotification, JsonRpcRequest, SentRequest, UntypedMessage,
@@ -126,7 +126,7 @@ use sacp::{
 use sacp::{
     HandleMessageFrom,
     schema::{InitializeProxyRequest, InitializeRequest, NewSessionRequest},
-    util::MatchMessageFrom,
+    util::MatchDispatchFrom,
 };
 use sacp::{
     Handled,
@@ -267,7 +267,7 @@ impl<Host: ConductorHostRole> ConductorImpl<Host> {
 
     async fn incoming_message_from_client(
         conductor_tx: &mut mpsc::Sender<ConductorMessage>,
-        message: MessageCx,
+        message: Dispatch,
     ) -> Result<(), sacp::Error> {
         conductor_tx
             .send(ConductorMessage::LeftToRight {
@@ -280,7 +280,7 @@ impl<Host: ConductorHostRole> ConductorImpl<Host> {
 
     async fn incoming_message_from_agent(
         conductor_tx: &mut mpsc::Sender<ConductorMessage>,
-        message: MessageCx,
+        message: Dispatch,
     ) -> Result<(), sacp::Error> {
         conductor_tx
             .send(ConductorMessage::RightToLeft {
@@ -308,9 +308,9 @@ impl<Host: ConductorHostRole> HandleMessageFrom<Host::Counterpart>
 {
     async fn handle_message_from(
         &mut self,
-        message: MessageCx,
+        message: Dispatch,
         connection: sacp::ConnectionTo<Host::Counterpart>,
-    ) -> Result<sacp::Handled<MessageCx>, sacp::Error> {
+    ) -> Result<sacp::Handled<Dispatch>, sacp::Error> {
         self.host
             .handle_message(message, connection, &mut self.conductor_tx)
             .await
@@ -555,7 +555,7 @@ where
         &mut self,
         client: ConnectionTo<Host::Counterpart>,
         source_component_index: SourceComponentIndex,
-        message: MessageCx<Req, N>,
+        message: Dispatch<Req, N>,
     ) -> Result<(), sacp::Error>
     where
         Req::Response: Send,
@@ -566,15 +566,15 @@ where
         };
 
         match message {
-            MessageCx::Request(request, request_cx) => self
+            Dispatch::Request(request, request_cx) => self
                 .send_request_to_predecessor_of(client, source_component_index, request)
                 .forward_to_request_cx(request_cx),
-            MessageCx::Notification(notification) => self.send_notification_to_predecessor_of(
+            Dispatch::Notification(notification) => self.send_notification_to_predecessor_of(
                 client,
                 source_component_index,
                 notification,
             ),
-            MessageCx::Response(result, response_cx) => response_cx.respond_with_result(result),
+            Dispatch::Response(result, response_cx) => response_cx.respond_with_result(result),
         }
     }
 
@@ -637,7 +637,7 @@ where
     async fn forward_client_to_agent_message(
         &mut self,
         target_component_index: usize,
-        message: MessageCx,
+        message: Dispatch,
         client: ConnectionTo<Host::Counterpart>,
     ) -> Result<(), sacp::Error> {
         tracing::trace!(
@@ -679,8 +679,8 @@ where
     async fn ensure_initialized(
         &mut self,
         client: ConnectionTo<Host::Counterpart>,
-        message: MessageCx,
-    ) -> Result<MessageCx, Error> {
+        message: Dispatch,
+    ) -> Result<Dispatch, Error> {
         // Already initialized - pass through
         let Some(instantiator) = self.instantiator.take() else {
             return Ok(message);
@@ -779,15 +779,15 @@ where
         &mut self,
         component_index: usize,
     ) -> ConnectFrom<Conductor, impl HandleMessageFrom<Proxy> + 'static> {
-        type SuccessorMessageCx = MessageCx<SuccessorMessage, SuccessorMessage>;
+        type SuccessorDispatch = Dispatch<SuccessorMessage, SuccessorMessage>;
         let mut conductor_tx = self.conductor_tx.clone();
         Conductor.connect_from()
             .name(format!("conductor-to-component({})", component_index))
             // Intercept messages sent by the proxy.
-            .on_receive_message(
-                async move |message_cx: MessageCx, _connection| {
-                    MatchMessage::new(message_cx)
-                        .if_message(async |message_cx: SuccessorMessageCx| {
+            .on_receive_dispatch(
+                async move |dispatch: Dispatch, _connection| {
+                    MatchDispatch::new(dispatch)
+                        .if_message(async |dispatch: SuccessorDispatch| {
                             //                         ------------------
                             // SuccessorMessages sent by the proxy go to its successor.
                             //
@@ -808,13 +808,13 @@ where
                             conductor_tx
                                 .send(ConductorMessage::LeftToRight {
                                     target_component_index: component_index + 1,
-                                    message: message_cx.map(|r, cx| (r.message, cx), |n| n.message),
+                                    message: dispatch.map(|r, cx| (r.message, cx), |n| n.message),
                                 })
                                 .await
                                 .map_err(sacp::util::internal_error)
                         })
                         .await
-                        .otherwise(async |message_cx| {
+                        .otherwise(async |dispatch| {
                             // Other messagrs send by the proxy go its predecessor.
                             // As in the previous handler:
                             //
@@ -833,7 +833,7 @@ where
                                 source_component_index: SourceComponentIndex::Proxy(
                                     component_index,
                                 ),
-                                message: message_cx,
+                                message: dispatch,
                             };
                             conductor_tx
                                 .send(message)
@@ -842,18 +842,18 @@ where
                         })
                         .await
                 },
-                sacp::on_receive_message!(),
+                sacp::on_receive_dispatch!(),
             )
     }
 
     async fn forward_message_from_client_to_proxy(
         &mut self,
         target_component_index: usize,
-        message: MessageCx,
+        message: Dispatch,
     ) -> Result<(), sacp::Error> {
         tracing::debug!(?message, "forward_message_to_proxy");
 
-        MatchMessage::new(message)
+        MatchDispatch::new(message)
             .if_request(async |_request: InitializeProxyRequest, request_cx| {
                 request_cx.respond_with_error(
                     sacp::Error::invalid_request()
@@ -891,10 +891,10 @@ where
     async fn forward_message_to_agent(
         &mut self,
         client_connection: ConnectionTo<Host::Counterpart>,
-        message: MessageCx,
+        message: Dispatch,
         agent_connection: ConnectionTo<Agent>,
     ) -> Result<(), Error> {
-        MatchMessage::new(message)
+        MatchDispatch::new(message)
             .if_request(async |_request: InitializeProxyRequest, responder| {
                 responder.respond_with_error(
                     sacp::Error::invalid_request()
@@ -936,7 +936,7 @@ where
                                 connection_id
                             ))
                         })?
-                        .send(MessageCx::Request(mcp_request, responder))
+                        .send(Dispatch::Request(mcp_request, responder))
                         .await
                 },
             )
@@ -955,7 +955,7 @@ where
                             connection_id
                         ))
                     })?
-                    .send(MessageCx::Notification(mcp_notification))
+                    .send(Dispatch::Notification(mcp_notification))
                     .await
             })
             .await
@@ -1233,7 +1233,7 @@ pub enum ConductorMessage {
     /// (i.e., the successor answering a request made by its predecessor).
     LeftToRight {
         target_component_index: usize,
-        message: MessageCx,
+        message: Dispatch,
     },
 
     /// If this message is a request or notification, then it is going "right-to-left"
@@ -1243,7 +1243,7 @@ pub enum ConductorMessage {
     /// (i.e., the predecessor answering a request made by its successor).
     RightToLeft {
         source_component_index: SourceComponentIndex,
-        message: MessageCx,
+        message: Dispatch,
     },
 
     /// A pending MCP bridge connection request request.
@@ -1279,7 +1279,7 @@ pub enum ConductorMessage {
     /// to the conductor via TCP. The conductor routes this to the appropriate proxy component.
     McpClientToMcpServer {
         connection_id: String,
-        message: MessageCx,
+        message: Dispatch,
     },
 
     /// Message sent when MCP client disconnects
@@ -1299,22 +1299,22 @@ pub trait ConductorHostRole: Role<Counterpart: HasPeer<Client>> {
     /// Handle initialization: parse the init request, instantiate components, and spawn them.
     ///
     /// Takes ownership of the instantiator and returns the (possibly modified) init request
-    /// wrapped in a MessageCx for forwarding.
+    /// wrapped in a Dispatch for forwarding.
     fn initialize(
         &self,
-        message: MessageCx,
+        message: Dispatch,
         connection: ConnectionTo<Self::Counterpart>,
         instantiator: Self::Instantiator,
         responder: &mut ConductorResponder<Self>,
-    ) -> impl Future<Output = Result<MessageCx, sacp::Error>> + Send;
+    ) -> impl Future<Output = Result<Dispatch, sacp::Error>> + Send;
 
     /// Handle an incoming message from the client or conductor, depending on `Self`
     fn handle_message(
         &self,
-        message: MessageCx,
+        message: Dispatch,
         connection: ConnectionTo<Self::Counterpart>,
         conductor_tx: &mut mpsc::Sender<ConductorMessage>,
-    ) -> impl Future<Output = Result<Handled<MessageCx>, sacp::Error>> + Send;
+    ) -> impl Future<Output = Result<Handled<Dispatch>, sacp::Error>> + Send;
 }
 
 /// Conductor acting as an agent
@@ -1323,16 +1323,16 @@ impl ConductorHostRole for Agent {
 
     async fn initialize(
         &self,
-        message: MessageCx,
+        message: Dispatch,
         client_connection: ConnectionTo<Client>,
         instantiator: Self::Instantiator,
         responder: &mut ConductorResponder<Self>,
-    ) -> Result<MessageCx, sacp::Error> {
+    ) -> Result<Dispatch, sacp::Error> {
         let invalid_request = || Error::invalid_request().data("expected `initialize` request");
 
         // Not yet initialized - expect an initialize request.
         // Error if we get anything else.
-        let MessageCx::Request(request, request_cx) = message else {
+        let Dispatch::Request(request, request_cx) = message else {
             message.respond_with_error(invalid_request(), client_connection.clone())?;
             return Err(invalid_request());
         };
@@ -1362,20 +1362,20 @@ impl ConductorHostRole for Agent {
             Client.connect_from()
                 .name("conductor-to-agent")
                 // Intercept agent-to-client messages from the agent.
-                .on_receive_message(
+                .on_receive_dispatch(
                     {
                         let mut conductor_tx = responder.conductor_tx.clone();
-                        async move |message_cx: MessageCx, _cx| {
+                        async move |dispatch: Dispatch, _cx| {
                             conductor_tx
                                 .send(ConductorMessage::RightToLeft {
                                     source_component_index: SourceComponentIndex::Successor,
-                                    message: message_cx,
+                                    message: dispatch,
                                 })
                                 .await
                                 .map_err(sacp::util::internal_error)
                         }
                     },
-                    sacp::on_receive_message!(),
+                    sacp::on_receive_dispatch!(),
                 ),
             agent_component,
         )?;
@@ -1384,7 +1384,7 @@ impl ConductorHostRole for Agent {
         // Spawn the proxy components
         responder.spawn_proxies(client_connection.clone(), proxy_components)?;
 
-        Ok(MessageCx::Request(
+        Ok(Dispatch::Request(
             modified_req.to_untyped_message()?,
             request_cx,
         ))
@@ -1392,17 +1392,17 @@ impl ConductorHostRole for Agent {
 
     async fn handle_message(
         &self,
-        message: MessageCx,
+        message: Dispatch,
         client_connection: ConnectionTo<Client>,
         conductor_tx: &mut mpsc::Sender<ConductorMessage>,
-    ) -> Result<Handled<MessageCx>, sacp::Error> {
+    ) -> Result<Handled<Dispatch>, sacp::Error> {
         tracing::debug!(
             method = ?message.method(),
             "ConductorToClient::handle_message"
         );
-        MatchMessageFrom::new(message, &client_connection)
+        MatchDispatchFrom::new(message, &client_connection)
             // Any incoming messages from the client are client-to-agent messages targeting the first component.
-            .if_message_from(Client, async move |message: MessageCx| {
+            .if_message_from(Client, async move |message: Dispatch| {
                 tracing::debug!(
                     method = ?message.method(),
                     "ConductorToClient::handle_message - matched Client"
@@ -1420,16 +1420,16 @@ impl ConductorHostRole for Proxy {
 
     async fn initialize(
         &self,
-        message: MessageCx,
+        message: Dispatch,
         client_connection: ConnectionTo<Conductor>,
         instantiator: Self::Instantiator,
         responder: &mut ConductorResponder<Self>,
-    ) -> Result<MessageCx, sacp::Error> {
+    ) -> Result<Dispatch, sacp::Error> {
         let invalid_request = || Error::invalid_request().data("expected `initialize` request");
 
         // Not yet initialized - expect an InitializeProxy request.
         // Error if we get anything else.
-        let MessageCx::Request(request, request_cx) = message else {
+        let Dispatch::Request(request, request_cx) = message else {
             message.respond_with_error(invalid_request(), client_connection.clone())?;
             return Err(invalid_request());
         };
@@ -1458,7 +1458,7 @@ impl ConductorHostRole for Proxy {
         // Spawn the proxy components
         responder.spawn_proxies(client_connection.clone(), proxy_components)?;
 
-        Ok(MessageCx::Request(
+        Ok(Dispatch::Request(
             modified_req.to_untyped_message()?,
             request_cx,
         ))
@@ -1466,20 +1466,20 @@ impl ConductorHostRole for Proxy {
 
     async fn handle_message(
         &self,
-        message: MessageCx,
+        message: Dispatch,
         client_connection: ConnectionTo<Conductor>,
         conductor_tx: &mut mpsc::Sender<ConductorMessage>,
-    ) -> Result<Handled<MessageCx>, sacp::Error> {
+    ) -> Result<Handled<Dispatch>, sacp::Error> {
         tracing::debug!(
             method = ?message.method(),
             ?message,
             "ConductorToConductor::handle_message"
         );
-        MatchMessageFrom::new(message, &client_connection)
+        MatchDispatchFrom::new(message, &client_connection)
             .if_message_from(Agent, {
                 // Messages from our successor arrive already unwrapped
                 // (RemoteRoleStyle::Successor strips the SuccessorMessage envelope).
-                async |message: MessageCx| {
+                async |message: Dispatch| {
                     tracing::debug!(
                         method = ?message.method(),
                         "ConductorToConductor::handle_message - matched Agent"
@@ -1491,7 +1491,7 @@ impl ConductorHostRole for Proxy {
             })
             .await
             // Any incoming messages from the client are client-to-agent messages targeting the first component.
-            .if_message_from(Client, async |message: MessageCx| {
+            .if_message_from(Client, async |message: Dispatch| {
                 tracing::debug!(
                     method = ?message.method(),
                     "ConductorToConductor::handle_message - matched Client"
@@ -1509,7 +1509,7 @@ pub trait ConductorSuccessor<Host: ConductorHostRole>: Send + Sync + 'static {
     /// Send a message to the successor.
     fn send_message<'a>(
         &self,
-        message: MessageCx,
+        message: Dispatch,
         conductor_cx: ConnectionTo<Host::Counterpart>,
         responder: &'a mut ConductorResponder<Host>,
     ) -> BoxFuture<'a, Result<(), sacp::Error>>;
@@ -1518,7 +1518,7 @@ pub trait ConductorSuccessor<Host: ConductorHostRole>: Send + Sync + 'static {
 impl<Host: ConductorHostRole> ConductorSuccessor<Host> for sacp::Error {
     fn send_message<'a>(
         &self,
-        #[expect(unused_variables)] message: MessageCx,
+        #[expect(unused_variables)] message: Dispatch,
         #[expect(unused_variables)] conductor_cx: ConnectionTo<Host::Counterpart>,
         #[expect(unused_variables)] responder: &'a mut ConductorResponder<Host>,
     ) -> BoxFuture<'a, Result<(), sacp::Error>> {
@@ -1534,7 +1534,7 @@ struct GrandSuccessor;
 /// When the conductor is acting as an proxy, messages sent by
 /// the last proxy go to the conductor's successor.
 ///
-/// ```
+/// ```text
 /// client --> Conductor -----------------------------> GrandSuccessor
 ///            |                                  |
 ///            +-> Proxy[0] -> ... -> Proxy[n-1] -+
@@ -1542,7 +1542,7 @@ struct GrandSuccessor;
 impl ConductorSuccessor<Proxy> for GrandSuccessor {
     fn send_message<'a>(
         &self,
-        message: MessageCx,
+        message: Dispatch,
         connection: ConnectionTo<Conductor>,
         _responder: &'a mut ConductorResponder<Proxy>,
     ) -> BoxFuture<'a, Result<(), sacp::Error>> {
@@ -1559,7 +1559,7 @@ impl ConductorSuccessor<Proxy> for GrandSuccessor {
 impl ConductorSuccessor<Agent> for ConnectionTo<Agent> {
     fn send_message<'a>(
         &self,
-        message: MessageCx,
+        message: Dispatch,
         connection: ConnectionTo<Client>,
         responder: &'a mut ConductorResponder<Agent>,
     ) -> BoxFuture<'a, Result<(), sacp::Error>> {

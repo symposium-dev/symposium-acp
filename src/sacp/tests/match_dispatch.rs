@@ -1,9 +1,9 @@
 use sacp::Role;
 use sacp::role::UntypedRole;
-use sacp::util::MatchMessage;
+use sacp::util::MatchDispatch;
 use sacp::{
     ConnectionTo, HandleMessageFrom, Handled, JsonRpcMessage, JsonRpcRequest, JsonRpcResponse,
-    MessageCx, Responder, ConnectTo, util::MatchMessageFrom,
+    Dispatch, Responder, ConnectTo, util::MatchDispatchFrom,
 };
 use serde::{Deserialize, Serialize};
 
@@ -55,10 +55,10 @@ struct EchoHandler;
 impl<Counterpart: Role> HandleMessageFrom<Counterpart> for EchoHandler {
     async fn handle_message_from(
         &mut self,
-        message: MessageCx,
+        message: Dispatch,
         _connection: ConnectionTo<Counterpart>,
-    ) -> Result<Handled<MessageCx>, sacp::Error> {
-        MatchMessage::new(message)
+    ) -> Result<Handled<Dispatch>, sacp::Error> {
+        MatchDispatch::new(message)
             .if_request(async move |request: EchoRequestResponse, responder| {
                 responder.respond(request)
             })
@@ -74,7 +74,7 @@ impl<Counterpart: Role> HandleMessageFrom<Counterpart> for EchoHandler {
 #[tokio::test]
 async fn modify_message_en_route() -> Result<(), sacp::Error> {
     // Demonstrate a case where we modify a message
-    // using a `HandleMessageFrom` invoked from `MatchMessage`
+    // using a `HandleMessageFrom` invoked from `MatchDispatch`
 
     struct TestComponent;
 
@@ -97,10 +97,10 @@ async fn modify_message_en_route() -> Result<(), sacp::Error> {
     impl HandleMessageFrom<UntypedRole> for PushHandler {
         async fn handle_message_from(
             &mut self,
-            message: MessageCx,
+            message: Dispatch,
             cx: ConnectionTo<UntypedRole>,
-        ) -> Result<Handled<MessageCx>, sacp::Error> {
-            MatchMessageFrom::new(message, &cx)
+        ) -> Result<Handled<Dispatch>, sacp::Error> {
+            MatchDispatchFrom::new(message, &cx)
                 .if_request(async move |mut request: EchoRequestResponse, responder| {
                     request.text.push(self.message.clone());
                     Ok(Handled::No {

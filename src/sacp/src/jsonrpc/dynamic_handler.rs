@@ -2,7 +2,7 @@ use futures::future::BoxFuture;
 use uuid::Uuid;
 
 use crate::role::Role;
-use crate::{ConnectionTo, HandleMessageFrom, Handled, MessageCx};
+use crate::{ConnectionTo, HandleMessageFrom, Handled, Dispatch};
 
 /// Internal dyn-safe wrapper around `HandleMessageAs`
 ///
@@ -10,9 +10,9 @@ use crate::{ConnectionTo, HandleMessageFrom, Handled, MessageCx};
 pub(crate) trait DynHandleMessageFrom<Counterpart: Role>: Send {
     fn dyn_handle_message_from(
         &mut self,
-        message: MessageCx,
+        message: Dispatch,
         cx: ConnectionTo<Counterpart>,
-    ) -> BoxFuture<'_, Result<Handled<MessageCx>, crate::Error>>;
+    ) -> BoxFuture<'_, Result<Handled<Dispatch>, crate::Error>>;
 
     fn dyn_describe_chain(&self) -> String;
 }
@@ -20,9 +20,9 @@ pub(crate) trait DynHandleMessageFrom<Counterpart: Role>: Send {
 impl<Counterpart: Role, H: HandleMessageFrom<Counterpart>> DynHandleMessageFrom<Counterpart> for H {
     fn dyn_handle_message_from(
         &mut self,
-        message: MessageCx,
+        message: Dispatch,
         cx: ConnectionTo<Counterpart>,
-    ) -> BoxFuture<'_, Result<Handled<MessageCx>, crate::Error>> {
+    ) -> BoxFuture<'_, Result<Handled<Dispatch>, crate::Error>> {
         Box::pin(HandleMessageFrom::handle_message_from(self, message, cx))
     }
 

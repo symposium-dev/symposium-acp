@@ -8,7 +8,7 @@ use futures::channel::mpsc;
 use tokio::sync::oneshot;
 
 use crate::{
-    Agent, Client, ConnectionTo, HandleMessageFrom, Handled, MessageCx, Responder, Role,
+    Agent, Client, ConnectionTo, HandleMessageFrom, Handled, Dispatch, Responder, Role,
     jsonrpc::{
         DynamicHandlerRegistration,
         run::{ChainRun, NullRun, RunWithConnectionTo},
@@ -16,7 +16,7 @@ use crate::{
     mcp_server::McpServer,
     role::{HasPeer, acp::ProxySessionMessages},
     schema::SessionId,
-    util::{MatchMessage, MatchMessageFrom, run_until},
+    util::{MatchDispatch, MatchDispatchFrom, run_until},
 };
 
 /// Marker type indicating the session builder will block the current task.
@@ -513,8 +513,8 @@ where
 #[derive(Debug)]
 pub enum SessionMessage {
     /// Periodic updates with new content, tool requests, etc.
-    /// Use [`MatchMessage`] to match on the message type.
-    SessionMessage(MessageCx),
+    /// Use [`MatchDispatch`] to match on the message type.
+    SessionMessage(Dispatch),
 
     /// When a prompt completes, the stop reason.
     StopReason(StopReason),
@@ -596,7 +596,7 @@ where
             let update = self.read_update().await?;
             tracing::trace!(?update, "read_to_string update");
             match update {
-                SessionMessage::SessionMessage(message_cx) => MatchMessage::new(message_cx)
+                SessionMessage::SessionMessage(dispatch) => MatchDispatch::new(dispatch)
                     .if_notification(async |notif: SessionNotification| match notif.update {
                         SessionUpdate::AgentMessageChunk(ContentChunk {
                             content: ContentBlock::Text(text),
@@ -682,9 +682,9 @@ where
         // consumed yet. We must forward them to maintain message ordering.
         while let Some(message) = update_rx.try_next().ok().flatten() {
             match message {
-                SessionMessage::SessionMessage(message_cx) => {
+                SessionMessage::SessionMessage(dispatch) => {
                     // Forward the message to the client
-                    connection.send_proxied_message_to(Client, message_cx)?;
+                    connection.send_proxied_message_to(Client, dispatch)?;
                 }
                 SessionMessage::StopReason(_) => {
                     // StopReason is internal bookkeeping, not forwarded
@@ -728,16 +728,16 @@ where
 {
     async fn handle_message_from(
         &mut self,
-        message: MessageCx,
+        message: Dispatch,
         cx: ConnectionTo<Counterpart>,
-    ) -> Result<Handled<MessageCx>, crate::Error> {
+    ) -> Result<Handled<Dispatch>, crate::Error> {
         // If this is a message for our session, grab it.
         tracing::trace!(
             ?message,
             handler_session_id = ?self.session_id,
             "ActiveSessionHandler::handle_message"
         );
-        MatchMessageFrom::new(message, &cx)
+        MatchDispatchFrom::new(message, &cx)
             .if_message_from(Agent, async |message| {
                 if let Some(session_id) = message.get_session_id()? {
                     tracing::trace!(

@@ -26,9 +26,9 @@ impl Role for Client {
 
     async fn default_handle_message_from(
         &self,
-        message: crate::MessageCx,
+        message: crate::Dispatch,
         _connection: crate::ConnectionTo<Self>,
-    ) -> Result<crate::Handled<crate::MessageCx>, crate::Error> {
+    ) -> Result<crate::Handled<crate::Dispatch>, crate::Error> {
         Ok(Handled::No {
             message,
             retry: false,
@@ -65,9 +65,9 @@ impl Role for Server {
 
     async fn default_handle_message_from(
         &self,
-        message: crate::MessageCx,
+        message: crate::Dispatch,
         _connection: crate::ConnectionTo<Self>,
-    ) -> Result<crate::Handled<crate::MessageCx>, crate::Error> {
+    ) -> Result<crate::Handled<crate::Dispatch>, crate::Error> {
         Ok(Handled::No {
             message,
             retry: false,

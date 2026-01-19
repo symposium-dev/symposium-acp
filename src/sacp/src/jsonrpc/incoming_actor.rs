@@ -8,7 +8,7 @@ use futures_concurrency::stream::StreamExt as _;
 use fxhash::FxHashMap;
 use uuid::Uuid;
 
-use crate::MessageCx;
+use crate::Dispatch;
 use crate::RoleId;
 use crate::UntypedMessage;
 use crate::jsonrpc::ConnectionTo;
@@ -56,7 +56,7 @@ pub(super) async fn incoming_protocol_actor<Counterpart: Role>(
 
     let mut dynamic_handlers: FxHashMap<Uuid, Box<dyn DynHandleMessageFrom<Counterpart>>> =
         FxHashMap::default();
-    let mut pending_messages: Vec<MessageCx> = vec![];
+    let mut pending_messages: Vec<Dispatch> = vec![];
 
     // Map from request ID to (method, sender) for response dispatch.
     // Keys are JSON values because jsonrpcmsg::Id doesn't implement Eq.
@@ -123,11 +123,11 @@ pub(super) async fn incoming_protocol_actor<Counterpart: Role>(
                 Ok(message) => match message {
                     jsonrpcmsg::Message::Request(request) => {
                         tracing::trace!(method = %request.method, id = ?request.id, "Handling request");
-                        let message_cx = message_cx_from_request(connection, request);
-                        dispatch_message_cx(
+                        let dispatch = dispatch_from_request(connection, request);
+                        dispatch_dispatch(
                             counterpart.clone(),
                             connection,
-                            message_cx,
+                            dispatch,
                             &mut dynamic_handlers,
                             &mut handler,
                             &mut pending_messages,
@@ -150,12 +150,12 @@ pub(super) async fn incoming_protocol_actor<Counterpart: Role>(
                             let id_json = serde_json::to_value(&id).unwrap();
                             if let Some(pending_reply) = pending_replies.remove(&id_json) {
                                 // Route the response through the handler chain
-                                let message_cx =
-                                    message_cx_from_response(id, pending_reply, result);
-                                dispatch_message_cx(
+                                let dispatch =
+                                    dispatch_from_response(id, pending_reply, result);
+                                dispatch_dispatch(
                                     counterpart.clone(),
                                     connection,
-                                    message_cx,
+                                    dispatch,
                                     &mut dynamic_handlers,
                                     &mut handler,
                                     &mut pending_messages,
@@ -190,14 +190,14 @@ enum IncomingProtocolMsg<Counterpart: Role> {
 
 /// Dispatches a JSON-RPC request to the handler.
 /// Report an error back to the server if it does not get handled.
-fn message_cx_from_request<Counterpart: Role>(
+fn dispatch_from_request<Counterpart: Role>(
     json_rpc_cx: &ConnectionTo<Counterpart>,
     request: jsonrpcmsg::Request,
-) -> MessageCx {
+) -> Dispatch {
     let message = UntypedMessage::new(&request.method, &request.params).expect("well-formed JSON");
 
-    let message_cx = match &request.id {
-        Some(id) => MessageCx::Request(
+    let dispatch = match &request.id {
+        Some(id) => Dispatch::Request(
             message,
             Responder::new(
                 json_rpc_cx.message_tx.clone(),
@@ -205,10 +205,10 @@ fn message_cx_from_request<Counterpart: Role>(
                 id.clone(),
             ),
         ),
-        None => MessageCx::Notification(message),
+        None => Dispatch::Notification(message),
     };
 
-    message_cx
+    dispatch
 }
 
 /// Dispatches a JSON-RPC response through the handler chain.
@@ -216,46 +216,46 @@ fn message_cx_from_request<Counterpart: Role>(
 /// This allows handlers to intercept and process responses before they reach
 /// the awaiting code. The default behavior is to forward the response to the
 /// local awaiter via the oneshot channel.
-fn message_cx_from_response(
+fn dispatch_from_response(
     id: jsonrpcmsg::Id,
     pending_reply: PendingReply,
     result: Result<serde_json::Value, crate::Error>,
-) -> MessageCx {
+) -> Dispatch {
     let PendingReply {
         method,
         role_id,
         sender,
     } = pending_reply;
 
-    // Create a MessageCx::Response with a ResponseRouter that routes to the oneshot
+    // Create a Dispatch::Response with a ResponseRouter that routes to the oneshot
     let response_cx = ResponseRouter::new(method.clone(), id.clone(), role_id, sender);
-    MessageCx::Response(result, response_cx)
+    Dispatch::Response(result, response_cx)
 }
 
 #[tracing::instrument(
-    skip(connection, message_cx, dynamic_handlers, handler, pending_messages),
-    fields(method = message_cx.method()),
+    skip(connection, dispatch, dynamic_handlers, handler, pending_messages),
+    fields(method = dispatch.method()),
     level = "trace",
 )]
-async fn dispatch_message_cx<Counterpart: Role>(
+async fn dispatch_dispatch<Counterpart: Role>(
     counterpart: Counterpart,
     connection: &ConnectionTo<Counterpart>,
-    mut message_cx: MessageCx,
+    mut dispatch: Dispatch,
     dynamic_handlers: &mut FxHashMap<Uuid, Box<dyn DynHandleMessageFrom<Counterpart>>>,
     handler: &mut impl HandleMessageFrom<Counterpart>,
-    pending_messages: &mut Vec<MessageCx>,
+    pending_messages: &mut Vec<Dispatch>,
 ) -> Result<(), crate::Error> {
-    tracing::trace!(?message_cx, "dispatch_message_cx");
+    tracing::trace!(?dispatch, "dispatch_dispatch");
 
     let mut retry_any = false;
 
-    let id = message_cx.id();
-    let method = message_cx.method().to_string();
+    let id = dispatch.id();
+    let method = dispatch.method().to_string();
 
     // First, apply the handlers given by the user.
     tracing::trace!(handler = ?handler.describe_chain(), "Attempting handler chain");
     match handler
-        .handle_message_from(message_cx, connection.clone())
+        .handle_message_from(dispatch, connection.clone())
         .await?
     {
         Handled::Yes => {
@@ -265,7 +265,7 @@ async fn dispatch_message_cx<Counterpart: Role>(
 
         Handled::No { message: m, retry } => {
             tracing::trace!(?method, ?id, handler = ?handler.describe_chain(), "Handler declined message");
-            message_cx = m;
+            dispatch = m;
             retry_any |= retry;
         }
     }
@@ -274,7 +274,7 @@ async fn dispatch_message_cx<Counterpart: Role>(
     for dynamic_handler in dynamic_handlers.values_mut() {
         tracing::trace!(handler = ?dynamic_handler.dyn_describe_chain(), "Attempting dynamic handler");
         match dynamic_handler
-            .dyn_handle_message_from(message_cx, connection.clone())
+            .dyn_handle_message_from(dispatch, connection.clone())
             .await?
         {
             Handled::Yes => {
@@ -285,7 +285,7 @@ async fn dispatch_message_cx<Counterpart: Role>(
             Handled::No { message: m, retry } => {
                 tracing::trace!(?method, ?id, handler = ?dynamic_handler.dyn_describe_chain(),  "Dynamic handler declined message");
                 retry_any |= retry;
-                message_cx = m;
+                dispatch = m;
             }
         }
     }
@@ -293,7 +293,7 @@ async fn dispatch_message_cx<Counterpart: Role>(
     // Finally, apply the default handler for the role.
     tracing::trace!(role = ?counterpart, "Attempting default handler");
     match counterpart
-        .default_handle_message_from(message_cx, connection.clone())
+        .default_handle_message_from(dispatch, connection.clone())
         .await?
     {
         Handled::Yes => {
@@ -302,7 +302,7 @@ async fn dispatch_message_cx<Counterpart: Role>(
         }
         Handled::No { message: m, retry } => {
             tracing::trace!(?method, handler = "default", "Role declined message");
-            message_cx = m;
+            dispatch = m;
             retry_any |= retry;
         }
     }
@@ -314,19 +314,19 @@ async fn dispatch_message_cx<Counterpart: Role>(
             ?method,
             "Retrying message as new dynamic handlers are added"
         );
-        pending_messages.push(message_cx);
+        pending_messages.push(dispatch);
         Ok(())
     } else {
-        match message_cx {
-            MessageCx::Request(..) | MessageCx::Notification(_) => {
+        match dispatch {
+            Dispatch::Request(..) | Dispatch::Notification(_) => {
                 tracing::info!(?method, "Rejecting message with error, no handler");
-                let method = message_cx.method().to_string();
-                message_cx.respond_with_error(
+                let method = dispatch.method().to_string();
+                dispatch.respond_with_error(
                     crate::Error::method_not_found().data(method),
                     connection.clone(),
                 )
             }
-            MessageCx::Response(result, response_cx) => {
+            Dispatch::Response(result, response_cx) => {
                 tracing::trace!(?method, "Forwarding response");
                 response_cx.respond_with_result(result)
             }
