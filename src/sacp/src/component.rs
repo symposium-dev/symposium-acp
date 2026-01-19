@@ -1,30 +1,30 @@
-//! Component abstraction for agents and proxies.
+//! ConnectTo abstraction for agents and proxies.
 //!
-//! This module provides the [`Component`] trait that defines the interface for things
+//! This module provides the [`ConnectTo`] trait that defines the interface for things
 //! that can be run as part of a conductor's chain - agents, proxies, or any ACP-speaking component.
 //!
 //! ## Usage
 //!
-//! Components serve by forwarding to other components, creating a chain of message processors.
-//! The type parameter `L` is the link type that this component can serve as a transport for.
+//! Components connect to other components, creating a chain of message processors.
+//! The type parameter `R` is the role that this component connects to (its counterpart).
 //!
-//! To implement a component, implement the `serve` method:
+//! To implement a component, implement the `connect_to` method:
 //!
 //! ```rust,ignore
-//! use sacp::component::Component;
-//! use sacp::link::AgentToClient;
+//! use sacp::ConnectTo;
+//! use sacp::Client;
 //!
 //! struct MyAgent {
 //!     // configuration fields
 //! }
 //!
-//! // An agent serves as a transport for AgentToClient connections
-//! impl Component<AgentToClient> for MyAgent {
-//!     async fn serve(self, client: impl Component<AgentToClient::ConnectsTo>) -> Result<(), sacp::Error> {
-//!         sacp::AgentToClient::builder()
+//! // An agent connects to clients
+//! impl ConnectTo<Client> for MyAgent {
+//!     async fn connect_to(self, client: impl ConnectTo<Agent>) -> Result<(), sacp::Error> {
+//!         sacp::Agent.builder()
 //!             .name("my-agent")
 //!             // configure handlers here
-//!             .serve(client)
+//!             .connect_to(client)
 //!             .await
 //!     }
 //! }
@@ -33,20 +33,19 @@
 use futures::future::BoxFuture;
 use std::{fmt::Debug, future::Future, marker::PhantomData};
 
-use crate::{Channel, link::JrLink};
+use crate::{Channel, role::Role};
 
-/// A component that can participate in the Agent-Client Protocol.
+/// A component that can exchange JSON-RPC messages to an endpoint playing the role `R`
+/// (e.g., an ACP [`Agent`](`crate::role::acp::Agent`) or an MCP [`Server`](`crate::role::mcp::Server`)).
 ///
 /// This trait represents anything that can communicate via JSON-RPC messages over channels -
 /// agents, proxies, in-process connections, or any ACP-speaking component.
 ///
-/// The type parameter `L` is the link type that this component can serve as a transport for.
+/// The type parameter `R` is the role that this component serves (its counterpart).
 /// For example:
-/// - An agent implements `Component<AgentToClient>` - it serves connections where the
-///   local side is an agent talking to a client
-/// - A proxy implements `Component<ProxyToConductor>` - it serves connections where the
-///   local side is a proxy talking to a conductor
-/// - Transports like `Channel` implement `Component<L>` for all `L` since they're link-agnostic
+/// - An agent implements `Serve<Client>` - it serves clients
+/// - A proxy implements `Serve<Conductor>` - it serves conductors
+/// - Transports like `Channel` implement `Serve<R>` for all `R` since they're role-agnostic
 ///
 /// # Component Types
 ///
@@ -70,16 +69,16 @@ use crate::{Channel, link::JrLink};
 /// # Implementation Example
 ///
 /// ```rust,ignore
-/// use sacp::{Component, peer::AgentToClient};
+/// use sacp::{Serve, role::Client};
 ///
 /// struct MyAgent {
 ///     config: AgentConfig,
 /// }
 ///
-/// impl Component<AgentToClient> for MyAgent {
-///     async fn serve(self, client: impl Component<<AgentToClient as JrLink>::ConnectsTo>) -> Result<(), sacp::Error> {
+/// impl Serve<Client> for MyAgent {
+///     async fn serve(self, client: impl Serve<Client::Counterpart>) -> Result<(), sacp::Error> {
 ///         // Set up connection that forwards to client
-///         sacp::AgentToClient::builder()
+///         sacp::Agent.builder()
 ///             .name("my-agent")
 ///             .on_receive_request(async |req: MyRequest, cx| {
 ///                 // Handle request
@@ -93,22 +92,22 @@ use crate::{Channel, link::JrLink};
 ///
 /// # Heterogeneous Collections
 ///
-/// For storing different component types in the same collection, use [`DynComponent`]:
+/// For storing different component types in the same collection, use [`DynConnectTo`]:
 ///
 /// ```rust,ignore
-/// use sacp::link::AgentToClient;
+/// use sacp::Client;
 ///
-/// let components: Vec<DynComponent<AgentToClient>> = vec![
-///     DynComponent::new(proxy1),
-///     DynComponent::new(proxy2),
-///     DynComponent::new(agent),
+/// let components: Vec<DynConnectTo<Client>> = vec![
+///     DynConnectTo::new(proxy1),
+///     DynConnectTo::new(proxy2),
+///     DynConnectTo::new(agent),
 /// ];
 /// ```
 ///
 /// [`ByteStreams`]: crate::ByteStreams
 /// [`AcpAgent`]: https://docs.rs/sacp-tokio/latest/sacp_tokio/struct.AcpAgent.html
-/// [`JrConnectionBuilder`]: crate::JrConnectionBuilder
-pub trait Component<L: JrLink>: Send + 'static {
+/// [`Builder`]: crate::Builder
+pub trait ConnectTo<R: Role>: Send + 'static {
     /// Serve this component by forwarding to a client component.
     ///
     /// Most components implement this method to set up their connection and
@@ -116,15 +115,15 @@ pub trait Component<L: JrLink>: Send + 'static {
     ///
     /// # Arguments
     ///
-    /// * `client` - The component to forward messages to (implements `Component<L::ConnectsTo>`)
+    /// * `client` - The component to forward messages to (implements `Serve<R::Counterpart>`)
     ///
     /// # Returns
     ///
     /// A future that resolves when the component stops serving, either successfully
     /// or with an error. The future must be `Send`.
-    fn serve(
+    fn connect_to(
         self,
-        client: impl Component<L::ConnectsTo>,
+        client: impl ConnectTo<R::Counterpart>,
     ) -> impl Future<Output = Result<(), crate::Error>> + Send;
 
     /// Convert this component into a channel endpoint and server future.
@@ -142,47 +141,47 @@ pub trait Component<L: JrLink>: Send + 'static {
     ///
     /// A tuple of `(Channel, BoxFuture)` where the channel is for the caller to use
     /// and the future must be spawned to run the server.
-    fn into_server(self) -> (Channel, BoxFuture<'static, Result<(), crate::Error>>)
+    fn into_channel_and_future(self) -> (Channel, BoxFuture<'static, Result<(), crate::Error>>)
     where
         Self: Sized,
     {
         let (channel_a, channel_b) = Channel::duplex();
-        let future = Box::pin(self.serve(channel_b));
+        let future = Box::pin(self.connect_to(channel_b));
         (channel_a, future)
     }
 }
 
-/// Type-erased component trait for object-safe dynamic dispatch.
+/// Type-erased connect trait for object-safe dynamic dispatch.
 ///
-/// This trait is internal and used by [`DynComponent`]. Users should implement
-/// [`Component`] instead, which is automatically converted to `ErasedComponent`
+/// This trait is internal and used by [`DynConnectTo`]. Users should implement
+/// [`ConnectTo`] instead, which is automatically converted to `ErasedConnectTo`
 /// via a blanket implementation.
-trait ErasedComponent<L: JrLink>: Send {
+trait ErasedConnectTo<R: Role>: Send {
     fn type_name(&self) -> String;
 
-    fn serve_erased(
+    fn connect_to_erased(
         self: Box<Self>,
-        client: Box<dyn ErasedComponent<L::ConnectsTo>>,
+        client: Box<dyn ErasedConnectTo<R::Counterpart>>,
     ) -> BoxFuture<'static, Result<(), crate::Error>>;
 
-    fn into_server_erased(
+    fn into_channel_and_future_erased(
         self: Box<Self>,
     ) -> (Channel, BoxFuture<'static, Result<(), crate::Error>>);
 }
 
-/// Blanket implementation: any `Component<L>` can be type-erased.
-impl<C: Component<L>, L: JrLink> ErasedComponent<L> for C {
+/// Blanket implementation: any `Serve<R>` can be type-erased.
+impl<C: ConnectTo<R>, R: Role> ErasedConnectTo<R> for C {
     fn type_name(&self) -> String {
         std::any::type_name::<C>().to_string()
     }
 
-    fn serve_erased(
+    fn connect_to_erased(
         self: Box<Self>,
-        client: Box<dyn ErasedComponent<L::ConnectsTo>>,
+        client: Box<dyn ErasedConnectTo<R::Counterpart>>,
     ) -> BoxFuture<'static, Result<(), crate::Error>> {
         Box::pin(async move {
             (*self)
-                .serve(DynComponent {
+                .connect_to(DynConnectTo {
                     inner: client,
                     _marker: PhantomData,
                 })
@@ -190,40 +189,40 @@ impl<C: Component<L>, L: JrLink> ErasedComponent<L> for C {
         })
     }
 
-    fn into_server_erased(
+    fn into_channel_and_future_erased(
         self: Box<Self>,
     ) -> (Channel, BoxFuture<'static, Result<(), crate::Error>>) {
-        (*self).into_server()
+        (*self).into_channel_and_future()
     }
 }
 
 /// A dynamically-typed component for heterogeneous collections.
 ///
-/// This type wraps any [`Component`] implementation and provides dynamic dispatch,
+/// This type wraps any [`ConnectTo`] implementation and provides dynamic dispatch,
 /// allowing you to store different component types in the same collection.
 ///
-/// The type parameter `L` is the link type that all components in the
-/// collection can serve as transports for.
+/// The type parameter `R` is the role that all components in the
+/// collection serve (their counterpart).
 ///
 /// # Examples
 ///
 /// ```rust,ignore
-/// use sacp::{DynComponent, peer::AgentToClient};
+/// use sacp::{DynConnectTo, Client};
 ///
-/// let components: Vec<DynComponent<AgentToClient>> = vec![
-///     DynComponent::new(Proxy1),
-///     DynComponent::new(Proxy2),
-///     DynComponent::new(Agent),
+/// let components: Vec<DynConnectTo<Client>> = vec![
+///     DynConnectTo::new(Proxy1),
+///     DynConnectTo::new(Proxy2),
+///     DynConnectTo::new(Agent),
 /// ];
 /// ```
-pub struct DynComponent<L: JrLink> {
-    inner: Box<dyn ErasedComponent<L>>,
-    _marker: PhantomData<L>,
+pub struct DynConnectTo<R: Role> {
+    inner: Box<dyn ErasedConnectTo<R>>,
+    _marker: PhantomData<R>,
 }
 
-impl<L: JrLink> DynComponent<L> {
-    /// Create a new `DynComponent` from any type implementing [`Component`].
-    pub fn new<C: Component<L>>(component: C) -> Self {
+impl<R: Role> DynConnectTo<R> {
+    /// Create a new `DynConnectTo` from any type implementing [`ConnectTo`].
+    pub fn new<C: ConnectTo<R>>(component: C) -> Self {
         Self {
             inner: Box::new(component),
             _marker: PhantomData,
@@ -236,21 +235,21 @@ impl<L: JrLink> DynComponent<L> {
     }
 }
 
-impl<L: JrLink> Component<L> for DynComponent<L> {
-    async fn serve(self, client: impl Component<L::ConnectsTo>) -> Result<(), crate::Error> {
+impl<R: Role> ConnectTo<R> for DynConnectTo<R> {
+    async fn connect_to(self, client: impl ConnectTo<R::Counterpart>) -> Result<(), crate::Error> {
         self.inner
-            .serve_erased(Box::new(client) as Box<dyn ErasedComponent<L::ConnectsTo>>)
+            .connect_to_erased(Box::new(client) as Box<dyn ErasedConnectTo<R::Counterpart>>)
             .await
     }
 
-    fn into_server(self) -> (Channel, BoxFuture<'static, Result<(), crate::Error>>) {
-        self.inner.into_server_erased()
+    fn into_channel_and_future(self) -> (Channel, BoxFuture<'static, Result<(), crate::Error>>) {
+        self.inner.into_channel_and_future_erased()
     }
 }
 
-impl<L: JrLink> Debug for DynComponent<L> {
+impl<R: Role> Debug for DynConnectTo<R> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("DynComponent")
+        f.debug_struct("DynServe")
             .field("type_name", &self.type_name())
             .finish()
     }

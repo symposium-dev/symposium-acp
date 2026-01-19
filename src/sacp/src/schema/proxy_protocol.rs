@@ -2,7 +2,7 @@
 //!
 //! These types are intended to become part of the ACP protocol specification.
 
-use crate::{JrMessage, JrNotification, JrRequest, UntypedMessage};
+use crate::{JsonRpcMessage, JsonRpcNotification, JsonRpcRequest, UntypedMessage};
 use agent_client_protocol_schema::InitializeResponse;
 use serde::{Deserialize, Serialize};
 
@@ -17,7 +17,7 @@ pub const METHOD_SUCCESSOR_MESSAGE: &str = "_proxy/successor";
 ///
 /// Used in `_proxy/successor` when the proxy wants to forward a message downstream.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SuccessorMessage<M: JrMessage = UntypedMessage> {
+pub struct SuccessorMessage<M: JsonRpcMessage = UntypedMessage> {
     /// The message to be sent to the successor component.
     #[serde(flatten)]
     pub message: M,
@@ -27,7 +27,7 @@ pub struct SuccessorMessage<M: JrMessage = UntypedMessage> {
     pub meta: Option<serde_json::Value>,
 }
 
-impl<M: JrMessage> JrMessage for SuccessorMessage<M> {
+impl<M: JsonRpcMessage> JsonRpcMessage for SuccessorMessage<M> {
     fn matches_method(method: &str) -> bool {
         method == METHOD_SUCCESSOR_MESSAGE
     }
@@ -62,11 +62,11 @@ impl<M: JrMessage> JrMessage for SuccessorMessage<M> {
     }
 }
 
-impl<Req: JrRequest> JrRequest for SuccessorMessage<Req> {
+impl<Req: JsonRpcRequest> JsonRpcRequest for SuccessorMessage<Req> {
     type Response = Req::Response;
 }
 
-impl<Notif: JrNotification> JrNotification for SuccessorMessage<Notif> {}
+impl<Notif: JsonRpcNotification> JsonRpcNotification for SuccessorMessage<Notif> {}
 
 // =============================================================================
 // MCP-over-ACP protocol
@@ -76,7 +76,7 @@ impl<Notif: JrNotification> JrNotification for SuccessorMessage<Notif> {}
 pub const METHOD_MCP_CONNECT_REQUEST: &str = "_mcp/connect";
 
 /// Creates a new MCP connection. This is equivalent to "running the command".
-#[derive(Debug, Clone, Serialize, Deserialize, crate::JrRequest)]
+#[derive(Debug, Clone, Serialize, Deserialize, crate::JsonRpcRequest)]
 #[request(method = "_mcp/connect", response = McpConnectResponse, crate = crate)]
 pub struct McpConnectRequest {
     /// The ACP URL to connect to (e.g., "acp:uuid")
@@ -88,7 +88,7 @@ pub struct McpConnectRequest {
 }
 
 /// Response to an MCP connect request
-#[derive(Debug, Clone, Serialize, Deserialize, crate::JrResponsePayload)]
+#[derive(Debug, Clone, Serialize, Deserialize, crate::JsonRpcResponse)]
 #[response(crate = crate)]
 pub struct McpConnectResponse {
     /// Unique identifier for the established MCP connection
@@ -103,7 +103,7 @@ pub struct McpConnectResponse {
 pub const METHOD_MCP_DISCONNECT_NOTIFICATION: &str = "_mcp/disconnect";
 
 /// Disconnects the MCP connection.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, crate::JrNotification)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, crate::JsonRpcNotification)]
 #[notification(method = "_mcp/disconnect", crate = crate)]
 pub struct McpDisconnectNotification {
     /// The id of the connection to disconnect.
@@ -136,7 +136,7 @@ pub struct McpOverAcpMessage<M = UntypedMessage> {
     pub meta: Option<serde_json::Value>,
 }
 
-impl<M: JrMessage> JrMessage for McpOverAcpMessage<M> {
+impl<M: JsonRpcMessage> JsonRpcMessage for McpOverAcpMessage<M> {
     fn matches_method(method: &str) -> bool {
         method == METHOD_MCP_MESSAGE
     }
@@ -174,11 +174,11 @@ impl<M: JrMessage> JrMessage for McpOverAcpMessage<M> {
     }
 }
 
-impl<R: JrRequest> JrRequest for McpOverAcpMessage<R> {
+impl<R: JsonRpcRequest> JsonRpcRequest for McpOverAcpMessage<R> {
     type Response = R::Response;
 }
 
-impl<R: JrNotification> JrNotification for McpOverAcpMessage<R> {}
+impl<R: JsonRpcNotification> JsonRpcNotification for McpOverAcpMessage<R> {}
 
 // =============================================================================
 // Proxy initialization protocol
@@ -192,7 +192,7 @@ pub const METHOD_INITIALIZE_PROXY: &str = "_proxy/initialize";
 /// This is sent to components that have a successor in the chain.
 /// Components that receive this (instead of `InitializeRequest`) know they
 /// are operating as a proxy and should forward messages to their successor.
-#[derive(Debug, Clone, Serialize, Deserialize, crate::JrRequest)]
+#[derive(Debug, Clone, Serialize, Deserialize, crate::JsonRpcRequest)]
 #[request(method = "_proxy/initialize", response = InitializeResponse, crate = crate)]
 pub struct InitializeProxyRequest {
     /// The underlying initialize request data.

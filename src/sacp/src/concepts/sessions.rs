@@ -9,9 +9,9 @@
 //! Use the session builder to create a new session:
 //!
 //! ```
-//! # use sacp::{ClientToAgent, AgentToClient, Component};
-//! # async fn example(transport: impl Component<AgentToClient>) -> Result<(), sacp::Error> {
-//! # ClientToAgent::builder().run_until(transport, async |cx| {
+//! # use sacp::{Client, Agent, ConnectTo};
+//! # async fn example(transport: impl ConnectTo<Client>) -> Result<(), sacp::Error> {
+//! # Client.builder().connect_with(transport, async |cx| {
 //! cx.build_session_cwd()?          // Use current working directory
 //!     .block_task()                // Mark as blocking
 //!     .run_until(async |session| {
@@ -28,9 +28,9 @@
 //! Or specify a custom working directory:
 //!
 //! ```
-//! # use sacp::{ClientToAgent, AgentToClient, Component};
-//! # async fn example(transport: impl Component<AgentToClient>) -> Result<(), sacp::Error> {
-//! # ClientToAgent::builder().run_until(transport, async |cx| {
+//! # use sacp::{Client, Agent, ConnectTo};
+//! # async fn example(transport: impl ConnectTo<Client>) -> Result<(), sacp::Error> {
+//! # Client.builder().connect_with(transport, async |cx| {
 //! cx.build_session("/path/to/project")
 //!     .block_task()
 //!     .run_until(async |session| { Ok(()) })
@@ -47,9 +47,9 @@
 //! with the agent:
 //!
 //! ```
-//! # use sacp::{ClientToAgent, AgentToClient, Component};
-//! # async fn example(transport: impl Component<AgentToClient>) -> Result<(), sacp::Error> {
-//! # ClientToAgent::builder().run_until(transport, async |cx| {
+//! # use sacp::{Client, Agent, ConnectTo};
+//! # async fn example(transport: impl ConnectTo<Client>) -> Result<(), sacp::Error> {
+//! # Client.builder().connect_with(transport, async |cx| {
 //! # cx.build_session_cwd()?.block_task()
 //! .run_until(async |mut session| {
 //!     // Send a prompt
@@ -78,11 +78,11 @@
 //! tools to the agent:
 //!
 //! ```
-//! # use sacp::{ClientToAgent, AgentToClient, Component};
+//! # use sacp::{Client, Agent, ConnectTo};
 //! # use sacp::mcp_server::McpServer;
-//! # async fn example(transport: impl Component<AgentToClient>) -> Result<(), sacp::Error> {
-//! # let my_mcp_server = McpServer::<ClientToAgent, _>::builder("tools").build();
-//! # ClientToAgent::builder().run_until(transport, async |cx| {
+//! # async fn example(transport: impl ConnectTo<Client>) -> Result<(), sacp::Error> {
+//! # let my_mcp_server = McpServer::<Agent, _>::builder("tools").build();
+//! # Client.builder().connect_with(transport, async |cx| {
 //! cx.build_session_cwd()?
 //!     .with_mcp_server(my_mcp_server)?
 //!     .block_task()
@@ -102,11 +102,11 @@
 //! use `on_session_start` instead of `block_task().run_until()`:
 //!
 //! ```
-//! # use sacp::{ClientToAgent, AgentToClient, Component};
+//! # use sacp::{Client, Agent, ConnectTo};
 //! # use sacp::schema::NewSessionRequest;
-//! # async fn example(transport: impl Component<AgentToClient>) -> Result<(), sacp::Error> {
-//! ClientToAgent::builder()
-//!     .on_receive_request(async |req: NewSessionRequest, request_cx, cx| {
+//! # async fn example(transport: impl ConnectTo<Client>) -> Result<(), sacp::Error> {
+//! Client.builder()
+//!     .on_receive_request(async |req: NewSessionRequest, responder, cx| {
 //!         cx.build_session_from(req)
 //!             .on_session_start(async |session| {
 //!                 // Handle the session
@@ -114,7 +114,7 @@
 //!             })?;
 //!         Ok(())
 //!     }, sacp::on_receive_request!())
-//! #   .run_until(transport, async |_| Ok(())).await?;
+//! #   .connect_with(transport, async |_| Ok(())).await?;
 //! # Ok(())
 //! # }
 //! ```

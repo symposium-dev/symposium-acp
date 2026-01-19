@@ -1,7 +1,5 @@
 use futures::{SinkExt as _, StreamExt as _, channel::mpsc};
-use sacp::mcp::{McpClientToServer, McpServerPeer, McpServerToClient};
-use sacp::schema::McpDisconnectNotification;
-use sacp::{Component, DynComponent, MessageCx};
+use sacp::{DynConnectTo, Dispatch, ConnectTo, role::mcp, schema::McpDisconnectNotification};
 use tracing::info;
 
 use crate::conductor::ConductorMessage;
@@ -12,23 +10,23 @@ use crate::conductor::ConductorMessage;
 #[derive(Debug)]
 pub struct McpBridgeConnectionActor {
     /// How to connect to the MCP server
-    transport: DynComponent<McpServerToClient>,
+    transport: DynConnectTo<mcp::Client>,
 
     /// Sender for messages to the conductor
     conductor_tx: mpsc::Sender<ConductorMessage>,
 
     /// Receiver for messages from the conductor to the MCP client
-    to_mcp_client_rx: mpsc::Receiver<MessageCx>,
+    to_mcp_client_rx: mpsc::Receiver<Dispatch>,
 }
 
 impl McpBridgeConnectionActor {
     pub fn new(
-        component: impl Component<sacp::mcp::McpServerToClient>,
+        component: impl ConnectTo<mcp::Client>,
         conductor_tx: mpsc::Sender<ConductorMessage>,
-        to_mcp_client_rx: mpsc::Receiver<MessageCx>,
+        to_mcp_client_rx: mpsc::Receiver<Dispatch>,
     ) -> Self {
         Self {
-            transport: DynComponent::new(component),
+            transport: DynConnectTo::new(component),
             conductor_tx,
             to_mcp_client_rx,
         }
@@ -43,14 +41,14 @@ impl McpBridgeConnectionActor {
             to_mcp_client_rx,
         } = self;
 
-        let result = McpClientToServer::builder()
+        let result = mcp::Client.builder()
             .name(format!("mpc-client-to-conductor({connection_id})"))
             // When we receive a message from the MCP client, forward it to the conductor
-            .on_receive_message(
+            .on_receive_dispatch(
                 {
                     let mut conductor_tx = conductor_tx.clone();
                     let connection_id = connection_id.clone();
-                    async move |message: sacp::MessageCx, _cx| {
+                    async move |message: sacp::Dispatch, _cx| {
                         conductor_tx
                             .send(ConductorMessage::McpClientToMcpServer {
                                 connection_id: connection_id.clone(),
@@ -60,14 +58,13 @@ impl McpBridgeConnectionActor {
                             .map_err(|_| sacp::Error::internal_error())
                     }
                 },
-                sacp::on_receive_message!(),
+                sacp::on_receive_dispatch!(),
             )
             // When we receive messages from the conductor, forward them to the MCP client
-            .connect_to(transport)?
-            .run_until(async move |mcp_client_cx| {
+            .connect_with(transport, async move |mcp_connection_to_client| {
                 let mut to_mcp_client_rx = to_mcp_client_rx;
                 while let Some(message) = to_mcp_client_rx.next().await {
-                    mcp_client_cx.send_proxied_message_to(McpServerPeer, message)?;
+                    mcp_connection_to_client.send_proxied_message(message)?;
                 }
                 Ok(())
             })

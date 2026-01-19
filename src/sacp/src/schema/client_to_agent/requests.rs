@@ -5,7 +5,7 @@ use crate::schema::{
 };
 use serde::Serialize;
 
-use crate::jsonrpc::{JrMessage, JrRequest, JrResponsePayload};
+use crate::jsonrpc::{JsonRpcMessage, JsonRpcRequest, JsonRpcResponse};
 use crate::util::json_cast;
 
 // Method constants
@@ -20,7 +20,7 @@ const METHOD_SESSION_SET_MODE: &str = "session/set_mode";
 // InitializeRequest
 // ============================================================================
 
-impl JrMessage for InitializeRequest {
+impl JsonRpcMessage for InitializeRequest {
     fn matches_method(method: &str) -> bool {
         method == METHOD_INITIALIZE
     }
@@ -41,11 +41,11 @@ impl JrMessage for InitializeRequest {
     }
 }
 
-impl JrRequest for InitializeRequest {
+impl JsonRpcRequest for InitializeRequest {
     type Response = InitializeResponse;
 }
 
-impl JrResponsePayload for InitializeResponse {
+impl JsonRpcResponse for InitializeResponse {
     fn into_json(self, _method: &str) -> Result<serde_json::Value, crate::Error> {
         serde_json::to_value(self).map_err(crate::Error::into_internal_error)
     }
@@ -59,7 +59,7 @@ impl JrResponsePayload for InitializeResponse {
 // AuthenticateRequest
 // ============================================================================
 
-impl JrMessage for AuthenticateRequest {
+impl JsonRpcMessage for AuthenticateRequest {
     fn matches_method(method: &str) -> bool {
         method == METHOD_AUTHENTICATE
     }
@@ -80,11 +80,11 @@ impl JrMessage for AuthenticateRequest {
     }
 }
 
-impl JrRequest for AuthenticateRequest {
+impl JsonRpcRequest for AuthenticateRequest {
     type Response = AuthenticateResponse;
 }
 
-impl JrResponsePayload for AuthenticateResponse {
+impl JsonRpcResponse for AuthenticateResponse {
     fn into_json(self, _method: &str) -> Result<serde_json::Value, crate::Error> {
         serde_json::to_value(self).map_err(crate::Error::into_internal_error)
     }
@@ -98,7 +98,7 @@ impl JrResponsePayload for AuthenticateResponse {
 // LoadSessionRequest
 // ============================================================================
 
-impl JrMessage for LoadSessionRequest {
+impl JsonRpcMessage for LoadSessionRequest {
     fn matches_method(method: &str) -> bool {
         method == METHOD_SESSION_LOAD
     }
@@ -119,11 +119,11 @@ impl JrMessage for LoadSessionRequest {
     }
 }
 
-impl JrRequest for LoadSessionRequest {
+impl JsonRpcRequest for LoadSessionRequest {
     type Response = LoadSessionResponse;
 }
 
-impl JrResponsePayload for LoadSessionResponse {
+impl JsonRpcResponse for LoadSessionResponse {
     fn into_json(self, _method: &str) -> Result<serde_json::Value, crate::Error> {
         serde_json::to_value(self).map_err(crate::Error::into_internal_error)
     }
@@ -137,7 +137,7 @@ impl JrResponsePayload for LoadSessionResponse {
 // NewSessionRequest
 // ============================================================================
 
-impl JrMessage for NewSessionRequest {
+impl JsonRpcMessage for NewSessionRequest {
     fn matches_method(method: &str) -> bool {
         method == METHOD_SESSION_NEW
     }
@@ -158,11 +158,11 @@ impl JrMessage for NewSessionRequest {
     }
 }
 
-impl JrRequest for NewSessionRequest {
+impl JsonRpcRequest for NewSessionRequest {
     type Response = NewSessionResponse;
 }
 
-impl JrResponsePayload for NewSessionResponse {
+impl JsonRpcResponse for NewSessionResponse {
     fn into_json(self, _method: &str) -> Result<serde_json::Value, crate::Error> {
         serde_json::to_value(self).map_err(crate::Error::into_internal_error)
     }
@@ -176,7 +176,7 @@ impl JrResponsePayload for NewSessionResponse {
 // PromptRequest
 // ============================================================================
 
-impl JrMessage for PromptRequest {
+impl JsonRpcMessage for PromptRequest {
     fn matches_method(method: &str) -> bool {
         method == METHOD_SESSION_PROMPT
     }
@@ -197,11 +197,11 @@ impl JrMessage for PromptRequest {
     }
 }
 
-impl JrRequest for PromptRequest {
+impl JsonRpcRequest for PromptRequest {
     type Response = PromptResponse;
 }
 
-impl JrResponsePayload for PromptResponse {
+impl JsonRpcResponse for PromptResponse {
     fn into_json(self, _method: &str) -> Result<serde_json::Value, crate::Error> {
         serde_json::to_value(self).map_err(crate::Error::into_internal_error)
     }
@@ -215,7 +215,7 @@ impl JrResponsePayload for PromptResponse {
 // SetSessionModeRequest
 // ============================================================================
 
-impl JrMessage for SetSessionModeRequest {
+impl JsonRpcMessage for SetSessionModeRequest {
     fn matches_method(method: &str) -> bool {
         method == METHOD_SESSION_SET_MODE
     }
@@ -236,11 +236,11 @@ impl JrMessage for SetSessionModeRequest {
     }
 }
 
-impl JrRequest for SetSessionModeRequest {
+impl JsonRpcRequest for SetSessionModeRequest {
     type Response = SetSessionModeResponse;
 }
 
-impl JrResponsePayload for SetSessionModeResponse {
+impl JsonRpcResponse for SetSessionModeResponse {
     fn into_json(self, _method: &str) -> Result<serde_json::Value, crate::Error> {
         serde_json::to_value(self).map_err(crate::Error::into_internal_error)
     }

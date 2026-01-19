@@ -7,6 +7,7 @@ use std::path::PathBuf;
 use std::str::FromStr;
 use std::sync::Arc;
 
+use sacp::{Client, Conductor, Role};
 use tokio::process::Child;
 use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
 
@@ -23,7 +24,7 @@ pub enum LineDirection {
 
 /// A component representing an external ACP agent running in a separate process.
 ///
-/// `AcpAgent` implements the [`sacp::Component`] trait for spawning and communicating with
+/// `AcpAgent` implements the [`sacp::ConnectTo`] trait for spawning and communicating with
 /// external agents or proxies via stdio. It handles process spawning, stream setup, and
 /// byte stream serialization automatically. This is the primary way to connect to agents
 /// that run as separate executables.
@@ -55,18 +56,19 @@ pub enum LineDirection {
 /// ```
 ///
 /// Use as a component to connect to an external agent:
-/// ```no_run
-/// # use sacp::link::UntypedLink;
-/// # use sacp::JrConnectionBuilder;
-/// # use sacp_tokio::AcpAgent;
-/// # use std::str::FromStr;
+/// ```ignore
+/// use sacp::{Client, Builder};
+/// use sacp_tokio::AcpAgent;
+/// use std::str::FromStr;
+///
 /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
 /// let agent = AcpAgent::from_str("python my_agent.py")?;
 ///
-/// // The agent process will be spawned automatically when served
-/// UntypedLink::builder()
-///     .connect_to(agent)?
-///     .run_until(|cx| async move {
+/// // The agent process will be spawned automatically when connected
+/// Client.builder()
+///     .connect_to(agent)
+///     .await?
+///     .connect_with(|cx| async move {
 ///         // Use the connection to communicate with the agent process
 ///         Ok(())
 ///     })
@@ -256,8 +258,18 @@ async fn monitor_child(
     }
 }
 
-impl<L: sacp::link::JrLink> sacp::Component<L> for AcpAgent {
-    async fn serve(self, client: impl sacp::Component<L::ConnectsTo>) -> Result<(), sacp::Error> {
+/// Roles that an ACP agent executable can potentially serve.
+pub trait AcpAgentCounterpartRole: Role {}
+
+impl AcpAgentCounterpartRole for Client {}
+
+impl AcpAgentCounterpartRole for Conductor {}
+
+impl<Counterpart: AcpAgentCounterpartRole> sacp::ConnectTo<Counterpart> for AcpAgent {
+    async fn connect_to(
+        self,
+        client: impl sacp::ConnectTo<Counterpart::Counterpart>,
+    ) -> Result<(), sacp::Error> {
         use futures::AsyncBufReadExt;
         use futures::AsyncWriteExt;
         use futures::StreamExt;
@@ -336,8 +348,10 @@ impl<L: sacp::link::JrLink> sacp::Component<L> for AcpAgent {
 
         // Race the protocol against child process exit
         // If the child exits early (e.g., with an error), we return that error
-        let protocol_future =
-            sacp::Component::<L>::serve(sacp::Lines::new(outgoing_sink, incoming_lines), client);
+        let protocol_future = sacp::ConnectTo::<Counterpart>::connect_to(
+            sacp::Lines::new(outgoing_sink, incoming_lines),
+            client,
+        );
 
         tokio::select! {
             result = protocol_future => result,

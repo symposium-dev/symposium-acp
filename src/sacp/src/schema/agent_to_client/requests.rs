@@ -1,6 +1,6 @@
 use serde::Serialize;
 
-use crate::jsonrpc::{JrMessage, JrRequest, JrResponsePayload};
+use crate::jsonrpc::{JsonRpcMessage, JsonRpcRequest, JsonRpcResponse};
 use crate::schema::{
     CreateTerminalRequest, CreateTerminalResponse, KillTerminalCommandRequest,
     KillTerminalCommandResponse, ReadTextFileRequest, ReadTextFileResponse, ReleaseTerminalRequest,
@@ -19,7 +19,7 @@ use crate::util::json_cast;
 
 const METHOD_REQUEST_PERMISSION: &str = "session/request_permission";
 
-impl JrMessage for RequestPermissionRequest {
+impl JsonRpcMessage for RequestPermissionRequest {
     fn matches_method(method: &str) -> bool {
         method == METHOD_REQUEST_PERMISSION
     }
@@ -40,11 +40,11 @@ impl JrMessage for RequestPermissionRequest {
     }
 }
 
-impl JrRequest for RequestPermissionRequest {
+impl JsonRpcRequest for RequestPermissionRequest {
     type Response = RequestPermissionResponse;
 }
 
-impl JrResponsePayload for RequestPermissionResponse {
+impl JsonRpcResponse for RequestPermissionResponse {
     fn into_json(self, _method: &str) -> Result<serde_json::Value, crate::Error> {
         serde_json::to_value(self).map_err(crate::Error::into_internal_error)
     }
@@ -60,7 +60,7 @@ impl JrResponsePayload for RequestPermissionResponse {
 
 const METHOD_WRITE_TEXT_FILE: &str = "fs/write_text_file";
 
-impl JrMessage for WriteTextFileRequest {
+impl JsonRpcMessage for WriteTextFileRequest {
     fn matches_method(method: &str) -> bool {
         method == METHOD_WRITE_TEXT_FILE
     }
@@ -81,11 +81,11 @@ impl JrMessage for WriteTextFileRequest {
     }
 }
 
-impl JrRequest for WriteTextFileRequest {
+impl JsonRpcRequest for WriteTextFileRequest {
     type Response = WriteTextFileResponse;
 }
 
-impl JrResponsePayload for WriteTextFileResponse {
+impl JsonRpcResponse for WriteTextFileResponse {
     fn into_json(self, _method: &str) -> Result<serde_json::Value, crate::Error> {
         serde_json::to_value(self).map_err(crate::Error::into_internal_error)
     }
@@ -101,7 +101,7 @@ impl JrResponsePayload for WriteTextFileResponse {
 
 const METHOD_READ_TEXT_FILE: &str = "fs/read_text_file";
 
-impl JrMessage for ReadTextFileRequest {
+impl JsonRpcMessage for ReadTextFileRequest {
     fn matches_method(method: &str) -> bool {
         method == METHOD_READ_TEXT_FILE
     }
@@ -122,11 +122,11 @@ impl JrMessage for ReadTextFileRequest {
     }
 }
 
-impl JrRequest for ReadTextFileRequest {
+impl JsonRpcRequest for ReadTextFileRequest {
     type Response = ReadTextFileResponse;
 }
 
-impl JrResponsePayload for ReadTextFileResponse {
+impl JsonRpcResponse for ReadTextFileResponse {
     fn into_json(self, _method: &str) -> Result<serde_json::Value, crate::Error> {
         serde_json::to_value(self).map_err(crate::Error::into_internal_error)
     }
@@ -142,7 +142,7 @@ impl JrResponsePayload for ReadTextFileResponse {
 
 const METHOD_CREATE_TERMINAL: &str = "terminal/create";
 
-impl JrMessage for CreateTerminalRequest {
+impl JsonRpcMessage for CreateTerminalRequest {
     fn matches_method(method: &str) -> bool {
         method == METHOD_CREATE_TERMINAL
     }
@@ -163,11 +163,11 @@ impl JrMessage for CreateTerminalRequest {
     }
 }
 
-impl JrRequest for CreateTerminalRequest {
+impl JsonRpcRequest for CreateTerminalRequest {
     type Response = CreateTerminalResponse;
 }
 
-impl JrResponsePayload for CreateTerminalResponse {
+impl JsonRpcResponse for CreateTerminalResponse {
     fn into_json(self, _method: &str) -> Result<serde_json::Value, crate::Error> {
         serde_json::to_value(self).map_err(crate::Error::into_internal_error)
     }
@@ -183,7 +183,7 @@ impl JrResponsePayload for CreateTerminalResponse {
 
 const METHOD_TERMINAL_OUTPUT: &str = "terminal/output";
 
-impl JrMessage for TerminalOutputRequest {
+impl JsonRpcMessage for TerminalOutputRequest {
     fn matches_method(method: &str) -> bool {
         method == METHOD_TERMINAL_OUTPUT
     }
@@ -204,11 +204,11 @@ impl JrMessage for TerminalOutputRequest {
     }
 }
 
-impl JrRequest for TerminalOutputRequest {
+impl JsonRpcRequest for TerminalOutputRequest {
     type Response = TerminalOutputResponse;
 }
 
-impl JrResponsePayload for TerminalOutputResponse {
+impl JsonRpcResponse for TerminalOutputResponse {
     fn into_json(self, _method: &str) -> Result<serde_json::Value, crate::Error> {
         serde_json::to_value(self).map_err(crate::Error::into_internal_error)
     }
@@ -224,7 +224,7 @@ impl JrResponsePayload for TerminalOutputResponse {
 
 const METHOD_RELEASE_TERMINAL: &str = "terminal/release";
 
-impl JrMessage for ReleaseTerminalRequest {
+impl JsonRpcMessage for ReleaseTerminalRequest {
     fn matches_method(method: &str) -> bool {
         method == METHOD_RELEASE_TERMINAL
     }
@@ -245,11 +245,11 @@ impl JrMessage for ReleaseTerminalRequest {
     }
 }
 
-impl JrRequest for ReleaseTerminalRequest {
+impl JsonRpcRequest for ReleaseTerminalRequest {
     type Response = ReleaseTerminalResponse;
 }
 
-impl JrResponsePayload for ReleaseTerminalResponse {
+impl JsonRpcResponse for ReleaseTerminalResponse {
     fn into_json(self, _method: &str) -> Result<serde_json::Value, crate::Error> {
         serde_json::to_value(self).map_err(crate::Error::into_internal_error)
     }
@@ -265,7 +265,7 @@ impl JrResponsePayload for ReleaseTerminalResponse {
 
 const METHOD_WAIT_FOR_TERMINAL_EXIT: &str = "terminal/wait_for_exit";
 
-impl JrMessage for WaitForTerminalExitRequest {
+impl JsonRpcMessage for WaitForTerminalExitRequest {
     fn matches_method(method: &str) -> bool {
         method == METHOD_WAIT_FOR_TERMINAL_EXIT
     }
@@ -286,11 +286,11 @@ impl JrMessage for WaitForTerminalExitRequest {
     }
 }
 
-impl JrRequest for WaitForTerminalExitRequest {
+impl JsonRpcRequest for WaitForTerminalExitRequest {
     type Response = WaitForTerminalExitResponse;
 }
 
-impl JrResponsePayload for WaitForTerminalExitResponse {
+impl JsonRpcResponse for WaitForTerminalExitResponse {
     fn into_json(self, _method: &str) -> Result<serde_json::Value, crate::Error> {
         serde_json::to_value(self).map_err(crate::Error::into_internal_error)
     }
@@ -306,7 +306,7 @@ impl JrResponsePayload for WaitForTerminalExitResponse {
 
 const METHOD_KILL_TERMINAL: &str = "terminal/kill";
 
-impl JrMessage for KillTerminalCommandRequest {
+impl JsonRpcMessage for KillTerminalCommandRequest {
     fn matches_method(method: &str) -> bool {
         method == METHOD_KILL_TERMINAL
     }
@@ -327,11 +327,11 @@ impl JrMessage for KillTerminalCommandRequest {
     }
 }
 
-impl JrRequest for KillTerminalCommandRequest {
+impl JsonRpcRequest for KillTerminalCommandRequest {
     type Response = KillTerminalCommandResponse;
 }
 
-impl JrResponsePayload for KillTerminalCommandResponse {
+impl JsonRpcResponse for KillTerminalCommandResponse {
     fn into_json(self, _method: &str) -> Result<serde_json::Value, crate::Error> {
         serde_json::to_value(self).map_err(crate::Error::into_internal_error)
     }

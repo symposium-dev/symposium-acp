@@ -17,7 +17,7 @@ use sacp::schema::{
     RequestPermissionOutcome, RequestPermissionRequest, RequestPermissionResponse,
     SelectedPermissionOutcome, SessionNotification, TextContent,
 };
-use sacp::{ClientToAgent, JrConnectionCx};
+use sacp::{Agent, Client, ConnectionTo};
 use std::path::PathBuf;
 use tokio::process::Child;
 use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
@@ -83,10 +83,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Create transport and connection
     let transport = sacp::ByteStreams::new(child_stdin.compat_write(), child_stdout.compat());
-    let connection = ClientToAgent::builder();
 
     // Run the client
-    connection
+    Client.builder()
         .on_receive_notification(
             async move |notification: SessionNotification, _cx| {
                 // Print session updates to stdout (so 2>/dev/null shows only agent output)
@@ -96,17 +95,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             sacp::on_receive_notification!(),
         )
         .on_receive_request(
-            async move |request: RequestPermissionRequest, request_cx, _connection_cx| {
+            async move |request: RequestPermissionRequest, responder, _connection| {
                 // YOLO: Auto-approve all permission requests by selecting the first option
                 eprintln!("✅ Auto-approving permission request: {:?}", request);
                 let option_id = request.options.first().map(|opt| opt.option_id.clone());
                 match option_id {
-                    Some(id) => request_cx.respond(RequestPermissionResponse::new(
+                    Some(id) => responder.respond(RequestPermissionResponse::new(
                         RequestPermissionOutcome::Selected(SelectedPermissionOutcome::new(id)),
                     )),
                     None => {
                         eprintln!("⚠️ No options provided in permission request, cancelling");
-                        request_cx.respond(RequestPermissionResponse::new(
+                        responder.respond(RequestPermissionResponse::new(
                             RequestPermissionOutcome::Cancelled,
                         ))
                     }
@@ -114,10 +113,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             },
             sacp::on_receive_request!(),
         )
-        .run_until(transport, |cx: JrConnectionCx<ClientToAgent>| async move {
+        .connect_with(transport, |connection: ConnectionTo<Agent>| async move {
             // Initialize the agent
             eprintln!("🤝 Initializing agent...");
-            let init_response = cx
+            let init_response = connection
                 .send_request(InitializeRequest::new(ProtocolVersion::LATEST))
                 .block_task()
                 .await?;
@@ -126,7 +125,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
             // Create a new session
             eprintln!("📝 Creating new session...");
-            let new_session_response = cx
+            let new_session_response = connection
                 .send_request(NewSessionRequest::new(
                     std::env::current_dir().unwrap_or_else(|_| PathBuf::from("/")),
                 ))
@@ -138,7 +137,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
             // Send the prompt
             eprintln!("💬 Sending prompt: \"{}\"", cli.prompt);
-            let prompt_response = cx
+            let prompt_response = connection
                 .send_request(PromptRequest::new(
                     session_id.clone(),
                     vec![ContentBlock::Text(TextContent::new(cli.prompt.clone()))],

@@ -7,8 +7,7 @@ use std::path::PathBuf;
 
 use futures::{SinkExt, channel::mpsc};
 use sacp::schema::{McpServer, McpServerHttp, McpServerStdio};
-use sacp::{self, JrLink};
-use sacp::{JrConnectionCx, MessageCx};
+use sacp::{ConnectionTo, Dispatch, Role};
 use tokio::net::TcpListener;
 use tracing::info;
 
@@ -33,15 +32,15 @@ pub(super) struct McpBridgeListener {
 #[derive(Clone, Debug)]
 pub struct McpBridgeConnection {
     /// Channel to send messages from MCP server (ACP proxy) to the MCP client (ACP agent).
-    to_mcp_client_tx: mpsc::Sender<MessageCx>,
+    to_mcp_client_tx: mpsc::Sender<Dispatch>,
 }
 
 impl McpBridgeConnection {
-    pub fn new(to_mcp_client_tx: mpsc::Sender<MessageCx>) -> Self {
+    pub fn new(to_mcp_client_tx: mpsc::Sender<Dispatch>) -> Self {
         Self { to_mcp_client_tx }
     }
 
-    pub async fn send(&mut self, message: MessageCx) -> Result<(), sacp::Error> {
+    pub async fn send(&mut self, message: Dispatch) -> Result<(), sacp::Error> {
         self.to_mcp_client_tx
             .send(message)
             .await
@@ -60,7 +59,7 @@ impl McpBridgeListeners {
     /// Other MCP servers are left unchanged.
     pub async fn transform_mcp_server(
         &mut self,
-        cx: JrConnectionCx<impl JrLink>,
+        connection: ConnectionTo<impl Role>,
         mcp_server: &mut McpServer,
         conductor_tx: &mpsc::Sender<ConductorMessage>,
         mcp_bridge_mode: &crate::McpBridgeMode,
@@ -90,7 +89,7 @@ impl McpBridgeListeners {
 
         // Create oneshot channel for session_id delivery
         let transformed = self
-            .spawn_bridge(cx, name, url, conductor_tx, mcp_bridge_mode)
+            .spawn_bridge(connection, name, url, conductor_tx, mcp_bridge_mode)
             .await?;
         *mcp_server = transformed;
         Ok(())
@@ -99,7 +98,7 @@ impl McpBridgeListeners {
     /// Spawn a bridge listener (HTTP or stdio) for an MCP server with ACP transport
     async fn spawn_bridge(
         &mut self,
-        cx: JrConnectionCx<impl JrLink>,
+        connection: ConnectionTo<impl Role>,
         server_name: &str,
         acp_url: &str,
         conductor_tx: &mpsc::Sender<ConductorMessage>,
@@ -145,7 +144,7 @@ impl McpBridgeListeners {
             },
         );
 
-        cx.spawn({
+        connection.spawn({
             let acp_url = acp_url.to_string();
             let conductor_tx = conductor_tx.clone();
             let mcp_bridge_mode = mcp_bridge_mode.clone();

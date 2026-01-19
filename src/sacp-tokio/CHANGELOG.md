@@ -38,7 +38,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - [**breaking**] split peer.rs into separate peer and link modules
 - [**breaking**] update module and documentation references from role to peer
 - [**breaking**] give component a link
-- update UntypedRole to UntypedLink in doc examples
+- update UntypedRole to UntypedRole in doc examples
 - *(sacp)* rename with_client to run_until
 - update references for renamed methods
 

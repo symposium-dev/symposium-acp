@@ -7,7 +7,7 @@
 mod acp_agent;
 
 pub use acp_agent::{AcpAgent, LineDirection};
-use sacp::{ByteStreams, Component};
+use sacp::{ByteStreams, Role, ConnectTo};
 use std::sync::Arc;
 use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
 
@@ -37,8 +37,8 @@ impl Default for Stdio {
     }
 }
 
-impl<L: sacp::link::JrLink> Component<L> for Stdio {
-    async fn serve(self, client: impl Component<L::ConnectsTo>) -> Result<(), sacp::Error> {
+impl<Counterpart: Role> ConnectTo<Counterpart> for Stdio {
+    async fn connect_to(self, client: impl ConnectTo<Counterpart::Counterpart>) -> Result<(), sacp::Error> {
         if let Some(callback) = self.debug_callback {
             use futures::AsyncBufReadExt;
             use futures::AsyncWriteExt;
@@ -73,10 +73,11 @@ impl<L: sacp::link::JrLink> Component<L> for Stdio {
             ))
                 as std::pin::Pin<Box<dyn futures::Sink<String, Error = std::io::Error> + Send>>;
 
-            Component::<L>::serve(sacp::Lines::new(outgoing_sink, incoming_lines), client).await
+            ConnectTo::<Counterpart>::connect_to(sacp::Lines::new(outgoing_sink, incoming_lines), client)
+                .await
         } else {
             // Without debug: use simple ByteStreams
-            Component::<L>::serve(
+            ConnectTo::<Counterpart>::connect_to(
                 ByteStreams::new(
                     tokio::io::stdout().compat_write(),
                     tokio::io::stdin().compat(),

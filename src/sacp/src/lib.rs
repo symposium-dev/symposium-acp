@@ -21,13 +21,13 @@
 //! and sends a prompt:
 //!
 //! ```no_run
-//! use sacp::ClientToAgent;
+//! use sacp::Client;
 //! use sacp::schema::{InitializeRequest, ProtocolVersion};
 //!
-//! # async fn run(transport: impl sacp::Component<sacp::AgentToClient>) -> Result<(), sacp::Error> {
-//! ClientToAgent::builder()
+//! # async fn run(transport: impl sacp::ConnectTo<sacp::Client>) -> Result<(), sacp::Error> {
+//! Client.builder()
 //!     .name("my-client")
-//!     .run_until(transport, async |cx| {
+//!     .connect_with(transport, async |cx| {
 //!         // Step 1: Initialize the connection
 //!         cx.send_request(InitializeRequest::new(ProtocolVersion::LATEST))
 //!             .block_task().await?;
@@ -88,14 +88,10 @@ pub mod cookbook;
 pub mod handler;
 /// JSON-RPC connection and handler infrastructure
 mod jsonrpc;
-/// Link types for JSON-RPC connections
-pub mod link;
-/// MCP declarations (minimal)
-pub mod mcp;
 /// MCP server support for providing MCP tools over ACP
 pub mod mcp_server;
-/// Peer types for JSON-RPC connections
-pub mod peer;
+/// Role types for ACP connections
+pub mod role;
 /// ACP protocol schema types - all message types, requests, responses, and supporting types
 pub mod schema;
 /// Utility functions and types
@@ -115,17 +111,18 @@ pub mod jsonrpcmsg {
 }
 
 pub use jsonrpc::{
-    ByteStreams, Channel, Handled, IntoHandled, JrConnection, JrConnectionBuilder, JrConnectionCx,
-    JrMessage, JrMessageHandler, JrNotification, JrRequest, JrRequestCx, JrResponse, JrResponseCx,
-    JrResponsePayload, Lines, MessageCx, NullHandler, UntypedMessage,
-    responder::{ChainResponder, JrResponder, NullResponder},
+    ByteStreams, Channel, Builder, ConnectionTo, HandleDispatchFrom, Handled, IntoHandled,
+    JsonRpcMessage, JsonRpcNotification, JsonRpcRequest, JsonRpcResponse, Lines, Dispatch,
+    NullHandler, Responder, ResponseRouter, SentRequest, UntypedMessage,
+    run::{ChainRun, NullRun, RunWithConnectionTo},
 };
 
-pub use link::{AgentToClient, ClientToAgent, HasDefaultPeer, HasPeer, JrLink, ProxyToConductor};
+pub use role::{
+    Role, RoleId, UntypedRole,
+    acp::{Agent, Client, Conductor, Proxy},
+};
 
-pub use peer::{AgentPeer, ClientPeer, ConductorPeer, JrPeer, PeerId};
-
-pub use component::{Component, DynComponent};
+pub use component::{DynConnectTo, ConnectTo};
 
 // Re-export BoxFuture for implementing Component traits
 pub use futures::future::BoxFuture;
@@ -140,7 +137,7 @@ pub use schema::{
 pub use schema::{Error, ErrorCode};
 
 // Re-export derive macros for custom JSON-RPC types
-pub use sacp_derive::{JrNotification, JrRequest, JrResponsePayload};
+pub use sacp_derive::{JsonRpcNotification, JsonRpcRequest, JsonRpcResponse};
 
 mod session;
 pub use session::*;
@@ -171,21 +168,21 @@ macro_rules! tool_fn {
 }
 
 /// This macro is used for the value of the `to_future_hack` parameter of
-/// [`JrConnectionBuilder::on_receive_request`] and [`JrConnectionBuilder::on_receive_request_from`].
+/// [`Builder::on_receive_request`] and [`Builder::on_receive_request_from`].
 ///
-/// It expands to `|f, req, req_cx, cx| Box::pin(f(req, req_cx, cx))`.
+/// It expands to `|f, req, responder, cx| Box::pin(f(req, responder, cx))`.
 ///
 /// This is needed until [return-type notation](https://github.com/rust-lang/rust/issues/109417)
 /// is stabilized.
 #[macro_export]
 macro_rules! on_receive_request {
     () => {
-        |f: &mut _, req, req_cx, cx| Box::pin(f(req, req_cx, cx))
+        |f: &mut _, req, responder, cx| Box::pin(f(req, responder, cx))
     };
 }
 
 /// This macro is used for the value of the `to_future_hack` parameter of
-/// [`JrConnectionBuilder::on_receive_notification`] and [`JrConnectionBuilder::on_receive_notification_from`].
+/// [`Builder::on_receive_notification`] and [`Builder::on_receive_notification_from`].
 ///
 /// It expands to `|f, notif, cx| Box::pin(f(notif, cx))`.
 ///
@@ -199,15 +196,15 @@ macro_rules! on_receive_notification {
 }
 
 /// This macro is used for the value of the `to_future_hack` parameter of
-/// [`JrConnectionBuilder::on_receive_message`] and [`JrConnectionBuilder::on_receive_message_from`].
+/// [`Builder::on_receive_dispatch`] and [`Builder::on_receive_dispatch_from`].
 ///
-/// It expands to `|f, msg_cx, cx| Box::pin(f(msg_cx, cx))`.
+/// It expands to `|f, dispatch, cx| Box::pin(f(dispatch, cx))`.
 ///
 /// This is needed until [return-type notation](https://github.com/rust-lang/rust/issues/109417)
 /// is stabilized.
 #[macro_export]
-macro_rules! on_receive_message {
+macro_rules! on_receive_dispatch {
     () => {
-        |f: &mut _, msg_cx, cx| Box::pin(f(msg_cx, cx))
+        |f: &mut _, dispatch, cx| Box::pin(f(dispatch, cx))
     };
 }

@@ -38,11 +38,11 @@
 //! ```ignore
 //! // DEADLOCK: This blocks the loop waiting for a response,
 //! // but the response can't arrive because the loop is blocked!
-//! builder.on_receive_request(async |request: MyRequest, request_cx, cx| {
+//! builder.on_receive_request(async |request: MyRequest, responder, cx| {
 //!     let response = cx.send_request(SomeRequest { ... })
 //!         .block_task()  // <-- Waits for response
 //!         .await?;       // <-- But response can never arrive!
-//!     request_cx.respond(response)
+//!     responder.respond(response)
 //! }, on_receive_request!());
 //! ```
 //!
@@ -51,17 +51,17 @@
 //!
 //! # `block_task` vs `on_receiving_result`
 //!
-//! When you send a request, you get a [`JrResponse`] with two ways to handle it:
+//! When you send a request, you get a [`SentRequest`] with two ways to handle it:
 //!
 //! ## `block_task()` - Acks immediately, you process later
 //!
 //! Use this in spawned tasks where you need to wait for the response:
 //!
 //! ```
-//! # use sacp::{ClientToAgent, AgentToClient, Component};
+//! # use sacp::{Client, Agent, ConnectTo};
 //! # use sacp_test::MyRequest;
-//! # async fn example(transport: impl Component<AgentToClient>) -> Result<(), sacp::Error> {
-//! # ClientToAgent::builder().run_until(transport, async |cx| {
+//! # async fn example(transport: impl ConnectTo<Client>) -> Result<(), sacp::Error> {
+//! # Client.builder().connect_with(transport, async |cx| {
 //! cx.spawn({
 //!     let cx = cx.clone();
 //!     async move {
@@ -87,10 +87,10 @@
 //! Use this when you need ordering guarantees:
 //!
 //! ```
-//! # use sacp::{ClientToAgent, AgentToClient, Component};
+//! # use sacp::{Client, Agent, ConnectTo};
 //! # use sacp_test::MyRequest;
-//! # async fn example(transport: impl Component<AgentToClient>) -> Result<(), sacp::Error> {
-//! # ClientToAgent::builder().run_until(transport, async |cx| {
+//! # async fn example(transport: impl ConnectTo<Client>) -> Result<(), sacp::Error> {
+//! # Client.builder().connect_with(transport, async |cx| {
 //! cx.send_request(MyRequest {})
 //!     .on_receiving_result(async |result| {
 //!         // Dispatch loop is blocked until this completes
@@ -113,7 +113,7 @@
 //! Use [`spawn`] to run work outside the dispatch loop:
 //!
 //! ```ignore
-//! builder.on_receive_request(async |request: MyRequest, request_cx, cx| {
+//! builder.on_receive_request(async |request: MyRequest, responder, cx| {
 //!     cx.spawn(async move {
 //!         // This runs outside the loop - other messages may be processed
 //!         let response = cx.send_request(SomeRequest { ... })
@@ -122,7 +122,7 @@
 //!         // ...
 //!         Ok(())
 //!     })?;
-//!     request_cx.respond(MyResponse { ... })  // Return immediately
+//!     responder.respond(MyResponse { ... })  // Return immediately
 //! }, on_receive_request!());
 //! ```
 //!
@@ -132,9 +132,9 @@
 //! so awaiting them won't cause deadlocks:
 //!
 //! ```
-//! # use sacp::{ClientToAgent, AgentToClient, Component};
-//! # async fn example(transport: impl Component<AgentToClient>) -> Result<(), sacp::Error> {
-//! # ClientToAgent::builder().run_until(transport, async |cx| {
+//! # use sacp::{Client, Agent, ConnectTo};
+//! # async fn example(transport: impl ConnectTo<Client>) -> Result<(), sacp::Error> {
+//! # Client.builder().connect_with(transport, async |cx| {
 //! cx.build_session_cwd()?
 //!     .block_task()
 //!     .run_until(async |mut session| {
@@ -164,11 +164,11 @@
 //!
 //! - [Proxies and Conductors](super::proxies) - Building message interceptors
 //!
-//! [`on_receive_request`]: crate::JrConnectionBuilder::on_receive_request
-//! [`on_receive_notification`]: crate::JrConnectionBuilder::on_receive_notification
-//! [`on_receiving_result`]: crate::JrResponse::on_receiving_result
-//! [`on_receiving_ok_result`]: crate::JrResponse::on_receiving_ok_result
+//! [`on_receive_request`]: crate::Builder::on_receive_request
+//! [`on_receive_notification`]: crate::Builder::on_receive_notification
+//! [`on_receiving_result`]: crate::SentRequest::on_receiving_result
+//! [`on_receiving_ok_result`]: crate::SentRequest::on_receiving_ok_result
 //! [`on_session_start`]: crate::SessionBuilder::on_session_start
 //! [`on_proxy_session_start`]: crate::SessionBuilder::on_proxy_session_start
-//! [`JrResponse`]: crate::JrResponse
-//! [`spawn`]: crate::JrConnectionCx::spawn
+//! [`SentRequest`]: crate::SentRequest
+//! [`spawn`]: crate::ConnectionTo::spawn

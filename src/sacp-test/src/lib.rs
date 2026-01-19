@@ -1,4 +1,3 @@
-use sacp::ClientToAgent;
 use sacp::*;
 use serde::{Deserialize, Serialize};
 
@@ -9,8 +8,8 @@ pub mod test_binaries;
 /// This is only for documentation examples that don't actually run.
 pub struct MockTransport;
 
-impl<L: link::JrLink> Component<L> for MockTransport {
-    async fn serve(self, _client: impl Component<L::ConnectsTo>) -> Result<(), Error> {
+impl<R: Role> ConnectTo<R> for MockTransport {
+    async fn connect_to(self, _client: impl ConnectTo<R::Counterpart>) -> Result<(), Error> {
         panic!("MockTransport should never be used in running code - it's only for doctests")
     }
 }
@@ -111,10 +110,10 @@ pub struct AnalysisComplete {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct QueryComplete {}
 
-// Implement JrMessage for all types
+// Implement JsonRpcMessage for all types
 macro_rules! impl_jr_message {
     ($type:ty, $method:expr) => {
-        impl JrMessage for $type {
+        impl JsonRpcMessage for $type {
             fn matches_method(method: &str) -> bool {
                 method == $method
             }
@@ -134,21 +133,21 @@ macro_rules! impl_jr_message {
     };
 }
 
-// Implement JrRequest for request types
+// Implement JsonRpcRequest for request types
 macro_rules! impl_jr_request {
     ($req:ty, $resp:ty, $method:expr) => {
         impl_jr_message!($req, $method);
-        impl JrRequest for $req {
+        impl JsonRpcRequest for $req {
             type Response = $resp;
         }
     };
 }
 
-// Implement JrNotification for notification types
+// Implement JsonRpcNotification for notification types
 macro_rules! impl_jr_notification {
     ($type:ty, $method:expr) => {
         impl_jr_message!($type, $method);
-        impl JrNotification for $type {}
+        impl JsonRpcNotification for $type {}
     };
 }
 
@@ -168,10 +167,10 @@ impl_jr_notification!(AnalysisComplete, "analysisComplete");
 impl_jr_notification!(QueryComplete, "queryComplete");
 impl_jr_notification!(ProcessStarted, "processStarted");
 
-// Implement JrResponsePayload for response types
+// Implement JsonRpcResponse for response types
 macro_rules! impl_jr_response_payload {
     ($type:ty, $method:expr) => {
-        impl JrResponsePayload for $type {
+        impl JsonRpcResponse for $type {
             fn into_json(self, _method: &str) -> Result<serde_json::Value, crate::Error> {
                 Ok(serde_json::to_value(self)?)
             }
@@ -208,8 +207,8 @@ pub fn process(data: &str) -> Result<String, crate::Error> {
 }
 
 // Helper to create a mock connection for examples
-pub fn mock_connection() -> JrConnectionBuilder<NullHandler<ClientToAgent>> {
-    ClientToAgent::builder()
+pub fn mock_connection() -> Builder<Client> {
+    Client.builder()
 }
 
 pub trait Make {

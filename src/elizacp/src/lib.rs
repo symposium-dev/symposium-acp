@@ -3,14 +3,13 @@ pub mod eliza;
 
 use anyhow::Result;
 use eliza::Eliza;
-use sacp::AgentToClient;
 use sacp::schema::{
     AgentCapabilities, ContentBlock, ContentChunk, InitializeRequest, InitializeResponse,
     LoadSessionRequest, LoadSessionResponse, McpServer, NewSessionRequest, NewSessionResponse,
     PromptRequest, PromptResponse, SessionId, SessionNotification, SessionUpdate, StopReason,
     TextContent,
 };
-use sacp::{Component, JrConnectionCx, JrRequestCx};
+use sacp::{Agent, Client, ConnectionTo, Responder, ConnectTo};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
@@ -75,7 +74,7 @@ impl ElizaAgent {
     async fn handle_new_session(
         &self,
         request: NewSessionRequest,
-        request_cx: JrRequestCx<NewSessionResponse>,
+        responder: Responder<NewSessionResponse>,
     ) -> Result<(), sacp::Error> {
         tracing::debug!("New session request with cwd: {:?}", request.cwd);
 
@@ -83,28 +82,28 @@ impl ElizaAgent {
         let session_id = SessionId::new(uuid::Uuid::new_v4().to_string());
         self.create_session(&session_id, request.mcp_servers);
 
-        request_cx.respond(NewSessionResponse::new(session_id))
+        responder.respond(NewSessionResponse::new(session_id))
     }
 
     async fn handle_load_session(
         &self,
         request: LoadSessionRequest,
-        request_cx: JrRequestCx<LoadSessionResponse>,
+        responder: Responder<LoadSessionResponse>,
     ) -> Result<(), sacp::Error> {
         tracing::debug!("Load session request: {:?}", request.session_id);
 
         // For Eliza, we just create a fresh session with no MCP servers
         self.create_session(&request.session_id, vec![]);
 
-        request_cx.respond(LoadSessionResponse::new())
+        responder.respond(LoadSessionResponse::new())
     }
 
     /// Process the prompt and send response - this runs in a spawned task
     async fn process_prompt(
         &self,
         request: PromptRequest,
-        request_cx: JrRequestCx<PromptResponse>,
-        cx: JrConnectionCx<AgentToClient>,
+        responder: Responder<PromptResponse>,
+        connection: ConnectionTo<Client>,
     ) -> Result<(), sacp::Error> {
         let session_id = request.session_id.clone();
 
@@ -162,13 +161,13 @@ impl ElizaAgent {
             ?final_response,
             "Eliza sending SessionNotification"
         );
-        cx.send_notification(SessionNotification::new(
+        connection.send_notification(SessionNotification::new(
             session_id.clone(),
             SessionUpdate::AgentMessageChunk(ContentChunk::new(final_response.into())),
         ))?;
 
         // Complete the request
-        request_cx.respond(PromptResponse::new(StopReason::EndTurn))
+        responder.respond(PromptResponse::new(StopReason::EndTurn))
     }
 
     /// Helper function to execute an operation with an MCP client
@@ -367,18 +366,15 @@ fn parse_tool_call(input: &str) -> Option<(String, String, String)> {
     ))
 }
 
-impl Component<sacp::link::AgentToClient> for ElizaAgent {
-    async fn serve(
-        self,
-        client: impl Component<sacp::link::ClientToAgent>,
-    ) -> Result<(), sacp::Error> {
-        AgentToClient::builder()
+impl ConnectTo<Client> for ElizaAgent {
+    async fn connect_to(self, client: impl ConnectTo<Agent>) -> Result<(), sacp::Error> {
+        Agent.builder()
             .name("elizacp")
             .on_receive_request(
-                async |initialize: InitializeRequest, request_cx, _cx| {
+                async |initialize: InitializeRequest, responder, _cx| {
                     tracing::debug!("Received initialize request");
 
-                    request_cx.respond(
+                    responder.respond(
                         InitializeResponse::new(initialize.protocol_version)
                             .agent_capabilities(AgentCapabilities::new()),
                     )
@@ -388,8 +384,8 @@ impl Component<sacp::link::AgentToClient> for ElizaAgent {
             .on_receive_request(
                 {
                     let agent = self.clone();
-                    async move |request: NewSessionRequest, request_cx, _cx| {
-                        agent.handle_new_session(request, request_cx).await
+                    async move |request: NewSessionRequest, responder, _cx| {
+                        agent.handle_new_session(request, responder).await
                     }
                 },
                 sacp::on_receive_request!(),
@@ -397,8 +393,8 @@ impl Component<sacp::link::AgentToClient> for ElizaAgent {
             .on_receive_request(
                 {
                     let agent = self.clone();
-                    async move |request: LoadSessionRequest, request_cx, _cx| {
-                        agent.handle_load_session(request, request_cx).await
+                    async move |request: LoadSessionRequest, responder, _cx| {
+                        agent.handle_load_session(request, responder).await
                     }
                 },
                 sacp::on_receive_request!(),
@@ -406,21 +402,20 @@ impl Component<sacp::link::AgentToClient> for ElizaAgent {
             .on_receive_request(
                 {
                     let agent = self.clone();
-                    async move |request: PromptRequest, request_cx, cx| {
+                    async move |request: PromptRequest, responder, cx| {
                         // Spawn prompt processing to avoid blocking the event loop.
                         // This allows the agent to handle other requests (like session/new)
                         // while processing a prompt.
                         let cx_clone = cx.clone();
                         cx.spawn({
                             let agent = agent.clone();
-                            async move { agent.process_prompt(request, request_cx, cx_clone).await }
+                            async move { agent.process_prompt(request, responder, cx_clone).await }
                         })
                     }
                 },
                 sacp::on_receive_request!(),
             )
-            .connect_to(client)?
-            .serve()
+            .connect_to(client)
             .await
     }
 }

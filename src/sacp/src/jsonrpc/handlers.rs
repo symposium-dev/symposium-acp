@@ -1,41 +1,38 @@
-use crate::jsonrpc::{Handled, IntoHandled, JrMessageHandler, JrResponsePayload};
-use crate::link::{HasPeer, JrLink, handle_incoming_message};
-use crate::peer::JrPeer;
-use crate::{JrConnectionCx, JrNotification, JrRequest, MessageCx, UntypedMessage};
+use crate::jsonrpc::{HandleDispatchFrom, Handled, IntoHandled, JsonRpcResponse};
+
+use crate::role::{HasPeer, Role, handle_incoming_dispatch};
+use crate::{ConnectionTo, JsonRpcNotification, JsonRpcRequest, Dispatch, UntypedMessage};
 // Types re-exported from crate root
-use super::JrRequestCx;
+use super::Responder;
 use std::marker::PhantomData;
 use std::ops::AsyncFnMut;
 
 /// Null handler that accepts no messages.
-pub struct NullHandler<Link: JrLink> {
-    role: Link,
-}
+pub struct NullHandler;
 
-impl<Link: JrLink> NullHandler<Link> {
+impl NullHandler {
     /// Creates a new null handler.
-    pub fn new(role: Link) -> Self {
-        Self { role }
-    }
-
-    /// Returns the role.
-    pub fn role(&self) -> Link {
-        self.role
+    pub fn new() -> Self {
+        Self
     }
 }
 
-impl<Link: JrLink> JrMessageHandler for NullHandler<Link> {
-    type Link = Link;
+impl Default for NullHandler {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
+impl<Counterpart: Role> HandleDispatchFrom<Counterpart> for NullHandler {
     fn describe_chain(&self) -> impl std::fmt::Debug {
         "(null)"
     }
 
-    async fn handle_message(
+    async fn handle_dispatch_from(
         &mut self,
-        message: MessageCx,
-        _cx: JrConnectionCx<Link>,
-    ) -> Result<Handled<MessageCx>, crate::Error> {
+        message: Dispatch,
+        _cx: ConnectionTo<Counterpart>,
+    ) -> Result<Handled<Dispatch>, crate::Error> {
         Ok(Handled::No {
             message,
             retry: false,
@@ -45,23 +42,27 @@ impl<Link: JrLink> JrMessageHandler for NullHandler<Link> {
 
 /// Handler for typed request messages
 pub struct RequestHandler<
-    Link: JrLink,
-    Peer: JrPeer,
-    Req: JrRequest = UntypedMessage,
+    Counterpart: Role,
+    Peer: Role,
+    Req: JsonRpcRequest = UntypedMessage,
     F = (),
     ToFut = (),
 > {
+    counterpart: Counterpart,
+    peer: Peer,
     handler: F,
     to_future_hack: ToFut,
-    phantom: PhantomData<fn(Link, Peer, Req)>,
+    phantom: PhantomData<fn(Req)>,
 }
 
-impl<Link: JrLink, Peer: JrPeer, Req: JrRequest, F, ToFut>
-    RequestHandler<Link, Peer, Req, F, ToFut>
+impl<Counterpart: Role, Peer: Role, Req: JsonRpcRequest, F, ToFut>
+    RequestHandler<Counterpart, Peer, Req, F, ToFut>
 {
     /// Creates a new request handler
-    pub fn new(_peer: Peer, _link: Link, handler: F, to_future_hack: ToFut) -> Self {
+    pub fn new(counterpart: Counterpart, peer: Peer, handler: F, to_future_hack: ToFut) -> Self {
         Self {
+            counterpart,
+            peer,
             handler,
             to_future_hack,
             phantom: PhantomData,
@@ -69,41 +70,44 @@ impl<Link: JrLink, Peer: JrPeer, Req: JrRequest, F, ToFut>
     }
 }
 
-impl<Link: JrLink, Peer: JrPeer, Req, F, T, ToFut> JrMessageHandler
-    for RequestHandler<Link, Peer, Req, F, ToFut>
+impl<Counterpart: Role, Peer: Role, Req, F, T, ToFut> HandleDispatchFrom<Counterpart>
+    for RequestHandler<Counterpart, Peer, Req, F, ToFut>
 where
-    Link: HasPeer<Peer>,
-    Req: JrRequest,
-    F: AsyncFnMut(Req, JrRequestCx<Req::Response>, JrConnectionCx<Link>) -> Result<T, crate::Error>
+    Counterpart: HasPeer<Peer>,
+    Req: JsonRpcRequest,
+    F: AsyncFnMut(
+            Req,
+            Responder<Req::Response>,
+            ConnectionTo<Counterpart>,
+        ) -> Result<T, crate::Error>
         + Send,
-    T: crate::IntoHandled<(Req, JrRequestCx<Req::Response>)>,
+    T: crate::IntoHandled<(Req, Responder<Req::Response>)>,
     ToFut: Fn(
             &mut F,
             Req,
-            JrRequestCx<Req::Response>,
-            JrConnectionCx<Link>,
+            Responder<Req::Response>,
+            ConnectionTo<Counterpart>,
         ) -> crate::BoxFuture<'_, Result<T, crate::Error>>
         + Send
         + Sync,
 {
-    type Link = Link;
-
     fn describe_chain(&self) -> impl std::fmt::Debug {
         std::any::type_name::<Req>()
     }
 
-    async fn handle_message(
+    async fn handle_dispatch_from(
         &mut self,
-        message_cx: MessageCx,
-        connection_cx: JrConnectionCx<Link>,
-    ) -> Result<Handled<MessageCx>, crate::Error> {
-        handle_incoming_message::<Link, Peer>(
-            Peer::default(),
-            message_cx,
-            connection_cx,
-            async |message_cx, connection_cx| {
-                match message_cx {
-                    MessageCx::Request(message, request_cx) => {
+        dispatch: Dispatch,
+        connection: ConnectionTo<Counterpart>,
+    ) -> Result<Handled<Dispatch>, crate::Error> {
+        handle_incoming_dispatch(
+            self.counterpart.clone(),
+            self.peer.clone(),
+            dispatch,
+            connection,
+            async |dispatch, connection| {
+                match dispatch {
+                    Dispatch::Request(message, responder) => {
                         tracing::debug!(
                             request_type = std::any::type_name::<Req>(),
                             message = ?message,
@@ -112,7 +116,7 @@ where
                         if !Req::matches_method(&message.method) {
                             tracing::trace!("RequestHandler::handle_request: method doesn't match");
                             Ok(Handled::No {
-                                message: MessageCx::Request(message, request_cx),
+                                message: Dispatch::Request(message, responder),
                                 retry: false,
                             })
                         } else {
@@ -122,26 +126,26 @@ where
                                         ?req,
                                         "RequestHandler::handle_request: parse completed"
                                     );
-                                    let typed_request_cx = request_cx.cast();
+                                    let typed_responder = responder.cast();
                                     let result = (self.to_future_hack)(
                                         &mut self.handler,
                                         req,
-                                        typed_request_cx,
-                                        connection_cx,
+                                        typed_responder,
+                                        connection,
                                     )
                                     .await?;
                                     match result.into_handled() {
                                         Handled::Yes => Ok(Handled::Yes),
                                         Handled::No {
-                                            message: (request, request_cx),
+                                            message: (request, responder),
                                             retry,
                                         } => {
                                             // Handler returned the request back, convert to untyped
                                             let untyped = request.to_untyped_message()?;
                                             Ok(Handled::No {
-                                                message: MessageCx::Request(
+                                                message: Dispatch::Request(
                                                     untyped,
-                                                    request_cx.erase_to_json(),
+                                                    responder.erase_to_json(),
                                                 ),
                                                 retry,
                                             })
@@ -159,8 +163,8 @@ where
                         }
                     }
 
-                    MessageCx::Notification(..) | MessageCx::Response(..) => Ok(Handled::No {
-                        message: message_cx,
+                    Dispatch::Notification(..) | Dispatch::Response(..) => Ok(Handled::No {
+                        message: dispatch,
                         retry: false,
                     }),
                 }
@@ -172,23 +176,27 @@ where
 
 /// Handler for typed notification messages
 pub struct NotificationHandler<
-    Link: JrLink,
-    Peer: JrPeer,
-    Notif: JrNotification = UntypedMessage,
+    Counterpart: Role,
+    Peer: Role,
+    Notif: JsonRpcNotification = UntypedMessage,
     F = (),
     ToFut = (),
 > {
+    counterpart: Counterpart,
+    peer: Peer,
     handler: F,
     to_future_hack: ToFut,
-    phantom: PhantomData<fn(Link, Peer, Notif)>,
+    phantom: PhantomData<fn(Notif)>,
 }
 
-impl<Link: JrLink, Peer: JrPeer, Notif: JrNotification, F, ToFut>
-    NotificationHandler<Link, Peer, Notif, F, ToFut>
+impl<Counterpart: Role, Peer: Role, Notif: JsonRpcNotification, F, ToFut>
+    NotificationHandler<Counterpart, Peer, Notif, F, ToFut>
 {
     /// Creates a new notification handler
-    pub fn new(_peer: Peer, _link: Link, handler: F, to_future_hack: ToFut) -> Self {
+    pub fn new(counterpart: Counterpart, peer: Peer, handler: F, to_future_hack: ToFut) -> Self {
         Self {
+            counterpart,
+            peer,
             handler,
             to_future_hack,
             phantom: PhantomData,
@@ -196,46 +204,49 @@ impl<Link: JrLink, Peer: JrPeer, Notif: JrNotification, F, ToFut>
     }
 }
 
-impl<Link: JrLink, Peer: JrPeer, Notif, F, T, ToFut> JrMessageHandler
-    for NotificationHandler<Link, Peer, Notif, F, ToFut>
+impl<Counterpart: Role, Peer: Role, Notif, F, T, ToFut> HandleDispatchFrom<Counterpart>
+    for NotificationHandler<Counterpart, Peer, Notif, F, ToFut>
 where
-    Link: HasPeer<Peer>,
-    Notif: JrNotification,
-    F: AsyncFnMut(Notif, JrConnectionCx<Link>) -> Result<T, crate::Error> + Send,
-    T: crate::IntoHandled<(Notif, JrConnectionCx<Link>)>,
-    ToFut: Fn(&mut F, Notif, JrConnectionCx<Link>) -> crate::BoxFuture<'_, Result<T, crate::Error>>
+    Counterpart: HasPeer<Peer>,
+    Notif: JsonRpcNotification,
+    F: AsyncFnMut(Notif, ConnectionTo<Counterpart>) -> Result<T, crate::Error> + Send,
+    T: crate::IntoHandled<(Notif, ConnectionTo<Counterpart>)>,
+    ToFut: Fn(
+            &mut F,
+            Notif,
+            ConnectionTo<Counterpart>,
+        ) -> crate::BoxFuture<'_, Result<T, crate::Error>>
         + Send
         + Sync,
 {
-    type Link = Link;
-
     fn describe_chain(&self) -> impl std::fmt::Debug {
         std::any::type_name::<Notif>()
     }
 
-    async fn handle_message(
+    async fn handle_dispatch_from(
         &mut self,
-        message_cx: MessageCx,
-        connection_cx: JrConnectionCx<Link>,
-    ) -> Result<Handled<MessageCx>, crate::Error> {
-        handle_incoming_message::<Link, Peer>(
-            Peer::default(),
-            message_cx,
-            connection_cx,
-            async |message_cx, connection_cx| {
-                match message_cx {
-                    MessageCx::Notification(message) => {
+        dispatch: Dispatch,
+        connection: ConnectionTo<Counterpart>,
+    ) -> Result<Handled<Dispatch>, crate::Error> {
+        handle_incoming_dispatch(
+            self.counterpart.clone(),
+            self.peer.clone(),
+            dispatch,
+            connection,
+            async |dispatch, connection| {
+                match dispatch {
+                    Dispatch::Notification(message) => {
                         tracing::debug!(
                             request_type = std::any::type_name::<Notif>(),
                             message = ?message,
-                            "NotificationHandler::handle_message"
+                            "NotificationHandler::handle_dispatch"
                         );
                         if !Notif::matches_method(&message.method) {
                             tracing::trace!(
                                 "NotificationHandler::handle_notification: method doesn't match"
                             );
                             Ok(Handled::No {
-                                message: MessageCx::Notification(message),
+                                message: Dispatch::Notification(message),
                                 retry: false,
                             })
                         } else {
@@ -248,7 +259,7 @@ where
                                     let result = (self.to_future_hack)(
                                         &mut self.handler,
                                         notif,
-                                        connection_cx,
+                                        connection,
                                     )
                                     .await?;
                                     match result.into_handled() {
@@ -260,7 +271,7 @@ where
                                             // Handler returned the notification back, convert to untyped
                                             let untyped = notification.to_untyped_message()?;
                                             Ok(Handled::No {
-                                                message: MessageCx::Notification(untyped),
+                                                message: Dispatch::Notification(untyped),
                                                 retry,
                                             })
                                         }
@@ -277,8 +288,8 @@ where
                         }
                     }
 
-                    MessageCx::Request(..) | MessageCx::Response(..) => Ok(Handled::No {
-                        message: message_cx,
+                    Dispatch::Request(..) | Dispatch::Response(..) => Ok(Handled::No {
+                        message: dispatch,
                         retry: false,
                     }),
                 }
@@ -290,24 +301,28 @@ where
 
 /// Handler that handles both requests and notifications of specific types.
 pub struct MessageHandler<
-    Link: JrLink,
-    Peer: JrPeer,
-    Req: JrRequest = UntypedMessage,
-    Notif: JrNotification = UntypedMessage,
+    Counterpart: Role,
+    Peer: Role,
+    Req: JsonRpcRequest = UntypedMessage,
+    Notif: JsonRpcNotification = UntypedMessage,
     F = (),
     ToFut = (),
 > {
+    counterpart: Counterpart,
+    peer: Peer,
     handler: F,
     to_future_hack: ToFut,
-    phantom: PhantomData<fn(Link, Peer, Req, Notif)>,
+    phantom: PhantomData<fn(Dispatch<Req, Notif>)>,
 }
 
-impl<Link: JrLink, Peer: JrPeer, Req: JrRequest, Notif: JrNotification, F, ToFut>
-    MessageHandler<Link, Peer, Req, Notif, F, ToFut>
+impl<Counterpart: Role, Peer: Role, Req: JsonRpcRequest, Notif: JsonRpcNotification, F, ToFut>
+    MessageHandler<Counterpart, Peer, Req, Notif, F, ToFut>
 {
     /// Creates a new message handler
-    pub fn new(_peer: Peer, _link: Link, handler: F, to_future_hack: ToFut) -> Self {
+    pub fn new(counterpart: Counterpart, peer: Peer, handler: F, to_future_hack: ToFut) -> Self {
         Self {
+            counterpart,
+            peer,
             handler,
             to_future_hack,
             phantom: PhantomData,
@@ -315,22 +330,21 @@ impl<Link: JrLink, Peer: JrPeer, Req: JrRequest, Notif: JrNotification, F, ToFut
     }
 }
 
-impl<Link: JrLink, Peer: JrPeer, Req: JrRequest, Notif: JrNotification, F, T, ToFut>
-    JrMessageHandler for MessageHandler<Link, Peer, Req, Notif, F, ToFut>
+impl<Counterpart: Role, Peer: Role, Req: JsonRpcRequest, Notif: JsonRpcNotification, F, T, ToFut>
+    HandleDispatchFrom<Counterpart> for MessageHandler<Counterpart, Peer, Req, Notif, F, ToFut>
 where
-    Link: HasPeer<Peer>,
-    F: AsyncFnMut(MessageCx<Req, Notif>, JrConnectionCx<Link>) -> Result<T, crate::Error> + Send,
-    T: IntoHandled<MessageCx<Req, Notif>>,
+    Counterpart: HasPeer<Peer>,
+    F: AsyncFnMut(Dispatch<Req, Notif>, ConnectionTo<Counterpart>) -> Result<T, crate::Error>
+        + Send,
+    T: IntoHandled<Dispatch<Req, Notif>>,
     ToFut: Fn(
             &mut F,
-            MessageCx<Req, Notif>,
-            JrConnectionCx<Link>,
+            Dispatch<Req, Notif>,
+            ConnectionTo<Counterpart>,
         ) -> crate::BoxFuture<'_, Result<T, crate::Error>>
         + Send
         + Sync,
 {
-    type Link = Link;
-
     fn describe_chain(&self) -> impl std::fmt::Debug {
         format!(
             "({}, {})",
@@ -339,57 +353,58 @@ where
         )
     }
 
-    async fn handle_message(
+    async fn handle_dispatch_from(
         &mut self,
-        message_cx: MessageCx,
-        connection_cx: JrConnectionCx<Link>,
-    ) -> Result<Handled<MessageCx>, crate::Error> {
-        handle_incoming_message::<Link, Peer>(
-            Peer::default(),
-            message_cx,
-            connection_cx,
-            async |message_cx, connection_cx| match message_cx
-                .into_typed_message_cx::<Req, Notif>()?
+        dispatch: Dispatch,
+        connection: ConnectionTo<Counterpart>,
+    ) -> Result<Handled<Dispatch>, crate::Error> {
+        handle_incoming_dispatch(
+            self.counterpart.clone(),
+            self.peer.clone(),
+            dispatch,
+            connection,
+            async |dispatch, connection| match dispatch
+                .into_typed_dispatch::<Req, Notif>()?
             {
-                Ok(typed_message_cx) => {
+                Ok(typed_dispatch) => {
                     let result =
-                        (self.to_future_hack)(&mut self.handler, typed_message_cx, connection_cx)
+                        (self.to_future_hack)(&mut self.handler, typed_dispatch, connection)
                             .await?;
                     match result.into_handled() {
                         Handled::Yes => Ok(Handled::Yes),
                         Handled::No {
-                            message: MessageCx::Request(request, request_cx),
+                            message: Dispatch::Request(request, responder),
                             retry,
                         } => {
                             let untyped = request.to_untyped_message()?;
                             Ok(Handled::No {
-                                message: MessageCx::Request(untyped, request_cx.erase_to_json()),
+                                message: Dispatch::Request(untyped, responder.erase_to_json()),
                                 retry,
                             })
                         }
                         Handled::No {
-                            message: MessageCx::Notification(notification),
+                            message: Dispatch::Notification(notification),
                             retry,
                         } => {
                             let untyped = notification.to_untyped_message()?;
                             Ok(Handled::No {
-                                message: MessageCx::Notification(untyped),
+                                message: Dispatch::Notification(untyped),
                                 retry,
                             })
                         }
                         Handled::No {
-                            message: MessageCx::Response(result, request_cx),
+                            message: Dispatch::Response(result, responder),
                             retry,
                         } => {
-                            let method = request_cx.method();
+                            let method = responder.method();
                             let untyped_result = match result {
                                 Ok(response) => response.into_json(method).map(Ok),
                                 Err(err) => Ok(Err(err)),
                             }?;
                             Ok(Handled::No {
-                                message: MessageCx::Response(
+                                message: Dispatch::Response(
                                     untyped_result,
-                                    request_cx.erase_to_json(),
+                                    responder.erase_to_json(),
                                 ),
                                 retry,
                             })
@@ -397,8 +412,8 @@ where
                     }
                 }
 
-                Err(message_cx) => Ok(Handled::No {
-                    message: message_cx,
+                Err(dispatch) => Ok(Handled::No {
+                    message: dispatch,
                     retry: false,
                 }),
             },
@@ -413,16 +428,16 @@ pub struct NamedHandler<H> {
     handler: H,
 }
 
-impl<H: JrMessageHandler> NamedHandler<H> {
+impl<H> NamedHandler<H> {
     /// Creates a new named handler
     pub fn new(name: Option<String>, handler: H) -> Self {
         Self { name, handler }
     }
 }
 
-impl<H: JrMessageHandler> JrMessageHandler for NamedHandler<H> {
-    type Link = H::Link;
-
+impl<Counterpart: Role, H: HandleDispatchFrom<Counterpart>> HandleDispatchFrom<Counterpart>
+    for NamedHandler<H>
+{
     fn describe_chain(&self) -> impl std::fmt::Debug {
         format!(
             "NamedHandler({:?}, {:?})",
@@ -431,19 +446,19 @@ impl<H: JrMessageHandler> JrMessageHandler for NamedHandler<H> {
         )
     }
 
-    async fn handle_message(
+    async fn handle_dispatch_from(
         &mut self,
-        message: MessageCx,
-        connection_cx: JrConnectionCx<H::Link>,
-    ) -> Result<Handled<MessageCx>, crate::Error> {
+        message: Dispatch,
+        connection: ConnectionTo<Counterpart>,
+    ) -> Result<Handled<Dispatch>, crate::Error> {
         if let Some(name) = &self.name {
             crate::util::instrumented_with_connection_name(
                 name.clone(),
-                self.handler.handle_message(message, connection_cx),
+                self.handler.handle_dispatch_from(message, connection),
             )
             .await
         } else {
-            self.handler.handle_message(message, connection_cx).await
+            self.handler.handle_dispatch_from(message, connection).await
         }
     }
 }
@@ -454,24 +469,18 @@ pub struct ChainedHandler<H1, H2> {
     handler2: H2,
 }
 
-impl<H1, H2> ChainedHandler<H1, H2>
-where
-    H1: JrMessageHandler,
-    H2: JrMessageHandler<Link = H1::Link>,
-{
+impl<H1, H2> ChainedHandler<H1, H2> {
     /// Creates a new chain handler
     pub fn new(handler1: H1, handler2: H2) -> Self {
         Self { handler1, handler2 }
     }
 }
 
-impl<H1, H2> JrMessageHandler for ChainedHandler<H1, H2>
+impl<Counterpart: Role, H1, H2> HandleDispatchFrom<Counterpart> for ChainedHandler<H1, H2>
 where
-    H1: JrMessageHandler,
-    H2: JrMessageHandler<Link = H1::Link>,
+    H1: HandleDispatchFrom<Counterpart>,
+    H2: HandleDispatchFrom<Counterpart>,
 {
-    type Link = H1::Link;
-
     fn describe_chain(&self) -> impl std::fmt::Debug {
         format!(
             "{:?}, {:?}",
@@ -480,21 +489,25 @@ where
         )
     }
 
-    async fn handle_message(
+    async fn handle_dispatch_from(
         &mut self,
-        message: MessageCx,
-        connection_cx: JrConnectionCx<H1::Link>,
-    ) -> Result<Handled<MessageCx>, crate::Error> {
+        message: Dispatch,
+        connection: ConnectionTo<Counterpart>,
+    ) -> Result<Handled<Dispatch>, crate::Error> {
         match self
             .handler1
-            .handle_message(message, connection_cx.clone())
+            .handle_dispatch_from(message, connection.clone())
             .await?
         {
             Handled::Yes => Ok(Handled::Yes),
             Handled::No {
                 message,
                 retry: retry1,
-            } => match self.handler2.handle_message(message, connection_cx).await? {
+            } => match self
+                .handler2
+                .handle_dispatch_from(message, connection)
+                .await?
+            {
                 Handled::Yes => Ok(Handled::Yes),
                 Handled::No {
                     message,

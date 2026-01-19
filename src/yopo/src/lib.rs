@@ -2,14 +2,13 @@
 //!
 //! Provides a convenient API for running one-shot prompts against SACP components.
 
-use sacp::ClientToAgent;
 use sacp::schema::{
     AudioContent, ContentBlock, EmbeddedResourceResource, ImageContent, InitializeRequest,
     ProtocolVersion, RequestPermissionOutcome, RequestPermissionRequest, RequestPermissionResponse,
     SelectedPermissionOutcome, SessionNotification, TextContent,
 };
-use sacp::util::MatchMessage;
-use sacp::{Component, Handled, MessageCx, UntypedMessage};
+use sacp::util::MatchDispatch;
+use sacp::{Agent, Client, Handled, Dispatch, ConnectTo, UntypedMessage};
 use std::path::PathBuf;
 
 /// Converts a `ContentBlock` to its string representation.
@@ -79,7 +78,7 @@ pub fn content_block_to_string(block: &ContentBlock) -> String {
 /// # }
 /// ```
 pub async fn prompt_with_callback(
-    component: impl Component<sacp::link::AgentToClient>,
+    component: impl ConnectTo<Client>,
     prompt_text: impl ToString,
     mut callback: impl AsyncFnMut(ContentBlock) + Send,
 ) -> Result<(), sacp::Error> {
@@ -87,19 +86,18 @@ pub async fn prompt_with_callback(
     let prompt_text = prompt_text.to_string();
 
     // Run the client
-    ClientToAgent::builder()
-        .on_receive_message(
-            async |message: MessageCx<UntypedMessage, UntypedMessage>, _cx| {
+    Client.builder()
+        .on_receive_dispatch(
+            async |message: Dispatch<UntypedMessage, UntypedMessage>, _cx| {
                 tracing::trace!("received: {:?}", message.message());
                 Ok(Handled::No {
                     message,
                     retry: false,
                 })
             },
-            sacp::on_receive_message!(),
+            sacp::on_receive_dispatch!(),
         )
-        .connect_to(component)?
-        .run_until(|cx: sacp::JrConnectionCx<ClientToAgent>| async move {
+        .connect_with(component, |cx: sacp::ConnectionTo<Agent>| async move {
             // Initialize the agent
             let _init_response = cx
                 .send_request(InitializeRequest::new(ProtocolVersion::LATEST))
@@ -118,7 +116,7 @@ pub async fn prompt_with_callback(
                 let update = session.read_update().await?;
                 match update {
                     sacp::SessionMessage::SessionMessage(message) => {
-                        MatchMessage::new(message)
+                        MatchDispatch::new(message)
                             .if_notification(async |notification: SessionNotification| {
                                 tracing::debug!(
                                     ?notification,
@@ -134,7 +132,7 @@ pub async fn prompt_with_callback(
                                 Ok(())
                             })
                             .await
-                            .if_request(async |request: RequestPermissionRequest, request_cx| {
+                            .if_request(async |request: RequestPermissionRequest, responder| {
                                 // Auto-approve all permission requests by selecting the first option
                                 // that looks "allow-ish"
                                 let outcome = request
@@ -156,7 +154,7 @@ pub async fn prompt_with_callback(
                                     })
                                     .unwrap_or(RequestPermissionOutcome::Cancelled);
 
-                                request_cx.respond(RequestPermissionResponse::new(outcome))?;
+                                responder.respond(RequestPermissionResponse::new(outcome))?;
 
                                 Ok(())
                             })
@@ -212,7 +210,7 @@ pub async fn prompt_with_callback(
 /// # }
 /// ```
 pub async fn prompt(
-    component: impl Component<sacp::link::AgentToClient>,
+    component: impl ConnectTo<Client>,
     prompt_text: impl ToString,
 ) -> Result<String, sacp::Error> {
     let mut accumulated_text = String::new();

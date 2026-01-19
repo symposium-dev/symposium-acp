@@ -6,9 +6,8 @@
 //! 3. Messages flow correctly through the empty conductor to eliza
 //! 4. The full chain works end-to-end
 
-use sacp::Component;
-use sacp::link::{AgentToClient, ProxyToConductor};
-use sacp_conductor::{Conductor, ProxiesAndAgent};
+use sacp::{Agent, Client, Conductor, Proxy, ConnectTo};
+use sacp_conductor::{ConductorImpl, ProxiesAndAgent};
 use tokio::io::duplex;
 use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
 
@@ -16,16 +15,13 @@ use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
 /// Creates a nested conductor with no components that acts as a passthrough proxy.
 struct MockEmptyConductor;
 
-impl Component<ProxyToConductor> for MockEmptyConductor {
-    async fn serve(
-        self,
-        client: impl Component<sacp::link::ConductorToProxy>,
-    ) -> Result<(), sacp::Error> {
+impl ConnectTo<Conductor> for MockEmptyConductor {
+    async fn connect_to(self, client: impl ConnectTo<Proxy>) -> Result<(), sacp::Error> {
         // Create an empty conductor with no components - it should act as a passthrough
         // Use Component::serve instead of .run() to get the ProxyToConductor impl
-        let empty_components: Vec<sacp::DynComponent<ProxyToConductor>> = vec![];
-        Component::<ProxyToConductor>::serve(
-            Conductor::new_proxy(
+        let empty_components: Vec<sacp::DynConnectTo<Conductor>> = vec![];
+        ConnectTo::<Conductor>::connect_to(
+            ConductorImpl::new_proxy(
                 "empty-conductor".to_string(),
                 empty_components,
                 Default::default(),
@@ -40,12 +36,9 @@ impl Component<ProxyToConductor> for MockEmptyConductor {
 /// Runs the Eliza agent logic in-process instead of spawning a subprocess.
 struct MockEliza;
 
-impl Component<AgentToClient> for MockEliza {
-    async fn serve(
-        self,
-        client: impl Component<sacp::link::ClientToAgent>,
-    ) -> Result<(), sacp::Error> {
-        Component::<AgentToClient>::serve(elizacp::ElizaAgent::new(true), client).await
+impl ConnectTo<Client> for MockEliza {
+    async fn connect_to(self, client: impl ConnectTo<Agent>) -> Result<(), sacp::Error> {
+        ConnectTo::<Client>::connect_to(elizacp::ElizaAgent::new(true), client).await
     }
 }
 
@@ -66,7 +59,7 @@ async fn test_conductor_with_empty_conductor_and_eliza() -> Result<(), sacp::Err
 
     // Spawn the conductor
     let conductor_handle = tokio::spawn(async move {
-        Conductor::new_agent(
+        ConductorImpl::new_agent(
             "outer-conductor".to_string(),
             ProxiesAndAgent::new(MockEliza).proxy(MockEmptyConductor),
             Default::default(),

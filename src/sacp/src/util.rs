@@ -6,7 +6,7 @@ use futures::{
 };
 
 mod typed;
-pub use typed::{MatchMessage, MatchMessageFrom, TypeNotification};
+pub use typed::{MatchDispatch, MatchDispatchFrom, TypeNotification};
 
 /// Cast from `N` to `M` by serializing/deserialization to/from JSON.
 pub fn json_cast<N, M>(params: N) -> Result<M, crate::Error>

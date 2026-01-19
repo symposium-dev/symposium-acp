@@ -2,8 +2,8 @@ use std::panic::Location;
 
 use futures::{FutureExt, channel::mpsc, future::BoxFuture};
 
-use crate::JrConnectionCx;
-use crate::link::JrLink;
+use crate::ConnectionTo;
+use crate::role::Role;
 use crate::util::process_stream_concurrently;
 
 pub type TaskTx = mpsc::UnboundedSender<Task>;
@@ -48,9 +48,9 @@ impl Task {
 }
 
 /// The "task actor" manages dynamically spawned tasks.
-pub(super) async fn task_actor<Link: JrLink>(
+pub(super) async fn task_actor<R: Role>(
     task_rx: mpsc::UnboundedReceiver<Task>,
-    _cx: &JrConnectionCx<Link>,
+    _cx: &ConnectionTo<R>,
 ) -> Result<(), crate::Error> {
     process_stream_concurrently(
         task_rx,

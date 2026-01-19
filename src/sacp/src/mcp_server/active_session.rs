@@ -2,44 +2,40 @@ use futures::channel::mpsc;
 use futures::{SinkExt, StreamExt};
 use fxhash::FxHashMap;
 
-use crate::mcp::{McpClientToServer, McpServerPeer};
-use crate::mcp_server::{McpContext, McpServerConnect};
+use crate::mcp_server::{McpConnectionTo, McpServerConnect};
+use crate::role;
+use crate::role::HasPeer;
 use crate::schema::{
     McpConnectRequest, McpConnectResponse, McpDisconnectNotification, McpOverAcpMessage,
 };
-use crate::util::MatchMessageFrom;
+use crate::util::MatchDispatchFrom;
 use crate::{
-    AgentPeer, Channel, Component, Handled, HasPeer, JrConnectionCx, JrLink, JrMessageHandler,
-    JrRequestCx, MessageCx, UntypedMessage,
+    Agent, Channel, ConnectionTo, HandleDispatchFrom, Handled, Dispatch, Responder, Role, ConnectTo,
+    UntypedMessage,
 };
 use std::sync::Arc;
 
 /// The message handler for an MCP server offered to a particular session.
 /// This is added as a 'dynamic' handler to the connection context
-/// (see [`JrConnectionCx::add_dynamic_handler`]) and handles MCP-over-ACP messages
+/// (see [`ConnectionTo::add_dynamic_handler`]) and handles MCP-over-ACP messages
 /// with the appropriate ACP url.
-pub(super) struct McpActiveSession<Link> {
-    /// The role of the server
-    #[expect(dead_code)]
-    role: Link,
-
+pub(super) struct McpActiveSession<Counterpart: Role> {
     /// The ACP URL created for this session
     acp_url: String,
 
     /// The MCP server we are managing
-    mcp_connect: Arc<dyn McpServerConnect<Link>>,
+    mcp_connect: Arc<dyn McpServerConnect<Counterpart>>,
 
     /// Active connections to MCP server tasks
-    connections: FxHashMap<String, mpsc::Sender<MessageCx>>,
+    connections: FxHashMap<String, mpsc::Sender<Dispatch>>,
 }
 
-impl<Link: JrLink> McpActiveSession<Link>
+impl<Counterpart: Role> McpActiveSession<Counterpart>
 where
-    Link: HasPeer<AgentPeer>,
+    Counterpart: HasPeer<Agent>,
 {
-    pub fn new(role: Link, acp_url: String, mcp_connect: Arc<dyn McpServerConnect<Link>>) -> Self {
+    pub fn new(acp_url: String, mcp_connect: Arc<dyn McpServerConnect<Counterpart>>) -> Self {
         Self {
-            role,
             acp_url,
             mcp_connect,
             connections: FxHashMap::default(),
@@ -51,13 +47,13 @@ where
     async fn handle_connect_request(
         &mut self,
         request: McpConnectRequest,
-        request_cx: JrRequestCx<McpConnectResponse>,
-        outer_cx: &JrConnectionCx<Link>,
-    ) -> Result<Handled<(McpConnectRequest, JrRequestCx<McpConnectResponse>)>, crate::Error> {
+        responder: Responder<McpConnectResponse>,
+        acp_connection: &ConnectionTo<Counterpart>,
+    ) -> Result<Handled<(McpConnectRequest, Responder<McpConnectResponse>)>, crate::Error> {
         // Check that this is for our MCP server
         if request.acp_url != self.acp_url {
             return Ok(Handled::No {
-                message: (request, request_cx),
+                message: (request, responder),
                 retry: false,
             });
         }
@@ -74,21 +70,21 @@ where
         // Create client-side handler that wraps messages and forwards to successor
         let client_component = {
             let connection_id = connection_id.clone();
-            let outer_cx = outer_cx.clone();
+            let acp_connection = acp_connection.clone();
 
-            McpClientToServer::builder()
-                .on_receive_message(
-                    async move |message: MessageCx, _mcp_cx| {
+            role::mcp::Client.builder()
+                .on_receive_dispatch(
+                    async move |message: Dispatch, _mcp_connection| {
                         // Wrap the message in McpOverAcp{Request,Notification} and forward to successor
                         let wrapped = message.map(
-                            |request, request_cx| {
+                            |request, responder| {
                                 (
                                     McpOverAcpMessage {
                                         connection_id: connection_id.clone(),
                                         message: request,
                                         meta: None,
                                     },
-                                    request_cx,
+                                    responder,
                                 )
                             },
                             |notification| McpOverAcpMessage {
@@ -97,37 +93,37 @@ where
                                 meta: None,
                             },
                         );
-                        outer_cx.send_proxied_message_to(AgentPeer, wrapped)
+                        acp_connection.send_proxied_message_to(Agent, wrapped)
                     },
-                    crate::on_receive_message!(),
+                    crate::on_receive_dispatch!(),
                 )
-                .with_spawned(move |mcp_cx| async move {
+                .with_spawned(move |mcp_connection| async move {
                     // Messages we pull off this channel were sent from the agent.
                     // Forward them back to the MCP server.
                     while let Some(msg) = mcp_server_rx.next().await {
-                        mcp_cx.send_proxied_message_to(McpServerPeer, msg)?;
+                        mcp_connection.send_proxied_message_to(role::mcp::Server, msg)?;
                     }
                     Ok(())
                 })
         };
 
         // Get the MCP server component
-        let spawned_server = self.mcp_connect.connect(McpContext {
+        let spawned_server = self.mcp_connect.connect(McpConnectionTo {
             acp_url: request.acp_url.clone(),
-            connection_cx: outer_cx.clone(),
+            connection: acp_connection.clone(),
         });
 
         // Spawn both sides of the connection
-        let spawn_results = outer_cx
-            .spawn(async move { client_component.serve(client_channel).await })
+        let spawn_results = acp_connection
+            .spawn(async move { client_component.connect_to(client_channel).await })
             .and_then(|()| {
                 // Spawn the MCP server serving the server channel
-                outer_cx.spawn(async move { spawned_server.serve(server_channel).await })
+                acp_connection.spawn(async move { spawned_server.connect_to(server_channel).await })
             });
 
         match spawn_results {
             Ok(()) => {
-                request_cx.respond(McpConnectResponse {
+                responder.respond(McpConnectResponse {
                     connection_id,
                     meta: None,
                 })?;
@@ -135,7 +131,7 @@ where
             }
 
             Err(err) => {
-                request_cx.respond_with_error(err)?;
+                responder.respond_with_error(err)?;
                 Ok(Handled::Yes)
             }
         }
@@ -145,24 +141,24 @@ where
     async fn handle_mcp_over_acp_request(
         &mut self,
         request: McpOverAcpMessage<UntypedMessage>,
-        request_cx: JrRequestCx<serde_json::Value>,
+        responder: Responder<serde_json::Value>,
     ) -> Result<
         Handled<(
             McpOverAcpMessage<UntypedMessage>,
-            JrRequestCx<serde_json::Value>,
+            Responder<serde_json::Value>,
         )>,
         crate::Error,
     > {
         // Check if we have a registered server with the given URL. If not, don't try to handle the request.
         let Some(mcp_server_tx) = self.connections.get_mut(&request.connection_id) else {
             return Ok(Handled::No {
-                message: (request, request_cx),
+                message: (request, responder),
                 retry: false,
             });
         };
 
         mcp_server_tx
-            .send(MessageCx::Request(request.message, request_cx))
+            .send(Dispatch::Request(request.message, responder))
             .await
             .map_err(crate::Error::into_internal_error)?;
 
@@ -183,7 +179,7 @@ where
         };
 
         mcp_server_tx
-            .send(MessageCx::Notification(notification.message))
+            .send(Dispatch::Notification(notification.message))
             .await
             .map_err(crate::Error::into_internal_error)?;
 
@@ -210,40 +206,38 @@ where
     }
 }
 
-impl<Link: JrLink> JrMessageHandler for McpActiveSession<Link>
+impl<Counterpart: Role> HandleDispatchFrom<Counterpart> for McpActiveSession<Counterpart>
 where
-    Link: HasPeer<AgentPeer>,
+    Counterpart: HasPeer<Agent>,
 {
-    type Link = Link;
-
     fn describe_chain(&self) -> impl std::fmt::Debug {
         "McpServerSession"
     }
 
-    async fn handle_message(
+    async fn handle_dispatch_from(
         &mut self,
-        message: MessageCx,
-        connection_cx: JrConnectionCx<Link>,
-    ) -> Result<Handled<MessageCx>, crate::Error> {
-        MatchMessageFrom::new(message, &connection_cx)
+        message: Dispatch,
+        connection: ConnectionTo<Counterpart>,
+    ) -> Result<Handled<Dispatch>, crate::Error> {
+        MatchDispatchFrom::new(message, &connection)
             // MCP connect requests come from the Agent direction (wrapped in SuccessorMessage)
-            .if_request_from(AgentPeer, async |request, request_cx| {
-                self.handle_connect_request(request, request_cx, &connection_cx)
+            .if_request_from(Agent, async |request, responder| {
+                self.handle_connect_request(request, responder, &connection)
                     .await
             })
             .await
             // MCP over ACP requests come from the Agent direction
-            .if_request_from(AgentPeer, async |request, request_cx| {
-                self.handle_mcp_over_acp_request(request, request_cx).await
+            .if_request_from(Agent, async |request, responder| {
+                self.handle_mcp_over_acp_request(request, responder).await
             })
             .await
             // MCP over ACP notifications come from the Agent direction
-            .if_notification_from(AgentPeer, async |notification| {
+            .if_notification_from(Agent, async |notification| {
                 self.handle_mcp_over_acp_notification(notification).await
             })
             .await
             // MCP disconnect notifications come from the Agent direction
-            .if_notification_from(AgentPeer, async |notification| {
+            .if_notification_from(Agent, async |notification| {
                 self.handle_mcp_disconnect_notification(notification).await
             })
             .await

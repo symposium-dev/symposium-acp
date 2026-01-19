@@ -4,27 +4,26 @@
 //! in both directions. This is how you add capabilities like MCP tools,
 //! logging, or message transformation.
 //!
-//! # The Proxy Link Type
+//! # The Proxy Role Type
 //!
-//! Proxies use the [`ProxyToConductor`] link type, which has two peers:
+//! Proxies use the [`Proxy`] role type, which has two peers:
 //!
-//! - [`ClientPeer`] - messages from/to the client direction
-//! - [`AgentPeer`] - messages from/to the agent direction
+//! - [`Client`] - messages from/to the client direction
+//! - [`Agent`] - messages from/to the agent direction
 //!
 //! Unlike simpler links, there's no default peer - you must always specify
 //! which direction you're communicating with.
 //!
 //! # Default Forwarding
 //!
-//! By default, `ProxyToConductor` forwards all messages it doesn't handle.
+//! By default, [`Proxy`] forwards all messages it doesn't handle.
 //! This means a minimal proxy that does nothing is just:
 //!
 //! ```
-//! # use sacp::{ProxyToConductor, Component};
-//! # use sacp::link::ConductorToProxy;
-//! # async fn example(transport: impl Component<ConductorToProxy>) -> Result<(), sacp::Error> {
-//! ProxyToConductor::builder()
-//!     .serve(transport)
+//! # use sacp::{Proxy, Conductor, ConnectTo};
+//! # async fn example(transport: impl ConnectTo<Proxy>) -> Result<(), sacp::Error> {
+//! Proxy.builder()
+//!     .connect_to(transport)
 //!     .await?;
 //! # Ok(())
 //! # }
@@ -37,23 +36,22 @@
 //! To intercept specific messages, use `on_receive_*_from` with explicit peers:
 //!
 //! ```
-//! # use sacp::{ProxyToConductor, ClientPeer, AgentPeer, Component};
-//! # use sacp::link::ConductorToProxy;
+//! # use sacp::{Proxy, Client, Agent, Conductor, ConnectTo};
 //! # use sacp_test::ProcessRequest;
-//! # async fn example(transport: impl Component<ConductorToProxy>) -> Result<(), sacp::Error> {
-//! ProxyToConductor::builder()
+//! # async fn example(transport: impl ConnectTo<Proxy>) -> Result<(), sacp::Error> {
+//! Proxy.builder()
 //!     // Intercept requests from the client
-//!     .on_receive_request_from(ClientPeer, async |req: ProcessRequest, request_cx, cx| {
+//!     .on_receive_request_from(Client, async |req: ProcessRequest, responder, cx| {
 //!         // Modify the request
 //!         let modified = ProcessRequest {
 //!             data: format!("prefix: {}", req.data),
 //!         };
 //!
 //!         // Forward to agent and relay the response back
-//!         cx.send_request_to(AgentPeer, modified)
-//!             .forward_to_request_cx(request_cx)
+//!         cx.send_request_to(Agent, modified)
+//!             .forward_response_to(responder)
 //!     }, sacp::on_receive_request!())
-//!     .serve(transport)
+//!     .connect_to(transport)
 //!     .await?;
 //! # Ok(())
 //! # }
@@ -69,14 +67,13 @@
 //! ## Global MCP Server
 //!
 //! ```
-//! # use sacp::{ProxyToConductor, Component};
-//! # use sacp::link::ConductorToProxy;
+//! # use sacp::{Proxy, Conductor, ConnectTo};
 //! # use sacp::mcp_server::McpServer;
-//! # async fn example(transport: impl Component<ConductorToProxy>) -> Result<(), sacp::Error> {
-//! # let my_mcp_server = McpServer::<ProxyToConductor, _>::builder("tools").build();
-//! ProxyToConductor::builder()
+//! # async fn example(transport: impl ConnectTo<Proxy>) -> Result<(), sacp::Error> {
+//! # let my_mcp_server = McpServer::<Conductor, _>::builder("tools").build();
+//! Proxy.builder()
 //!     .with_mcp_server(my_mcp_server)
-//!     .serve(transport)
+//!     .connect_to(transport)
 //!     .await?;
 //! # Ok(())
 //! # }
@@ -85,22 +82,21 @@
 //! ## Per-Session MCP Server
 //!
 //! ```
-//! # use sacp::{ProxyToConductor, ClientPeer, Component};
-//! # use sacp::link::ConductorToProxy;
+//! # use sacp::{Proxy, Client, Conductor, ConnectTo};
 //! # use sacp::schema::NewSessionRequest;
 //! # use sacp::mcp_server::McpServer;
-//! # async fn example(transport: impl Component<ConductorToProxy>) -> Result<(), sacp::Error> {
-//! ProxyToConductor::builder()
-//!     .on_receive_request_from(ClientPeer, async |req: NewSessionRequest, request_cx, cx| {
-//!         let my_mcp_server = McpServer::<ProxyToConductor, _>::builder("tools").build();
+//! # async fn example(transport: impl ConnectTo<Proxy>) -> Result<(), sacp::Error> {
+//! Proxy.builder()
+//!     .on_receive_request_from(Client, async |req: NewSessionRequest, responder, cx| {
+//!         let my_mcp_server = McpServer::<Conductor, _>::builder("tools").build();
 //!         cx.build_session_from(req)
 //!             .with_mcp_server(my_mcp_server)?
-//!             .on_proxy_session_start(request_cx, async |session_id| {
+//!             .on_proxy_session_start(responder, async |session_id| {
 //!                 // Session started with MCP server attached
 //!                 Ok(())
 //!             })
 //!     }, sacp::on_receive_request!())
-//!     .serve(transport)
+//!     .connect_to(transport)
 //!     .await?;
 //! # Ok(())
 //! # }
@@ -127,8 +123,8 @@
 //! ```
 //!
 //! Each proxy sees messages from its perspective:
-//! - `ClientPeer` is "toward the client" (Proxy A, or conductor if first)
-//! - `AgentPeer` is "toward the agent" (Proxy B, or agent if last)
+//! - `Client` is "toward the client" (Proxy A, or conductor if first)
+//! - `Agent` is "toward the agent" (Proxy B, or agent if last)
 //!
 //! Messages flow through each proxy in order. Each can inspect, modify,
 //! or handle messages before they continue.
@@ -137,12 +133,12 @@
 //!
 //! | Task | Approach |
 //! |------|----------|
-//! | Forward everything | Just `serve(transport)` |
+//! | Forward everything | Just `connect_to(transport)` |
 //! | Intercept specific messages | `on_receive_*_from` with explicit peers |
 //! | Add global tools | `with_mcp_server` on builder |
 //! | Add per-session tools | `with_mcp_server` on session builder |
 //!
-//! [`ProxyToConductor`]: crate::ProxyToConductor
-//! [`ClientPeer`]: crate::ClientPeer
-//! [`AgentPeer`]: crate::AgentPeer
+//! [`Proxy`]: crate::Proxy
+//! [`Client`]: crate::Client
+//! [`Agent`]: crate::Agent
 //! [`sacp-conductor`]: https://crates.io/crates/sacp-conductor

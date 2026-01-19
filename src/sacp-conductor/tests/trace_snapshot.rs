@@ -9,7 +9,7 @@ use expect_test::expect;
 use futures::StreamExt;
 use futures::channel::mpsc;
 use sacp_conductor::trace::TraceEvent;
-use sacp_conductor::{Conductor, ProxiesAndAgent};
+use sacp_conductor::{ConductorImpl, ProxiesAndAgent};
 use sacp_test::test_binaries::{arrow_proxy_example, elizacp};
 use sacp_tokio::AcpAgent;
 use std::collections::HashMap;
@@ -143,7 +143,7 @@ async fn test_trace_snapshot() -> Result<(), sacp::Error> {
 
     // Spawn the conductor with tracing to the channel
     let conductor_handle = tokio::spawn(async move {
-        Conductor::new_agent(
+        ConductorImpl::new_agent(
             "conductor".to_string(),
             ProxiesAndAgent::new(eliza_agent).proxy(arrow_proxy_agent),
             Default::default(),

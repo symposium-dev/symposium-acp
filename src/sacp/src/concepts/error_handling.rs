@@ -22,33 +22,33 @@
 //! use the request context's `respond` method:
 //!
 //! ```
-//! # use sacp::{ClientToAgent, AgentToClient, Component};
+//! # use sacp::{Client, Agent, ConnectTo};
 //! # use sacp_test::{ValidateRequest, ValidateResponse};
-//! # async fn example(transport: impl Component<AgentToClient>) -> Result<(), sacp::Error> {
-//! ClientToAgent::builder()
-//!     .on_receive_request(async |request: ValidateRequest, request_cx, _cx| {
+//! # async fn example(transport: impl ConnectTo<Client>) -> Result<(), sacp::Error> {
+//! Client.builder()
+//!     .on_receive_request(async |request: ValidateRequest, responder, _cx| {
 //!         if request.data.is_empty() {
 //!             // Send error to peer, keep connection alive
-//!             request_cx.respond_with_error(sacp::Error::invalid_params())?;
+//!             responder.respond_with_error(sacp::Error::invalid_params())?;
 //!             return Ok(());
 //!         }
 //!
 //!         // Process valid request...
-//!         request_cx.respond(ValidateResponse { is_valid: true, error: None })?;
+//!         responder.respond(ValidateResponse { is_valid: true, error: None })?;
 //!         Ok(())
 //!     }, sacp::on_receive_request!())
-//! #   .run_until(transport, async |_| Ok(())).await?;
+//! #   .connect_with(transport, async |_| Ok(())).await?;
 //! # Ok(())
 //! # }
 //! ```
 //!
 //! For sending error notifications (one-way error messages), use
-//! [`send_error_notification`][crate::JrConnectionCx::send_error_notification]:
+//! [`send_error_notification`][crate::ConnectionTo::send_error_notification]:
 //!
 //! ```
-//! # use sacp::{ClientToAgent, AgentToClient, Component};
-//! # async fn example(transport: impl Component<AgentToClient>) -> Result<(), sacp::Error> {
-//! # ClientToAgent::builder().run_until(transport, async |cx| {
+//! # use sacp::{Client, Agent, ConnectTo};
+//! # async fn example(transport: impl ConnectTo<Client>) -> Result<(), sacp::Error> {
+//! # Client.builder().connect_with(transport, async |cx| {
 //! cx.send_error_notification(sacp::Error::internal_error()
 //!     .data("Something went wrong"))?;
 //! # Ok(())
@@ -110,7 +110,7 @@
 //!
 //! | Situation | What to do |
 //! |-----------|------------|
-//! | Send error response to request | `request_cx.respond(Err(error))` then `Ok(())` |
+//! | Send error response to request | `responder.respond(Err(error))` then `Ok(())` |
 //! | Send error notification | `cx.send_error_notification(error)` then `Ok(())` |
 //! | Shut down connection | Return `Err(error)` from callback |
 //! | Convert external error | `.map_err(Error::into_internal_error)?` |

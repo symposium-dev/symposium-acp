@@ -20,7 +20,7 @@ mod dynamic_handler;
 pub(crate) mod handlers;
 mod incoming_actor;
 mod outgoing_actor;
-pub(crate) mod responder;
+pub(crate) mod run;
 mod task_actor;
 mod transport_actor;
 
@@ -29,16 +29,16 @@ pub use crate::jsonrpc::handlers::NullHandler;
 use crate::jsonrpc::handlers::{ChainedHandler, NamedHandler};
 use crate::jsonrpc::handlers::{MessageHandler, NotificationHandler, RequestHandler};
 use crate::jsonrpc::outgoing_actor::{OutgoingMessageTx, send_raw_message};
-use crate::jsonrpc::responder::SpawnedResponder;
-use crate::jsonrpc::responder::{ChainResponder, JrResponder, NullResponder};
+use crate::jsonrpc::run::SpawnedRun;
+use crate::jsonrpc::run::{ChainRun, NullRun, RunWithConnectionTo};
 use crate::jsonrpc::task_actor::{Task, TaskTx};
-use crate::link::{HasDefaultPeer, HasPeer, JrLink};
 use crate::mcp_server::McpServer;
-use crate::peer::{JrPeer, PeerId};
+use crate::role::HasPeer;
+use crate::role::Role;
 use crate::util::json_cast;
-use crate::{AgentPeer, ClientPeer, Component};
+use crate::{Agent, Client, ConnectTo, RoleId};
 
-/// Handlers process incoming JSON-RPC messages on a [`JrConnection`].
+/// Handlers process incoming JSON-RPC messages on a connection.
 ///
 /// When messages arrive, they flow through a chain of handlers. Each handler can
 /// either **claim** the message (handle it) or **decline** it (pass to the next handler).
@@ -63,13 +63,13 @@ use crate::{AgentPeer, ClientPeer, Component};
 /// ┌─────────────────────────────────────────────────────────────────┐
 /// │  2. Dynamic Handlers (added at runtime)                         │
 /// │     - Used for session-specific message handling                │
-/// │     - Added via JrConnectionCx::add_dynamic_handler             │
+/// │     - Added via ConnectionTo::add_dynamic_handler             │
 /// └─────────────────────────────────────────────────────────────────┘
 ///                              │ Handled::No
 ///                              ▼
 /// ┌─────────────────────────────────────────────────────────────────┐
 /// │  3. Role Default Handler                                        │
-/// │     - Fallback based on the connection's JrLink                 │
+/// │     - Fallback based on the connection's Role                   │
 /// │     - Handles protocol-level messages (e.g., proxy forwarding)  │
 /// └─────────────────────────────────────────────────────────────────┘
 ///                              │ Handled::No
@@ -104,16 +104,16 @@ use crate::{AgentPeer, ClientPeer, Component};
 ///
 /// # Handler Registration
 ///
-/// Most users register handlers using the builder methods on [`JrConnectionBuilder`]:
+/// Most users register handlers using the builder methods on [`Builder`]:
 ///
 /// ```
-/// # use sacp::{AgentToClient, ClientToAgent, Component};
+/// # use sacp::{Agent, Client, ConnectTo};
 /// # use sacp::schema::{InitializeRequest, InitializeResponse, AgentCapabilities};
 /// # use sacp_test::StatusUpdate;
-/// # async fn example(transport: impl Component<ClientToAgent>) -> Result<(), sacp::Error> {
-/// AgentToClient::builder()
-///     .on_receive_request(async |req: InitializeRequest, request_cx, cx| {
-///         request_cx.respond(
+/// # async fn example(transport: impl ConnectTo<Agent>) -> Result<(), sacp::Error> {
+/// Agent.builder()
+///     .on_receive_request(async |req: InitializeRequest, responder, cx| {
+///         responder.respond(
 ///             InitializeResponse::new(req.protocol_version)
 ///                 .agent_capabilities(AgentCapabilities::new()),
 ///         )
@@ -122,7 +122,7 @@ use crate::{AgentPeer, ClientPeer, Component};
 ///         // Process notification
 ///         Ok(())
 ///     }, sacp::on_receive_notification!())
-///     .serve(transport)
+///     .connect_to(transport)
 ///     .await?;
 /// # Ok(())
 /// # }
@@ -133,19 +133,18 @@ use crate::{AgentPeer, ClientPeer, Component};
 ///
 /// # Implementing Custom Handlers
 ///
-/// For advanced use cases, you can implement `JrMessageHandler` directly:
+/// For advanced use cases, you can implement `HandleMessageAs` directly:
 ///
 /// ```ignore
 /// struct MyHandler;
 ///
-/// impl JrMessageHandler for MyHandler {
-///     type Link = ClientToAgent;
+/// impl HandleMessageAs<Agent> for MyHandler {
 ///
-///     async fn handle_message(
+///     async fn handle_dispatch(
 ///         &mut self,
-///         message: MessageCx,
-///         cx: JrConnectionCx<Self::Role>,
-///     ) -> Result<Handled<MessageCx>, Error> {
+///         message: Dispatch,
+///         cx: ConnectionTo<Self::Role>,
+///     ) -> Result<Handled<Dispatch>, Error> {
 ///         if message.method() == "my/custom/method" {
 ///             // Handle it
 ///             Ok(Handled::Yes)
@@ -164,19 +163,19 @@ use crate::{AgentPeer, ClientPeer, Component};
 /// # Important: Handlers Must Not Block
 ///
 /// The connection processes messages on a single async task. While a handler is running,
-/// no other messages can be processed. For expensive operations, use [`JrConnectionCx::spawn`]
+/// no other messages can be processed. For expensive operations, use [`ConnectionTo::spawn`]
 /// to run work concurrently:
 ///
 /// ```
-/// # use sacp::{ClientToAgent, AgentToClient, Component};
+/// # use sacp::{Client, Agent, ConnectTo};
 /// # use sacp_test::{expensive_operation, ProcessComplete};
-/// # async fn example(transport: impl Component<AgentToClient>) -> Result<(), sacp::Error> {
-/// # ClientToAgent::builder().run_until(transport, async |cx| {
+/// # async fn example(transport: impl ConnectTo<Client>) -> Result<(), sacp::Error> {
+/// # Client.builder().connect_with(transport, async |cx| {
 /// cx.spawn({
-///     let connection_cx = cx.clone();
+///     let connection = cx.clone();
 ///     async move {
 ///         let result = expensive_operation("data").await?;
-///         connection_cx.send_notification(ProcessComplete { result })?;
+///         connection.send_notification(ProcessComplete { result })?;
 ///         Ok(())
 ///     }
 /// })?;
@@ -189,49 +188,51 @@ use crate::{AgentPeer, ClientPeer, Component};
 /// A handler for incoming JSON-RPC messages.
 ///
 /// This trait is implemented by types that can process incoming messages on a connection.
-/// Handlers are registered with a [`JrConnectionBuilder`] and are called in order until
+/// Handlers are registered with a [`Builder`] and are called in order until
 /// one claims the message.
-pub trait JrMessageHandler: Send {
-    /// The role type for this handler's connection.
-    type Link: JrLink;
-
+///
+/// The type parameter `R` is the role this handler plays - who I am.
+/// For an agent handler, `R = Agent` (I handle messages as an agent).
+/// For a client handler, `R = Client` (I handle messages as a client).
+pub trait HandleDispatchFrom<Counterpart: Role>: Send {
     /// Attempt to claim an incoming message (request or notification).
     ///
     /// # Important: do not block
     ///
     /// The server will not process new messages until this handler returns.
     /// You should avoid blocking in this callback unless you wish to block the server (e.g., for rate limiting).
-    /// The recommended approach to manage expensive operations is to the [`JrConnectionCx::spawn`] method available on the message context.
+    /// The recommended approach to manage expensive operations is to the [`ConnectionTo::spawn`] method available on the message context.
     ///
     /// # Parameters
     ///
     /// * `message` - The incoming message to handle.
-    /// * `cx` - The connection context, used to send messages and access connection state.
+    /// * `connection` - The connection, used to send messages and access connection state.
     ///
     /// # Returns
     ///
     /// * `Ok(Handled::Yes)` if the message was claimed. It will not be propagated further.
     /// * `Ok(Handled::No(message))` if not; the (possibly changed) message will be passed to the remaining handlers.
     /// * `Err` if an internal error occurs (this will bring down the server).
-    fn handle_message(
+    fn handle_dispatch_from(
         &mut self,
-        message: MessageCx,
-        cx: JrConnectionCx<Self::Link>,
-    ) -> impl Future<Output = Result<Handled<MessageCx>, crate::Error>> + Send;
+        message: Dispatch,
+        connection: ConnectionTo<Counterpart>,
+    ) -> impl Future<Output = Result<Handled<Dispatch>, crate::Error>> + Send;
 
     /// Returns a debug description of the registered handlers for diagnostics.
     fn describe_chain(&self) -> impl std::fmt::Debug;
 }
 
-impl<H: JrMessageHandler> JrMessageHandler for &mut H {
-    type Link = H::Link;
-
-    fn handle_message(
+impl<Counterpart: Role, H> HandleDispatchFrom<Counterpart> for &mut H
+where
+    H: HandleDispatchFrom<Counterpart>,
+{
+    fn handle_dispatch_from(
         &mut self,
-        message: MessageCx,
-        cx: JrConnectionCx<Self::Link>,
-    ) -> impl Future<Output = Result<Handled<MessageCx>, crate::Error>> + Send {
-        H::handle_message(self, message, cx)
+        message: Dispatch,
+        cx: ConnectionTo<Counterpart>,
+    ) -> impl Future<Output = Result<Handled<Dispatch>, crate::Error>> + Send {
+        H::handle_dispatch_from(self, message, cx)
     }
 
     fn describe_chain(&self) -> impl std::fmt::Debug {
@@ -241,10 +242,10 @@ impl<H: JrMessageHandler> JrMessageHandler for &mut H {
 
 /// A JSON-RPC connection that can act as either a server, client, or both.
 ///
-/// `JrConnection` provides a builder-style API for creating JSON-RPC servers and clients.
-/// You start by calling `Link::builder()` (e.g., `ClientToAgent::builder()`), then add message
-/// handlers, and finally drive the connection with either [`serve`](JrConnectionBuilder::serve)
-/// or [`run_until`](JrConnectionBuilder::run_until), providing a component implementation
+/// [`Builder`] provides a builder-style API for creating JSON-RPC servers and clients.
+/// You start by calling `Role.builder()` (e.g., `Client.builder()`), then add message
+/// handlers, and finally drive the connection with either [`connect_to`](Builder::connect_to)
+/// or [`connect_with`](Builder::connect_with), providing a component implementation
 /// (e.g., [`ByteStreams`] for byte streams).
 ///
 /// # JSON-RPC Primer
@@ -271,15 +272,15 @@ impl<H: JrMessageHandler> JrMessageHandler for &mut H {
 /// # async fn example() -> Result<(), sacp::Error> {
 /// # let connection = mock_connection();
 /// connection
-///     .on_receive_request(async |req: InitializeRequest, request_cx, cx| {
+///     .on_receive_request(async |req: InitializeRequest, responder, cx| {
 ///         // Handle only InitializeRequest messages
-///         request_cx.respond(InitializeResponse::make())
+///         responder.respond(InitializeResponse::make())
 ///     }, sacp::on_receive_request!())
 ///     .on_receive_notification(async |notif: SessionNotification, cx| {
 ///         // Handle only SessionUpdate notifications
 ///         Ok(())
 ///     }, sacp::on_receive_notification!())
-/// # .serve(sacp_test::MockTransport).await?;
+/// # .connect_to(sacp_test::MockTransport).await?;
 /// # Ok(())
 /// # }
 /// ```
@@ -287,11 +288,11 @@ impl<H: JrMessageHandler> JrMessageHandler for &mut H {
 /// ## Enum Message Types
 ///
 /// You can also handle multiple related messages with a single handler by defining an enum
-/// that implements the appropriate trait ([`JrRequest`] or [`JrNotification`]):
+/// that implements the appropriate trait ([`JsonRpcRequest`] or [`JsonRpcNotification`]):
 ///
 /// ```no_run
 /// # use sacp_test::*;
-/// # use sacp::{JrRequest, JrMessage, UntypedMessage};
+/// # use sacp::{JsonRpcRequest, JsonRpcMessage, UntypedMessage};
 /// # use sacp::schema::{InitializeRequest, InitializeResponse, PromptRequest, PromptResponse};
 /// # async fn example() -> Result<(), sacp::Error> {
 /// # let connection = mock_connection();
@@ -302,53 +303,53 @@ impl<H: JrMessageHandler> JrMessageHandler for &mut H {
 ///     Prompt(PromptRequest),
 /// }
 ///
-/// // Implement JrRequest for your enum
-/// # impl JrMessage for MyRequests {
+/// // Implement JsonRpcRequest for your enum
+/// # impl JsonRpcMessage for MyRequests {
 /// #     fn matches_method(_method: &str) -> bool { false }
 /// #     fn method(&self) -> &str { "myRequests" }
 /// #     fn to_untyped_message(&self) -> Result<UntypedMessage, sacp::Error> { todo!() }
 /// #     fn parse_message(_method: &str, _params: &impl serde::Serialize) -> Result<Self, sacp::Error> { Err(sacp::Error::method_not_found()) }
 /// # }
-/// impl JrRequest for MyRequests { type Response = serde_json::Value; }
+/// impl JsonRpcRequest for MyRequests { type Response = serde_json::Value; }
 ///
 /// // Handle all variants in one place
-/// connection.on_receive_request(async |req: MyRequests, request_cx, cx| {
+/// connection.on_receive_request(async |req: MyRequests, responder, cx| {
 ///     match req {
-///         MyRequests::Initialize(init) => { request_cx.respond(serde_json::json!({})) }
-///         MyRequests::Prompt(prompt) => { request_cx.respond(serde_json::json!({})) }
+///         MyRequests::Initialize(init) => { responder.respond(serde_json::json!({})) }
+///         MyRequests::Prompt(prompt) => { responder.respond(serde_json::json!({})) }
 ///     }
 /// }, sacp::on_receive_request!())
-/// # .serve(sacp_test::MockTransport).await?;
+/// # .connect_to(sacp_test::MockTransport).await?;
 /// # Ok(())
 /// # }
 /// ```
 ///
 /// ## Mixed Message Types
 ///
-/// For enums containing both requests AND notifications, use [`on_receive_message`](Self::on_receive_message):
+/// For enums containing both requests AND notifications, use [`on_receive_dispatch`](Self::on_receive_dispatch):
 ///
 /// ```no_run
 /// # use sacp_test::*;
-/// # use sacp::MessageCx;
+/// # use sacp::Dispatch;
 /// # use sacp::schema::{InitializeRequest, InitializeResponse, SessionNotification};
 /// # async fn example() -> Result<(), sacp::Error> {
 /// # let connection = mock_connection();
-/// // on_receive_message receives MessageCx which can be either a request or notification
-/// connection.on_receive_message(async |msg: MessageCx<InitializeRequest, SessionNotification>, _cx| {
+/// // on_receive_dispatch receives Dispatch which can be either a request or notification
+/// connection.on_receive_dispatch(async |msg: Dispatch<InitializeRequest, SessionNotification>, _cx| {
 ///     match msg {
-///         MessageCx::Request(req, request_cx) => {
-///             request_cx.respond(InitializeResponse::make())
+///         Dispatch::Request(req, responder) => {
+///             responder.respond(InitializeResponse::make())
 ///         }
-///         MessageCx::Notification(notif) => {
+///         Dispatch::Notification(notif) => {
 ///             Ok(())
 ///         }
-///         MessageCx::Response(result, request_cx) => {
+///         Dispatch::Response(result, router) => {
 ///             // Forward response to its destination
-///             request_cx.respond_with_result(result)
+///             router.respond_with_result(result)
 ///         }
 ///     }
-/// }, sacp::on_receive_message!())
-/// # .serve(sacp_test::MockTransport).await?;
+/// }, sacp::on_receive_dispatch!())
+/// # .connect_to(sacp_test::MockTransport).await?;
 /// # Ok(())
 /// # }
 /// ```
@@ -359,7 +360,7 @@ impl<H: JrMessageHandler> JrMessageHandler for &mut H {
 ///
 /// * [`on_receive_request`](Self::on_receive_request) - Handle JSON-RPC requests (messages expecting responses)
 /// * [`on_receive_notification`](Self::on_receive_notification) - Handle JSON-RPC notifications (fire-and-forget)
-/// * [`on_receive_message`](Self::on_receive_message) - Handle enums containing both requests and notifications
+/// * [`on_receive_dispatch`](Self::on_receive_dispatch) - Handle enums containing both requests and notifications
 /// * [`with_handler`](Self::with_handler) - Low-level primitive for maximum flexibility
 ///
 /// ## Handler Ordering
@@ -369,24 +370,24 @@ impl<H: JrMessageHandler> JrMessageHandler for &mut H {
 ///
 /// ```no_run
 /// # use sacp_test::*;
-/// # use sacp::{MessageCx, UntypedMessage};
+/// # use sacp::{Dispatch, UntypedMessage};
 /// # use sacp::schema::{InitializeRequest, InitializeResponse, PromptRequest, PromptResponse};
 /// # async fn example() -> Result<(), sacp::Error> {
 /// # let connection = mock_connection();
 /// connection
-///     .on_receive_request(async |req: InitializeRequest, request_cx, cx| {
+///     .on_receive_request(async |req: InitializeRequest, responder, cx| {
 ///         // This runs first for InitializeRequest
-///         request_cx.respond(InitializeResponse::make())
+///         responder.respond(InitializeResponse::make())
 ///     }, sacp::on_receive_request!())
-///     .on_receive_request(async |req: PromptRequest, request_cx, cx| {
+///     .on_receive_request(async |req: PromptRequest, responder, cx| {
 ///         // This runs first for PromptRequest
-///         request_cx.respond(PromptResponse::make())
+///         responder.respond(PromptResponse::make())
 ///     }, sacp::on_receive_request!())
-///     .on_receive_message(async |msg: MessageCx, cx| {
+///     .on_receive_dispatch(async |msg: Dispatch, cx| {
 ///         // This runs for any message not handled above
 ///         msg.respond_with_error(sacp::util::internal_error("unknown method"), cx)
-///     }, sacp::on_receive_message!())
-/// # .serve(sacp_test::MockTransport).await?;
+///     }, sacp::on_receive_dispatch!())
+/// # .connect_to(sacp_test::MockTransport).await?;
 /// # Ok(())
 /// # }
 /// ```
@@ -397,74 +398,74 @@ impl<H: JrMessageHandler> JrMessageHandler for &mut H {
 ///
 /// ## The Event Loop
 ///
-/// `JrConnection` runs all handler callbacks on a single async task - the event loop.
+/// [`Builder`] runs all handler callbacks on a single async task - the event loop.
 /// While a handler is running, **the server cannot receive new messages**. This means
 /// any blocking or expensive work in your handlers will stall the entire connection.
 ///
-/// To avoid blocking the event loop, use [`JrConnectionCx::spawn`] to offload serious
+/// To avoid blocking the event loop, use [`ConnectionTo::spawn`] to offload serious
 /// work to concurrent tasks:
 ///
 /// ```no_run
 /// # use sacp_test::*;
 /// # async fn example() -> Result<(), sacp::Error> {
 /// # let connection = mock_connection();
-/// connection.on_receive_request(async |req: AnalyzeRequest, request_cx, cx| {
+/// connection.on_receive_request(async |req: AnalyzeRequest, responder, cx| {
 ///     // Clone cx for the spawned task
 ///     cx.spawn({
-///         let connection_cx = cx.clone();
+///         let connection = cx.clone();
 ///         async move {
 ///             let result = expensive_analysis(&req.data).await?;
-///             connection_cx.send_notification(AnalysisComplete { result })?;
+///             connection.send_notification(AnalysisComplete { result })?;
 ///             Ok(())
 ///         }
 ///     })?;
 ///
 ///     // Respond immediately without blocking
-///     request_cx.respond(AnalysisStarted { job_id: 42 })
+///     responder.respond(AnalysisStarted { job_id: 42 })
 /// }, sacp::on_receive_request!())
-/// # .serve(sacp_test::MockTransport).await?;
+/// # .connect_to(sacp_test::MockTransport).await?;
 /// # Ok(())
 /// # }
 /// ```
 ///
 /// Note that the entire connection runs within one async task, so parallelism must be
-/// managed explicitly using [`spawn`](JrConnectionCx::spawn).
+/// managed explicitly using [`spawn`](ConnectionTo::spawn).
 ///
 /// ## The Connection Context
 ///
 /// Handler callbacks receive a context object (`cx`) for interacting with the connection:
 ///
-/// * **For request handlers** - [`JrRequestCx<R>`] provides [`respond`](JrRequestCx::respond)
+/// * **For request handlers** - [`Responder<R>`] provides [`respond`](Responder::respond)
 ///   to send the response, plus methods to send other messages
-/// * **For notification handlers** - [`JrConnectionCx`] provides methods to send messages
+/// * **For notification handlers** - [`ConnectionTo`] provides methods to send messages
 ///   and spawn tasks
 ///
 /// Both context types support:
-/// * [`send_request`](JrConnectionCx::send_request) - Send requests to the other side
-/// * [`send_notification`](JrConnectionCx::send_notification) - Send notifications
-/// * [`spawn`](JrConnectionCx::spawn) - Run tasks concurrently without blocking the event loop
+/// * [`send_request`](ConnectionTo::send_request) - Send requests to the other side
+/// * [`send_notification`](ConnectionTo::send_notification) - Send notifications
+/// * [`spawn`](ConnectionTo::spawn) - Run tasks concurrently without blocking the event loop
 ///
-/// The [`JrResponse`] returned by `send_request` provides methods like
-/// [`on_receiving_result`](JrResponse::on_receiving_result) that help you
+/// The [`SentRequest`] returned by `send_request` provides methods like
+/// [`on_receiving_result`](SentRequest::on_receiving_result) that help you
 /// avoid accidentally blocking the event loop while waiting for responses.
 ///
 /// # Driving the Connection
 ///
 /// After adding handlers, you must drive the connection using one of two modes:
 ///
-/// ## Server Mode: `serve()`
+/// ## Server Mode: `connect_to()`
 ///
-/// Use [`serve`](Self::serve) when you only need to respond to incoming messages:
+/// Use [`connect_to`](Self::connect_to) when you only need to respond to incoming messages:
 ///
 /// ```no_run
 /// # use sacp_test::*;
 /// # async fn example() -> Result<(), sacp::Error> {
 /// # let connection = mock_connection();
 /// connection
-///     .on_receive_request(async |req: MyRequest, request_cx, cx| {
-///         request_cx.respond(MyResponse { status: "ok".into() })
+///     .on_receive_request(async |req: MyRequest, responder, cx| {
+///         responder.respond(MyResponse { status: "ok".into() })
 ///     }, sacp::on_receive_request!())
-///     .serve(MockTransport)  // Runs until connection closes or error occurs
+///     .connect_to(MockTransport)  // Runs until connection closes or error occurs
 ///     .await?;
 /// # Ok(())
 /// # }
@@ -473,9 +474,9 @@ impl<H: JrMessageHandler> JrMessageHandler for &mut H {
 /// The connection will process incoming messages and invoke your handlers until the
 /// connection is closed or an error occurs.
 ///
-/// ## Client Mode: `run_until()`
+/// ## Client Mode: `connect_with()`
 ///
-/// Use [`run_until`](Self::run_until) when you need to both handle incoming messages
+/// Use [`connect_with`](Self::connect_with) when you need to both handle incoming messages
 /// AND send your own requests/notifications:
 ///
 /// ```no_run
@@ -484,10 +485,10 @@ impl<H: JrMessageHandler> JrMessageHandler for &mut H {
 /// # async fn example() -> Result<(), sacp::Error> {
 /// # let connection = mock_connection();
 /// connection
-///     .on_receive_request(async |req: MyRequest, request_cx, cx| {
-///         request_cx.respond(MyResponse { status: "ok".into() })
+///     .on_receive_request(async |req: MyRequest, responder, cx| {
+///         responder.respond(MyResponse { status: "ok".into() })
 ///     }, sacp::on_receive_request!())
-///     .run_until(MockTransport, async |cx| {
+///     .connect_with(MockTransport, async |cx| {
 ///         // You can send requests to the other side
 ///         let response = cx.send_request(InitializeRequest::make())
 ///             .block_task()
@@ -509,8 +510,8 @@ impl<H: JrMessageHandler> JrMessageHandler for &mut H {
 /// # Example: Complete Agent
 ///
 /// ```no_run
-/// # use sacp::link::UntypedLink;
-/// # use sacp::{JrConnectionBuilder};
+/// # use sacp::UntypedRole;
+/// # use sacp::{Builder};
 /// # use sacp::ByteStreams;
 /// # use sacp::schema::{InitializeRequest, InitializeResponse, PromptRequest, PromptResponse, SessionNotification};
 /// # use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
@@ -520,168 +521,193 @@ impl<H: JrMessageHandler> JrMessageHandler for &mut H {
 ///     tokio::io::stdin().compat(),
 /// );
 ///
-/// UntypedLink::builder()
+/// UntypedRole.builder()
 ///     .name("my-agent")  // Optional: for debugging logs
-///     .on_receive_request(async |init: InitializeRequest, request_cx, cx| {
+///     .on_receive_request(async |init: InitializeRequest, responder, cx| {
 ///         let response: InitializeResponse = todo!();
-///         request_cx.respond(response)
+///         responder.respond(response)
 ///     }, sacp::on_receive_request!())
-///     .on_receive_request(async |prompt: PromptRequest, request_cx, cx| {
+///     .on_receive_request(async |prompt: PromptRequest, responder, cx| {
 ///         // You can send notifications while processing a request
 ///         let notif: SessionNotification = todo!();
 ///         cx.send_notification(notif)?;
 ///
 ///         // Then respond to the request
 ///         let response: PromptResponse = todo!();
-///         request_cx.respond(response)
+///         responder.respond(response)
 ///     }, sacp::on_receive_request!())
-///     .serve(transport)
+///     .connect_to(transport)
 ///     .await?;
 /// # Ok(())
 /// # }
 /// ```
 #[must_use]
-pub struct JrConnectionBuilder<H: JrMessageHandler, R: JrResponder<H::Link> = NullResponder> {
+pub struct Builder<Host: Role, Handler = NullHandler, Runner = NullRun>
+where
+    Handler: HandleDispatchFrom<Host::Counterpart>,
+    Runner: RunWithConnectionTo<Host::Counterpart>,
+{
+    /// My role.
+    host: Host,
+
+    /// Name of the connection, used in tracing logs.
     name: Option<String>,
 
     /// Handler for incoming messages.
-    handler: H,
+    handler: Handler,
 
     /// Responder for background tasks.
-    responder: R,
+    responder: Runner,
 }
 
-impl<Link: JrLink> JrConnectionBuilder<NullHandler<Link>, NullResponder> {
-    /// Create a new JrConnection with the given role.
+impl<Host: Role> Builder<Host, NullHandler, NullRun> {
+    /// Create a new connection builder for the given role.
     /// This type follows a builder pattern; use other methods to configure and then invoke
-    /// [`Self::serve`] (to use as a server) or [`Self::run_until`] to use as a client.
-    pub(crate) fn new(role: Link) -> Self {
+    /// [`Self::connect_to`] (to use as a server) or [`Self::connect_with`] to use as a client.
+    pub fn new(role: Host) -> Self {
         Self {
+            host: role,
             name: Default::default(),
-            handler: NullHandler::new(role),
-            responder: NullResponder,
+            handler: NullHandler,
+            responder: NullRun,
         }
     }
 }
 
-impl<H: JrMessageHandler> JrConnectionBuilder<H, NullResponder> {
+impl<Host: Role, Handler> Builder<Host, Handler, NullRun>
+where
+    Handler: HandleDispatchFrom<Host::Counterpart>,
+{
     /// Create a new connection builder with the given handler.
-    pub fn new_with(handler: H) -> Self {
+    pub fn new_with(role: Host, handler: Handler) -> Self {
         Self {
+            host: role,
             name: Default::default(),
             handler,
-            responder: NullResponder,
+            responder: NullRun,
         }
     }
 }
 
-impl<H: JrMessageHandler, R: JrResponder<H::Link>> JrConnectionBuilder<H, R> {
+impl<
+    Host: Role,
+    Handler: HandleDispatchFrom<Host::Counterpart>,
+    Runner: RunWithConnectionTo<Host::Counterpart>,
+> Builder<Host, Handler, Runner>
+{
     /// Set the "name" of this connection -- used only for debugging logs.
     pub fn name(mut self, name: impl ToString) -> Self {
         self.name = Some(name.to_string());
         self
     }
 
-    /// Merge another [`JrConnectionBuilder`] into this one.
+    /// Merge another [`Builder`] into this one.
     ///
     /// Prefer [`Self::on_receive_request`] or [`Self::on_receive_notification`].
     /// This is a low-level method that is not intended for general use.
-    pub fn with_connection_builder<H1, R1>(
+    pub fn with_connection_builder(
         self,
-        other: JrConnectionBuilder<H1, R1>,
-    ) -> JrConnectionBuilder<impl JrMessageHandler<Link = H::Link>, impl JrResponder<H::Link>>
-    where
-        H1: JrMessageHandler<Link = H::Link>,
-        R1: JrResponder<H::Link>,
-    {
-        JrConnectionBuilder {
+        other: Builder<
+            Host,
+            impl HandleDispatchFrom<Host::Counterpart>,
+            impl RunWithConnectionTo<Host::Counterpart>,
+        >,
+    ) -> Builder<
+        Host,
+        impl HandleDispatchFrom<Host::Counterpart>,
+        impl RunWithConnectionTo<Host::Counterpart>,
+    > {
+        Builder {
+            host: self.host,
             name: self.name,
             handler: ChainedHandler::new(
                 self.handler,
                 NamedHandler::new(other.name, other.handler),
             ),
-            responder: ChainResponder::new(self.responder, other.responder),
+            responder: ChainRun::new(self.responder, other.responder),
         }
     }
 
-    /// Add a new [`JrMessageHandler`] to the chain.
+    /// Add a new [`HandleDispatchFrom`] to the chain.
     ///
     /// Prefer [`Self::on_receive_request`] or [`Self::on_receive_notification`].
     /// This is a low-level method that is not intended for general use.
-    pub fn with_handler<H1>(
+    pub fn with_handler(
         self,
-        handler: H1,
-    ) -> JrConnectionBuilder<impl JrMessageHandler<Link = H::Link>, R>
-    where
-        H1: JrMessageHandler<Link = H::Link>,
-    {
-        JrConnectionBuilder {
+        handler: impl HandleDispatchFrom<Host::Counterpart>,
+    ) -> Builder<Host, impl HandleDispatchFrom<Host::Counterpart>, Runner> {
+        Builder {
+            host: self.host,
             name: self.name,
             handler: ChainedHandler::new(self.handler, handler),
             responder: self.responder,
         }
     }
 
-    /// Add a new [`JrResponder`] to the chain.
-    pub fn with_responder<R1>(
+    /// Add a new [`RunWithConnectionTo`] to the chain.
+    pub fn with_responder<Run1>(
         self,
-        responder: R1,
-    ) -> JrConnectionBuilder<H, impl JrResponder<H::Link>>
+        responder: Run1,
+    ) -> Builder<Host, Handler, impl RunWithConnectionTo<Host::Counterpart>>
     where
-        R1: JrResponder<H::Link>,
+        Run1: RunWithConnectionTo<Host::Counterpart>,
     {
-        JrConnectionBuilder {
+        Builder {
+            host: self.host,
             name: self.name,
             handler: self.handler,
-            responder: ChainResponder::new(self.responder, responder),
+            responder: ChainRun::new(self.responder, responder),
         }
     }
 
     /// Enqueue a task to run once the connection is actively serving traffic.
     #[track_caller]
-    pub fn with_spawned<F, Fut>(self, task: F) -> JrConnectionBuilder<H, impl JrResponder<H::Link>>
+    pub fn with_spawned<F, Fut>(
+        self,
+        task: F,
+    ) -> Builder<Host, Handler, impl RunWithConnectionTo<Host::Counterpart>>
     where
-        F: FnOnce(JrConnectionCx<H::Link>) -> Fut + Send,
+        F: FnOnce(ConnectionTo<Host::Counterpart>) -> Fut + Send,
         Fut: Future<Output = Result<(), crate::Error>> + Send,
     {
         let location = Location::caller();
-        self.with_responder(SpawnedResponder::new(location, task))
+        self.with_responder(SpawnedRun::new(location, task))
     }
 
     /// Register a handler for messages that can be either requests OR notifications.
     ///
     /// Use this when you want to handle an enum type that contains both request and
-    /// notification variants. Your handler receives a [`MessageCx<Req, Notif>`] which
+    /// notification variants. Your handler receives a [`Dispatch<Req, Notif>`] which
     /// is an enum with two variants:
     ///
-    /// - `MessageCx::Request(request, request_cx)` - A request with its response context
-    /// - `MessageCx::Notification(notification)` - A notification
-    /// - `MessageCx::Response(result, request_cx)` - A response to a request we sent
+    /// - `Dispatch::Request(request, responder)` - A request with its response context
+    /// - `Dispatch::Notification(notification)` - A notification
+    /// - `Dispatch::Response(result, router)` - A response to a request we sent
     ///
     /// # Example
     ///
     /// ```no_run
     /// # use sacp_test::*;
-    /// # use sacp::MessageCx;
+    /// # use sacp::Dispatch;
     /// # async fn example() -> Result<(), sacp::Error> {
     /// # let connection = mock_connection();
-    /// connection.on_receive_message(async |message: MessageCx<MyRequest, StatusUpdate>, _cx| {
+    /// connection.on_receive_dispatch(async |message: Dispatch<MyRequest, StatusUpdate>, _cx| {
     ///     match message {
-    ///         MessageCx::Request(req, request_cx) => {
+    ///         Dispatch::Request(req, responder) => {
     ///             // Handle request and send response
-    ///             request_cx.respond(MyResponse { status: "ok".into() })
+    ///             responder.respond(MyResponse { status: "ok".into() })
     ///         }
-    ///         MessageCx::Notification(notif) => {
+    ///         Dispatch::Notification(notif) => {
     ///             // Handle notification (no response needed)
     ///             Ok(())
     ///         }
-    ///         MessageCx::Response(result, request_cx) => {
+    ///         Dispatch::Response(result, router) => {
     ///             // Forward response to its destination
-    ///             request_cx.respond_with_result(result)
+    ///             router.respond_with_result(result)
     ///         }
     ///     }
-    /// }, sacp::on_receive_message!())
-    /// # .serve(sacp_test::MockTransport).await?;
+    /// }, sacp::on_receive_dispatch!())
+    /// # .connect_to(sacp_test::MockTransport).await?;
     /// # Ok(())
     /// # }
     /// ```
@@ -695,53 +721,57 @@ impl<H: JrMessageHandler, R: JrResponder<H::Link>> JrConnectionBuilder<H, R> {
     /// This callback runs inside the dispatch loop and blocks further message processing
     /// until it completes. See the [`ordering`](crate::concepts::ordering) module for details on
     /// ordering guarantees and how to avoid deadlocks.
-    pub fn on_receive_message<Req, Notif, F, T, ToFut>(
+    pub fn on_receive_dispatch<Req, Notif, F, T, ToFut>(
         self,
         op: F,
         to_future_hack: ToFut,
-    ) -> JrConnectionBuilder<impl JrMessageHandler<Link = H::Link>, R>
+    ) -> Builder<Host, impl HandleDispatchFrom<Host::Counterpart>, Runner>
     where
-        H::Link: HasDefaultPeer,
-        Req: JrRequest,
-        Notif: JrNotification,
-        F: AsyncFnMut(MessageCx<Req, Notif>, JrConnectionCx<H::Link>) -> Result<T, crate::Error>
+        Host::Counterpart: HasPeer<Host::Counterpart>,
+        Req: JsonRpcRequest,
+        Notif: JsonRpcNotification,
+        F: AsyncFnMut(
+                Dispatch<Req, Notif>,
+                ConnectionTo<Host::Counterpart>,
+            ) -> Result<T, crate::Error>
             + Send,
-        T: IntoHandled<MessageCx<Req, Notif>>,
+        T: IntoHandled<Dispatch<Req, Notif>>,
         ToFut: Fn(
                 &mut F,
-                MessageCx<Req, Notif>,
-                JrConnectionCx<H::Link>,
+                Dispatch<Req, Notif>,
+                ConnectionTo<Host::Counterpart>,
             ) -> crate::BoxFuture<'_, Result<T, crate::Error>>
             + Send
             + Sync,
     {
-        self.with_handler(MessageHandler::new(
-            <H::Link as HasDefaultPeer>::DefaultPeer::default(),
-            <H::Link>::default(),
+        let handler = MessageHandler::new(
+            self.host.counterpart(),
+            self.host.counterpart(),
             op,
             to_future_hack,
-        ))
+        );
+        self.with_handler(handler)
     }
 
     /// Register a handler for JSON-RPC requests of type `Req`.
     ///
     /// Your handler receives two arguments:
     /// 1. The request (type `Req`)
-    /// 2. A [`JrRequestCx<R, Req::Response>`] for sending the response
+    /// 2. A [`Responder<R, Req::Response>`] for sending the response
     ///
     /// The request context allows you to:
-    /// - Send the response with [`JrRequestCx::respond`]
-    /// - Send notifications to the client with [`JrConnectionCx::send_notification`]
-    /// - Send requests to the client with [`JrConnectionCx::send_request`]
+    /// - Send the response with [`Responder::respond`]
+    /// - Send notifications to the client with [`ConnectionTo::send_notification`]
+    /// - Send requests to the client with [`ConnectionTo::send_request`]
     ///
     /// # Example
     ///
     /// ```ignore
-    /// # use sacp::link::UntypedLink;
-    /// # use sacp::{JrConnectionBuilder};
+    /// # use sacp::UntypedRole;
+    /// # use sacp::{Builder};
     /// # use sacp::schema::{PromptRequest, PromptResponse, SessionNotification};
-    /// # fn example(connection: JrConnectionBuilder<impl sacp::JrMessageHandler<Link = UntypedLink>>) {
-    /// connection.on_receive_request(async |request: PromptRequest, request_cx, cx| {
+    /// # fn example<R: sacp::Role>(connection: Builder<R, impl sacp::HandleMessageAs<R>>) {
+    /// connection.on_receive_request(async |request: PromptRequest, responder, cx| {
     ///     // Send a notification while processing
     ///     let notif: SessionNotification = todo!();
     ///     cx.send_notification(notif)?;
@@ -751,7 +781,7 @@ impl<H: JrMessageHandler, R: JrResponder<H::Link>> JrConnectionBuilder<H, R> {
     ///
     ///     // Send the response
     ///     let response: PromptResponse = todo!();
-    ///     request_cx.respond(response)
+    ///     responder.respond(response)
     /// }, sacp::on_receive_request!());
     /// # }
     /// ```
@@ -766,35 +796,36 @@ impl<H: JrMessageHandler, R: JrResponder<H::Link>> JrConnectionBuilder<H, R> {
     /// This callback runs inside the dispatch loop and blocks further message processing
     /// until it completes. See the [`ordering`](crate::concepts::ordering) module for details on
     /// ordering guarantees and how to avoid deadlocks.
-    pub fn on_receive_request<Req: JrRequest, F, T, ToFut>(
+    pub fn on_receive_request<Req: JsonRpcRequest, F, T, ToFut>(
         self,
         op: F,
         to_future_hack: ToFut,
-    ) -> JrConnectionBuilder<impl JrMessageHandler<Link = H::Link>, R>
+    ) -> Builder<Host, impl HandleDispatchFrom<Host::Counterpart>, Runner>
     where
-        H::Link: HasDefaultPeer,
+        Host::Counterpart: HasPeer<Host::Counterpart>,
         F: AsyncFnMut(
                 Req,
-                JrRequestCx<Req::Response>,
-                JrConnectionCx<H::Link>,
+                Responder<Req::Response>,
+                ConnectionTo<Host::Counterpart>,
             ) -> Result<T, crate::Error>
             + Send,
-        T: IntoHandled<(Req, JrRequestCx<Req::Response>)>,
+        T: IntoHandled<(Req, Responder<Req::Response>)>,
         ToFut: Fn(
                 &mut F,
                 Req,
-                JrRequestCx<Req::Response>,
-                JrConnectionCx<H::Link>,
+                Responder<Req::Response>,
+                ConnectionTo<Host::Counterpart>,
             ) -> crate::BoxFuture<'_, Result<T, crate::Error>>
             + Send
             + Sync,
     {
-        self.with_handler(RequestHandler::new(
-            <H::Link as HasDefaultPeer>::DefaultPeer::default(),
-            <H::Link>::default(),
+        let handler = RequestHandler::new(
+            self.host.counterpart(),
+            self.host.counterpart(),
             op,
             to_future_hack,
-        ))
+        );
+        self.with_handler(handler)
     }
 
     /// Register a handler for JSON-RPC notifications of type `Notif`.
@@ -802,7 +833,7 @@ impl<H: JrMessageHandler, R: JrResponder<H::Link>> JrConnectionBuilder<H, R> {
     /// Notifications are fire-and-forget messages that don't expect a response.
     /// Your handler receives:
     /// 1. The notification (type `Notif`)
-    /// 2. A [`JrConnectionCx<R>`] for sending messages to the other side
+    /// 2. A [`ConnectionTo<R>`] for sending messages to the other side
     ///
     /// Unlike request handlers, you cannot send a response (notifications don't have IDs),
     /// but you can still send your own requests and notifications using the context.
@@ -824,7 +855,7 @@ impl<H: JrMessageHandler, R: JrResponder<H::Link>> JrConnectionBuilder<H, R> {
     ///
     ///     Ok(())
     /// }, sacp::on_receive_notification!())
-    /// # .serve(sacp_test::MockTransport).await?;
+    /// # .connect_to(sacp_test::MockTransport).await?;
     /// # Ok(())
     /// # }
     /// ```
@@ -843,47 +874,48 @@ impl<H: JrMessageHandler, R: JrResponder<H::Link>> JrConnectionBuilder<H, R> {
         self,
         op: F,
         to_future_hack: ToFut,
-    ) -> JrConnectionBuilder<impl JrMessageHandler<Link = H::Link>, R>
+    ) -> Builder<Host, impl HandleDispatchFrom<Host::Counterpart>, Runner>
     where
-        H::Link: HasDefaultPeer,
-        Notif: JrNotification,
-        F: AsyncFnMut(Notif, JrConnectionCx<H::Link>) -> Result<T, crate::Error> + Send,
-        T: IntoHandled<(Notif, JrConnectionCx<H::Link>)>,
+        Host::Counterpart: HasPeer<Host::Counterpart>,
+        Notif: JsonRpcNotification,
+        F: AsyncFnMut(Notif, ConnectionTo<Host::Counterpart>) -> Result<T, crate::Error> + Send,
+        T: IntoHandled<(Notif, ConnectionTo<Host::Counterpart>)>,
         ToFut: Fn(
                 &mut F,
                 Notif,
-                JrConnectionCx<H::Link>,
+                ConnectionTo<Host::Counterpart>,
             ) -> crate::BoxFuture<'_, Result<T, crate::Error>>
             + Send
             + Sync,
     {
-        self.with_handler(NotificationHandler::new(
-            <H::Link as HasDefaultPeer>::DefaultPeer::default(),
-            <H::Link>::default(),
+        let handler = NotificationHandler::new(
+            self.host.counterpart(),
+            self.host.counterpart(),
             op,
             to_future_hack,
-        ))
+        );
+        self.with_handler(handler)
     }
 
     /// Register a handler for messages from a specific peer.
     ///
-    /// This is similar to [`on_receive_message`](Self::on_receive_message), but allows
+    /// This is similar to [`on_receive_dispatch`](Self::on_receive_dispatch), but allows
     /// specifying the source peer explicitly. This is useful when receiving messages
     /// from a peer that requires message transformation (e.g., unwrapping `SuccessorMessage`
     /// envelopes when receiving from an agent via a proxy).
     ///
     /// For the common case of receiving from the default counterpart, use
-    /// [`on_receive_message`](Self::on_receive_message) instead.
+    /// [`on_receive_dispatch`](Self::on_receive_dispatch) instead.
     ///
     /// # Ordering
     ///
     /// This callback runs inside the dispatch loop and blocks further message processing
     /// until it completes. See the [`ordering`](crate::concepts::ordering) module for details on
     /// ordering guarantees and how to avoid deadlocks.
-    pub fn on_receive_message_from<
-        Req: JrRequest,
-        Notif: JrNotification,
-        Peer: JrPeer,
+    pub fn on_receive_dispatch_from<
+        Req: JsonRpcRequest,
+        Notif: JsonRpcNotification,
+        Peer: Role,
         F,
         T,
         ToFut,
@@ -892,26 +924,25 @@ impl<H: JrMessageHandler, R: JrResponder<H::Link>> JrConnectionBuilder<H, R> {
         peer: Peer,
         op: F,
         to_future_hack: ToFut,
-    ) -> JrConnectionBuilder<impl JrMessageHandler<Link = H::Link>, R>
+    ) -> Builder<Host, impl HandleDispatchFrom<Host::Counterpart>, Runner>
     where
-        H::Link: HasPeer<Peer>,
-        F: AsyncFnMut(MessageCx<Req, Notif>, JrConnectionCx<H::Link>) -> Result<T, crate::Error>
+        Host::Counterpart: HasPeer<Peer>,
+        F: AsyncFnMut(
+                Dispatch<Req, Notif>,
+                ConnectionTo<Host::Counterpart>,
+            ) -> Result<T, crate::Error>
             + Send,
-        T: IntoHandled<MessageCx<Req, Notif>>,
+        T: IntoHandled<Dispatch<Req, Notif>>,
         ToFut: Fn(
                 &mut F,
-                MessageCx<Req, Notif>,
-                JrConnectionCx<H::Link>,
+                Dispatch<Req, Notif>,
+                ConnectionTo<Host::Counterpart>,
             ) -> crate::BoxFuture<'_, Result<T, crate::Error>>
             + Send
             + Sync,
     {
-        self.with_handler(MessageHandler::new(
-            peer,
-            <H::Link>::default(),
-            op,
-            to_future_hack,
-        ))
+        let handler = MessageHandler::new(self.host.counterpart(), peer, op, to_future_hack);
+        self.with_handler(handler)
     }
 
     /// Register a handler for JSON-RPC requests from a specific peer.
@@ -931,9 +962,9 @@ impl<H: JrMessageHandler, R: JrResponder<H::Link>> JrConnectionBuilder<H, R> {
     /// use sacp::schema::InitializeRequest;
     ///
     /// // Conductor receiving from agent direction - messages will be unwrapped from SuccessorMessage
-    /// connection.on_receive_request_from(Agent, async |req: InitializeRequest, request_cx, cx| {
+    /// connection.on_receive_request_from(Agent, async |req: InitializeRequest, responder, cx| {
     ///     // Handle the request
-    ///     request_cx.respond(InitializeResponse::make())
+    ///     responder.respond(InitializeResponse::make())
     /// })
     /// ```
     ///
@@ -942,36 +973,32 @@ impl<H: JrMessageHandler, R: JrResponder<H::Link>> JrConnectionBuilder<H, R> {
     /// This callback runs inside the dispatch loop and blocks further message processing
     /// until it completes. See the [`ordering`](crate::concepts::ordering) module for details on
     /// ordering guarantees and how to avoid deadlocks.
-    pub fn on_receive_request_from<Req: JrRequest, Peer: JrPeer, F, T, ToFut>(
+    pub fn on_receive_request_from<Req: JsonRpcRequest, Peer: Role, F, T, ToFut>(
         self,
         peer: Peer,
         op: F,
         to_future_hack: ToFut,
-    ) -> JrConnectionBuilder<impl JrMessageHandler<Link = H::Link>, R>
+    ) -> Builder<Host, impl HandleDispatchFrom<Host::Counterpart>, Runner>
     where
-        H::Link: HasPeer<Peer>,
+        Host::Counterpart: HasPeer<Peer>,
         F: AsyncFnMut(
                 Req,
-                JrRequestCx<Req::Response>,
-                JrConnectionCx<H::Link>,
+                Responder<Req::Response>,
+                ConnectionTo<Host::Counterpart>,
             ) -> Result<T, crate::Error>
             + Send,
-        T: IntoHandled<(Req, JrRequestCx<Req::Response>)>,
+        T: IntoHandled<(Req, Responder<Req::Response>)>,
         ToFut: Fn(
                 &mut F,
                 Req,
-                JrRequestCx<Req::Response>,
-                JrConnectionCx<H::Link>,
+                Responder<Req::Response>,
+                ConnectionTo<Host::Counterpart>,
             ) -> crate::BoxFuture<'_, Result<T, crate::Error>>
             + Send
             + Sync,
     {
-        self.with_handler(RequestHandler::new(
-            peer,
-            <H::Link>::default(),
-            op,
-            to_future_hack,
-        ))
+        let handler = RequestHandler::new(self.host.counterpart(), peer, op, to_future_hack);
+        self.with_handler(handler)
     }
 
     /// Register a handler for JSON-RPC notifications from a specific peer.
@@ -989,250 +1016,47 @@ impl<H: JrMessageHandler, R: JrResponder<H::Link>> JrConnectionBuilder<H, R> {
     /// This callback runs inside the dispatch loop and blocks further message processing
     /// until it completes. See the [`ordering`](crate::concepts::ordering) module for details on
     /// ordering guarantees and how to avoid deadlocks.
-    pub fn on_receive_notification_from<Notif: JrNotification, Peer: JrPeer, F, T, ToFut>(
+    pub fn on_receive_notification_from<Notif: JsonRpcNotification, Peer: Role, F, T, ToFut>(
         self,
         peer: Peer,
         op: F,
         to_future_hack: ToFut,
-    ) -> JrConnectionBuilder<impl JrMessageHandler<Link = H::Link>, R>
+    ) -> Builder<Host, impl HandleDispatchFrom<Host::Counterpart>, Runner>
     where
-        H::Link: HasPeer<Peer>,
-        F: AsyncFnMut(Notif, JrConnectionCx<H::Link>) -> Result<T, crate::Error> + Send,
-        T: IntoHandled<(Notif, JrConnectionCx<H::Link>)>,
+        Host::Counterpart: HasPeer<Peer>,
+        F: AsyncFnMut(Notif, ConnectionTo<Host::Counterpart>) -> Result<T, crate::Error> + Send,
+        T: IntoHandled<(Notif, ConnectionTo<Host::Counterpart>)>,
         ToFut: Fn(
                 &mut F,
                 Notif,
-                JrConnectionCx<H::Link>,
+                ConnectionTo<Host::Counterpart>,
             ) -> crate::BoxFuture<'_, Result<T, crate::Error>>
             + Send
             + Sync,
     {
-        self.with_handler(NotificationHandler::new(
-            peer,
-            <H::Link>::default(),
-            op,
-            to_future_hack,
-        ))
+        let handler = NotificationHandler::new(self.host.counterpart(), peer, op, to_future_hack);
+        self.with_handler(handler)
     }
 
-    /// In a proxy, add this MCP server to new sessions passing through the proxy.
+    /// Add an MCP server that will be added to all new sessions that are proxied through this connection.
     ///
-    /// This adds a handler that intercepts `session/new` requests to include the
-    /// registered MCP server.
-    ///
-    /// # Example
-    ///
-    /// ```ignore
-    /// use sacp::mcp_server::McpServiceRegistry;
-    /// use sacp::ProxyToConductor;
-    ///
-    /// ProxyToConductor::builder()
-    ///     .name("my-proxy")
-    ///     .provide_mcp(McpServiceRegistry::default().with_mcp_server("example", my_server)?)
-    ///     .serve(connection)
-    ///     .await?;
-    /// ```
-    pub fn with_mcp_server<Link: JrLink, McpR: JrResponder<Link>>(
+    /// Only applicable to proxies.
+    pub fn with_mcp_server(
         self,
-        server: McpServer<Link, McpR>,
-    ) -> JrConnectionBuilder<impl JrMessageHandler<Link = Link>, impl JrResponder<Link>>
+        mcp_server: McpServer<Host::Counterpart, impl RunWithConnectionTo<Host::Counterpart>>,
+    ) -> Builder<
+        Host,
+        impl HandleDispatchFrom<Host::Counterpart>,
+        impl RunWithConnectionTo<Host::Counterpart>,
+    >
     where
-        H: JrMessageHandler<Link = Link>,
-        Link: HasPeer<ClientPeer> + HasPeer<AgentPeer>,
+        Host::Counterpart: HasPeer<Agent> + HasPeer<Client>,
     {
-        let (message_handler, mcp_responder) = server.into_handler_and_responder();
-        self.with_handler(message_handler)
-            .with_responder(mcp_responder)
+        let (handler, responder) = mcp_server.into_handler_and_responder();
+        self.with_handler(handler).with_responder(responder)
     }
 
-    /// Connect these handlers to a transport layer.
-    /// The resulting connection must then be either [served](`JrConnection::serve`) or [run until completion](`JrConnection::run_until`).
-    pub fn connect_to(
-        self,
-        transport: impl Component<<H::Link as JrLink>::ConnectsTo> + 'static,
-    ) -> Result<JrConnection<H, R>, crate::Error> {
-        let Self {
-            name,
-            handler,
-            responder,
-        } = self;
-
-        let (outgoing_tx, outgoing_rx) = mpsc::unbounded();
-        let (new_task_tx, new_task_rx) = mpsc::unbounded();
-        let (dynamic_handler_tx, dynamic_handler_rx) = mpsc::unbounded();
-        let cx = JrConnectionCx::new(outgoing_tx, new_task_tx, dynamic_handler_tx);
-
-        // Convert transport into server - this returns a channel for us to use
-        // and a future that runs the transport
-        let transport_component = crate::DynComponent::new(transport);
-        let (transport_channel, transport_future) = transport_component.into_server();
-        cx.spawn(transport_future)?;
-
-        // Destructure the channel endpoints
-        let Channel {
-            rx: transport_incoming_rx,
-            tx: transport_outgoing_tx,
-        } = transport_channel;
-
-        Ok(JrConnection {
-            cx,
-            name,
-            outgoing_rx,
-            new_task_rx,
-            transport_outgoing_tx,
-            transport_incoming_rx,
-            dynamic_handler_rx,
-            handler,
-            responder,
-        })
-    }
-
-    /// Apply the registered handlers to a single message.
-    ///
-    /// This method processes one message through all registered handlers, attempting to
-    /// match it against each handler in order. This is useful when implementing
-    /// custom message handling logic or when you need fine-grained control over message
-    /// processing.
-    ///
-    /// # Returns
-    ///
-    /// - `Ok(Handled::Claimed)` - A handler claimed and processed the message
-    /// - `Ok(Handled::Unclaimed(message))` - No handler matched the message
-    /// - `Err(_)` - A handler encountered an error while processing
-    ///
-    /// # Borrow Checker Considerations
-    ///
-    /// You may find that [`MatchMessage`](`crate::util::MatchMessage`) is a better choice than this method
-    /// for implementing custom handlers. It offers a very similar API to
-    /// [`JrConnectionBuilder`] but is structured to apply each test one at a time
-    /// (sequentially) instead of setting them all up at once. This sequential approach
-    /// often interacts better with the borrow checker, at the cost of requiring `.await`
-    /// calls between each handler and only working for processing a single message.
-    ///
-    /// # Example: Borrow Checker Challenges
-    ///
-    /// When building a connection with `async {}` blocks (non-move), you might encounter
-    /// borrow checker errors if multiple handlers need access to the same mutable state:
-    ///
-    /// ```compile_fail
-    /// # use sacp::{JrConnectionBuilder, JrRequestCx};
-    /// # use sacp::schema::{InitializeRequest, InitializeResponse};
-    /// # use sacp::schema::{PromptRequest, PromptResponse};
-    /// # async fn example() -> Result<(), sacp::Error> {
-    /// let mut state = String::from("initial");
-    ///
-    /// // This fails to compile because both handlers borrow `state` mutably,
-    /// // and the futures are set up at the same time (even though only one will run)
-    /// let chain = UntypedLink::builder()
-    ///     .on_receive_request(async |req: InitializeRequest, cx: JrRequestCx| {
-    ///         state.push_str(" - initialized");  // First mutable borrow
-    ///         cx.respond(InitializeResponse::make())
-    ///     }, sacp::on_receive_request!())
-    ///     .on_receive_request(async |req: PromptRequest, cx: JrRequestCx| {
-    ///         state.push_str(" - prompted");  // Second mutable borrow - ERROR!
-    ///         cx.respond(PromptResponse { content: vec![], stopReason: None })
-    ///     }, sacp::on_receive_request!());
-    /// # Ok(())
-    /// # }
-    /// ```
-    ///
-    /// You can work around this by using `apply()` to process messages one at a time,
-    /// or use [`MatchMessage`](`crate::util::MatchMessage`) which provides a similar API but applies handlers sequentially:
-    ///
-    /// ```ignore
-    /// use sacp::{MessageCx, Handled};
-    /// use sacp::util::MatchMessage;
-    ///
-    /// async fn handle_with_state(
-    ///     message: MessageCx,
-    ///     state: &mut String,
-    /// ) -> Result<Handled<MessageCx>, sacp::Error> {
-    ///     MatchMessage::new(message)
-    ///         .on_request(async |req: InitializeRequest, request_cx| {
-    ///             state.push_str(" - initialized");  // Sequential - OK!
-    ///             request_cx.respond(InitializeResponse::make())
-    ///         })
-    ///         .on_request(async |req: PromptRequest, request_cx| {
-    ///             state.push_str(" - prompted");  // Sequential - OK!
-    ///             request_cx.respond(PromptResponse { content: vec![], stopReason: None })
-    ///         })
-    ///         .otherwise(async |msg| Ok(Handled::Unclaimed(msg)))
-    ///         .await
-    /// }
-    /// ```
-    pub async fn apply(
-        &mut self,
-        message: MessageCx,
-        cx: JrConnectionCx<H::Link>,
-    ) -> Result<Handled<MessageCx>, crate::Error> {
-        self.handler.handle_message(message, cx).await
-    }
-
-    /// Convenience method to connect to a transport and serve.
-    ///
-    /// This is equivalent to:
-    /// ```text
-    /// handler_chain.connect_to(transport)?.serve().await
-    /// ```
-    pub async fn serve(
-        self,
-        transport: impl Component<<H::Link as JrLink>::ConnectsTo> + 'static,
-    ) -> Result<(), crate::Error> {
-        self.connect_to(transport)?.serve().await
-    }
-
-    /// Convenience method to connect to a transport and run until a closure completes.
-    ///
-    /// This is equivalent to:
-    /// ```text
-    /// handler_chain.connect_to(transport)?.run_until(main_fn).await
-    /// ```
-    pub async fn run_until(
-        self,
-        transport: impl Component<<H::Link as JrLink>::ConnectsTo> + 'static,
-        main_fn: impl AsyncFnOnce(JrConnectionCx<H::Link>) -> Result<(), crate::Error>,
-    ) -> Result<(), crate::Error> {
-        self.connect_to(transport)?.run_until(main_fn).await
-    }
-}
-
-impl<H, R> Component<H::Link> for JrConnectionBuilder<H, R>
-where
-    H: JrMessageHandler + 'static,
-    R: JrResponder<H::Link> + 'static,
-{
-    async fn serve(
-        self,
-        client: impl Component<<H::Link as JrLink>::ConnectsTo>,
-    ) -> Result<(), crate::Error> {
-        self.connect_to(client)?.serve().await
-    }
-}
-
-/// A JSON-RPC connection with an active transport.
-///
-/// This type represents a `JrConnectionBuilder` that has been connected to a transport
-/// via `connect_to()`. It can be driven in two modes:
-///
-/// - [`serve()`](Self::serve) - Run as a server, handling incoming messages until the connection closes
-/// - [`run_until()`](Self::run_until) - Run until a closure completes, allowing you to send requests/notifications
-///
-/// Most users won't construct this directly - instead use `JrConnectionBuilder::connect_to()` or
-/// `JrConnectionBuilder::serve()` for convenience.
-pub struct JrConnection<H: JrMessageHandler, R: JrResponder<H::Link> = NullResponder> {
-    cx: JrConnectionCx<H::Link>,
-    name: Option<String>,
-    outgoing_rx: mpsc::UnboundedReceiver<OutgoingMessage>,
-    new_task_rx: mpsc::UnboundedReceiver<Task>,
-    transport_outgoing_tx: mpsc::UnboundedSender<Result<jsonrpcmsg::Message, crate::Error>>,
-    transport_incoming_rx: mpsc::UnboundedReceiver<Result<jsonrpcmsg::Message, crate::Error>>,
-    dynamic_handler_rx: mpsc::UnboundedReceiver<DynamicHandlerMessage<H::Link>>,
-    handler: H,
-    responder: R,
-}
-
-impl<H: JrMessageHandler, R: JrResponder<H::Link>> JrConnection<H, R> {
-    /// Run the connection in server mode with the provided transport.
+    /// Run in server mode with the provided transport.
     ///
     /// This drives the connection by continuously processing messages from the transport
     /// and dispatching them to your registered handlers. The connection will run until:
@@ -1245,13 +1069,13 @@ impl<H: JrMessageHandler, R: JrResponder<H::Link>> JrConnection<H, R> {
     ///
     /// Use this mode when you only need to respond to incoming messages and don't need
     /// to initiate your own requests. If you need to send requests to the other side,
-    /// use [`run_until`](Self::run_until) instead.
+    /// use [`connect_with`](Self::connect_with) instead.
     ///
     /// # Example: Byte Stream Transport
     ///
     /// ```no_run
-    /// # use sacp::link::UntypedLink;
-    /// # use sacp::{JrConnectionBuilder};
+    /// # use sacp::UntypedRole;
+    /// # use sacp::{Builder};
     /// # use sacp::ByteStreams;
     /// # use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
     /// # use sacp_test::*;
@@ -1261,17 +1085,20 @@ impl<H: JrMessageHandler, R: JrResponder<H::Link>> JrConnection<H, R> {
     ///     tokio::io::stdin().compat(),
     /// );
     ///
-    /// UntypedLink::builder()
-    ///     .on_receive_request(async |req: MyRequest, request_cx, cx| {
-    ///         request_cx.respond(MyResponse { status: "ok".into() })
+    /// UntypedRole.builder()
+    ///     .on_receive_request(async |req: MyRequest, responder, cx| {
+    ///         responder.respond(MyResponse { status: "ok".into() })
     ///     }, sacp::on_receive_request!())
-    ///     .serve(transport)
+    ///     .connect_to(transport)
     ///     .await?;
     /// # Ok(())
     /// # }
     /// ```
-    pub async fn serve(self) -> Result<(), crate::Error> {
-        self.run_until(async move |_cx| future::pending().await)
+    pub async fn connect_to(
+        self,
+        transport: impl ConnectTo<Host> + 'static,
+    ) -> Result<(), crate::Error> {
+        self.connect_with(transport, async move |_cx| future::pending().await)
             .await
     }
 
@@ -1279,20 +1106,20 @@ impl<H: JrMessageHandler, R: JrResponder<H::Link>> JrConnection<H, R> {
     ///
     /// This drives the connection by:
     /// 1. Running your registered handlers in the background to process incoming messages
-    /// 2. Executing your `main_fn` closure with a [`JrConnectionCx<R>`] for sending requests/notifications
+    /// 2. Executing your `main_fn` closure with a [`ConnectionTo<R>`] for sending requests/notifications
     ///
     /// The connection stays active until your `main_fn` returns, then shuts down gracefully.
     /// If the connection closes unexpectedly before `main_fn` completes, this returns an error.
     ///
     /// Use this mode when you need to initiate communication (send requests/notifications)
     /// in addition to responding to incoming messages. For server-only mode where you just
-    /// respond to messages, use [`serve`](Self::serve) instead.
+    /// respond to messages, use [`connect_to`](Self::connect_to) instead.
     ///
     /// # Example
     ///
     /// ```no_run
-    /// # use sacp::link::UntypedLink;
-    /// # use sacp::{JrConnectionBuilder};
+    /// # use sacp::UntypedRole;
+    /// # use sacp::{Builder};
     /// # use sacp::ByteStreams;
     /// # use sacp::schema::InitializeRequest;
     /// # use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
@@ -1303,13 +1130,12 @@ impl<H: JrMessageHandler, R: JrResponder<H::Link>> JrConnection<H, R> {
     ///     tokio::io::stdin().compat(),
     /// );
     ///
-    /// UntypedLink::builder()
-    ///     .on_receive_request(async |req: MyRequest, request_cx, cx| {
+    /// UntypedRole.builder()
+    ///     .on_receive_request(async |req: MyRequest, responder, cx| {
     ///         // Handle incoming requests in the background
-    ///         request_cx.respond(MyResponse { status: "ok".into() })
+    ///         responder.respond(MyResponse { status: "ok".into() })
     ///     }, sacp::on_receive_request!())
-    ///     .connect_to(transport)?
-    ///     .run_until(async |cx| {
+    ///     .connect_with(transport, async |cx| {
     ///         // Initialize the protocol
     ///         let init_response = cx.send_request(InitializeRequest::make())
     ///             .block_task()
@@ -1330,54 +1156,104 @@ impl<H: JrMessageHandler, R: JrResponder<H::Link>> JrConnection<H, R> {
     ///
     /// # Parameters
     ///
-    /// - `main_fn`: Your client logic. Receives a [`JrConnectionCx<R>`] for sending messages.
+    /// - `main_fn`: Your client logic. Receives a [`ConnectionTo<R>`] for sending messages.
     ///
     /// # Errors
     ///
     /// Returns an error if the connection closes before `main_fn` completes.
-    pub async fn run_until<T>(
+    pub async fn connect_with<R>(
         self,
-        main_fn: impl AsyncFnOnce(JrConnectionCx<H::Link>) -> Result<T, crate::Error>,
-    ) -> Result<T, crate::Error> {
-        let JrConnection {
-            cx,
+        transport: impl ConnectTo<Host> + 'static,
+        main_fn: impl AsyncFnOnce(ConnectionTo<Host::Counterpart>) -> Result<R, crate::Error>,
+    ) -> Result<R, crate::Error> {
+        let (_, future) = self.into_connection_and_future(transport, main_fn);
+        future.await
+    }
+
+    /// Helper that returns a [`ConnectionTo<R>`] and a future that runs this connection until `main_fn` returns.
+    fn into_connection_and_future<R>(
+        self,
+        transport: impl ConnectTo<Host> + 'static,
+        main_fn: impl AsyncFnOnce(ConnectionTo<Host::Counterpart>) -> Result<R, crate::Error>,
+    ) -> (
+        ConnectionTo<Host::Counterpart>,
+        impl Future<Output = Result<R, crate::Error>>,
+    ) {
+        let Self {
             name,
-            outgoing_rx,
-            new_task_rx,
             handler,
             responder,
-            transport_outgoing_tx,
-            transport_incoming_rx,
-            dynamic_handler_rx,
+            host: me,
         } = self;
+
+        let (outgoing_tx, outgoing_rx) = mpsc::unbounded();
+        let (new_task_tx, new_task_rx) = mpsc::unbounded();
+        let (dynamic_handler_tx, dynamic_handler_rx) = mpsc::unbounded();
+        let connection = ConnectionTo::new(
+            me.counterpart(),
+            outgoing_tx,
+            new_task_tx,
+            dynamic_handler_tx,
+        );
+
+        // Convert transport into server - this returns a channel for us to use
+        // and a future that runs the transport
+        let transport_component = crate::DynConnectTo::new(transport);
+        let (transport_channel, transport_future) = transport_component.into_channel_and_future();
+        let spawn_result = connection.spawn(transport_future);
+
+        // Destructure the channel endpoints
+        let Channel {
+            rx: transport_incoming_rx,
+            tx: transport_outgoing_tx,
+        } = transport_channel;
+
         let (reply_tx, reply_rx) = mpsc::unbounded();
 
-        crate::util::instrument_with_connection_name(name, async move {
-            let background = async {
-                futures::try_join!(
-                    // Protocol layer: OutgoingMessage → jsonrpcmsg::Message
-                    outgoing_actor::outgoing_protocol_actor(
-                        outgoing_rx,
-                        reply_tx.clone(),
-                        transport_outgoing_tx,
-                    ),
-                    // Protocol layer: jsonrpcmsg::Message → handler/reply routing
-                    incoming_actor::incoming_protocol_actor(
-                        &cx,
-                        transport_incoming_rx,
-                        dynamic_handler_rx,
-                        reply_rx,
-                        handler,
-                    ),
-                    task_actor::task_actor(new_task_rx, &cx),
-                    responder.run(cx.clone()),
-                )?;
-                Ok(())
-            };
+        let future = crate::util::instrument_with_connection_name(name, {
+            let connection = connection.clone();
+            async move {
+                let () = spawn_result?;
 
-            crate::util::run_until(background, main_fn(cx.clone())).await
-        })
-        .await
+                let background = async {
+                    futures::try_join!(
+                        // Protocol layer: OutgoingMessage → jsonrpcmsg::Message
+                        outgoing_actor::outgoing_protocol_actor(
+                            outgoing_rx,
+                            reply_tx.clone(),
+                            transport_outgoing_tx,
+                        ),
+                        // Protocol layer: jsonrpcmsg::Message → handler/reply routing
+                        incoming_actor::incoming_protocol_actor(
+                            me.counterpart(),
+                            &connection,
+                            transport_incoming_rx,
+                            dynamic_handler_rx,
+                            reply_rx,
+                            handler,
+                        ),
+                        task_actor::task_actor(new_task_rx, &connection),
+                        responder.run_with_connection_to(connection.clone()),
+                    )?;
+                    Ok(())
+                };
+
+                crate::util::run_until(background, main_fn(connection.clone())).await
+            }
+        });
+
+        (connection, future)
+    }
+}
+
+impl<R, H, Run> ConnectTo<R::Counterpart> for Builder<R, H, Run>
+where
+    R: Role,
+    H: HandleDispatchFrom<R::Counterpart> + 'static,
+    Run: RunWithConnectionTo<R::Counterpart> + 'static,
+{
+    async fn connect_to(self, client: impl ConnectTo<R>) -> Result<(), crate::Error> {
+        Builder::connect_to(self, client).await
     }
 }
 
@@ -1420,7 +1296,7 @@ enum ReplyMessage {
         id: jsonrpcmsg::Id,
 
         /// id of the peer this request was sent to
-        peer_id: PeerId,
+        role_id: RoleId,
 
         /// (original) method of the request -- the actual request may have been transformed
         /// to a successor method, but this will reflect the method of the wrapped request
@@ -1454,7 +1330,7 @@ enum OutgoingMessage {
         method: String,
 
         /// the peer we sent this to
-        peer_id: PeerId,
+        role_id: RoleId,
 
         /// the message to send; this may have a distinct method
         /// depending on the peer
@@ -1537,7 +1413,7 @@ impl<T> IntoHandled<T> for Handled<T> {
 ///
 /// The transport layer is responsible only for moving `jsonrpcmsg::Message` in and out.
 /// It has no knowledge of protocol semantics like request/response correlation, ID assignment,
-/// or handler dispatch - those are handled by the protocol layer in `JrConnection`.
+/// or handler dispatch - those are handled by the protocol layer in [`Builder`].
 ///
 /// # Example
 ///
@@ -1550,11 +1426,11 @@ impl<T> IntoHandled<T> for Handled<T> {
 ///
 /// * Send requests and notifications to the other side
 /// * Spawn concurrent tasks that run alongside the connection
-/// * Respond to requests (via [`JrRequestCx`] which wraps this)
+/// * Respond to requests (via [`Responder`] which wraps this)
 ///
 /// # Cloning
 ///
-/// `JrConnectionCx` is cheaply cloneable - all clones refer to the same underlying connection.
+/// `ConnectionTo` is cheaply cloneable - all clones refer to the same underlying connection.
 /// This makes it easy to share across async tasks.
 ///
 /// # Event Loop and Concurrency
@@ -1563,29 +1439,34 @@ impl<T> IntoHandled<T> for Handled<T> {
 /// messages while your handler is running. Use [`spawn`](Self::spawn) to offload any
 /// expensive or blocking work to concurrent tasks.
 ///
-/// See the [Event Loop and Concurrency](JrConnection#event-loop-and-concurrency) section
+/// See the [Event Loop and Concurrency](Builder#event-loop-and-concurrency) section
 /// for more details.
 #[derive(Clone, Debug)]
-pub struct JrConnectionCx<Link> {
-    #[expect(dead_code)]
-    role: Link,
+pub struct ConnectionTo<Counterpart: Role> {
+    counterpart: Counterpart,
     message_tx: OutgoingMessageTx,
     task_tx: TaskTx,
-    dynamic_handler_tx: mpsc::UnboundedSender<DynamicHandlerMessage<Link>>,
+    dynamic_handler_tx: mpsc::UnboundedSender<DynamicHandlerMessage<Counterpart>>,
 }
 
-impl<Link: JrLink> JrConnectionCx<Link> {
+impl<Counterpart: Role> ConnectionTo<Counterpart> {
     fn new(
+        counterpart: Counterpart,
         message_tx: mpsc::UnboundedSender<OutgoingMessage>,
         task_tx: mpsc::UnboundedSender<Task>,
-        dynamic_handler_tx: mpsc::UnboundedSender<DynamicHandlerMessage<Link>>,
+        dynamic_handler_tx: mpsc::UnboundedSender<DynamicHandlerMessage<Counterpart>>,
     ) -> Self {
         Self {
-            role: Link::default(),
+            counterpart,
             message_tx,
             task_tx,
             dynamic_handler_tx,
         }
+    }
+
+    /// Return the counterpart role this connection is talking to.
+    pub fn counterpart(&self) -> Counterpart {
+        self.counterpart.clone()
     }
 
     /// Spawns a task that will run so long as the JSON-RPC connection is being served.
@@ -1603,21 +1484,21 @@ impl<Link: JrLink> JrConnectionCx<Link> {
     /// # use sacp_test::*;
     /// # async fn example() -> Result<(), sacp::Error> {
     /// # let connection = mock_connection();
-    /// connection.on_receive_request(async |req: ProcessRequest, request_cx, cx| {
+    /// connection.on_receive_request(async |req: ProcessRequest, responder, cx| {
     ///     // Clone cx for the spawned task
     ///     cx.spawn({
-    ///         let connection_cx = cx.clone();
+    ///         let connection = cx.clone();
     ///         async move {
     ///             let result = expensive_operation(&req.data).await?;
-    ///             connection_cx.send_notification(ProcessComplete { result })?;
+    ///             connection.send_notification(ProcessComplete { result })?;
     ///             Ok(())
     ///         }
     ///     })?;
     ///
     ///     // Respond immediately
-    ///     request_cx.respond(ProcessResponse { result: "started".into() })
+    ///     responder.respond(ProcessResponse { result: "started".into() })
     /// }, sacp::on_receive_request!())
-    /// # .serve(sacp_test::MockTransport).await?;
+    /// # .connect_to(sacp_test::MockTransport).await?;
     /// # Ok(())
     /// # }
     /// ```
@@ -1635,52 +1516,69 @@ impl<Link: JrLink> JrConnectionCx<Link> {
         Task::new(location, task).spawn(&self.task_tx)
     }
 
-    /// Spawn a JSON-RPC connection in the background and return a [`JrConnectionCx`] for sending messages to it.
+    /// Spawn a JSON-RPC connection in the background and return a [`ConnectionTo`] for sending messages to it.
     ///
     /// This is useful for creating multiple connections that communicate with each other,
     /// such as implementing proxy patterns or connecting to multiple backend services.
     ///
     /// # Arguments
     ///
-    /// - `connection`: The `JrConnection` to spawn (typically created via `JrConnectionBuilder::connect_to()`)
-    /// - `serve_future`: A function that drives the connection (usually `|c| Box::pin(c.serve())`)
+    /// - `builder`: The connection builder with handlers configured
+    /// - `transport`: The transport component to connect to
     ///
     /// # Returns
     ///
-    /// A `JrConnectionCx` that you can use to send requests and notifications to the spawned connection.
+    /// A `ConnectionTo` that you can use to send requests and notifications to the spawned connection.
     ///
     /// # Example: Proxying to a backend connection
     ///
     /// ```
-    /// # use sacp::link::UntypedLink;
-    /// # use sacp::{JrConnectionBuilder, JrConnectionCx};
+    /// # use sacp::UntypedRole;
+    /// # use sacp::{Builder, ConnectionTo};
     /// # use sacp_test::*;
-    /// # async fn example(cx: JrConnectionCx<UntypedLink>) -> Result<(), sacp::Error> {
-    /// // Set up a backend connection
-    /// let backend = UntypedLink::builder()
-    ///     .on_receive_request(async |req: MyRequest, request_cx, _cx| {
-    ///         request_cx.respond(MyResponse { status: "ok".into() })
-    ///     }, sacp::on_receive_request!())
-    ///     .connect_to(MockTransport)?;
+    /// # async fn example(cx: ConnectionTo<UntypedRole>) -> Result<(), sacp::Error> {
+    /// // Set up a backend connection builder
+    /// let backend = UntypedRole.builder()
+    ///     .on_receive_request(async |req: MyRequest, responder, _cx| {
+    ///         responder.respond(MyResponse { status: "ok".into() })
+    ///     }, sacp::on_receive_request!());
     ///
     /// // Spawn it and get a context to send requests to it
-    /// let backend_cx = cx.spawn_connection(backend, |c| Box::pin(c.serve()))?;
+    /// let backend_connection = cx.spawn_connection(backend, MockTransport)?;
     ///
     /// // Now you can forward requests to the backend
-    /// let response = backend_cx.send_request(MyRequest {}).block_task().await?;
+    /// let response = backend_connection.send_request(MyRequest {}).block_task().await?;
     /// # Ok(())
     /// # }
     /// ```
     #[track_caller]
-    pub fn spawn_connection<H: JrMessageHandler, R: JrResponder<H::Link> + 'static>(
+    pub fn spawn_connection<R: Role>(
         &self,
-        connection: JrConnection<H, R>,
-        serve_future: impl FnOnce(JrConnection<H, R>) -> BoxFuture<'static, Result<(), crate::Error>>,
-    ) -> Result<JrConnectionCx<H::Link>, crate::Error> {
-        let cx = connection.cx.clone();
-        let future = serve_future(connection);
+        builder: Builder<
+            R,
+            impl HandleDispatchFrom<R::Counterpart> + 'static,
+            impl RunWithConnectionTo<R::Counterpart> + 'static,
+        >,
+        transport: impl ConnectTo<R> + 'static,
+    ) -> Result<ConnectionTo<R::Counterpart>, crate::Error> {
+        let (connection, future) =
+            builder.into_connection_and_future(transport, |_| std::future::pending());
         Task::new(std::panic::Location::caller(), future).spawn(&self.task_tx)?;
-        Ok(cx)
+        Ok(connection)
+    }
+
+    /// Send a request/notification and forward the response appropriately.
+    ///
+    /// The request context's response type matches the request's response type,
+    /// enabling type-safe message forwarding.
+    pub fn send_proxied_message<Req: JsonRpcRequest<Response: Send>, Notif: JsonRpcNotification>(
+        &self,
+        message: Dispatch<Req, Notif>,
+    ) -> Result<(), crate::Error>
+    where
+        Counterpart: HasPeer<Counterpart>,
+    {
+        self.send_proxied_message_to(self.counterpart(), message)
     }
 
     /// Send a request/notification and forward the response appropriately.
@@ -1688,37 +1586,37 @@ impl<Link: JrLink> JrConnectionCx<Link> {
     /// The request context's response type matches the request's response type,
     /// enabling type-safe message forwarding.
     pub fn send_proxied_message_to<
-        Peer: JrPeer,
-        Req: JrRequest<Response: Send>,
-        Notif: JrNotification,
+        Peer: Role,
+        Req: JsonRpcRequest<Response: Send>,
+        Notif: JsonRpcNotification,
     >(
         &self,
         peer: Peer,
-        message: MessageCx<Req, Notif>,
+        message: Dispatch<Req, Notif>,
     ) -> Result<(), crate::Error>
     where
-        Link: HasPeer<Peer>,
+        Counterpart: HasPeer<Peer>,
     {
         match message {
-            MessageCx::Request(request, request_cx) => self
+            Dispatch::Request(request, responder) => self
                 .send_request_to(peer, request)
-                .forward_to_request_cx(request_cx),
-            MessageCx::Notification(notification) => self.send_notification_to(peer, notification),
-            MessageCx::Response(result, request_cx) => {
+                .forward_response_to(responder),
+            Dispatch::Notification(notification) => self.send_notification_to(peer, notification),
+            Dispatch::Response(result, router) => {
                 // Responses are forwarded directly to their destination
-                request_cx.respond_with_result(result)
+                router.respond_with_result(result)
             }
         }
     }
 
-    /// Send an outgoing request and return a [`JrResponse`] for handling the reply.
+    /// Send an outgoing request and return a [`SentRequest`] for handling the reply.
     ///
-    /// The returned [`JrResponse`] provides methods for receiving the response without
+    /// The returned [`SentRequest`] provides methods for receiving the response without
     /// blocking the event loop:
     ///
-    /// * [`on_receiving_result`](JrResponse::on_receiving_result) - Schedule
+    /// * [`on_receiving_result`](SentRequest::on_receiving_result) - Schedule
     ///   a callback to run when the response arrives (doesn't block the event loop)
-    /// * [`block_task`](JrResponse::block_task) - Block the current task until the response
+    /// * [`block_task`](SentRequest::block_task) - Block the current task until the response
     ///   arrives (only safe in spawned tasks, not in handlers)
     ///
     /// # Anti-Footgun Design
@@ -1728,7 +1626,7 @@ impl<Link: JrLink> JrConnectionCx<Link> {
     ///
     /// ```compile_fail
     /// # use sacp_test::*;
-    /// # async fn example(cx: sacp::JrConnectionCx<sacp::link::UntypedLink>) -> Result<(), sacp::Error> {
+    /// # async fn example(cx: sacp::ConnectionTo<sacp::UntypedRole>) -> Result<(), sacp::Error> {
     /// // ❌ This doesn't compile - prevents blocking the event loop
     /// let response = cx.send_request(MyRequest {}).await?;
     /// # Ok(())
@@ -1737,7 +1635,7 @@ impl<Link: JrLink> JrConnectionCx<Link> {
     ///
     /// ```no_run
     /// # use sacp_test::*;
-    /// # async fn example(cx: sacp::JrConnectionCx<sacp::link::UntypedLink>) -> Result<(), sacp::Error> {
+    /// # async fn example(cx: sacp::ConnectionTo<sacp::UntypedRole>) -> Result<(), sacp::Error> {
     /// // ✅ Option 1: Schedule callback (safe in handlers)
     /// cx.send_request(MyRequest {})
     ///     .on_receiving_result(async |result| {
@@ -1761,39 +1659,39 @@ impl<Link: JrLink> JrConnectionCx<Link> {
     /// ```
     /// Send an outgoing request to the default counterpart peer.
     ///
-    /// This is a convenience method that uses the connection's default peer.
+    /// This is a convenience method that sends to the counterpart role `R`.
     /// For explicit control over the target peer, use [`send_request_to`](Self::send_request_to).
-    pub fn send_request<Req: JrRequest>(&self, request: Req) -> JrResponse<Req::Response>
+    pub fn send_request<Req: JsonRpcRequest>(&self, request: Req) -> SentRequest<Req::Response>
     where
-        Link: HasDefaultPeer,
+        Counterpart: HasPeer<Counterpart>,
     {
-        self.send_request_to(Link::DefaultPeer::default(), request)
+        self.send_request_to(self.counterpart.clone(), request)
     }
 
-    /// Send an outgoing request to a specific counterpart peer.
+    /// Send an outgoing request to a specific peer.
     ///
-    /// The message will be transformed according to the link's [`HasPeer`](crate::HasPeer)
+    /// The message will be transformed according to the [`HasPeer`](crate::role::HasPeer)
     /// implementation before being sent.
-    pub fn send_request_to<Peer: JrPeer, Req: JrRequest>(
+    pub fn send_request_to<Peer: Role, Req: JsonRpcRequest>(
         &self,
         peer: Peer,
         request: Req,
-    ) -> JrResponse<Req::Response>
+    ) -> SentRequest<Req::Response>
     where
-        Link: HasPeer<Peer>,
+        Counterpart: HasPeer<Peer>,
     {
         let method = request.method().to_string();
         let id = jsonrpcmsg::Id::String(uuid::Uuid::new_v4().to_string());
         let (response_tx, response_rx) = oneshot::channel();
-        let peer_id = peer.peer_id();
-        let remote_style = Link::remote_style(peer);
+        let role_id = peer.role_id();
+        let remote_style = self.counterpart.remote_style(peer);
         match remote_style.transform_outgoing_message(request) {
             Ok(untyped) => {
                 // Transform the message for the target role
                 let message = OutgoingMessage::Request {
                     id: id.clone(),
                     method: method.clone(),
-                    peer_id,
+                    role_id,
                     untyped,
                     response_tx,
                 };
@@ -1834,7 +1732,7 @@ impl<Link: JrLink> JrConnectionCx<Link> {
             }
         }
 
-        JrResponse::new(id, method.clone(), self.task_tx.clone(), response_rx)
+        SentRequest::new(id, method.clone(), self.task_tx.clone(), response_rx)
             .map(move |json| <Req::Response>::from_value(&method, json))
     }
 
@@ -1843,40 +1741,43 @@ impl<Link: JrLink> JrConnectionCx<Link> {
     /// Notifications are fire-and-forget messages that don't have IDs and don't expect responses.
     /// This method sends the notification immediately and returns.
     ///
-    /// This is a convenience method that uses the link's default peer.
+    /// This is a convenience method that sends to the counterpart role `R`.
     /// For explicit control over the target peer, use [`send_notification_to`](Self::send_notification_to).
     ///
     /// ```no_run
     /// # use sacp_test::*;
-    /// # async fn example(cx: sacp::JrConnectionCx<sacp::link::UntypedLink>) -> Result<(), sacp::Error> {
+    /// # async fn example(cx: sacp::ConnectionTo<sacp::Agent>) -> Result<(), sacp::Error> {
     /// cx.send_notification(StatusUpdate {
     ///     message: "Processing...".into(),
     /// })?;
     /// # Ok(())
     /// # }
     /// ```
-    pub fn send_notification<N: JrNotification>(&self, notification: N) -> Result<(), crate::Error>
+    pub fn send_notification<N: JsonRpcNotification>(
+        &self,
+        notification: N,
+    ) -> Result<(), crate::Error>
     where
-        Link: HasDefaultPeer,
+        Counterpart: HasPeer<Counterpart>,
     {
-        self.send_notification_to(Link::DefaultPeer::default(), notification)
+        self.send_notification_to(self.counterpart.clone(), notification)
     }
 
-    /// Send an outgoing notification to a specific counterpart peer (no reply expected).
+    /// Send an outgoing notification to a specific peer (no reply expected).
     ///
-    /// The message will be transformed according to the link's [`HasPeer`](crate::HasPeer)
+    /// The message will be transformed according to the [`HasPeer`](crate::role::HasPeer)
     /// implementation before being sent.
-    pub fn send_notification_to<Peer: JrPeer, N: JrNotification>(
+    pub fn send_notification_to<Peer: Role, N: JsonRpcNotification>(
         &self,
         peer: Peer,
         notification: N,
     ) -> Result<(), crate::Error>
     where
-        Link: HasPeer<Peer>,
+        Counterpart: HasPeer<Peer>,
     {
-        let remote_style = Link::remote_style(peer);
+        let remote_style = self.counterpart.remote_style(peer);
         tracing::debug!(
-            role = std::any::type_name::<Link>(),
+            role = std::any::type_name::<Counterpart>(),
             peer = std::any::type_name::<Peer>(),
             notification_type = std::any::type_name::<N>(),
             ?remote_style,
@@ -1911,8 +1812,8 @@ impl<Link: JrLink> JrConnectionCx<Link> {
     /// The handler will stay registered until the returned registration guard is dropped.
     pub fn add_dynamic_handler(
         &self,
-        handler: impl JrMessageHandler<Link = Link> + 'static,
-    ) -> Result<DynamicHandlerRegistration<Link>, crate::Error> {
+        handler: impl HandleDispatchFrom<Counterpart> + 'static,
+    ) -> Result<DynamicHandlerRegistration<Counterpart>, crate::Error> {
         let uuid = Uuid::new_v4();
         self.dynamic_handler_tx
             .unbounded_send(DynamicHandlerMessage::AddDynamicHandler(
@@ -1936,13 +1837,13 @@ impl<Link: JrLink> JrConnectionCx<Link> {
 }
 
 #[derive(Clone, Debug)]
-pub struct DynamicHandlerRegistration<Link: JrLink> {
+pub struct DynamicHandlerRegistration<R: Role> {
     uuid: Uuid,
-    cx: JrConnectionCx<Link>,
+    cx: ConnectionTo<R>,
 }
 
-impl<Link: JrLink> DynamicHandlerRegistration<Link> {
-    fn new(uuid: Uuid, cx: JrConnectionCx<Link>) -> Self {
+impl<R: Role> DynamicHandlerRegistration<R> {
+    fn new(uuid: Uuid, cx: ConnectionTo<R>) -> Self {
         Self { uuid, cx }
     }
 
@@ -1952,7 +1853,7 @@ impl<Link: JrLink> DynamicHandlerRegistration<Link> {
     }
 }
 
-impl<Link: JrLink> Drop for DynamicHandlerRegistration<Link> {
+impl<R: Role> Drop for DynamicHandlerRegistration<R> {
     fn drop(&mut self) {
         self.cx.remove_dynamic_handler(self.uuid.clone());
     }
@@ -1964,10 +1865,10 @@ impl<Link: JrLink> Drop for DynamicHandlerRegistration<Link> {
 ///
 /// 1. **Respond to the request** - Use [`respond`](Self::respond) or
 ///    [`respond_with_result`](Self::respond_with_result) to send the response
-/// 2. **Send other messages** - Use the [`JrConnectionCx`] parameter passed to your
-///    handler, which provides [`send_request`](`JrConnectionCx::send_request`),
-///    [`send_notification`](`JrConnectionCx::send_notification`), and
-///    [`spawn`](`JrConnectionCx::spawn`)
+/// 2. **Send other messages** - Use the [`ConnectionTo`] parameter passed to your
+///    handler, which provides [`send_request`](`ConnectionTo::send_request`),
+///    [`send_notification`](`ConnectionTo::send_notification`), and
+///    [`spawn`](`ConnectionTo::spawn`)
 ///
 /// # Example
 ///
@@ -1975,7 +1876,7 @@ impl<Link: JrLink> Drop for DynamicHandlerRegistration<Link> {
 /// # use sacp_test::*;
 /// # async fn example() -> Result<(), sacp::Error> {
 /// # let connection = mock_connection();
-/// connection.on_receive_request(async |req: ProcessRequest, request_cx, cx| {
+/// connection.on_receive_request(async |req: ProcessRequest, responder, cx| {
 ///     // Send a notification while processing
 ///     cx.send_notification(StatusUpdate {
 ///         message: "processing".into(),
@@ -1985,9 +1886,9 @@ impl<Link: JrLink> Drop for DynamicHandlerRegistration<Link> {
 ///     let result = process(&req.data)?;
 ///
 ///     // Respond to the request
-///     request_cx.respond(ProcessResponse { result })
+///     responder.respond(ProcessResponse { result })
 /// }, sacp::on_receive_request!())
-/// # .serve(sacp_test::MockTransport).await?;
+/// # .connect_to(sacp_test::MockTransport).await?;
 /// # Ok(())
 /// # }
 /// ```
@@ -1995,13 +1896,13 @@ impl<Link: JrLink> Drop for DynamicHandlerRegistration<Link> {
 /// # Event Loop Considerations
 ///
 /// Like all handlers, request handlers run on the event loop. Use
-/// [`spawn`](JrConnectionCx::spawn) for expensive operations to avoid blocking
+/// [`spawn`](ConnectionTo::spawn) for expensive operations to avoid blocking
 /// the connection.
 ///
-/// See the [Event Loop and Concurrency](JrConnection#event-loop-and-concurrency)
+/// See the [Event Loop and Concurrency](Builder#event-loop-and-concurrency)
 /// section for more details.
 #[must_use]
-pub struct JrRequestCx<T: JrResponsePayload = serde_json::Value> {
+pub struct Responder<T: JsonRpcResponse = serde_json::Value> {
     /// The method of the request.
     method: String,
 
@@ -2015,9 +1916,9 @@ pub struct JrRequestCx<T: JrResponsePayload = serde_json::Value> {
     send_fn: SendBoxFnOnce<'static, (Result<T, crate::Error>,), Result<(), crate::Error>>,
 }
 
-impl<T: JrResponsePayload> std::fmt::Debug for JrRequestCx<T> {
+impl<T: JsonRpcResponse> std::fmt::Debug for Responder<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("JrRequestCx")
+        f.debug_struct("Responder")
             .field("method", &self.method)
             .field("id", &self.id)
             .field("response_type", &std::any::type_name::<T>())
@@ -2025,7 +1926,7 @@ impl<T: JrResponsePayload> std::fmt::Debug for JrRequestCx<T> {
     }
 }
 
-impl JrRequestCx<serde_json::Value> {
+impl Responder<serde_json::Value> {
     /// Create a new request context for an incoming request.
     ///
     /// The response will be serialized to JSON and sent over the wire.
@@ -2051,7 +1952,7 @@ impl JrRequestCx<serde_json::Value> {
     /// Cast this request context to a different response type.
     ///
     /// The provided type `T` will be serialized to JSON before sending.
-    pub fn cast<T: JrResponsePayload>(self) -> JrRequestCx<T> {
+    pub fn cast<T: JsonRpcResponse>(self) -> Responder<T> {
         self.wrap_params(move |method, value| match value {
             Ok(value) => T::into_json(value, &method),
             Err(e) => Err(e),
@@ -2059,7 +1960,7 @@ impl JrRequestCx<serde_json::Value> {
     }
 }
 
-impl<T: JrResponsePayload> JrRequestCx<T> {
+impl<T: JsonRpcResponse> Responder<T> {
     /// Method of the incoming request
     pub fn method(&self) -> &str {
         &self.method
@@ -2070,32 +1971,32 @@ impl<T: JrResponsePayload> JrRequestCx<T> {
         crate::util::id_to_json(&self.id)
     }
 
-    /// Convert to a `JrRequestCx` that expects a JSON value
+    /// Convert to a `Responder` that expects a JSON value
     /// and which checks (dynamically) that the JSON value it receives
     /// can be converted to `T`.
-    pub fn erase_to_json(self) -> JrRequestCx<serde_json::Value> {
+    pub fn erase_to_json(self) -> Responder<serde_json::Value> {
         self.wrap_params(|method, value| T::from_value(&method, value?))
     }
 
-    /// Return a new JrRequestCx with a different method name.
-    pub fn wrap_method(self, method: String) -> JrRequestCx<T> {
-        JrRequestCx {
+    /// Return a new Responder with a different method name.
+    pub fn wrap_method(self, method: String) -> Responder<T> {
+        Responder {
             method,
             id: self.id,
             send_fn: self.send_fn,
         }
     }
 
-    /// Return a new JrRequestCx that expects a response of type U.
+    /// Return a new Responder that expects a response of type U.
     ///
     /// `wrap_fn` will be invoked with the method name and the result to transform
     /// type `U` into type `T` before sending.
-    pub fn wrap_params<U: JrResponsePayload>(
+    pub fn wrap_params<U: JsonRpcResponse>(
         self,
         wrap_fn: impl FnOnce(&str, Result<U, crate::Error>) -> Result<T, crate::Error> + Send + 'static,
-    ) -> JrRequestCx<U> {
+    ) -> Responder<U> {
         let method = self.method.clone();
-        JrRequestCx {
+        Responder {
             method: self.method,
             id: self.id,
             send_fn: SendBoxFnOnce::new(move |input: Result<U, crate::Error>| {
@@ -2133,31 +2034,31 @@ impl<T: JrResponsePayload> JrRequestCx<T> {
 
 /// Context for handling an incoming JSON-RPC response.
 ///
-/// This is the response-side counterpart to [`JrRequestCx`]. While `JrRequestCx` handles
-/// incoming requests (where you send a response over the wire), `JrResponseCx` handles
+/// This is the response-side counterpart to [`Responder`]. While `Responder` handles
+/// incoming requests (where you send a response over the wire), `ResponseRouter` handles
 /// incoming responses (where you route the response to a local task waiting for it).
 ///
 /// Both are fundamentally "sinks" that push the message through a `send_fn`, but they
 /// represent different points in the message lifecycle and carry different metadata.
 #[must_use]
-pub struct JrResponseCx<T: JrResponsePayload = serde_json::Value> {
+pub struct ResponseRouter<T: JsonRpcResponse = serde_json::Value> {
     /// The method of the original request.
     method: String,
 
     /// The `id` of the original request.
     id: jsonrpcmsg::Id,
 
-    /// The PeerId to which the original request was sent
+    /// The RoleId to which the original request was sent
     /// (and hence from which the reply is expected).
-    peer_id: PeerId,
+    role_id: RoleId,
 
     /// Function to send the response to the waiting task.
     send_fn: SendBoxFnOnce<'static, (Result<T, crate::Error>,), Result<(), crate::Error>>,
 }
 
-impl<T: JrResponsePayload> std::fmt::Debug for JrResponseCx<T> {
+impl<T: JsonRpcResponse> std::fmt::Debug for ResponseRouter<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("JrResponseCx")
+        f.debug_struct("ResponseRouter")
             .field("method", &self.method)
             .field("id", &self.id)
             .field("response_type", &std::any::type_name::<T>())
@@ -2165,7 +2066,7 @@ impl<T: JrResponsePayload> std::fmt::Debug for JrResponseCx<T> {
     }
 }
 
-impl JrResponseCx<serde_json::Value> {
+impl ResponseRouter<serde_json::Value> {
     /// Create a new response context for routing a response to a local awaiter.
     ///
     /// When `respond_with_result` is called, the response is sent through the oneshot
@@ -2173,13 +2074,13 @@ impl JrResponseCx<serde_json::Value> {
     pub(crate) fn new(
         method: String,
         id: jsonrpcmsg::Id,
-        peer_id: PeerId,
+        role_id: RoleId,
         sender: oneshot::Sender<ResponsePayload>,
     ) -> Self {
         Self {
             method,
             id,
-            peer_id,
+            role_id,
             send_fn: SendBoxFnOnce::new(
                 move |response: Result<serde_json::Value, crate::Error>| {
                     sender
@@ -2198,7 +2099,7 @@ impl JrResponseCx<serde_json::Value> {
     /// Cast this response context to a different response type.
     ///
     /// The provided type `T` will be serialized to JSON before sending.
-    pub fn cast<T: JrResponsePayload>(self) -> JrResponseCx<T> {
+    pub fn cast<T: JsonRpcResponse>(self) -> ResponseRouter<T> {
         self.wrap_params(move |method, value| match value {
             Ok(value) => T::into_json(value, &method),
             Err(e) => Err(e),
@@ -2206,7 +2107,7 @@ impl JrResponseCx<serde_json::Value> {
     }
 }
 
-impl<T: JrResponsePayload> JrResponseCx<T> {
+impl<T: JsonRpcResponse> ResponseRouter<T> {
     /// Method of the original request
     pub fn method(&self) -> &str {
         &self.method
@@ -2220,30 +2121,30 @@ impl<T: JrResponsePayload> JrResponseCx<T> {
     /// The peer to which the original request was sent.
     ///
     /// This is the peer from which we expect to receive the response.
-    pub fn peer_id(&self) -> PeerId {
-        self.peer_id.clone()
+    pub fn role_id(&self) -> RoleId {
+        self.role_id.clone()
     }
 
-    /// Convert to a `JrResponseCx` that expects a JSON value
+    /// Convert to a `ResponseRouter` that expects a JSON value
     /// and which checks (dynamically) that the JSON value it receives
     /// can be converted to `T`.
-    pub fn erase_to_json(self) -> JrResponseCx<serde_json::Value> {
+    pub fn erase_to_json(self) -> ResponseRouter<serde_json::Value> {
         self.wrap_params(|method, value| T::from_value(&method, value?))
     }
 
-    /// Return a new JrResponseCx that expects a response of type U.
+    /// Return a new ResponseRouter that expects a response of type U.
     ///
     /// `wrap_fn` will be invoked with the method name and the result to transform
     /// type `U` into type `T` before sending.
-    fn wrap_params<U: JrResponsePayload>(
+    fn wrap_params<U: JsonRpcResponse>(
         self,
         wrap_fn: impl FnOnce(&str, Result<U, crate::Error>) -> Result<T, crate::Error> + Send + 'static,
-    ) -> JrResponseCx<U> {
+    ) -> ResponseRouter<U> {
         let method = self.method.clone();
-        JrResponseCx {
+        ResponseRouter {
             method: self.method,
             id: self.id,
-            peer_id: self.peer_id,
+            role_id: self.role_id,
             send_fn: SendBoxFnOnce::new(move |input: Result<U, crate::Error>| {
                 let t_value = wrap_fn(&method, input);
                 self.send_fn.call(t_value)
@@ -2281,10 +2182,10 @@ impl<T: JrResponsePayload> JrResponseCx<T> {
 ///
 /// # Derive Macro
 ///
-/// For simple message types, you can use the `JrRequest` or `JrNotification` derive macros
-/// which will implement both `JrMessage` and the respective trait. See [`JrRequest`] and
-/// [`JrNotification`] for examples.
-pub trait JrMessage: 'static + Debug + Sized + Send + Clone {
+/// For simple message types, you can use the `JsonRpcRequest` or `JsonRpcNotification` derive macros
+/// which will implement both `JsonRpcMessage` and the respective trait. See [`JsonRpcRequest`] and
+/// [`JsonRpcNotification`] for examples.
+pub trait JsonRpcMessage: 'static + Debug + Sized + Send + Clone {
     /// Check if this message type matches the given method name.
     fn matches_method(method: &str) -> bool;
 
@@ -2305,19 +2206,19 @@ pub trait JrMessage: 'static + Debug + Sized + Send + Clone {
 ///
 /// # Derive Macro
 ///
-/// Use `#[derive(JrResponsePayload)]` to automatically implement this trait:
+/// Use `#[derive(JsonRpcResponse)]` to automatically implement this trait:
 ///
 /// ```ignore
-/// use sacp::JrResponsePayload;
+/// use sacp::JsonRpcResponse;
 /// use serde::{Serialize, Deserialize};
 ///
-/// #[derive(Debug, Serialize, Deserialize, JrResponsePayload)]
+/// #[derive(Debug, Serialize, Deserialize, JsonRpcResponse)]
 /// #[response(method = "_hello")]
 /// struct HelloResponse {
 ///     greeting: String,
 /// }
 /// ```
-pub trait JrResponsePayload: 'static + Debug + Sized + Send + Clone {
+pub trait JsonRpcResponse: 'static + Debug + Sized + Send + Clone {
     /// Convert this message into a JSON value.
     fn into_json(self, method: &str) -> Result<serde_json::Value, crate::Error>;
 
@@ -2325,7 +2226,7 @@ pub trait JrResponsePayload: 'static + Debug + Sized + Send + Clone {
     fn from_value(method: &str, value: serde_json::Value) -> Result<Self, crate::Error>;
 }
 
-impl JrResponsePayload for serde_json::Value {
+impl JsonRpcResponse for serde_json::Value {
     fn from_value(_method: &str, value: serde_json::Value) -> Result<Self, crate::Error> {
         Ok(value)
     }
@@ -2339,44 +2240,44 @@ impl JrResponsePayload for serde_json::Value {
 ///
 /// # Derive Macro
 ///
-/// Use `#[derive(JrNotification)]` to automatically implement both `JrMessage` and `JrNotification`:
+/// Use `#[derive(JsonRpcNotification)]` to automatically implement both `JsonRpcMessage` and `JsonRpcNotification`:
 ///
 /// ```ignore
-/// use sacp::JrNotification;
+/// use sacp::JsonRpcNotification;
 /// use serde::{Serialize, Deserialize};
 ///
-/// #[derive(Debug, Clone, Serialize, Deserialize, JrNotification)]
+/// #[derive(Debug, Clone, Serialize, Deserialize, JsonRpcNotification)]
 /// #[notification(method = "_ping")]
 /// struct PingNotification {
 ///     timestamp: u64,
 /// }
 /// ```
-pub trait JrNotification: JrMessage {}
+pub trait JsonRpcNotification: JsonRpcMessage {}
 
 /// A struct that represents a request (JSON-RPC message expecting a response).
 ///
 /// # Derive Macro
 ///
-/// Use `#[derive(JrRequest)]` to automatically implement both `JrMessage` and `JrRequest`:
+/// Use `#[derive(JsonRpcRequest)]` to automatically implement both `JsonRpcMessage` and `JsonRpcRequest`:
 ///
 /// ```ignore
-/// use sacp::{JrRequest, JrResponsePayload};
+/// use sacp::{JsonRpcRequest, JsonRpcResponse};
 /// use serde::{Serialize, Deserialize};
 ///
-/// #[derive(Debug, Clone, Serialize, Deserialize, JrRequest)]
+/// #[derive(Debug, Clone, Serialize, Deserialize, JsonRpcRequest)]
 /// #[request(method = "_hello", response = HelloResponse)]
 /// struct HelloRequest {
 ///     name: String,
 /// }
 ///
-/// #[derive(Debug, Serialize, Deserialize, JrResponsePayload)]
+/// #[derive(Debug, Serialize, Deserialize, JsonRpcResponse)]
 /// struct HelloResponse {
 ///     greeting: String,
 /// }
 /// ```
-pub trait JrRequest: JrMessage {
+pub trait JsonRpcRequest: JsonRpcMessage {
     /// The type of data expected in response.
-    type Response: JrResponsePayload;
+    type Response: JsonRpcResponse;
 }
 
 /// An enum capturing an in-flight request or notification.
@@ -2386,9 +2287,9 @@ pub trait JrRequest: JrMessage {
 /// By default, both are `UntypedMessage` for dynamic dispatch.
 /// The request context's response type matches the request's response type.
 #[derive(Debug)]
-pub enum MessageCx<Req: JrRequest = UntypedMessage, Notif: JrMessage = UntypedMessage> {
+pub enum Dispatch<Req: JsonRpcRequest = UntypedMessage, Notif: JsonRpcMessage = UntypedMessage> {
     /// Incoming request and the context where the response should be sent.
-    Request(Req, JrRequestCx<Req::Response>),
+    Request(Req, Responder<Req::Response>),
 
     /// Incoming notification.
     Notification(Notif),
@@ -2400,34 +2301,34 @@ pub enum MessageCx<Req: JrRequest = UntypedMessage, Notif: JrMessage = UntypedMe
     /// (typically a waiting oneshot channel).
     Response(
         Result<Req::Response, crate::Error>,
-        JrResponseCx<Req::Response>,
+        ResponseRouter<Req::Response>,
     ),
 }
 
-impl<Req: JrRequest, Notif: JrMessage> MessageCx<Req, Notif> {
+impl<Req: JsonRpcRequest, Notif: JsonRpcMessage> Dispatch<Req, Notif> {
     /// Map the request and notification types to new types.
     ///
     /// Note: Response variants are passed through unchanged since they don't
     /// contain a parseable message payload.
     pub fn map<Req1, Notif1>(
         self,
-        map_request: impl FnOnce(Req, JrRequestCx<Req::Response>) -> (Req1, JrRequestCx<Req1::Response>),
+        map_request: impl FnOnce(Req, Responder<Req::Response>) -> (Req1, Responder<Req1::Response>),
         map_notification: impl FnOnce(Notif) -> Notif1,
-    ) -> MessageCx<Req1, Notif1>
+    ) -> Dispatch<Req1, Notif1>
     where
-        Req1: JrRequest<Response = Req::Response>,
-        Notif1: JrMessage,
+        Req1: JsonRpcRequest<Response = Req::Response>,
+        Notif1: JsonRpcMessage,
     {
         match self {
-            MessageCx::Request(request, cx) => {
-                let (new_request, new_cx) = map_request(request, cx);
-                MessageCx::Request(new_request, new_cx)
+            Dispatch::Request(request, responder) => {
+                let (new_request, new_responder) = map_request(request, responder);
+                Dispatch::Request(new_request, new_responder)
             }
-            MessageCx::Notification(notification) => {
+            Dispatch::Notification(notification) => {
                 let new_notification = map_notification(notification);
-                MessageCx::Notification(new_notification)
+                Dispatch::Notification(new_notification)
             }
-            MessageCx::Response(result, cx) => MessageCx::Response(result, cx),
+            Dispatch::Response(result, router) => Dispatch::Response(result, router),
         }
     }
 
@@ -2438,34 +2339,34 @@ impl<Req: JrRequest, Notif: JrMessage> MessageCx<Req, Notif> {
     /// If this message is a notification, the error is sent as a notification.
     ///
     /// If this message is a response, the error is forwarded to the waiting handler.
-    pub fn respond_with_error<Link: JrLink>(
+    pub fn respond_with_error<R: Role>(
         self,
         error: crate::Error,
-        cx: JrConnectionCx<Link>,
+        cx: ConnectionTo<R>,
     ) -> Result<(), crate::Error> {
         match self {
-            MessageCx::Request(_, request_cx) => request_cx.respond_with_error(error),
-            MessageCx::Notification(_) => cx.send_error_notification(error),
-            MessageCx::Response(_, request_cx) => request_cx.respond_with_error(error),
+            Dispatch::Request(_, responder) => responder.respond_with_error(error),
+            Dispatch::Notification(_) => cx.send_error_notification(error),
+            Dispatch::Response(_, responder) => responder.respond_with_error(error),
         }
     }
 
-    /// Convert to a `JrRequestCx` that expects a JSON value
+    /// Convert to a `Responder` that expects a JSON value
     /// and which checks (dynamically) that the JSON value it receives
     /// can be converted to `T`.
     ///
     /// Note: Response variants cannot be erased since their payload is already
     /// parsed. This returns an error for Response variants.
-    pub fn erase_to_json(self) -> Result<MessageCx, crate::Error> {
+    pub fn erase_to_json(self) -> Result<Dispatch, crate::Error> {
         match self {
-            MessageCx::Request(response, request_cx) => Ok(MessageCx::Request(
+            Dispatch::Request(response, responder) => Ok(Dispatch::Request(
                 response.to_untyped_message()?,
-                request_cx.erase_to_json(),
+                responder.erase_to_json(),
             )),
-            MessageCx::Notification(notification) => {
-                Ok(MessageCx::Notification(notification.to_untyped_message()?))
+            Dispatch::Notification(notification) => {
+                Ok(Dispatch::Notification(notification.to_untyped_message()?))
             }
-            MessageCx::Response(_, _) => Err(crate::util::internal_error(
+            Dispatch::Response(_, _) => Err(crate::util::internal_error(
                 "cannot erase Response variant to JSON",
             )),
         }
@@ -2477,9 +2378,9 @@ impl<Req: JrRequest, Notif: JrMessage> MessageCx<Req, Notif> {
     /// This returns an error for Response variants.
     pub fn to_untyped_message(&self) -> Result<UntypedMessage, crate::Error> {
         match self {
-            MessageCx::Request(request, _) => request.to_untyped_message(),
-            MessageCx::Notification(notification) => notification.to_untyped_message(),
-            MessageCx::Response(_, _) => Err(crate::util::internal_error(
+            Dispatch::Request(request, _) => request.to_untyped_message(),
+            Dispatch::Notification(notification) => notification.to_untyped_message(),
+            Dispatch::Response(_, _) => Err(crate::util::internal_error(
                 "Response variant has no untyped message representation",
             )),
         }
@@ -2488,16 +2389,16 @@ impl<Req: JrRequest, Notif: JrMessage> MessageCx<Req, Notif> {
     /// Convert self to an untyped message context.
     ///
     /// Note: Response variants cannot be converted. This returns an error for Response variants.
-    pub fn into_untyped_message_cx(self) -> Result<MessageCx, crate::Error> {
+    pub fn into_untyped_dispatch(self) -> Result<Dispatch, crate::Error> {
         match self {
-            MessageCx::Request(request, request_cx) => Ok(MessageCx::Request(
+            Dispatch::Request(request, responder) => Ok(Dispatch::Request(
                 request.to_untyped_message()?,
-                request_cx.erase_to_json(),
+                responder.erase_to_json(),
             )),
-            MessageCx::Notification(notification) => {
-                Ok(MessageCx::Notification(notification.to_untyped_message()?))
+            Dispatch::Notification(notification) => {
+                Ok(Dispatch::Notification(notification.to_untyped_message()?))
             }
-            MessageCx::Response(_, _) => Err(crate::util::internal_error(
+            Dispatch::Response(_, _) => Err(crate::util::internal_error(
                 "cannot convert Response variant to untyped message context",
             )),
         }
@@ -2506,9 +2407,9 @@ impl<Req: JrRequest, Notif: JrMessage> MessageCx<Req, Notif> {
     /// Returns the request ID if this is a request or response, None if notification.
     pub fn id(&self) -> Option<serde_json::Value> {
         match self {
-            MessageCx::Request(_, cx) => Some(cx.id()),
-            MessageCx::Notification(_) => None,
-            MessageCx::Response(_, cx) => Some(cx.id()),
+            Dispatch::Request(_, cx) => Some(cx.id()),
+            Dispatch::Notification(_) => None,
+            Dispatch::Response(_, cx) => Some(cx.id()),
         }
     }
 
@@ -2518,14 +2419,14 @@ impl<Req: JrRequest, Notif: JrMessage> MessageCx<Req, Notif> {
     /// For responses, this is the method of the original request.
     pub fn method(&self) -> &str {
         match self {
-            MessageCx::Request(msg, _) => msg.method(),
-            MessageCx::Notification(msg) => msg.method(),
-            MessageCx::Response(_, cx) => cx.method(),
+            Dispatch::Request(msg, _) => msg.method(),
+            Dispatch::Notification(msg) => msg.method(),
+            Dispatch::Response(_, cx) => cx.method(),
         }
     }
 }
 
-impl MessageCx {
+impl Dispatch {
     /// Attempts to parse `self` into a typed message context.
     ///
     /// # Returns
@@ -2534,23 +2435,23 @@ impl MessageCx {
     /// * `Ok(Err(self))` if not
     /// * `Err` if has the correct method for the given types but parsing fails
     #[tracing::instrument(skip(self), fields(Request = ?std::any::type_name::<Req>(), Notif = ?std::any::type_name::<Notif>()), level = "trace", ret)]
-    pub(crate) fn into_typed_message_cx<Req: JrRequest, Notif: JrNotification>(
+    pub(crate) fn into_typed_dispatch<Req: JsonRpcRequest, Notif: JsonRpcNotification>(
         self,
-    ) -> Result<Result<MessageCx<Req, Notif>, MessageCx>, crate::Error> {
+    ) -> Result<Result<Dispatch<Req, Notif>, Dispatch>, crate::Error> {
         tracing::debug!(
             message = ?self,
-            "into_typed_message_cx"
+            "into_typed_dispatch"
         );
         match self {
-            MessageCx::Request(message, request_cx) => {
+            Dispatch::Request(message, responder) => {
                 if !Req::matches_method(&message.method) {
                     tracing::trace!("method doesn't match");
-                    Ok(Err(MessageCx::Request(message, request_cx)))
+                    Ok(Err(Dispatch::Request(message, responder)))
                 } else {
                     match Req::parse_message(&message.method, &message.params) {
                         Ok(req) => {
                             tracing::trace!(?req, "parsed ok");
-                            Ok(Ok(MessageCx::Request(req, request_cx.cast())))
+                            Ok(Ok(Dispatch::Request(req, responder.cast())))
                         }
                         Err(err) => {
                             tracing::trace!(?err, "parse error");
@@ -2560,15 +2461,15 @@ impl MessageCx {
                 }
             }
 
-            MessageCx::Notification(message) => {
+            Dispatch::Notification(message) => {
                 if !Notif::matches_method(&message.method) {
                     tracing::trace!("method doesn't match");
-                    Ok(Err(MessageCx::Notification(message)))
+                    Ok(Err(Dispatch::Notification(message)))
                 } else {
                     match Notif::parse_message(&message.method, &message.params) {
                         Ok(notif) => {
                             tracing::trace!(?notif, "parse ok");
-                            Ok(Ok(MessageCx::Notification(notif)))
+                            Ok(Ok(Dispatch::Notification(notif)))
                         }
                         Err(err) => {
                             tracing::trace!(?err, "parse error");
@@ -2578,16 +2479,16 @@ impl MessageCx {
                 }
             }
 
-            MessageCx::Response(result, cx) => {
+            Dispatch::Response(result, cx) => {
                 let method = cx.method();
                 if !Req::matches_method(method) {
                     tracing::trace!("method doesn't match");
-                    Ok(Err(MessageCx::Response(result, cx)))
+                    Ok(Err(Dispatch::Response(result, cx)))
                 } else {
                     // Parse the response result
                     let typed_result = match result {
                         Ok(value) => {
-                            match <Req::Response as JrResponsePayload>::from_value(method, value) {
+                            match <Req::Response as JsonRpcResponse>::from_value(method, value) {
                                 Ok(parsed) => {
                                     tracing::trace!(?parsed, "parse ok");
                                     Ok(parsed)
@@ -2603,7 +2504,7 @@ impl MessageCx {
                             Err(err)
                         }
                     };
-                    Ok(Ok(MessageCx::Response(typed_result, cx.cast())))
+                    Ok(Ok(Dispatch::Response(typed_result, cx.cast())))
                 }
             }
         }
@@ -2648,21 +2549,21 @@ impl MessageCx {
     /// * `Ok(Ok(typed))` if this is a request/notification of the given types
     /// * `Ok(Err(self))` if not
     /// * `Err` if has the correct method for the given types but parsing fails
-    pub fn into_notification<N: JrNotification>(
+    pub fn into_notification<N: JsonRpcNotification>(
         self,
-    ) -> Result<Result<N, MessageCx>, crate::Error> {
+    ) -> Result<Result<N, Dispatch>, crate::Error> {
         match self {
-            MessageCx::Request(..) => Ok(Err(self)),
-            MessageCx::Notification(msg) => {
+            Dispatch::Request(..) => Ok(Err(self)),
+            Dispatch::Notification(msg) => {
                 if !N::matches_method(&msg.method) {
-                    return Ok(Err(MessageCx::Notification(msg)));
+                    return Ok(Err(Dispatch::Notification(msg)));
                 }
                 match N::parse_message(&msg.method, &msg.params) {
                     Ok(n) => Ok(Ok(n)),
                     Err(err) => Err(err),
                 }
             }
-            MessageCx::Response(..) => Ok(Err(self)),
+            Dispatch::Response(..) => Ok(Err(self)),
         }
     }
 
@@ -2673,34 +2574,34 @@ impl MessageCx {
     /// * `Ok(Ok(typed))` if this is a request/notification of the given types
     /// * `Ok(Err(self))` if not
     /// * `Err` if has the correct method for the given types but parsing fails
-    pub fn into_request<Req: JrRequest>(
+    pub fn into_request<Req: JsonRpcRequest>(
         self,
-    ) -> Result<Result<(Req, JrRequestCx<Req::Response>), MessageCx>, crate::Error> {
+    ) -> Result<Result<(Req, Responder<Req::Response>), Dispatch>, crate::Error> {
         match self {
-            MessageCx::Request(msg, request_cx) => {
+            Dispatch::Request(msg, responder) => {
                 if !Req::matches_method(&msg.method) {
-                    return Ok(Err(MessageCx::Request(msg, request_cx)));
+                    return Ok(Err(Dispatch::Request(msg, responder)));
                 }
                 match Req::parse_message(&msg.method, &msg.params) {
-                    Ok(req) => Ok(Ok((req, request_cx.cast()))),
+                    Ok(req) => Ok(Ok((req, responder.cast()))),
                     Err(err) => Err(err),
                 }
             }
-            MessageCx::Notification(..) => Ok(Err(self)),
-            MessageCx::Response(..) => Ok(Err(self)),
+            Dispatch::Notification(..) => Ok(Err(self)),
+            Dispatch::Response(..) => Ok(Err(self)),
         }
     }
 }
 
-impl<M: JrRequest + JrNotification> MessageCx<M, M> {
+impl<M: JsonRpcRequest + JsonRpcNotification> Dispatch<M, M> {
     /// Returns the message payload for requests and notifications.
     ///
     /// Returns `None` for Response variants since they don't contain a message payload.
     pub fn message(&self) -> Option<&M> {
         match self {
-            MessageCx::Request(msg, _) => Some(msg),
-            MessageCx::Notification(msg) => Some(msg),
-            MessageCx::Response(_, _) => None,
+            Dispatch::Request(msg, _) => Some(msg),
+            Dispatch::Notification(msg) => Some(msg),
+            Dispatch::Response(_, _) => None,
         }
     }
 
@@ -2710,13 +2611,13 @@ impl<M: JrRequest + JrNotification> MessageCx<M, M> {
     pub(crate) fn try_map_message(
         self,
         map_message: impl FnOnce(M) -> Result<M, crate::Error>,
-    ) -> Result<MessageCx<M, M>, crate::Error> {
+    ) -> Result<Dispatch<M, M>, crate::Error> {
         match self {
-            MessageCx::Request(request, cx) => Ok(MessageCx::Request(map_message(request)?, cx)),
-            MessageCx::Notification(notification) => {
-                Ok(MessageCx::<M, M>::Notification(map_message(notification)?))
+            Dispatch::Request(request, cx) => Ok(Dispatch::Request(map_message(request)?, cx)),
+            Dispatch::Notification(notification) => {
+                Ok(Dispatch::<M, M>::Notification(map_message(notification)?))
             }
-            MessageCx::Response(result, cx) => Ok(MessageCx::Response(result, cx)),
+            Dispatch::Response(result, cx) => Ok(Dispatch::Response(result, cx)),
         }
     }
 }
@@ -2765,7 +2666,7 @@ impl UntypedMessage {
     }
 }
 
-impl JrMessage for UntypedMessage {
+impl JsonRpcMessage for UntypedMessage {
     fn matches_method(_method: &str) -> bool {
         // UntypedMessage matches any method - it's the untyped fallback
         true
@@ -2784,21 +2685,21 @@ impl JrMessage for UntypedMessage {
     }
 }
 
-impl JrRequest for UntypedMessage {
+impl JsonRpcRequest for UntypedMessage {
     type Response = serde_json::Value;
 }
 
-impl JrNotification for UntypedMessage {}
+impl JsonRpcNotification for UntypedMessage {}
 
 /// Represents a pending response of type `R` from an outgoing request.
 ///
-/// Returned by [`JrConnectionCx::send_request`], this type provides methods for handling
+/// Returned by [`ConnectionTo::send_request`], this type provides methods for handling
 /// the response without blocking the event loop. The API is intentionally designed to make
 /// it difficult to accidentally block.
 ///
 /// # Anti-Footgun Design
 ///
-/// You cannot directly `.await` a `JrResponse`. Instead, you must choose how to handle
+/// You cannot directly `.await` a `SentRequest`. Instead, you must choose how to handle
 /// the response:
 ///
 /// ## Option 1: Schedule a Callback (Safe in Handlers)
@@ -2808,7 +2709,7 @@ impl JrNotification for UntypedMessage {}
 ///
 /// ```no_run
 /// # use sacp_test::*;
-/// # async fn example(cx: sacp::JrConnectionCx<sacp::link::UntypedLink>) -> Result<(), sacp::Error> {
+/// # async fn example(cx: sacp::ConnectionTo<sacp::UntypedRole>) -> Result<(), sacp::Error> {
 /// cx.send_request(MyRequest {})
 ///     .on_receiving_result(async |result| {
 ///         match result {
@@ -2833,7 +2734,7 @@ impl JrNotification for UntypedMessage {}
 ///
 /// ```no_run
 /// # use sacp_test::*;
-/// # async fn example(cx: sacp::JrConnectionCx<sacp::link::UntypedLink>) -> Result<(), sacp::Error> {
+/// # async fn example(cx: sacp::ConnectionTo<sacp::UntypedRole>) -> Result<(), sacp::Error> {
 /// // ✅ Safe: Spawned task runs concurrently
 /// cx.spawn({
 ///     let cx = cx.clone();
@@ -2854,13 +2755,13 @@ impl JrNotification for UntypedMessage {}
 /// # async fn example() -> Result<(), sacp::Error> {
 /// # let connection = mock_connection();
 /// // ❌ NEVER do this in a handler - blocks the event loop!
-/// connection.on_receive_request(async |req: MyRequest, request_cx, cx| {
+/// connection.on_receive_request(async |req: MyRequest, responder, cx| {
 ///     let response = cx.send_request(MyRequest {})
 ///         .block_task()  // This will deadlock!
 ///         .await?;
-///     request_cx.respond(response)
+///     responder.respond(response)
 /// }, sacp::on_receive_request!())
-/// # .serve(sacp_test::MockTransport).await?;
+/// # .connect_to(sacp_test::MockTransport).await?;
 /// # Ok(())
 /// # }
 /// ```
@@ -2870,7 +2771,7 @@ impl JrNotification for UntypedMessage {}
 /// If you block the event loop while waiting for a response, the connection cannot process
 /// the incoming response message, creating a deadlock. This API design prevents that footgun
 /// by making blocking explicit and encouraging non-blocking patterns.
-pub struct JrResponse<T> {
+pub struct SentRequest<T> {
     id: jsonrpcmsg::Id,
     method: String,
     task_tx: TaskTx,
@@ -2878,7 +2779,7 @@ pub struct JrResponse<T> {
     to_result: Box<dyn Fn(serde_json::Value) -> Result<T, crate::Error> + Send>,
 }
 
-impl JrResponse<serde_json::Value> {
+impl SentRequest<serde_json::Value> {
     fn new(
         id: jsonrpcmsg::Id,
         method: String,
@@ -2895,7 +2796,7 @@ impl JrResponse<serde_json::Value> {
     }
 }
 
-impl<T: JrResponsePayload> JrResponse<T> {
+impl<T: JsonRpcResponse> SentRequest<T> {
     /// The id of the outgoing request.
     pub fn id(&self) -> serde_json::Value {
         crate::util::id_to_json(&self.id)
@@ -2910,8 +2811,8 @@ impl<T: JrResponsePayload> JrResponse<T> {
     pub fn map<U>(
         self,
         map_fn: impl Fn(T) -> Result<U, crate::Error> + 'static + Send,
-    ) -> JrResponse<U> {
-        JrResponse {
+    ) -> SentRequest<U> {
+        SentRequest {
             id: self.id,
             method: self.method,
             response_rx: self.response_rx,
@@ -2929,28 +2830,27 @@ impl<T: JrResponsePayload> JrResponse<T> {
     /// # Example: Proxying requests
     ///
     /// ```
-    /// # use sacp::link::UntypedLink;
-    /// # use sacp::{JrConnectionBuilder, JrConnectionCx};
+    /// # use sacp::UntypedRole;
+    /// # use sacp::{Builder, ConnectionTo};
     /// # use sacp_test::*;
-    /// # async fn example(cx: JrConnectionCx<UntypedLink>) -> Result<(), sacp::Error> {
-    /// // Set up backend connection
-    /// let backend = UntypedLink::builder()
-    ///     .on_receive_request(async |req: MyRequest, request_cx, cx| {
-    ///         request_cx.respond(MyResponse { status: "ok".into() })
-    ///     }, sacp::on_receive_request!())
-    ///     .connect_to(MockTransport)?;
+    /// # async fn example(cx: ConnectionTo<UntypedRole>) -> Result<(), sacp::Error> {
+    /// // Set up backend connection builder
+    /// let backend = UntypedRole.builder()
+    ///     .on_receive_request(async |req: MyRequest, responder, cx| {
+    ///         responder.respond(MyResponse { status: "ok".into() })
+    ///     }, sacp::on_receive_request!());
     ///
     /// // Spawn backend and get a context to send to it
-    /// let backend_cx = cx.spawn_connection(backend, |c| Box::pin(c.serve()))?;
+    /// let backend_connection = cx.spawn_connection(backend, MockTransport)?;
     ///
     /// // Set up proxy that forwards requests to backend
-    /// UntypedLink::builder()
+    /// UntypedRole.builder()
     ///     .on_receive_request({
-    ///         let backend_cx = backend_cx.clone();
-    ///         async move |req: MyRequest, request_cx, cx| {
+    ///         let backend_connection = backend_connection.clone();
+    ///         async move |req: MyRequest, responder, cx| {
     ///             // Forward the request to backend and proxy the response back
-    ///             backend_cx.send_request(req)
-    ///                 .forward_to_request_cx(request_cx)?;
+    ///             backend_connection.send_request(req)
+    ///                 .forward_response_to(responder)?;
     ///             Ok(())
     ///         }
     ///     }, sacp::on_receive_request!());
@@ -2972,17 +2872,17 @@ impl<T: JrResponsePayload> JrResponse<T> {
     ///
     /// This is equivalent to calling `on_receiving_result` and manually forwarding
     /// the result, but more concise.
-    pub fn forward_to_request_cx(self, request_cx: JrRequestCx<T>) -> Result<(), crate::Error>
+    pub fn forward_response_to(self, responder: Responder<T>) -> Result<(), crate::Error>
     where
         T: Send,
     {
-        self.on_receiving_result(async move |result| request_cx.respond_with_result(result))
+        self.on_receiving_result(async move |result| responder.respond_with_result(result))
     }
 
     /// Block the current task until the response is received.
     ///
     /// **Warning:** This method blocks the current async task. It is **only safe** to use
-    /// in spawned tasks created with [`JrConnectionCx::spawn`]. Using it directly in a
+    /// in spawned tasks created with [`ConnectionTo::spawn`]. Using it directly in a
     /// handler callback will deadlock the connection.
     ///
     /// # Safe Usage (in spawned tasks)
@@ -2991,13 +2891,13 @@ impl<T: JrResponsePayload> JrResponse<T> {
     /// # use sacp_test::*;
     /// # async fn example() -> Result<(), sacp::Error> {
     /// # let connection = mock_connection();
-    /// connection.on_receive_request(async |req: MyRequest, request_cx, cx| {
+    /// connection.on_receive_request(async |req: MyRequest, responder, cx| {
     ///     // Spawn a task to handle the request
     ///     cx.spawn({
-    ///         let connection_cx = cx.clone();
+    ///         let connection = cx.clone();
     ///         async move {
     ///             // Safe: We're in a spawned task, not blocking the event loop
-    ///             let response = connection_cx.send_request(OtherRequest {})
+    ///             let response = connection.send_request(OtherRequest {})
     ///                 .block_task()
     ///                 .await?;
     ///
@@ -3007,9 +2907,9 @@ impl<T: JrResponsePayload> JrResponse<T> {
     ///     })?;
     ///
     ///     // Respond immediately
-    ///     request_cx.respond(MyResponse { status: "ok".into() })
+    ///     responder.respond(MyResponse { status: "ok".into() })
     /// }, sacp::on_receive_request!())
-    /// # .serve(sacp_test::MockTransport).await?;
+    /// # .connect_to(sacp_test::MockTransport).await?;
     /// # Ok(())
     /// # }
     /// ```
@@ -3020,15 +2920,15 @@ impl<T: JrResponsePayload> JrResponse<T> {
     /// # use sacp_test::*;
     /// # async fn example() -> Result<(), sacp::Error> {
     /// # let connection = mock_connection();
-    /// connection.on_receive_request(async |req: MyRequest, request_cx, cx| {
+    /// connection.on_receive_request(async |req: MyRequest, responder, cx| {
     ///     // ❌ DEADLOCK: Handler blocks event loop, which can't process the response
     ///     let response = cx.send_request(OtherRequest {})
     ///         .block_task()
     ///         .await?;
     ///
-    ///     request_cx.respond(MyResponse { status: response.value })
+    ///     responder.respond(MyResponse { status: response.value })
     /// }, sacp::on_receive_request!())
-    /// # .serve(sacp_test::MockTransport).await?;
+    /// # .connect_to(sacp_test::MockTransport).await?;
     /// # Ok(())
     /// # }
     /// ```
@@ -3036,7 +2936,7 @@ impl<T: JrResponsePayload> JrResponse<T> {
     /// # When to Use
     ///
     /// Use this method when:
-    /// - You're in a spawned task (via [`JrConnectionCx::spawn`])
+    /// - You're in a spawned task (via [`ConnectionTo::spawn`])
     /// - You need the response value to proceed with your logic
     /// - Linear control flow is more natural than callbacks
     ///
@@ -3085,7 +2985,7 @@ impl<T: JrResponsePayload> JrResponse<T> {
     /// # Behavior
     ///
     /// - If the response is `Ok(value)`, your task receives the value and the request context
-    /// - If the response is `Err(error)`, the error is automatically sent to `request_cx`
+    /// - If the response is `Err(error)`, the error is automatically sent to `responder`
     ///   and your task is not called
     ///
     /// # Example: Chaining requests
@@ -3094,22 +2994,22 @@ impl<T: JrResponsePayload> JrResponse<T> {
     /// # use sacp_test::*;
     /// # async fn example() -> Result<(), sacp::Error> {
     /// # let connection = mock_connection();
-    /// connection.on_receive_request(async |req: ValidateRequest, request_cx, cx| {
+    /// connection.on_receive_request(async |req: ValidateRequest, responder, cx| {
     ///     // Send initial request
     ///     cx.send_request(ValidateRequest { data: req.data.clone() })
-    ///         .on_receiving_ok_result(request_cx, async |validation, request_cx| {
+    ///         .on_receiving_ok_result(responder, async |validation, responder| {
     ///             // Only runs if validation succeeded
     ///             if validation.is_valid {
     ///                 // Respond to original request
-    ///                 request_cx.respond(ValidateResponse { is_valid: true, error: None })
+    ///                 responder.respond(ValidateResponse { is_valid: true, error: None })
     ///             } else {
-    ///                 request_cx.respond_with_error(sacp::util::internal_error("validation failed"))
+    ///                 responder.respond_with_error(sacp::util::internal_error("validation failed"))
     ///             }
     ///         })?;
     ///
     ///     Ok(())
     /// }, sacp::on_receive_request!())
-    /// # .serve(sacp_test::MockTransport).await?;
+    /// # .connect_to(sacp_test::MockTransport).await?;
     /// # Ok(())
     /// # }
     /// ```
@@ -3131,16 +3031,16 @@ impl<T: JrResponsePayload> JrResponse<T> {
     #[track_caller]
     pub fn on_receiving_ok_result<F>(
         self,
-        request_cx: JrRequestCx<T>,
-        task: impl FnOnce(T, JrRequestCx<T>) -> F + 'static + Send,
+        responder: Responder<T>,
+        task: impl FnOnce(T, Responder<T>) -> F + 'static + Send,
     ) -> Result<(), crate::Error>
     where
         F: Future<Output = Result<(), crate::Error>> + 'static + Send,
         T: Send,
     {
         self.on_receiving_result(async move |result| match result {
-            Ok(value) => task(value, request_cx).await,
-            Err(err) => request_cx.respond_with_error(err),
+            Ok(value) => task(value, responder).await,
+            Err(err) => responder.respond_with_error(err),
         })
     }
 
@@ -3155,17 +3055,17 @@ impl<T: JrResponsePayload> JrResponse<T> {
     /// # use sacp_test::*;
     /// # async fn example() -> Result<(), sacp::Error> {
     /// # let connection = mock_connection();
-    /// connection.on_receive_request(async |req: MyRequest, request_cx, cx| {
+    /// connection.on_receive_request(async |req: MyRequest, responder, cx| {
     ///     // Send a request and schedule a callback for the response
     ///     cx.send_request(QueryRequest { id: 22 })
     ///         .on_receiving_result({
-    ///             let connection_cx = cx.clone();
+    ///             let connection = cx.clone();
     ///             async move |result| {
     ///                 match result {
     ///                     Ok(response) => {
     ///                         println!("Got response: {:?}", response);
     ///                         // Can send more messages here
-    ///                         connection_cx.send_notification(QueryComplete {})?;
+    ///                         connection.send_notification(QueryComplete {})?;
     ///                         Ok(())
     ///                 }
     ///                     Err(error) => {
@@ -3177,9 +3077,9 @@ impl<T: JrResponsePayload> JrResponse<T> {
     ///         })?;
     ///
     ///     // Handler continues immediately without waiting
-    ///     request_cx.respond(MyResponse { status: "processing".into() })
+    ///     responder.respond(MyResponse { status: "processing".into() })
     /// }, sacp::on_receive_request!())
-    /// # .serve(sacp_test::MockTransport).await?;
+    /// # .connect_to(sacp_test::MockTransport).await?;
     /// # Ok(())
     /// # }
     /// ```
@@ -3260,7 +3160,7 @@ impl<T: JrResponsePayload> JrResponse<T> {
 
 /// A component that communicates over line streams.
 ///
-/// `Lines` implements the [`Component`] trait for any pair of line-based streams
+/// `Lines` implements the [`ConnectTo`] trait for any pair of line-based streams
 /// (a `Stream<Item = io::Result<String>>` for incoming and a `Sink<String>` for outgoing),
 /// handling serialization of JSON-RPC messages to/from newline-delimited JSON.
 ///
@@ -3279,7 +3179,7 @@ impl<T: JrResponsePayload> JrResponse<T> {
 /// Most users should use [`ByteStreams`] instead, which provides a simpler interface
 /// for byte-based I/O.
 ///
-/// [`Component`]: crate::Component
+/// [`ConnectTo`]: crate::ConnectTo
 pub struct Lines<OutgoingSink, IncomingStream> {
     /// Outgoing line sink (where we write serialized JSON-RPC messages)
     pub outgoing: OutgoingSink,
@@ -3298,20 +3198,20 @@ where
     }
 }
 
-impl<OutgoingSink, IncomingStream, L: JrLink> Component<L> for Lines<OutgoingSink, IncomingStream>
+impl<OutgoingSink, IncomingStream, R: Role> ConnectTo<R> for Lines<OutgoingSink, IncomingStream>
 where
     OutgoingSink: futures::Sink<String, Error = std::io::Error> + Send + 'static,
     IncomingStream: futures::Stream<Item = std::io::Result<String>> + Send + 'static,
 {
-    async fn serve(self, client: impl Component<L::ConnectsTo>) -> Result<(), crate::Error> {
-        let (channel, serve_self) = Component::<L>::into_server(self);
-        match futures::future::select(Box::pin(client.serve(channel)), serve_self).await {
+    async fn connect_to(self, client: impl ConnectTo<R::Counterpart>) -> Result<(), crate::Error> {
+        let (channel, serve_self) = ConnectTo::<R>::into_channel_and_future(self);
+        match futures::future::select(Box::pin(client.connect_to(channel)), serve_self).await {
             Either::Left((result, _)) => result,
             Either::Right((result, _)) => result,
         }
     }
 
-    fn into_server(self) -> (Channel, BoxFuture<'static, Result<(), crate::Error>>) {
+    fn into_channel_and_future(self) -> (Channel, BoxFuture<'static, Result<(), crate::Error>>) {
         let Self { outgoing, incoming } = self;
 
         // Create a channel pair for the client to use
@@ -3337,7 +3237,7 @@ where
 
 /// A component that communicates over byte streams (stdin/stdout, sockets, pipes, etc.).
 ///
-/// `ByteStreams` implements the [`Component`] trait for any pair of `AsyncRead` and `AsyncWrite`
+/// `ByteStreams` implements the [`ConnectTo`] trait for any pair of `AsyncRead` and `AsyncWrite`
 /// streams, handling serialization of JSON-RPC messages to/from newline-delimited JSON.
 /// This is the standard way to communicate with external processes or network connections.
 ///
@@ -3353,7 +3253,7 @@ where
 /// Connecting to an agent via stdio:
 ///
 /// ```no_run
-/// use sacp::link::UntypedLink;
+/// use sacp::UntypedRole;
 /// # use sacp::{ByteStreams};
 /// use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
 ///
@@ -3364,15 +3264,15 @@ where
 /// );
 ///
 /// // Use as a component in a connection
-/// sacp::link::UntypedLink::builder()
+/// sacp::UntypedRole.builder()
 ///     .name("my-client")
-///     .serve(component)
+///     .connect_to(component)
 ///     .await?;
 /// # Ok(())
 /// # }
 /// ```
 ///
-/// [`Component`]: crate::Component
+/// [`ConnectTo`]: crate::ConnectTo
 pub struct ByteStreams<OB, IB> {
     /// Outgoing byte stream (where we write serialized messages)
     pub outgoing: OB,
@@ -3391,20 +3291,20 @@ where
     }
 }
 
-impl<OB, IB, L: JrLink> Component<L> for ByteStreams<OB, IB>
+impl<OB, IB, R: Role> ConnectTo<R> for ByteStreams<OB, IB>
 where
     OB: AsyncWrite + Send + 'static,
     IB: AsyncRead + Send + 'static,
 {
-    async fn serve(self, client: impl Component<L::ConnectsTo>) -> Result<(), crate::Error> {
-        let (channel, serve_self) = Component::<L>::into_server(self);
-        match futures::future::select(pin!(client.serve(channel)), serve_self).await {
+    async fn connect_to(self, client: impl ConnectTo<R::Counterpart>) -> Result<(), crate::Error> {
+        let (channel, serve_self) = ConnectTo::<R>::into_channel_and_future(self);
+        match futures::future::select(pin!(client.connect_to(channel)), serve_self).await {
             Either::Left((result, _)) => result,
             Either::Right((result, _)) => result,
         }
     }
 
-    fn into_server(self) -> (Channel, BoxFuture<'static, Result<(), crate::Error>>) {
+    fn into_channel_and_future(self) -> (Channel, BoxFuture<'static, Result<(), crate::Error>>) {
         use futures::AsyncBufReadExt;
         use futures::AsyncWriteExt;
         use futures::io::BufReader;
@@ -3425,7 +3325,7 @@ where
             });
 
         // Delegate to Lines component
-        Component::<L>::into_server(Lines::new(outgoing_sink, incoming_lines))
+        ConnectTo::<R>::into_channel_and_future(Lines::new(outgoing_sink, incoming_lines))
     }
 }
 
@@ -3439,16 +3339,16 @@ where
 /// # Example
 ///
 /// ```no_run
-/// # use sacp::link::UntypedLink;
-/// # use sacp::{Channel, JrConnectionBuilder};
+/// # use sacp::UntypedRole;
+/// # use sacp::{Channel, Builder};
 /// # async fn example() -> Result<(), sacp::Error> {
 /// // Create a pair of connected channels
 /// let (channel_a, channel_b) = Channel::duplex();
 ///
 /// // Each channel can be used by a different component
-/// UntypedLink::builder()
+/// UntypedRole.builder()
 ///     .name("connection-a")
-///     .serve(channel_a)
+///     .connect_to(channel_a)
 ///     .await?;
 /// # Ok(())
 /// # }
@@ -3496,9 +3396,9 @@ impl Channel {
     }
 }
 
-impl<L: JrLink> Component<L> for Channel {
-    async fn serve(self, client: impl Component<L::ConnectsTo>) -> Result<(), crate::Error> {
-        let (client_channel, client_serve) = client.into_server();
+impl<R: Role> ConnectTo<R> for Channel {
+    async fn connect_to(self, client: impl ConnectTo<R::Counterpart>) -> Result<(), crate::Error> {
+        let (client_channel, client_serve) = client.into_channel_and_future();
 
         match futures::try_join!(
             Channel {
@@ -3518,7 +3418,7 @@ impl<L: JrLink> Component<L> for Channel {
         }
     }
 
-    fn into_server(self) -> (Channel, BoxFuture<'static, Result<(), crate::Error>>) {
+    fn into_channel_and_future(self) -> (Channel, BoxFuture<'static, Result<(), crate::Error>>) {
         (self, Box::pin(future::ready(Ok(()))))
     }
 }

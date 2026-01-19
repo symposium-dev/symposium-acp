@@ -2,21 +2,21 @@
 
 [Introduction](./introduction.md)
 
-# User Guide
+# Core Library (sacp)
 
-- [Architecture Overview](./architecture.md)
+- [Design Overview](./sacp-design.md)
 - [Protocol Reference](./protocol.md)
-- [Building a Proxy](./building-proxy.md)
-- [Building an Agent](./building-agent.md)
+
+# Conductor (sacp-conductor)
+
+- [Conductor Design](./conductor.md)
+- [MCP Bridge](./mcp-bridge.md)
 
 # Reference
 
-- [SACP RFD](./proxying-acp.md)
-- [Component Architecture](./pacp-components.md)
-- [Conductor Implementation](./conductor.md)
-- [MCP Bridge](./mcp-bridge.md)
+- [v10 to v11 Upgrade Guide](./v10_to_v11_upgrade.md)
+- [P/ACP Specification](./proxying-acp.md)
+
+# Archive
+
 - [Transport Architecture](./transport-architecture.md)
-
-# Design
-
-- [Trace Viewer](./trace-viewer.md)

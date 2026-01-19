@@ -1,31 +1,31 @@
-//! Establishing connections using link types and connection builders.
+//! Establishing connections using role types and connection builders.
 //!
 //! To communicate over ACP, you need to establish a connection. This involves
-//! choosing a **link type** that matches your role and using a **connection builder**
+//! choosing a **role type** that matches your role and using a **connection builder**
 //! to configure and run the connection.
 //!
-//! # Choosing a Link Type
+//! # Choosing a Role Type
 //!
-//! Your link type determines what messages you can send and who you can send them to.
+//! Your role type determines what messages you can send and who you can send them to.
 //! Choose based on what you're building:
 //!
-//! | You are building... | Use this link type |
+//! | You are building... | Use this role type |
 //! |---------------------|-------------------|
-//! | A client that talks to an agent | [`ClientToAgent`] |
-//! | An agent that responds to clients | [`AgentToClient`] |
-//! | A proxy in a conductor chain | [`ProxyToConductor`] |
+//! | A client that talks to an agent | [`Client`] |
+//! | An agent that responds to clients | [`Agent`] |
+//! | A proxy in a conductor chain | [`Proxy`] |
 //!
 //! # The Connection Builder Pattern
 //!
-//! Every link type has a `builder()` method that returns a connection builder.
+//! Every role type has a `builder()` method that returns a connection builder.
 //! The builder lets you configure handlers, then connect to a transport:
 //!
 //! ```
-//! # use sacp::{ClientToAgent, AgentToClient, Component};
-//! # async fn example(transport: impl Component<AgentToClient>) -> Result<(), sacp::Error> {
-//! ClientToAgent::builder()
+//! # use sacp::{Client, Agent, ConnectTo};
+//! # async fn example(transport: impl ConnectTo<Client>) -> Result<(), sacp::Error> {
+//! Client.builder()
 //!     .name("my-client")
-//!     .run_until(transport, async |cx| {
+//!     .connect_with(transport, async |cx| {
 //!         // Use `cx` to send requests and handle responses
 //!         Ok(())
 //!     })
@@ -36,15 +36,15 @@
 //!
 //! # The Connection Context
 //!
-//! Inside `run_until`, you receive a [`JrConnectionCx`] (connection context) that
+//! Inside `connect_with`, you receive a [`ConnectionTo`] (connection context) that
 //! lets you interact with the remote peer:
 //!
 //! ```
-//! # use sacp::{ClientToAgent, AgentToClient, Component};
+//! # use sacp::{Client, Agent, ConnectTo};
 //! # use sacp::schema::{InitializeRequest, ProtocolVersion};
 //! # use sacp_test::StatusUpdate;
-//! # async fn example(transport: impl Component<AgentToClient>) -> Result<(), sacp::Error> {
-//! # ClientToAgent::builder().run_until(transport, async |cx| {
+//! # async fn example(transport: impl ConnectTo<Client>) -> Result<(), sacp::Error> {
+//! # Client.builder().connect_with(transport, async |cx| {
 //! // Send a request and wait for the response
 //! let response = cx.send_request(InitializeRequest::new(ProtocolVersion::LATEST))
 //!     .block_task()
@@ -60,7 +60,7 @@
 //!
 //! # Sending Requests
 //!
-//! When you call `send_request()`, you get back a [`JrResponse`] that represents
+//! When you call `send_request()`, you get back a [`SentRequest`] that represents
 //! the pending response. You have two main ways to handle it:
 //!
 //! ## Option 1: Block and wait
@@ -68,10 +68,10 @@
 //! Use `block_task()` when you need the response before continuing:
 //!
 //! ```
-//! # use sacp::{ClientToAgent, AgentToClient, Component};
+//! # use sacp::{Client, Agent, ConnectTo};
 //! # use sacp_test::MyRequest;
-//! # async fn example(transport: impl Component<AgentToClient>) -> Result<(), sacp::Error> {
-//! # ClientToAgent::builder().run_until(transport, async |cx| {
+//! # async fn example(transport: impl ConnectTo<Client>) -> Result<(), sacp::Error> {
+//! # Client.builder().connect_with(transport, async |cx| {
 //! let response = cx.send_request(MyRequest {})
 //!     .block_task()
 //!     .await?;
@@ -87,10 +87,10 @@
 //! Use `on_receiving_result()` when you want to handle the response asynchronously:
 //!
 //! ```
-//! # use sacp::{ClientToAgent, AgentToClient, Component};
+//! # use sacp::{Client, Agent, ConnectTo};
 //! # use sacp_test::MyRequest;
-//! # async fn example(transport: impl Component<AgentToClient>) -> Result<(), sacp::Error> {
-//! # ClientToAgent::builder().run_until(transport, async |cx| {
+//! # async fn example(transport: impl ConnectTo<Client>) -> Result<(), sacp::Error> {
+//! # Client.builder().connect_with(transport, async |cx| {
 //! cx.send_request(MyRequest {})
 //!     .on_receiving_result(async |result| {
 //!         match result {
@@ -113,8 +113,8 @@
 //! - [Sessions](super::sessions) - Create multi-turn conversations
 //! - [Callbacks](super::callbacks) - Handle incoming requests from the remote peer
 //!
-//! [`ClientToAgent`]: crate::ClientToAgent
-//! [`AgentToClient`]: crate::AgentToClient
-//! [`ProxyToConductor`]: crate::ProxyToConductor
-//! [`JrConnectionCx`]: crate::JrConnectionCx
-//! [`JrResponse`]: crate::JrResponse
+//! [`Client`]: crate::Client
+//! [`Agent`]: crate::Agent
+//! [`Proxy`]: crate::Proxy
+//! [`ConnectionTo`]: crate::ConnectionTo
+//! [`SentRequest`]: crate::SentRequest

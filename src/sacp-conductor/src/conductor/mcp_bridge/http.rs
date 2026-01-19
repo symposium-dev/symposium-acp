@@ -9,7 +9,7 @@ use futures::{SinkExt, StreamExt as _, channel::mpsc, future::Either, stream::St
 use futures_concurrency::future::FutureExt as _;
 use futures_concurrency::stream::StreamExt as _;
 use fxhash::FxHashMap;
-use sacp::{BoxFuture, Channel, Component, jsonrpcmsg::Message};
+use sacp::{BoxFuture, Channel, ConnectTo, jsonrpcmsg::Message, role::mcp};
 use std::{collections::VecDeque, pin::pin, sync::Arc};
 use tokio::net::TcpListener;
 
@@ -58,16 +58,16 @@ impl HttpMcpBridge {
     }
 }
 
-impl<L: sacp::link::JrLink> sacp::Component<L> for HttpMcpBridge {
-    async fn serve(self, client: impl Component<L::ConnectsTo>) -> Result<(), sacp::Error> {
-        let (channel, serve_self) = Component::<L>::into_server(self);
-        match futures::future::select(pin!(client.serve(channel)), serve_self).await {
+impl ConnectTo<mcp::Client> for HttpMcpBridge {
+    async fn connect_to(self, client: impl ConnectTo<mcp::Server>) -> Result<(), sacp::Error> {
+        let (channel, serve_self) = self.into_channel_and_future();
+        match futures::future::select(pin!(client.connect_to(channel)), serve_self).await {
             Either::Left((result, _)) => result,
             Either::Right((result, _)) => result,
         }
     }
 
-    fn into_server(self) -> (Channel, BoxFuture<'static, Result<(), sacp::Error>>)
+    fn into_channel_and_future(self) -> (Channel, BoxFuture<'static, Result<(), sacp::Error>>)
     where
         Self: Sized,
     {

@@ -18,7 +18,7 @@ The most common use case is connecting to an existing ACP agent as a client:
 use sacp::ClientToAgent;
 use sacp::schema::{InitializeRequest, VERSION as PROTOCOL_VERSION};
 
-ClientToAgent::builder()
+Client.builder()
     .name("my-client")
     .run_until(transport, async |cx| {
         // Initialize the connection

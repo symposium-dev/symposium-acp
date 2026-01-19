@@ -1,7 +1,9 @@
-use sacp::link::UntypedLink;
+use sacp::Role;
+use sacp::role::UntypedRole;
+use sacp::util::MatchDispatch;
 use sacp::{
-    Component, Handled, JrConnectionCx, JrMessage, JrMessageHandler, JrRequest, JrRequestCx,
-    JrResponsePayload, MessageCx, util::MatchMessageFrom,
+    ConnectionTo, HandleDispatchFrom, Handled, JsonRpcMessage, JsonRpcRequest, JsonRpcResponse,
+    Dispatch, Responder, ConnectTo, util::MatchDispatchFrom,
 };
 use serde::{Deserialize, Serialize};
 
@@ -10,7 +12,7 @@ struct EchoRequestResponse {
     text: Vec<String>,
 }
 
-impl JrMessage for EchoRequestResponse {
+impl JsonRpcMessage for EchoRequestResponse {
     fn matches_method(method: &str) -> bool {
         method == "echo"
     }
@@ -27,14 +29,14 @@ impl JrMessage for EchoRequestResponse {
     }
 
     fn parse_message(method: &str, params: &impl serde::Serialize) -> Result<Self, sacp::Error> {
-        if !<Self as JrMessage>::matches_method(method) {
+        if !<Self as JsonRpcMessage>::matches_method(method) {
             return Err(sacp::Error::method_not_found());
         }
         sacp::util::json_cast(params)
     }
 }
 
-impl JrResponsePayload for EchoRequestResponse {
+impl JsonRpcResponse for EchoRequestResponse {
     fn into_json(self, _method: &str) -> Result<serde_json::Value, sacp::Error> {
         sacp::util::json_cast(self)
     }
@@ -44,23 +46,21 @@ impl JrResponsePayload for EchoRequestResponse {
     }
 }
 
-impl JrRequest for EchoRequestResponse {
+impl JsonRpcRequest for EchoRequestResponse {
     type Response = EchoRequestResponse;
 }
 
 struct EchoHandler;
 
-impl JrMessageHandler for EchoHandler {
-    type Link = UntypedLink;
-
-    async fn handle_message(
+impl<Counterpart: Role> HandleDispatchFrom<Counterpart> for EchoHandler {
+    async fn handle_dispatch_from(
         &mut self,
-        message: MessageCx,
-        cx: JrConnectionCx<Self::Link>,
-    ) -> Result<Handled<MessageCx>, sacp::Error> {
-        MatchMessageFrom::new(message, &cx)
-            .if_request(async move |request: EchoRequestResponse, request_cx| {
-                request_cx.respond(request)
+        message: Dispatch,
+        _connection: ConnectionTo<Counterpart>,
+    ) -> Result<Handled<Dispatch>, sacp::Error> {
+        MatchDispatch::new(message)
+            .if_request(async move |request: EchoRequestResponse, responder| {
+                responder.respond(request)
             })
             .await
             .done()
@@ -74,18 +74,18 @@ impl JrMessageHandler for EchoHandler {
 #[tokio::test]
 async fn modify_message_en_route() -> Result<(), sacp::Error> {
     // Demonstrate a case where we modify a message
-    // using a `JrMessageHandler` invoked from `MatchMessage`
+    // using a `HandleDispatchFrom` invoked from `MatchDispatch`
 
     struct TestComponent;
 
-    impl Component<UntypedLink> for TestComponent {
-        async fn serve(self, client: impl Component<UntypedLink>) -> Result<(), sacp::Error> {
-            UntypedLink::builder()
+    impl ConnectTo<UntypedRole> for TestComponent {
+        async fn connect_to(self, client: impl ConnectTo<UntypedRole>) -> Result<(), sacp::Error> {
+            UntypedRole.builder()
                 .with_handler(PushHandler {
                     message: "b".to_string(),
                 })
                 .with_handler(EchoHandler)
-                .serve(client)
+                .connect_to(client)
                 .await
         }
     }
@@ -94,19 +94,17 @@ async fn modify_message_en_route() -> Result<(), sacp::Error> {
         message: String,
     }
 
-    impl JrMessageHandler for PushHandler {
-        type Link = UntypedLink;
-
-        async fn handle_message(
+    impl HandleDispatchFrom<UntypedRole> for PushHandler {
+        async fn handle_dispatch_from(
             &mut self,
-            message: MessageCx,
-            cx: JrConnectionCx<Self::Link>,
-        ) -> Result<Handled<MessageCx>, sacp::Error> {
-            MatchMessageFrom::new(message, &cx)
-                .if_request(async move |mut request: EchoRequestResponse, request_cx| {
+            message: Dispatch,
+            cx: ConnectionTo<UntypedRole>,
+        ) -> Result<Handled<Dispatch>, sacp::Error> {
+            MatchDispatchFrom::new(message, &cx)
+                .if_request(async move |mut request: EchoRequestResponse, responder| {
                     request.text.push(self.message.clone());
                     Ok(Handled::No {
-                        message: (request, request_cx),
+                        message: (request, responder),
                         retry: false,
                     })
                 })
@@ -119,9 +117,8 @@ async fn modify_message_en_route() -> Result<(), sacp::Error> {
         }
     }
 
-    UntypedLink::builder()
-        .connect_to(TestComponent)?
-        .run_until(async |cx| {
+    UntypedRole.builder()
+        .connect_with(TestComponent, async |cx| {
             let result = cx
                 .send_request(EchoRequestResponse {
                     text: vec!["a".to_string()],
@@ -149,30 +146,29 @@ async fn modify_message_en_route_inline() -> Result<(), sacp::Error> {
 
     struct TestComponent;
 
-    impl Component<UntypedLink> for TestComponent {
-        async fn serve(self, client: impl Component<UntypedLink>) -> Result<(), sacp::Error> {
-            UntypedLink::builder()
+    impl ConnectTo<UntypedRole> for TestComponent {
+        async fn connect_to(self, client: impl ConnectTo<UntypedRole>) -> Result<(), sacp::Error> {
+            UntypedRole.builder()
                 .on_receive_request(
                     async move |mut request: EchoRequestResponse,
-                                request_cx: JrRequestCx<EchoRequestResponse>,
-                                _connection_cx: JrConnectionCx<UntypedLink>| {
+                                responder: Responder<EchoRequestResponse>,
+                                _connection: ConnectionTo<UntypedRole>| {
                         request.text.push("b".to_string());
                         Ok(Handled::No {
-                            message: (request, request_cx),
+                            message: (request, responder),
                             retry: false,
                         })
                     },
                     sacp::on_receive_request!(),
                 )
                 .with_handler(EchoHandler)
-                .serve(client)
+                .connect_to(client)
                 .await
         }
     }
 
-    UntypedLink::builder()
-        .connect_to(TestComponent)?
-        .run_until(async |cx| {
+    UntypedRole.builder()
+        .connect_with(TestComponent, async |cx| {
             let result = cx
                 .send_request(EchoRequestResponse {
                     text: vec!["a".to_string()],
@@ -201,38 +197,37 @@ async fn modify_message_and_stop() -> Result<(), sacp::Error> {
 
     struct TestComponent;
 
-    impl Component<UntypedLink> for TestComponent {
-        async fn serve(self, client: impl Component<UntypedLink>) -> Result<(), sacp::Error> {
-            UntypedLink::builder()
+    impl ConnectTo<UntypedRole> for TestComponent {
+        async fn connect_to(self, client: impl ConnectTo<UntypedRole>) -> Result<(), sacp::Error> {
+            UntypedRole.builder()
                 .on_receive_request(
                     async move |request: EchoRequestResponse,
-                                request_cx: JrRequestCx<EchoRequestResponse>,
-                                _connection_cx: JrConnectionCx<UntypedLink>| {
-                        request_cx.respond(request)
+                                responder: Responder<EchoRequestResponse>,
+                                _connection: ConnectionTo<UntypedRole>| {
+                        responder.respond(request)
                     },
                     sacp::on_receive_request!(),
                 )
                 .on_receive_request(
                     async move |mut request: EchoRequestResponse,
-                                request_cx: JrRequestCx<EchoRequestResponse>,
-                                _connection_cx: JrConnectionCx<UntypedLink>| {
+                                responder: Responder<EchoRequestResponse>,
+                                _connection: ConnectionTo<UntypedRole>| {
                         request.text.push("b".to_string());
                         Ok(Handled::No {
-                            message: (request, request_cx),
+                            message: (request, responder),
                             retry: false,
                         })
                     },
                     sacp::on_receive_request!(),
                 )
                 .with_handler(EchoHandler)
-                .serve(client)
+                .connect_to(client)
                 .await
         }
     }
 
-    UntypedLink::builder()
-        .connect_to(TestComponent)?
-        .run_until(async |cx| {
+    UntypedRole.builder()
+        .connect_with(TestComponent, async |cx| {
             let result = cx
                 .send_request(EchoRequestResponse {
                     text: vec!["a".to_string()],

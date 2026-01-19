@@ -8,23 +8,24 @@ use futures_concurrency::stream::StreamExt as _;
 use fxhash::FxHashMap;
 use uuid::Uuid;
 
-use crate::MessageCx;
+use crate::Dispatch;
+use crate::RoleId;
 use crate::UntypedMessage;
-use crate::jsonrpc::JrConnectionCx;
-use crate::jsonrpc::JrMessageHandler;
-use crate::jsonrpc::JrRequestCx;
-use crate::jsonrpc::JrResponseCx;
+use crate::jsonrpc::ConnectionTo;
+use crate::jsonrpc::HandleDispatchFrom;
 use crate::jsonrpc::ReplyMessage;
-use crate::jsonrpc::dynamic_handler::DynamicHandler;
+use crate::jsonrpc::Responder;
+use crate::jsonrpc::ResponseRouter;
+use crate::jsonrpc::dynamic_handler::DynHandleDispatchFrom;
 use crate::jsonrpc::dynamic_handler::DynamicHandlerMessage;
-use crate::link::JrLink;
-use crate::peer::PeerId;
+
+use crate::role::Role;
 
 use super::Handled;
 
 struct PendingReply {
     method: String,
-    peer_id: PeerId,
+    role_id: RoleId,
     sender: oneshot::Sender<crate::jsonrpc::ResponsePayload>,
 }
 
@@ -37,21 +38,25 @@ struct PendingReply {
 /// - Manages reply subscriptions from outgoing requests
 ///
 /// This is the protocol layer - it has no knowledge of how messages arrived.
-pub(super) async fn incoming_protocol_actor<Link: JrLink>(
-    json_rpc_cx: &JrConnectionCx<Link>,
+///
+/// The type parameter `MyRole` is the role of this endpoint (e.g., `Agent`).
+/// Messages are received from `MyRole::Counterpart` (e.g., `Client`).
+pub(super) async fn incoming_protocol_actor<Counterpart: Role>(
+    counterpart: Counterpart,
+    connection: &ConnectionTo<Counterpart>,
     transport_rx: mpsc::UnboundedReceiver<Result<jsonrpcmsg::Message, crate::Error>>,
-    dynamic_handler_rx: mpsc::UnboundedReceiver<DynamicHandlerMessage<Link>>,
+    dynamic_handler_rx: mpsc::UnboundedReceiver<DynamicHandlerMessage<Counterpart>>,
     reply_rx: mpsc::UnboundedReceiver<ReplyMessage>,
-    mut handler: impl JrMessageHandler<Link = Link>,
+    mut handler: impl HandleDispatchFrom<Counterpart>,
 ) -> Result<(), crate::Error> {
     let mut my_rx = transport_rx
         .map(IncomingProtocolMsg::Transport)
         .merge(dynamic_handler_rx.map(IncomingProtocolMsg::DynamicHandler))
         .merge(reply_rx.map(IncomingProtocolMsg::Reply));
 
-    let mut dynamic_handlers: FxHashMap<Uuid, Box<dyn DynamicHandler<Link>>> = FxHashMap::default();
-    let mut pending_messages: Vec<MessageCx> = vec![];
-    let mut state = <Link::State>::default();
+    let mut dynamic_handlers: FxHashMap<Uuid, Box<dyn DynHandleDispatchFrom<Counterpart>>> =
+        FxHashMap::default();
+    let mut pending_messages: Vec<Dispatch> = vec![];
 
     // Map from request ID to (method, sender) for response dispatch.
     // Keys are JSON values because jsonrpcmsg::Id doesn't implement Eq.
@@ -64,7 +69,7 @@ pub(super) async fn incoming_protocol_actor<Link: JrLink>(
             IncomingProtocolMsg::Reply(message) => match message {
                 ReplyMessage::Subscribe {
                     id,
-                    peer_id,
+                    role_id,
                     method,
                     sender,
                 } => {
@@ -74,7 +79,7 @@ pub(super) async fn incoming_protocol_actor<Link: JrLink>(
                         id,
                         PendingReply {
                             method,
-                            peer_id,
+                            role_id,
                             sender,
                         },
                     );
@@ -89,7 +94,7 @@ pub(super) async fn incoming_protocol_actor<Link: JrLink>(
                     for pending_message in pending_messages {
                         tracing::trace!(method = pending_message.method(), handler = ?handler.dyn_describe_chain(), "Retrying message");
                         match handler
-                            .dyn_handle_message(pending_message, json_rpc_cx.clone())
+                            .dyn_handle_dispatch_from(pending_message, connection.clone())
                             .await?
                         {
                             Handled::Yes => {
@@ -118,14 +123,14 @@ pub(super) async fn incoming_protocol_actor<Link: JrLink>(
                 Ok(message) => match message {
                     jsonrpcmsg::Message::Request(request) => {
                         tracing::trace!(method = %request.method, id = ?request.id, "Handling request");
-                        let message_cx = message_cx_from_request(json_rpc_cx, request);
-                        dispatch_message_cx(
-                            json_rpc_cx,
-                            message_cx,
+                        let dispatch = dispatch_from_request(connection, request);
+                        dispatch_dispatch(
+                            counterpart.clone(),
+                            connection,
+                            dispatch,
                             &mut dynamic_handlers,
                             &mut handler,
                             &mut pending_messages,
-                            &mut state,
                         )
                         .await?
                     }
@@ -145,15 +150,15 @@ pub(super) async fn incoming_protocol_actor<Link: JrLink>(
                             let id_json = serde_json::to_value(&id).unwrap();
                             if let Some(pending_reply) = pending_replies.remove(&id_json) {
                                 // Route the response through the handler chain
-                                let message_cx =
-                                    message_cx_from_response(id, pending_reply, result);
-                                dispatch_message_cx(
-                                    json_rpc_cx,
-                                    message_cx,
+                                let dispatch =
+                                    dispatch_from_response(id, pending_reply, result);
+                                dispatch_dispatch(
+                                    counterpart.clone(),
+                                    connection,
+                                    dispatch,
                                     &mut dynamic_handlers,
                                     &mut handler,
                                     &mut pending_messages,
-                                    &mut state,
                                 )
                                 .await?;
                             } else {
@@ -168,7 +173,7 @@ pub(super) async fn incoming_protocol_actor<Link: JrLink>(
                 Err(error) => {
                     // Parse error from transport - send error notification back to remote
                     tracing::warn!(?error, "Transport parse error, sending error notification");
-                    json_rpc_cx.send_error_notification(error)?;
+                    connection.send_error_notification(error)?;
                 }
             },
         }
@@ -177,33 +182,33 @@ pub(super) async fn incoming_protocol_actor<Link: JrLink>(
 }
 
 #[derive(Debug)]
-enum IncomingProtocolMsg<Link: JrLink> {
+enum IncomingProtocolMsg<Counterpart: Role> {
     Transport(Result<jsonrpcmsg::Message, crate::Error>),
-    DynamicHandler(DynamicHandlerMessage<Link>),
+    DynamicHandler(DynamicHandlerMessage<Counterpart>),
     Reply(ReplyMessage),
 }
 
 /// Dispatches a JSON-RPC request to the handler.
 /// Report an error back to the server if it does not get handled.
-fn message_cx_from_request<Link: JrLink>(
-    json_rpc_cx: &JrConnectionCx<Link>,
+fn dispatch_from_request<Counterpart: Role>(
+    connection: &ConnectionTo<Counterpart>,
     request: jsonrpcmsg::Request,
-) -> MessageCx {
+) -> Dispatch {
     let message = UntypedMessage::new(&request.method, &request.params).expect("well-formed JSON");
 
-    let message_cx = match &request.id {
-        Some(id) => MessageCx::Request(
+    let dispatch = match &request.id {
+        Some(id) => Dispatch::Request(
             message,
-            JrRequestCx::new(
-                json_rpc_cx.message_tx.clone(),
+            Responder::new(
+                connection.message_tx.clone(),
                 request.method.clone(),
                 id.clone(),
             ),
         ),
-        None => MessageCx::Notification(message),
+        None => Dispatch::Notification(message),
     };
 
-    message_cx
+    dispatch
 }
 
 /// Dispatches a JSON-RPC response through the handler chain.
@@ -211,46 +216,46 @@ fn message_cx_from_request<Link: JrLink>(
 /// This allows handlers to intercept and process responses before they reach
 /// the awaiting code. The default behavior is to forward the response to the
 /// local awaiter via the oneshot channel.
-fn message_cx_from_response(
+fn dispatch_from_response(
     id: jsonrpcmsg::Id,
     pending_reply: PendingReply,
     result: Result<serde_json::Value, crate::Error>,
-) -> MessageCx {
+) -> Dispatch {
     let PendingReply {
         method,
-        peer_id,
+        role_id,
         sender,
     } = pending_reply;
 
-    // Create a MessageCx::Response with a JrResponseCx that routes to the oneshot
-    let response_cx = JrResponseCx::new(method.clone(), id.clone(), peer_id, sender);
-    MessageCx::Response(result, response_cx)
+    // Create a Dispatch::Response with a ResponseRouter that routes to the oneshot
+    let router = ResponseRouter::new(method.clone(), id.clone(), role_id, sender);
+    Dispatch::Response(result, router)
 }
 
 #[tracing::instrument(
-    skip(json_rpc_cx, message_cx, dynamic_handlers, handler, pending_messages, state),
-    fields(method = message_cx.method()),
+    skip(connection, dispatch, dynamic_handlers, handler, pending_messages),
+    fields(method = dispatch.method()),
     level = "trace",
 )]
-async fn dispatch_message_cx<Link: JrLink>(
-    json_rpc_cx: &JrConnectionCx<Link>,
-    mut message_cx: MessageCx,
-    dynamic_handlers: &mut FxHashMap<Uuid, Box<dyn DynamicHandler<Link>>>,
-    handler: &mut impl JrMessageHandler<Link = Link>,
-    pending_messages: &mut Vec<MessageCx>,
-    state: &mut Link::State,
+async fn dispatch_dispatch<Counterpart: Role>(
+    counterpart: Counterpart,
+    connection: &ConnectionTo<Counterpart>,
+    mut dispatch: Dispatch,
+    dynamic_handlers: &mut FxHashMap<Uuid, Box<dyn DynHandleDispatchFrom<Counterpart>>>,
+    handler: &mut impl HandleDispatchFrom<Counterpart>,
+    pending_messages: &mut Vec<Dispatch>,
 ) -> Result<(), crate::Error> {
-    tracing::trace!(?message_cx, "dispatch_message_cx");
+    tracing::trace!(?dispatch, "dispatch_dispatch");
 
     let mut retry_any = false;
 
-    let id = message_cx.id();
-    let method = message_cx.method().to_string();
+    let id = dispatch.id();
+    let method = dispatch.method().to_string();
 
     // First, apply the handlers given by the user.
     tracing::trace!(handler = ?handler.describe_chain(), "Attempting handler chain");
     match handler
-        .handle_message(message_cx, json_rpc_cx.clone())
+        .handle_dispatch_from(dispatch, connection.clone())
         .await?
     {
         Handled::Yes => {
@@ -260,7 +265,7 @@ async fn dispatch_message_cx<Link: JrLink>(
 
         Handled::No { message: m, retry } => {
             tracing::trace!(?method, ?id, handler = ?handler.describe_chain(), "Handler declined message");
-            message_cx = m;
+            dispatch = m;
             retry_any |= retry;
         }
     }
@@ -269,7 +274,7 @@ async fn dispatch_message_cx<Link: JrLink>(
     for dynamic_handler in dynamic_handlers.values_mut() {
         tracing::trace!(handler = ?dynamic_handler.dyn_describe_chain(), "Attempting dynamic handler");
         match dynamic_handler
-            .dyn_handle_message(message_cx, json_rpc_cx.clone())
+            .dyn_handle_dispatch_from(dispatch, connection.clone())
             .await?
         {
             Handled::Yes => {
@@ -280,21 +285,24 @@ async fn dispatch_message_cx<Link: JrLink>(
             Handled::No { message: m, retry } => {
                 tracing::trace!(?method, ?id, handler = ?dynamic_handler.dyn_describe_chain(),  "Dynamic handler declined message");
                 retry_any |= retry;
-                message_cx = m;
+                dispatch = m;
             }
         }
     }
 
     // Finally, apply the default handler for the role.
-    tracing::trace!(Link = ?Link::default(), "Attempting Link");
-    match Link::default_message_handler(message_cx, json_rpc_cx.clone(), state).await? {
+    tracing::trace!(role = ?counterpart, "Attempting default handler");
+    match counterpart
+        .default_handle_dispatch_from(dispatch, connection.clone())
+        .await?
+    {
         Handled::Yes => {
-            tracing::trace!(?method, handler = "default", "Link accepted message");
+            tracing::trace!(?method, handler = "default", "Role accepted message");
             return Ok(());
         }
         Handled::No { message: m, retry } => {
-            tracing::trace!(?method, handler = "default", "Link declined message");
-            message_cx = m;
+            tracing::trace!(?method, handler = "default", "Role declined message");
+            dispatch = m;
             retry_any |= retry;
         }
     }
@@ -306,21 +314,21 @@ async fn dispatch_message_cx<Link: JrLink>(
             ?method,
             "Retrying message as new dynamic handlers are added"
         );
-        pending_messages.push(message_cx);
+        pending_messages.push(dispatch);
         Ok(())
     } else {
-        match message_cx {
-            MessageCx::Request(..) | MessageCx::Notification(_) => {
+        match dispatch {
+            Dispatch::Request(..) | Dispatch::Notification(_) => {
                 tracing::info!(?method, "Rejecting message with error, no handler");
-                let method = message_cx.method().to_string();
-                message_cx.respond_with_error(
+                let method = dispatch.method().to_string();
+                dispatch.respond_with_error(
                     crate::Error::method_not_found().data(method),
-                    json_rpc_cx.clone(),
+                    connection.clone(),
                 )
             }
-            MessageCx::Response(result, response_cx) => {
+            Dispatch::Response(result, router) => {
                 tracing::trace!(?method, "Forwarding response");
-                response_cx.respond_with_result(result)
+                router.respond_with_result(result)
             }
         }
     }

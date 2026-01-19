@@ -85,40 +85,7 @@ Send a notification to the successor component.
 4. Conductor routes to Proxy B as normal `prompt`
 5. Response flows back through the chain
 
-**Example: Pass-through proxy**
-
-A minimal proxy that just forwards everything doesn't need any handlers - the conductor automatically routes unhandled messages:
-
-```rust
-use sacp::{Component, ProxyToConductor};
-
-ProxyToConductor::builder()
-    .name("passthrough")
-    .connect_to(transport)?
-    .serve()
-    .await
-```
-
-To explicitly handle and forward messages:
-
-```rust
-use sacp::{AgentPeer, ClientPeer, ProxyToConductor};
-use sacp::schema::PromptRequest;
-
-ProxyToConductor::builder()
-    .name("my-proxy")
-    .on_receive_request(
-        async |request: PromptRequest, _request_cx, cx| {
-            // Forward request to agent
-            cx.send_request_to(AgentPeer, request)?;
-            Ok(())
-        },
-        sacp::on_receive_request!(),
-    )
-    .connect_to(transport)?
-    .serve()
-    .await
-```
+**Pass-through proxies**: A proxy that doesn't register any handlers passes all messages through unchanged - the conductor automatically routes unhandled messages.
 
 ## Capability Handshake
 
@@ -362,13 +329,9 @@ The `conductor mcp PORT` process bridges between stdio and the conductor's ACP m
 | `_mcp/request` | Agent↔Component | Bidirectional MCP requests |
 | `_mcp/notification` | Agent↔Component | Bidirectional MCP notifications |
 
-## Building on SACP
+## Related Documentation
 
-When building proxies, you use `ProxyToConductor::builder()` from the `sacp` crate which provides:
-
-- `.on_receive_request()` / `.on_receive_notification()` for handling messages from client
-- `.on_receive_request_from(AgentPeer, ...)` / `.on_receive_notification_from(AgentPeer, ...)` for handling messages from agent
-- `cx.send_request_to(AgentPeer, ...)` / `cx.send_notification_to(ClientPeer, ...)` for forwarding messages
-- Automatic proxy capability handshake
-
-See [Building a Proxy](./building-proxy.md) for implementation guide.
+- [Conductor Design](./conductor.md) - How the conductor routes messages
+- [MCP Bridge](./mcp-bridge.md) - MCP-over-ACP implementation details
+- [P/ACP Specification](./proxying-acp.md) - Full protocol specification
+- [sacp rustdoc](https://docs.rs/sacp) - API for building proxies and agents

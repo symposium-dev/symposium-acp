@@ -1,35 +1,39 @@
 use std::sync::Arc;
 
-use crate::{DynComponent, JrLink, mcp::McpServerToClient, mcp_server::McpContext};
+use crate::{
+    DynConnectTo,
+    mcp_server::McpConnectionTo,
+    role::{self, Role},
+};
 
 /// Trait for types that can create MCP server connections.
 ///
 /// Implement this trait to create custom MCP servers. Each call to [`connect`](Self::connect)
-/// should return a new [`Component`](crate::Component) that serves MCP requests for a single
+/// should return a new [`ConnectTo`](crate::ConnectTo) that serves MCP requests for a single
 /// connection.
 ///
 /// # Example
 ///
 /// ```rust,ignore
-/// use sacp::mcp_server::{McpServerConnect, McpContext};
-/// use sacp::{DynComponent, JrLink};
+/// use sacp::mcp_server::{McpServerConnect, McpConnectionTo};
+/// use sacp::{DynConnectTo, role::Role};
 ///
 /// struct MyMcpServer {
 ///     name: String,
 /// }
 ///
-/// impl<Link: JrLink> McpServerConnect<Link> for MyMcpServer {
+/// impl<R: Role> McpServerConnect<R> for MyMcpServer {
 ///     fn name(&self) -> String {
 ///         self.name.clone()
 ///     }
 ///
-///     fn connect(&self, cx: McpContext<Link>) -> DynComponent<McpServerToClient> {
+///     fn connect(&self, cx: McpConnectionTo<R>) -> DynConnectTo<role::mcp::Client> {
 ///         // Create and return a component that handles MCP requests
-///         DynComponent::new(MyMcpComponent::new(cx))
+///         DynConnectTo::new(MyMcpComponent::new(cx))
 ///     }
 /// }
 /// ```
-pub trait McpServerConnect<Link: JrLink>: Send + Sync + 'static {
+pub trait McpServerConnect<Counterpart: Role>: Send + Sync + 'static {
     /// The name of the MCP server, used to identify it in session responses.
     fn name(&self) -> String;
 
@@ -38,27 +42,31 @@ pub trait McpServerConnect<Link: JrLink>: Send + Sync + 'static {
     /// This is called each time an agent connects to this MCP server. The returned
     /// component will handle MCP protocol messages for that connection.
     ///
-    /// The [`McpContext`] provides access to the ACP connection context and the
+    /// The [`McpConnectionTo`] provides access to the ACP connection context and the
     /// server's ACP URL.
-    fn connect(&self, cx: McpContext<Link>) -> DynComponent<McpServerToClient>;
+    fn connect(&self, cx: McpConnectionTo<Counterpart>) -> DynConnectTo<role::mcp::Client>;
 }
 
-impl<Link: JrLink, S: ?Sized + McpServerConnect<Link>> McpServerConnect<Link> for Box<S> {
+impl<Counterpart: Role, S: ?Sized + McpServerConnect<Counterpart>> McpServerConnect<Counterpart>
+    for Box<S>
+{
     fn name(&self) -> String {
         S::name(self)
     }
 
-    fn connect(&self, cx: McpContext<Link>) -> DynComponent<McpServerToClient> {
+    fn connect(&self, cx: McpConnectionTo<Counterpart>) -> DynConnectTo<role::mcp::Client> {
         S::connect(self, cx)
     }
 }
 
-impl<Link: JrLink, S: ?Sized + McpServerConnect<Link>> McpServerConnect<Link> for Arc<S> {
+impl<Counterpart: Role, S: ?Sized + McpServerConnect<Counterpart>> McpServerConnect<Counterpart>
+    for Arc<S>
+{
     fn name(&self) -> String {
         S::name(self)
     }
 
-    fn connect(&self, cx: McpContext<Link>) -> DynComponent<McpServerToClient> {
+    fn connect(&self, cx: McpConnectionTo<Counterpart>) -> DynConnectTo<role::mcp::Client> {
         S::connect(self, cx)
     }
 }

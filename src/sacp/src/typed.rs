@@ -2,7 +2,8 @@
 use jsonrpcmsg::Params;
 
 use crate::{
-    JrConnectionCx, JrNotification, JrRequest, JrRequestCx, UntypedMessage, util::json_cast,
+    ConnectionTo, Responder, JsonRpcNotification, JsonRpcRequest, UntypedMessage,
+    util::json_cast,
 };
 
 /// Utility class for handling untyped requests.
@@ -12,33 +13,33 @@ pub struct TypeRequest {
 }
 
 enum TypeMessageState {
-    Unhandled(String, Option<Params>, JrRequestCx<serde_json::Value>),
+    Unhandled(String, Option<Params>, Responder<serde_json::Value>),
     Handled(Result<(), crate::Error>),
 }
 
 impl TypeRequest {
-    pub fn new(request: UntypedMessage, request_cx: JrRequestCx<serde_json::Value>) -> Self {
+    pub fn new(request: UntypedMessage, responder: Responder<serde_json::Value>) -> Self {
         let UntypedMessage { method, params } = request;
         let params: Option<Params> = json_cast(params).expect("valid params");
         Self {
-            state: Some(TypeMessageState::Unhandled(method, params, request_cx)),
+            state: Some(TypeMessageState::Unhandled(method, params, responder)),
         }
     }
 
-    pub async fn handle_if<R: JrRequest>(
+    pub async fn handle_if<R: JsonRpcRequest>(
         mut self,
-        op: impl AsyncFnOnce(R, JrRequestCx<R::Response>) -> Result<(), crate::Error>,
+        op: impl AsyncFnOnce(R, Responder<R::Response>) -> Result<(), crate::Error>,
     ) -> Self {
         self.state = Some(match self.state.take().expect("valid state") {
-            TypeMessageState::Unhandled(method, params, request_cx) => {
+            TypeMessageState::Unhandled(method, params, responder) => {
                 match R::parse_message(&method, &params) {
                     Some(Ok(request)) => {
-                        TypeMessageState::Handled(op(request, request_cx.cast()).await)
+                        TypeMessageState::Handled(op(request, responder.cast()).await)
                     }
 
-                    Some(Err(err)) => TypeMessageState::Handled(request_cx.respond_with_error(err)),
+                    Some(Err(err)) => TypeMessageState::Handled(responder.respond_with_error(err)),
 
-                    None => TypeMessageState::Unhandled(method, params, request_cx),
+                    None => TypeMessageState::Unhandled(method, params, responder),
                 }
             }
 
@@ -49,13 +50,13 @@ impl TypeRequest {
 
     pub async fn otherwise(
         mut self,
-        op: impl AsyncFnOnce(UntypedMessage, JrRequestCx<serde_json::Value>) -> Result<(), crate::Error>,
+        op: impl AsyncFnOnce(UntypedMessage, Responder<serde_json::Value>) -> Result<(), crate::Error>,
     ) -> Result<(), crate::Error> {
         match self.state.take().expect("valid state") {
-            TypeMessageState::Unhandled(method, params, request_cx) => {
+            TypeMessageState::Unhandled(method, params, responder) => {
                 match UntypedMessage::new(&method, params) {
-                    Ok(m) => op(m, request_cx).await,
-                    Err(err) => request_cx.respond_with_error(err),
+                    Ok(m) => op(m, responder).await,
+                    Err(err) => responder.respond_with_error(err),
                 }
             }
             TypeMessageState::Handled(r) => r,
@@ -66,7 +67,7 @@ impl TypeRequest {
 /// Utility class for handling untyped notifications.
 #[must_use]
 pub struct TypeNotification {
-    cx: JrConnectionCx,
+    cx: ConnectionTo,
     state: Option<TypeNotificationState>,
 }
 
@@ -76,7 +77,7 @@ enum TypeNotificationState {
 }
 
 impl TypeNotification {
-    pub fn new(request: UntypedMessage, cx: &JrConnectionCx) -> Self {
+    pub fn new(request: UntypedMessage, cx: &ConnectionTo) -> Self {
         let UntypedMessage { method, params } = request;
         let params: Option<Params> = json_cast(params).expect("valid params");
         Self {
@@ -85,7 +86,7 @@ impl TypeNotification {
         }
     }
 
-    pub async fn handle_if<N: JrNotification>(
+    pub async fn handle_if<N: JsonRpcNotification>(
         mut self,
         op: impl AsyncFnOnce(N) -> Result<(), crate::Error>,
     ) -> Self {

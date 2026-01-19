@@ -1,29 +1,29 @@
 //! MCP server builder for creating MCP servers.
 
-use std::sync::Arc;
+use std::{marker::PhantomData, sync::Arc};
 
 use agent_client_protocol_schema::NewSessionRequest;
 use futures::{StreamExt, channel::mpsc};
 use uuid::Uuid;
 
 use crate::{
-    AgentPeer, ClientPeer, Component, DynComponent, Handled, HasPeer, JrConnectionCx, JrLink,
-    JrMessageHandler, MessageCx,
+    Agent, Client, ConnectionTo, DynConnectTo, HandleDispatchFrom, Handled, Dispatch, Role, ConnectTo,
     jsonrpc::{
         DynamicHandlerRegistration,
-        responder::{JrResponder, NullResponder},
+        run::{NullRun, RunWithConnectionTo},
     },
-    mcp::{McpClientPeer, McpClientToServer, McpServerPeer, McpServerToClient},
     mcp_server::{
-        McpContext, McpServerConnect, active_session::McpActiveSession, builder::McpServerBuilder,
+        McpConnectionTo, McpServerConnect, active_session::McpActiveSession,
+        builder::McpServerBuilder,
     },
-    util::MatchMessageFrom,
+    role::{self, HasPeer},
+    util::MatchDispatchFrom,
 };
 
 /// An MCP server that can be attached to ACP connections.
 ///
 /// `McpServer` wraps an [`McpServerConnect`](`super::McpServerConnect`) implementation and can be used either:
-/// - As a message handler via [`JrConnectionBuilder::with_handler`](`crate::JrConnectionBuilder::with_handler`), automatically
+/// - As a message handler via [`Builder::with_handler`](`crate::Builder::with_handler`), automatically
 ///   attaching to new sessions
 /// - Manually for more control
 ///
@@ -43,12 +43,15 @@ use crate::{
 /// ```rust,ignore
 /// let server = McpServer::new(MyCustomServerConnect);
 /// ```
-pub struct McpServer<Link, Responder = NullResponder> {
+pub struct McpServer<Counterpart: Role, Run = NullRun> {
+    /// The host role that is serving up this MCP server
+    phantom: PhantomData<Counterpart>,
+
     /// The ACP URL we assigned for this mcp server; always unique
     acp_url: String,
 
     /// The "connect" instance
-    connect: Arc<dyn McpServerConnect<Link>>,
+    connect: Arc<dyn McpServerConnect<Counterpart>>,
 
     /// The "responder" is a task that should be run alongside the message handler.
     /// Some futures direct messages back through channels to this future which actually
@@ -56,24 +59,28 @@ pub struct McpServer<Link, Responder = NullResponder> {
     ///
     /// This is how we bridge the gap between the rmcp implementation,
     /// which requires `'static`, and our APIs, which do not.
-    responder: Responder,
+    responder: Run,
 }
 
-impl<Link: JrLink> McpServer<Link, NullResponder> {
+impl<Host: Role> McpServer<Host, NullRun> {
     /// Create an empty server with no content.
-    pub fn builder(name: impl ToString) -> McpServerBuilder<Link, NullResponder> {
+    pub fn builder(name: impl ToString) -> McpServerBuilder<Host, NullRun> {
         McpServerBuilder::new(name.to_string())
     }
 }
 
-impl<Link: JrLink, Responder: JrResponder<Link>> McpServer<Link, Responder> {
+impl<Counterpart: Role, Run> McpServer<Counterpart, Run>
+where
+    Run: RunWithConnectionTo<Counterpart>,
+{
     /// Create an MCP server from something that implements the [`McpServerConnect`](`super::McpServerConnect`) trait.
     ///
     /// # See also
     ///
     /// See [`Self::builder`] to construct MCP servers from Rust code.
-    pub fn new(c: impl McpServerConnect<Link>, responder: Responder) -> Self {
+    pub fn new(c: impl McpServerConnect<Counterpart>, responder: Run) -> Self {
         McpServer {
+            phantom: PhantomData,
             acp_url: format!("acp:{}", Uuid::new_v4()),
             connect: Arc::new(c),
             responder,
@@ -81,11 +88,12 @@ impl<Link: JrLink, Responder: JrResponder<Link>> McpServer<Link, Responder> {
     }
 
     /// Split this MCP server into the message handler and a future that must be run while the handler is active.
-    pub(crate) fn into_handler_and_responder(self) -> (McpNewSessionHandler<Link>, Responder)
+    pub(crate) fn into_handler_and_responder(self) -> (McpNewSessionHandler<Counterpart>, Run)
     where
-        Link: HasPeer<AgentPeer>,
+        Counterpart: HasPeer<Agent>,
     {
         let Self {
+            phantom: _,
             acp_url,
             connect,
             responder,
@@ -95,26 +103,22 @@ impl<Link: JrLink, Responder: JrResponder<Link>> McpServer<Link, Responder> {
 }
 
 /// Message handler created from a [`McpServer`].
-pub(crate) struct McpNewSessionHandler<Link>
+pub(crate) struct McpNewSessionHandler<Counterpart: Role>
 where
-    Link: HasPeer<AgentPeer>,
+    Counterpart: HasPeer<Agent>,
 {
     acp_url: String,
-    connect: Arc<dyn McpServerConnect<Link>>,
-    active_session: McpActiveSession<Link>,
+    connect: Arc<dyn McpServerConnect<Counterpart>>,
+    active_session: McpActiveSession<Counterpart>,
 }
 
-impl<Link: JrLink> McpNewSessionHandler<Link>
+impl<Counterpart: Role> McpNewSessionHandler<Counterpart>
 where
-    Link: HasPeer<AgentPeer>,
+    Counterpart: HasPeer<Agent>,
 {
-    pub fn new(acp_url: String, connect: Arc<dyn McpServerConnect<Link>>) -> Self {
+    pub fn new(acp_url: String, connect: Arc<dyn McpServerConnect<Counterpart>>) -> Self {
         Self {
-            active_session: McpActiveSession::new(
-                Link::default(),
-                acp_url.clone(),
-                connect.clone(),
-            ),
+            active_session: McpActiveSession::new(acp_url.clone(), connect.clone()),
             acp_url,
             connect,
         }
@@ -128,9 +132,9 @@ where
     }
 }
 
-impl<Link: JrLink> McpNewSessionHandler<Link>
+impl<Counterpart: Role> McpNewSessionHandler<Counterpart>
 where
-    Link: HasPeer<AgentPeer>,
+    Counterpart: HasPeer<Agent>,
 {
     /// Attach this server to the new session, spawning off a dynamic handler that will
     /// manage requests coming from this session.
@@ -145,34 +149,32 @@ where
     pub fn into_dynamic_handler(
         self,
         request: &mut NewSessionRequest,
-        cx: &JrConnectionCx<Link>,
-    ) -> Result<DynamicHandlerRegistration<Link>, crate::Error>
+        cx: &ConnectionTo<Counterpart>,
+    ) -> Result<DynamicHandlerRegistration<Counterpart>, crate::Error>
     where
-        Link: HasPeer<AgentPeer>,
+        Counterpart: HasPeer<Agent>,
     {
         self.modify_new_session_request(request);
         cx.add_dynamic_handler(self.active_session)
     }
 }
 
-impl<Link: JrLink> JrMessageHandler for McpNewSessionHandler<Link>
+impl<Counterpart: Role> HandleDispatchFrom<Counterpart> for McpNewSessionHandler<Counterpart>
 where
-    Link: HasPeer<ClientPeer> + HasPeer<AgentPeer>,
+    Counterpart: HasPeer<Client> + HasPeer<Agent>,
 {
-    type Link = Link;
-
-    async fn handle_message(
+    async fn handle_dispatch_from(
         &mut self,
-        message: crate::MessageCx,
-        cx: crate::JrConnectionCx<Self::Link>,
-    ) -> Result<crate::Handled<crate::MessageCx>, crate::Error> {
-        MatchMessageFrom::new(message, &cx)
+        message: Dispatch,
+        cx: ConnectionTo<Counterpart>,
+    ) -> Result<Handled<Dispatch>, crate::Error> {
+        MatchDispatchFrom::new(message, &cx)
             .if_request_from(
-                ClientPeer,
-                async |mut request: NewSessionRequest, request_cx| {
+                Client,
+                async |mut request: NewSessionRequest, responder| {
                     self.modify_new_session_request(&mut request);
                     Ok(Handled::No {
-                        message: (request, request_cx),
+                        message: (request, responder),
                         retry: false,
                     })
                 },
@@ -187,54 +189,53 @@ where
     }
 }
 
-impl<R> Component<McpServerToClient> for McpServer<McpServerToClient, R>
+impl<Run> ConnectTo<role::mcp::Client> for McpServer<role::mcp::Client, Run>
 where
-    R: JrResponder<McpServerToClient> + 'static,
+    Run: RunWithConnectionTo<role::mcp::Client> + 'static,
 {
-    async fn serve(self, client: impl Component<McpClientToServer>) -> Result<(), crate::Error> {
+    async fn connect_to(self, client: impl ConnectTo<role::mcp::Server>) -> Result<(), crate::Error> {
         let Self {
             acp_url,
             connect,
             responder,
+            phantom: _,
         } = self;
 
         let (tx, mut rx) = mpsc::unbounded();
 
-        McpServerToClient::builder()
+        role::mcp::Server.builder()
             .with_responder(responder)
-            .on_receive_message(
-                async |message_from_client: MessageCx, _cx| {
+            .on_receive_dispatch(
+                async |message_from_client: Dispatch, _cx| {
                     tx.unbounded_send(message_from_client)
                         .map_err(|_| crate::util::internal_error("nobody listening to mcp server"))
                 },
-                crate::on_receive_message!(),
+                crate::on_receive_dispatch!(),
             )
-            .with_spawned(async move |server_to_client_cx| {
-                let spawned_server: DynComponent<McpServerToClient> = connect.connect(McpContext {
-                    acp_url,
-                    connection_cx: server_to_client_cx.clone(),
-                });
+            .with_spawned(async move |connection_to_client| {
+                let spawned_server: DynConnectTo<role::mcp::Client> =
+                    connect.connect(McpConnectionTo {
+                        acp_url,
+                        connection: connection_to_client.clone(),
+                    });
 
-                McpClientToServer::builder()
-                    .on_receive_message(
-                        async |message_from_server: MessageCx, _client_to_server_cx| {
+                role::mcp::Client.builder()
+                    .on_receive_dispatch(
+                        async |message_from_server: Dispatch, _| {
                             // when we receive a message from the server, fwd to the client
-                            server_to_client_cx
-                                .send_proxied_message_to(McpClientPeer, message_from_server)
+                            connection_to_client.send_proxied_message(message_from_server)
                         },
-                        crate::on_receive_message!(),
+                        crate::on_receive_dispatch!(),
                     )
-                    .connect_to(spawned_server)?
-                    .run_until(async |client_to_server_cx| {
+                    .connect_with(spawned_server, async |connection_to_server| {
                         while let Some(message_from_client) = rx.next().await {
-                            client_to_server_cx
-                                .send_proxied_message_to(McpServerPeer, message_from_client)?;
+                            connection_to_server.send_proxied_message(message_from_client)?;
                         }
                         Ok(())
                     })
                     .await
             })
-            .serve(client)
+            .connect_to(client)
             .await
     }
 }

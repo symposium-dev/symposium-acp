@@ -1,7 +1,11 @@
 {
   "permissions": {
     "allow": [
-      "mcp__acp__Edit"
+      "mcp__acp__Edit",
+      "mcp__cargo-mcp__cargo_check",
+      "mcp__acp__Bash",
+      "mcp__sparkle__session_checkpoint",
+      "mcp__acp__Write"
     ]
   }
 }

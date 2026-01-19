@@ -1,15 +1,14 @@
 //! Integration test for AcpAgent debug logging
 
-use sacp::Component;
-use sacp::link::UntypedLink;
+use sacp::{Client, ConnectTo};
 use sacp::schema::InitializeRequest;
 use sacp_test::test_binaries::elizacp;
 use sacp_tokio::LineDirection;
 use std::sync::{Arc, Mutex};
 
 /// Test helper to receive a JSON-RPC response
-async fn recv<T: sacp::JrResponsePayload + Send>(
-    response: sacp::JrResponse<T>,
+async fn recv<T: sacp::JsonRpcResponse + Send>(
+    response: sacp::SentRequest<T>,
 ) -> Result<T, sacp::Error> {
     let (tx, rx) = tokio::sync::oneshot::channel();
     response.on_receiving_result(async move |result| {
@@ -58,18 +57,18 @@ async fn test_acp_agent_debug_callback() -> Result<(), Box<dyn std::error::Error
 
     let transport = sacp::ByteStreams::new(client_out.compat_write(), client_in.compat());
 
-    UntypedLink::builder()
+    Client.builder()
         .name("test-client")
         .with_spawned(|_cx| async move {
-            Component::<UntypedLink>::serve(
+            ConnectTo::<Client>::connect_to(
                 agent,
                 sacp::ByteStreams::new(agent_out.compat_write(), agent_in.compat()),
             )
             .await
         })
-        .run_until(transport, async |client_cx| {
+        .connect_with(transport, async |connection_to_client| {
             // Send an initialize request
-            let _init_response = recv(client_cx.send_request(InitializeRequest::new(
+            let _init_response = recv(connection_to_client.send_request(InitializeRequest::new(
                 sacp::schema::ProtocolVersion::LATEST,
             )))
             .await?;

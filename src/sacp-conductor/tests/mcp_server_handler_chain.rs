@@ -1,18 +1,17 @@
 //! Test that MCP server doesn't break the handler chain for NewSessionRequest.
 //!
-//! This is a regression test for a bug where `McpServer::handle_message` would
+//! This is a regression test for a bug where `McpServer::handle_dispatch` would
 //! forward `NewSessionRequest` directly to the agent instead of returning
 //! `Handled::No`, which prevented downstream `.on_receive_request_from()` handlers
 //! from being invoked.
 
-use sacp::link::{AgentToClient, ProxyToConductor};
 use sacp::mcp_server::McpServer;
 use sacp::schema::{
     AgentCapabilities, InitializeRequest, InitializeResponse, NewSessionRequest,
     NewSessionResponse, ProtocolVersion, SessionId,
 };
-use sacp::{AgentPeer, ClientPeer, Component};
-use sacp_conductor::{Conductor, ProxiesAndAgent};
+use sacp::{Agent, Client, Conductor, DynConnectTo, Proxy, ConnectTo};
+use sacp_conductor::{ConductorImpl, ProxiesAndAgent};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
@@ -35,8 +34,8 @@ struct EchoOutput {
 }
 
 /// Test helper to receive a JSON-RPC response
-async fn recv<T: sacp::JrResponsePayload + Send>(
-    response: sacp::JrResponse<T>,
+async fn recv<T: sacp::JsonRpcResponse + Send>(
+    response: sacp::SentRequest<T>,
 ) -> Result<T, sacp::Error> {
     let (tx, rx) = tokio::sync::oneshot::channel();
     response.on_receiving_result(async move |result| {
@@ -68,10 +67,10 @@ struct ProxyWithMcpAndHandler {
     config: Arc<HandlerConfig>,
 }
 
-impl Component<ProxyToConductor> for ProxyWithMcpAndHandler {
-    async fn serve(
+impl ConnectTo<Conductor> for ProxyWithMcpAndHandler {
+    async fn connect_to(
         self,
-        client: impl Component<sacp::link::ConductorToProxy>,
+        client: impl ConnectTo<Proxy>,
     ) -> Result<(), sacp::Error> {
         let config = Arc::clone(&self.config);
 
@@ -90,30 +89,29 @@ impl Component<ProxyToConductor> for ProxyWithMcpAndHandler {
             )
             .build();
 
-        ProxyToConductor::builder()
+        sacp::Proxy.builder()
             .name("proxy-with-mcp-and-handler")
             // Add the MCP server
             .with_mcp_server(mcp_server)
             // Add a NewSessionRequest handler - this should be invoked!
             .on_receive_request_from(
-                ClientPeer,
-                async move |request: NewSessionRequest, request_cx, cx| {
+                Client,
+                async move |request: NewSessionRequest, responder, cx| {
                     // Mark that we were called
                     config
                         .new_session_handler_called
                         .store(true, Ordering::SeqCst);
 
                     // Forward to agent and relay response
-                    cx.send_request_to(AgentPeer, request).on_receiving_result(
-                        async move |result| {
+                    cx.send_request_to(Agent, request)
+                        .on_receiving_result(async move |result| {
                             let response: NewSessionResponse = result?;
-                            request_cx.respond(response)
-                        },
-                    )
+                            responder.respond(response)
+                        })
                 },
                 sacp::on_receive_request!(),
             )
-            .serve(client)
+            .connect_to(client)
             .await
     }
 }
@@ -121,16 +119,16 @@ impl Component<ProxyToConductor> for ProxyWithMcpAndHandler {
 /// A simple agent that responds to initialization and session requests
 struct SimpleAgent;
 
-impl Component<AgentToClient> for SimpleAgent {
-    async fn serve(
+impl ConnectTo<Client> for SimpleAgent {
+    async fn connect_to(
         self,
-        client: impl Component<sacp::link::ClientToAgent>,
+        client: impl ConnectTo<Agent>,
     ) -> Result<(), sacp::Error> {
-        AgentToClient::builder()
+        Agent.builder()
             .name("simple-agent")
             .on_receive_request(
-                async |request: InitializeRequest, request_cx, _cx| {
-                    request_cx.respond(
+                async |request: InitializeRequest, responder, _cx| {
+                    responder.respond(
                         InitializeResponse::new(request.protocol_version)
                             .agent_capabilities(AgentCapabilities::new()),
                     )
@@ -138,33 +136,32 @@ impl Component<AgentToClient> for SimpleAgent {
                 sacp::on_receive_request!(),
             )
             .on_receive_request(
-                async |_request: NewSessionRequest, request_cx, _cx| {
-                    request_cx.respond(NewSessionResponse::new(SessionId::new(
+                async |_request: NewSessionRequest, responder, _cx| {
+                    responder.respond(NewSessionResponse::new(SessionId::new(
                         uuid::Uuid::new_v4().to_string(),
                     )))
                 },
                 sacp::on_receive_request!(),
             )
-            .connect_to(client)?
-            .serve()
+            .connect_to(client)
             .await
     }
 }
 
 async fn run_test(
-    proxies: Vec<sacp::DynComponent<ProxyToConductor>>,
-    agent: sacp::DynComponent<AgentToClient>,
-    editor_task: impl AsyncFnOnce(sacp::JrConnectionCx<sacp::ClientToAgent>) -> Result<(), sacp::Error>,
+    proxies: Vec<DynConnectTo<Conductor>>,
+    agent: DynConnectTo<Client>,
+    editor_task: impl AsyncFnOnce(sacp::ConnectionTo<Agent>) -> Result<(), sacp::Error>,
 ) -> Result<(), sacp::Error> {
     let (editor_out, conductor_in) = duplex(1024);
     let (conductor_out, editor_in) = duplex(1024);
 
     let transport = sacp::ByteStreams::new(editor_out.compat_write(), editor_in.compat());
 
-    sacp::ClientToAgent::builder()
+    sacp::Client.builder()
         .name("editor-to-conductor")
         .with_spawned(|_cx| async move {
-            Conductor::new_agent(
+            ConductorImpl::new_agent(
                 "conductor".to_string(),
                 ProxiesAndAgent::new(agent).proxies(proxies),
                 Default::default(),
@@ -175,7 +172,7 @@ async fn run_test(
             ))
             .await
         })
-        .run_until(transport, editor_task)
+        .connect_with(transport, editor_task)
         .await
 }
 
@@ -185,19 +182,19 @@ async fn test_new_session_handler_invoked_with_mcp_server() -> Result<(), sacp::
     let handler_config = HandlerConfig::new();
     let handler_config_clone = Arc::clone(&handler_config);
 
-    let proxy = sacp::DynComponent::<ProxyToConductor>::new(ProxyWithMcpAndHandler {
+    let proxy = DynConnectTo::<Conductor>::new(ProxyWithMcpAndHandler {
         config: handler_config,
     });
-    let agent = sacp::DynComponent::<AgentToClient>::new(SimpleAgent);
+    let agent = DynConnectTo::<Client>::new(SimpleAgent);
 
-    run_test(vec![proxy], agent, async |editor_cx| {
+    run_test(vec![proxy], agent, async |connection_to_editor| {
         // Initialize first
         let _init_response =
-            recv(editor_cx.send_request(InitializeRequest::new(ProtocolVersion::LATEST))).await?;
+            recv(connection_to_editor.send_request(InitializeRequest::new(ProtocolVersion::LATEST))).await?;
 
         // Create a new session - this should trigger the handler in the proxy
         let session_response =
-            recv(editor_cx.send_request(NewSessionRequest::new(PathBuf::from("/tmp")))).await?;
+            recv(connection_to_editor.send_request(NewSessionRequest::new(PathBuf::from("/tmp")))).await?;
 
         // Verify we got a valid session ID
         assert!(
