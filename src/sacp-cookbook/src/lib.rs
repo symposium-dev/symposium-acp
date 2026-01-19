@@ -12,7 +12,7 @@
 //! # Building Clients
 //!
 //! A client connects to an agent, sends requests, and handles responses. Use
-//! [`ClientToAgent`] as your link type.
+//! [`Client.connect_from()`][Client] to build connections.
 //!
 //! - [`one_shot_prompt`] - Send a single prompt and get a response (simplest pattern)
 //! - [`connecting_as_client`] - More details on connection setup and permission handling
@@ -20,8 +20,8 @@
 //! # Building Proxies
 //!
 //! A proxy sits between client and agent, intercepting and optionally modifying
-//! messages. The most common use case is adding MCP tools. Use [`ProxyToConductor`]
-//! as your link type.
+//! messages. The most common use case is adding MCP tools. Use [`Proxy.connect_from()`][Proxy]
+//! to build proxy connections.
 //!
 //! **Important:** Proxies don't run standalone—they need the [`sacp-conductor`] to
 //! orchestrate the connection between client, proxies, and agent. See
@@ -30,25 +30,25 @@
 //! - [`global_mcp_server`] - Add tools that work across all sessions
 //! - [`per_session_mcp_server`] - Add tools with session-specific state
 //! - [`filtering_tools`] - Enable or disable tools dynamically
-//! - [`reusable_components`] - Package your proxy as a [`Component`] for composition
+//! - [`reusable_components`] - Package your proxy as a [`ConnectTo`] for composition
 //! - [`running_proxies_with_conductor`] - Run your proxy with an agent
 //!
 //! [`sacp-conductor`]: https://crates.io/crates/sacp-conductor
 //!
 //! # Building Agents
 //!
-//! An agent receives prompts and generates responses. Use [`AgentToClient`] as
-//! your link type.
+//! An agent receives prompts and generates responses. Use [`Agent.connect_from()`][Agent]
+//! to build agent connections.
 //!
 //! - [`building_an_agent`] - Handle initialization, sessions, and prompts
-//! - [`reusable_components`] - Package your agent as a [`Component`]
+//! - [`reusable_components`] - Package your agent as a [`ConnectTo`]
 //! - [`custom_message_handlers`] - Fine-grained control over message routing
 //!
 //! [`sacp::concepts`]: sacp::concepts
-//! [`ClientToAgent`]: sacp::ClientToAgent
-//! [`AgentToClient`]: sacp::AgentToClient
-//! [`ProxyToConductor`]: sacp::ProxyToConductor
-//! [`Component`]: sacp::Component
+//! [`Client`]: sacp::Client
+//! [`Agent`]: sacp::Agent
+//! [`Proxy`]: sacp::Proxy
+//! [`ConnectTo`]: sacp::ConnectTo
 
 pub mod one_shot_prompt {
     //! Pattern: You Only Prompt Once.
@@ -60,23 +60,22 @@ pub mod one_shot_prompt {
     //! # Example
     //!
     //! ```
-    //! use sacp::{ClientToAgent, AgentToClient, Component};
+    //! use sacp::{Client, Agent, ConnectTo};
     //! use sacp::schema::{InitializeRequest, ProtocolVersion};
     //!
     //! async fn ask_agent(
-    //!     transport: impl Component<AgentToClient> + 'static,
+    //!     transport: impl ConnectTo<Client> + 'static,
     //!     prompt: &str,
     //! ) -> Result<String, sacp::Error> {
     //!     Client.connect_from()
     //!         .name("my-client")
-    //!         .connect_to(transport)?
-    //!         .run_until(async |cx| {
+    //!         .connect_with(transport, async |connection| {
     //!             // Initialize the connection
-    //!             cx.send_request(InitializeRequest::new(ProtocolVersion::LATEST))
+    //!             connection.send_request(InitializeRequest::new(ProtocolVersion::LATEST))
     //!                 .block_task().await?;
     //!
     //!             // Create a session, send prompt, read response
-    //!             let mut session = cx.build_session_cwd()?
+    //!             let mut session = connection.build_session_cwd()?
     //!                 .block_task()
     //!                 .start_session()
     //!                 .await?;
@@ -90,16 +89,15 @@ pub mod one_shot_prompt {
     //!
     //! # How it works
     //!
-    //! 1. **[`connect_to`]** establishes the transport connection
-    //! 2. **[`run_until`]** runs your code while the connection handles messages
-    //!    in the background
-    //! 3. **[`send_request`]** + **[`block_task`]** sends the initialize request
+    //! 1. **[`connect_with`]** establishes the transport connection and runs your
+    //!    code while handling messages in the background
+    //! 2. **[`send_request`]** + **[`block_task`]** sends the initialize request
     //!    and waits for the response
-    //! 4. **[`build_session_cwd`]** creates a session builder using the current working directory
-    //! 5. **[`start_session`]** sends the `NewSessionRequest` and returns an
+    //! 3. **[`build_session_cwd`]** creates a session builder using the current working directory
+    //! 4. **[`start_session`]** sends the `NewSessionRequest` and returns an
     //!    [`ActiveSession`] handle
-    //! 6. **[`send_prompt`]** queues the prompt to send to the agent
-    //! 7. **[`read_to_string`]** reads all text chunks until the agent finishes
+    //! 5. **[`send_prompt`]** queues the prompt to send to the agent
+    //! 6. **[`read_to_string`]** reads all text chunks until the agent finishes
     //!
     //! # Handling permission requests
     //!
@@ -107,10 +105,9 @@ pub mod one_shot_prompt {
     //! commands or writing files. See [`connecting_as_client`] for how to handle
     //! [`RequestPermissionRequest`] messages.
     //!
-    //! [`connect_to`]: sacp::ConnectFrom::connect_to
-    //! [`run_until`]: sacp::ConnectFrom::run_until
+    //! [`connect_with`]: sacp::ConnectFrom::connect_with
     //! [`send_request`]: sacp::ConnectionTo::send_request
-    //! [`block_task`]: sacp::JrResponse::block_task
+    //! [`block_task`]: sacp::SentRequest::block_task
     //! [`build_session_cwd`]: sacp::ConnectionTo::build_session_cwd
     //! [`start_session`]: sacp::SessionBuilder::start_session
     //! [`ActiveSession`]: sacp::ActiveSession
@@ -123,26 +120,26 @@ pub mod one_shot_prompt {
 pub mod connecting_as_client {
     //! Pattern: Connecting as a client.
     //!
-    //! To connect to an ACP agent and send requests, use [`run_until`].
+    //! To connect to an ACP agent and send requests, use [`connect_with`].
     //! This runs your code while the connection handles incoming messages
     //! in the background.
     //!
     //! # Basic Example
     //!
     //! ```
-    //! use sacp::{ClientToAgent, AgentToClient, Component};
+    //! use sacp::{Client, Agent, ConnectTo};
     //! use sacp::schema::{InitializeRequest, ProtocolVersion};
     //!
-    //! async fn connect_to_agent(transport: impl Component<AgentToClient>) -> Result<(), sacp::Error> {
+    //! async fn connect_to_agent(transport: impl ConnectTo<Client>) -> Result<(), sacp::Error> {
     //!     Client.connect_from()
     //!         .name("my-client")
-    //!         .run_until(transport, async |cx| {
+    //!         .connect_with(transport, async |connection| {
     //!             // Initialize the connection
-    //!             cx.send_request(InitializeRequest::new(ProtocolVersion::LATEST))
+    //!             connection.send_request(InitializeRequest::new(ProtocolVersion::LATEST))
     //!                 .block_task().await?;
     //!
     //!             // Create a session and send a prompt
-    //!             cx.build_session_cwd()?
+    //!             connection.build_session_cwd()?
     //!                 .block_task()
     //!                 .run_until(async |mut session| {
     //!                     session.send_prompt("Hello, agent!")?;
@@ -175,7 +172,7 @@ pub mod connecting_as_client {
     //!
     //! ```ignore
     //! Client.connect_from()
-    //!     .on_receive_request(async |req: RequestPermissionRequest, responder, _cx| {
+    //!     .on_receive_request(async |req: RequestPermissionRequest, responder, _connection| {
     //!         // Auto-approve by selecting the first option (YOLO mode)
     //!         let option_id = req.options.first().map(|opt| opt.id.clone());
     //!         responder.respond(RequestPermissionResponse {
@@ -186,18 +183,18 @@ pub mod connecting_as_client {
     //!             meta: None,
     //!         })
     //!     }, sacp::on_receive_request!())
-    //!     .run_until(transport, async |cx| { /* ... */ })
+    //!     .connect_with(transport, async |connection| { /* ... */ })
     //!     .await
     //! ```
     //!
     //! # Note on `block_task`
     //!
-    //! Using [`block_task`] is safe inside `run_until` because the closure runs
+    //! Using [`block_task`] is safe inside `connect_with` because the closure runs
     //! as a spawned task, not on the event loop. The event loop continues processing
     //! messages (including the response you're waiting for) while your task blocks.
     //!
-    //! [`run_until`]: sacp::ConnectFrom::run_until
-    //! [`block_task`]: sacp::JrResponse::block_task
+    //! [`connect_with`]: sacp::ConnectFrom::connect_with
+    //! [`block_task`]: sacp::SentRequest::block_task
     //! [`build_session`]: sacp::ConnectionTo::build_session
     //! [`SessionBuilder`]: sacp::SessionBuilder
     //! [`send_prompt`]: sacp::ActiveSession::send_prompt
@@ -217,46 +214,45 @@ pub mod building_an_agent {
     //! 2. Handle [`NewSessionRequest`] to create sessions
     //! 3. Handle [`PromptRequest`] to process prompts
     //!
-    //! Use [`AgentToClient`] as your link type.
+    //! Use [`Agent.connect_from()`][Agent] to build agent connections.
     //!
     //! # Minimal Example
     //!
     //! ```
-    //! use sacp::{AgentToClient, Component, Dispatch, ConnectionTo};
-    //! use sacp::link::JrLink;
+    //! use sacp::{Agent, Client, ConnectTo, Dispatch, ConnectionTo};
     //! use sacp::schema::{
     //!     InitializeRequest, InitializeResponse, AgentCapabilities,
     //!     NewSessionRequest, NewSessionResponse, SessionId,
     //!     PromptRequest, PromptResponse, StopReason,
     //! };
     //!
-    //! async fn run_agent(transport: impl Component<sacp::ClientToAgent>) -> Result<(), sacp::Error> {
+    //! async fn run_agent(transport: impl ConnectTo<Agent>) -> Result<(), sacp::Error> {
     //!     Agent.connect_from()
     //!         .name("my-agent")
     //!         // Handle initialization
-    //!         .on_receive_request(async |req: InitializeRequest, responder, _cx| {
+    //!         .on_receive_request(async |req: InitializeRequest, responder, _connection| {
     //!             responder.respond(
     //!                 InitializeResponse::new(req.protocol_version)
     //!                     .agent_capabilities(AgentCapabilities::new())
     //!             )
     //!         }, sacp::on_receive_request!())
     //!         // Handle session creation
-    //!         .on_receive_request(async |req: NewSessionRequest, responder, _cx| {
+    //!         .on_receive_request(async |req: NewSessionRequest, responder, _connection| {
     //!             responder.respond(NewSessionResponse::new(SessionId::new("session-1")))
     //!         }, sacp::on_receive_request!())
     //!         // Handle prompts
-    //!         .on_receive_request(async |req: PromptRequest, responder, cx| {
+    //!         .on_receive_request(async |req: PromptRequest, responder, connection| {
     //!             // Send streaming updates via notifications
-    //!             // cx.send_notification(SessionNotification { ... })?;
+    //!             // connection.send_notification(SessionNotification { ... })?;
     //!
     //!             // Return final response
     //!             responder.respond(PromptResponse::new(StopReason::EndTurn))
     //!         }, sacp::on_receive_request!())
     //!         // Reject unknown messages
-    //!         .on_receive_dispatch(async |message: Dispatch, cx: ConnectionTo<AgentToClient>| {
-    //!             message.respond_with_error(sacp::Error::method_not_found(), cx)
+    //!         .on_receive_dispatch(async |message: Dispatch, connection: ConnectionTo<Client>| {
+    //!             message.respond_with_error(sacp::Error::method_not_found(), connection)
     //!         }, sacp::on_receive_dispatch!())
-    //!         .serve(transport)
+    //!         .connect_to(transport)
     //!         .await
     //! }
     //! ```
@@ -267,9 +263,9 @@ pub mod building_an_agent {
     //! while processing a prompt:
     //!
     //! ```ignore
-    //! .on_receive_request(async |req: PromptRequest, responder, cx| {
+    //! .on_receive_request(async |req: PromptRequest, responder, connection| {
     //!     // Stream some text
-    //!     cx.send_notification(SessionNotification {
+    //!     connection.send_notification(SessionNotification {
     //!         session_id: req.session_id.clone(),
     //!         update: SessionUpdate::Text(TextUpdate {
     //!             text: "Hello, ".into(),
@@ -278,7 +274,7 @@ pub mod building_an_agent {
     //!         meta: None,
     //!     })?;
     //!
-    //!     cx.send_notification(SessionNotification {
+    //!     connection.send_notification(SessionNotification {
     //!         session_id: req.session_id.clone(),
     //!         update: SessionUpdate::Text(TextUpdate {
     //!             text: "world!".into(),
@@ -300,7 +296,7 @@ pub mod building_an_agent {
     //! or writing files), send a [`RequestPermissionRequest`]:
     //!
     //! ```ignore
-    //! let response = cx.send_request(RequestPermissionRequest {
+    //! let response = connection.send_request(RequestPermissionRequest {
     //!     session_id: session_id.clone(),
     //!     action: PermissionAction::Bash { command: "rm -rf /".into() },
     //!     options: vec![
@@ -322,7 +318,7 @@ pub mod building_an_agent {
     //!
     //! # As a Reusable Component
     //!
-    //! For agents that will be composed with proxies, implement [`Component`].
+    //! For agents that will be composed with proxies, implement [`ConnectTo`].
     //! See [`reusable_components`] for the pattern.
     //!
     //! [`InitializeRequest`]: sacp::schema::InitializeRequest
@@ -330,8 +326,8 @@ pub mod building_an_agent {
     //! [`PromptRequest`]: sacp::schema::PromptRequest
     //! [`SessionNotification`]: sacp::schema::SessionNotification
     //! [`RequestPermissionRequest`]: sacp::schema::RequestPermissionRequest
-    //! [`AgentToClient`]: sacp::AgentToClient
-    //! [`Component`]: sacp::Component
+    //! [`Agent`]: sacp::Agent
+    //! [`ConnectTo`]: sacp::ConnectTo
     //! [`reusable_components`]: super::reusable_components
 }
 
@@ -339,14 +335,13 @@ pub mod reusable_components {
     //! Pattern: Defining reusable components.
     //!
     //! When building agents or proxies that will be composed together (for example,
-    //! with [`sacp-conductor`]), define a struct that implements [`Component`].
+    //! with [`sacp-conductor`]), define a struct that implements [`ConnectTo`].
     //! This allows your component to be connected to other components in a type-safe way.
     //!
     //! # Example
     //!
     //! ```
-    //! use sacp::{Component, AgentToClient};
-    //! use sacp::link::JrLink;
+    //! use sacp::{ConnectTo, Agent, Client};
     //! use sacp::schema::{
     //!     InitializeRequest, InitializeResponse, AgentCapabilities,
     //! };
@@ -355,17 +350,17 @@ pub mod reusable_components {
     //!     name: String,
     //! }
     //!
-    //! impl Component<AgentToClient> for MyAgent {
-    //!     async fn serve(self, client: impl Component<<AgentToClient as JrLink>::ConnectsTo>) -> Result<(), sacp::Error> {
+    //! impl ConnectTo<Client> for MyAgent {
+    //!     async fn connect_to(self, client: impl ConnectTo<Agent>) -> Result<(), sacp::Error> {
     //!         Agent.connect_from()
     //!             .name(&self.name)
-    //!             .on_receive_request(async move |req: InitializeRequest, responder, _cx| {
+    //!             .on_receive_request(async move |req: InitializeRequest, responder, _connection| {
     //!                 responder.respond(
     //!                     InitializeResponse::new(req.protocol_version)
     //!                         .agent_capabilities(AgentCapabilities::new())
     //!                 )
     //!             }, sacp::on_receive_request!())
-    //!             .serve(client)
+    //!             .connect_to(client)
     //!             .await
     //!     }
     //! }
@@ -381,9 +376,9 @@ pub mod reusable_components {
     //! - Use [`ConnectionTo::spawn`] to offload work to a background task
     //! - Use [`on_receiving_result`] to schedule work when a response arrives
     //!
-    //! [`Component`]: sacp::Component
+    //! [`ConnectTo`]: sacp::ConnectTo
     //! [`ConnectionTo::spawn`]: sacp::ConnectionTo::spawn
-    //! [`on_receiving_result`]: sacp::JrResponse::on_receiving_result
+    //! [`on_receiving_result`]: sacp::SentRequest::on_receiving_result
     //! [`sacp-conductor`]: https://crates.io/crates/sacp-conductor
 }
 
@@ -401,19 +396,17 @@ pub mod custom_message_handlers {
     //! # Example
     //!
     //! ```
-    //! use sacp::{HandleDispatchFrom, Dispatch, Handled, ConnectionTo};
+    //! use sacp::{HandleDispatchFrom, Dispatch, Handled, ConnectionTo, UntypedRole};
     //! use sacp::schema::{InitializeRequest, InitializeResponse, AgentCapabilities};
     //! use sacp::util::MatchDispatch;
     //!
     //! struct MyHandler;
     //!
-    //! impl HandleDispatchFrom for MyHandler {
-    //!     type Link = sacp::link::UntypedRole;
-    //!
-    //!     async fn handle_dispatch(
+    //! impl HandleDispatchFrom<UntypedRole> for MyHandler {
+    //!     async fn handle_dispatch_from(
     //!         &mut self,
     //!         message: Dispatch,
-    //!         _cx: ConnectionTo<Self::Link>,
+    //!         _connection: ConnectionTo<UntypedRole>,
     //!     ) -> Result<Handled<Dispatch>, sacp::Error> {
     //!         MatchDispatch::new(message)
     //!             .if_request(async |req: InitializeRequest, responder| {
@@ -462,7 +455,7 @@ pub mod global_mcp_server {
     //!
     //! ```
     //! use sacp::mcp_server::McpServer;
-    //! use sacp::{Component, Run, ProxyToConductor};
+    //! use sacp::{ConnectTo, RunWithConnectionTo, Proxy, Conductor};
     //! use schemars::JsonSchema;
     //! use serde::{Deserialize, Serialize};
     //!
@@ -483,14 +476,14 @@ pub mod global_mcp_server {
     //!
     //! // The proxy component is generic over the MCP server's responder type
     //! struct MyProxy<R> {
-    //!     mcp_server: McpServer<ProxyToConductor, R>,
+    //!     mcp_server: McpServer<Conductor, R>,
     //! }
     //!
-    //! impl<R: Run<ProxyToConductor> + Send + 'static> Component<ProxyToConductor> for MyProxy<R> {
-    //!     async fn serve(self, client: impl Component<sacp::link::ConductorToProxy>) -> Result<(), sacp::Error> {
+    //! impl<R: RunWithConnectionTo<Conductor> + Send + 'static> ConnectTo<Conductor> for MyProxy<R> {
+    //!     async fn connect_to(self, conductor: impl ConnectTo<Proxy>) -> Result<(), sacp::Error> {
     //!         Proxy.connect_from()
     //!             .with_mcp_server(self.mcp_server)
-    //!             .serve(client)
+    //!             .connect_to(conductor)
     //!             .await
     //!     }
     //! }
@@ -509,7 +502,7 @@ pub mod global_mcp_server {
     //! use rmcp::handler::server::wrapper::Parameters;
     //! use rmcp::model::*;
     //! use sacp::mcp_server::McpServer;
-    //! use sacp::ProxyToConductor;
+    //! use sacp::Conductor;
     //! use sacp_rmcp::McpServerExt;
     //! use serde::{Deserialize, Serialize};
     //!
@@ -550,7 +543,7 @@ pub mod global_mcp_server {
     //! }
     //!
     //! // Create an MCP server from the rmcp service
-    //! let mcp_server = McpServer::<ProxyToConductor, _>::from_rmcp("my-server", MyMcpServer::new);
+    //! let mcp_server = McpServer::<Conductor, _>::from_rmcp("my-server", MyMcpServer::new);
     //! ```
     //!
     //! The `from_rmcp` function takes a factory closure that creates a new server
@@ -592,12 +585,11 @@ pub mod per_session_mcp_server {
     //! ```
     //! use sacp::mcp_server::McpServer;
     //! use sacp::schema::NewSessionRequest;
-    //! use sacp::{Client, Component, ProxyToConductor};
-    //! use sacp::link::ConductorToProxy;
+    //! use sacp::{Client, Proxy, Conductor, ConnectTo};
     //!
-    //! async fn run_proxy(transport: impl Component<ConductorToProxy>) -> Result<(), sacp::Error> {
+    //! async fn run_proxy(transport: impl ConnectTo<Proxy>) -> Result<(), sacp::Error> {
     //!     Proxy.connect_from()
-    //!         .on_receive_request_from(Client, async move |request: NewSessionRequest, responder, cx| {
+    //!         .on_receive_request_from(Client, async move |request: NewSessionRequest, responder, connection| {
     //!             // Extract session context from the request
     //!             let workspace_path = request.cwd.clone();
     //!
@@ -611,7 +603,7 @@ pub mod per_session_mcp_server {
     //!                 .build();
     //!
     //!             // Build the session and run code after it starts
-    //!             cx.build_session_from(request)
+    //!             connection.build_session_from(request)
     //!                 .with_mcp_server(mcp_server)?
     //!                 .on_proxy_session_start(responder, async move |session_id| {
     //!                     // This callback runs after the session-id has been sent to the
@@ -625,7 +617,7 @@ pub mod per_session_mcp_server {
     //!                     Ok(())
     //!                 })
     //!         }, sacp::on_receive_request!())
-    //!         .serve(transport)
+    //!         .connect_to(transport)
     //!         .await
     //! }
     //! ```
@@ -651,11 +643,10 @@ pub mod per_session_mcp_server {
     //! ```
     //! # use sacp::mcp_server::McpServer;
     //! # use sacp::schema::NewSessionRequest;
-    //! # use sacp::{Client, Component, ProxyToConductor};
-    //! # use sacp::link::ConductorToProxy;
-    //! # async fn run_proxy(transport: impl Component<ConductorToProxy>) -> Result<(), sacp::Error> {
+    //! # use sacp::{Client, Proxy, Conductor, ConnectTo};
+    //! # async fn run_proxy(transport: impl ConnectTo<Proxy>) -> Result<(), sacp::Error> {
     //!     Proxy.connect_from()
-    //!         .on_receive_request_from(Client, async |request: NewSessionRequest, responder, cx| {
+    //!         .on_receive_request_from(Client, async |request: NewSessionRequest, responder, connection| {
     //!             let cwd = request.cwd.clone();
     //!             let mcp_server = McpServer::builder("tools")
     //!                 .tool_fn("get_cwd", "Returns working directory", {
@@ -663,7 +654,7 @@ pub mod per_session_mcp_server {
     //!                 }, sacp::tool_fn!())
     //!                 .build();
     //!
-    //!             let session_id = cx.build_session_from(request)
+    //!             let session_id = connection.build_session_from(request)
     //!                 .with_mcp_server(mcp_server)?
     //!                 .block_task()
     //!                 .start_session_proxy(responder)
@@ -672,7 +663,7 @@ pub mod per_session_mcp_server {
     //!             tracing::info!(%session_id, "Session started");
     //!             Ok(())
     //!         }, sacp::on_receive_request!())
-    //!         .serve(transport)
+    //!         .connect_to(transport)
     //!         .await
     //! # }
     //! ```
@@ -706,14 +697,14 @@ pub mod filtering_tools {
     //!
     //! ```
     //! use sacp::mcp_server::McpServer;
-    //! use sacp::ProxyToConductor;
+    //! use sacp::{Conductor, RunWithConnectionTo};
     //! use schemars::JsonSchema;
     //! use serde::Deserialize;
     //!
     //! #[derive(Debug, Deserialize, JsonSchema)]
     //! struct Params {}
     //!
-    //! fn build_server(enable_admin: bool) -> Result<McpServer<ProxyToConductor, impl sacp::Run<ProxyToConductor>>, sacp::Error> {
+    //! fn build_server(enable_admin: bool) -> Result<McpServer<Conductor, impl RunWithConnectionTo<Conductor>>, sacp::Error> {
     //!     let mut builder = McpServer::builder("my-server")
     //!         .tool_fn("echo", "Echo a message",
     //!             async |_p: Params, _cx| Ok("echoed"),
@@ -742,14 +733,14 @@ pub mod filtering_tools {
     //!
     //! ```
     //! use sacp::mcp_server::McpServer;
-    //! use sacp::ProxyToConductor;
+    //! use sacp::{Conductor, RunWithConnectionTo};
     //! use schemars::JsonSchema;
     //! use serde::Deserialize;
     //!
     //! #[derive(Debug, Deserialize, JsonSchema)]
     //! struct Params {}
     //!
-    //! fn build_restricted_server() -> Result<McpServer<ProxyToConductor, impl sacp::Run<ProxyToConductor>>, sacp::Error> {
+    //! fn build_restricted_server() -> Result<McpServer<Conductor, impl RunWithConnectionTo<Conductor>>, sacp::Error> {
     //!     McpServer::builder("restricted-server")
     //!         .tool_fn("safe", "Safe operation",
     //!             async |_p: Params, _cx| Ok("safe"),
@@ -775,10 +766,10 @@ pub mod filtering_tools {
     //!
     //! ```
     //! use sacp::mcp_server::McpServer;
-    //! use sacp::ProxyToConductor;
+    //! use sacp::Conductor;
     //!
     //! // This will error because "ech" is not a registered tool
-    //! let result = McpServer::<ProxyToConductor, _>::builder("server")
+    //! let result = McpServer::<Conductor, _>::builder("server")
     //!     .disable_tool("ech");  // Typo! Should be "echo"
     //!
     //! assert!(result.is_err());
