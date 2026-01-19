@@ -8,24 +8,36 @@ use serde::Serialize;
 use crate::jsonrpc::{JrMessage, JrRequest, JrResponsePayload};
 use crate::util::json_cast;
 
+// Method constants
+const METHOD_INITIALIZE: &str = "initialize";
+const METHOD_AUTHENTICATE: &str = "authenticate";
+const METHOD_SESSION_LOAD: &str = "session/load";
+const METHOD_SESSION_NEW: &str = "session/new";
+const METHOD_SESSION_PROMPT: &str = "session/prompt";
+const METHOD_SESSION_SET_MODE: &str = "session/set_mode";
+
 // ============================================================================
 // InitializeRequest
 // ============================================================================
 
 impl JrMessage for InitializeRequest {
+    fn matches_method(method: &str) -> bool {
+        method == METHOD_INITIALIZE
+    }
+
     fn method(&self) -> &str {
-        "initialize"
+        METHOD_INITIALIZE
     }
 
     fn to_untyped_message(&self) -> Result<crate::UntypedMessage, crate::Error> {
         crate::UntypedMessage::new(self.method(), self)
     }
 
-    fn parse_message(method: &str, params: &impl Serialize) -> Option<Result<Self, crate::Error>> {
-        if method != "initialize" {
-            return None;
+    fn parse_message(method: &str, params: &impl Serialize) -> Result<Self, crate::Error> {
+        if !Self::matches_method(method) {
+            return Err(crate::Error::method_not_found());
         }
-        Some(json_cast(params))
+        json_cast(params)
     }
 }
 
@@ -48,19 +60,23 @@ impl JrResponsePayload for InitializeResponse {
 // ============================================================================
 
 impl JrMessage for AuthenticateRequest {
+    fn matches_method(method: &str) -> bool {
+        method == METHOD_AUTHENTICATE
+    }
+
     fn method(&self) -> &str {
-        "authenticate"
+        METHOD_AUTHENTICATE
     }
 
     fn to_untyped_message(&self) -> Result<crate::UntypedMessage, crate::Error> {
         crate::UntypedMessage::new(self.method(), self)
     }
 
-    fn parse_message(method: &str, params: &impl Serialize) -> Option<Result<Self, crate::Error>> {
-        if method != "authenticate" {
-            return None;
+    fn parse_message(method: &str, params: &impl Serialize) -> Result<Self, crate::Error> {
+        if !Self::matches_method(method) {
+            return Err(crate::Error::method_not_found());
         }
-        Some(json_cast(params))
+        json_cast(params)
     }
 }
 
@@ -83,19 +99,23 @@ impl JrResponsePayload for AuthenticateResponse {
 // ============================================================================
 
 impl JrMessage for LoadSessionRequest {
+    fn matches_method(method: &str) -> bool {
+        method == METHOD_SESSION_LOAD
+    }
+
     fn method(&self) -> &str {
-        "session/load"
+        METHOD_SESSION_LOAD
     }
 
     fn to_untyped_message(&self) -> Result<crate::UntypedMessage, crate::Error> {
         crate::UntypedMessage::new(self.method(), self)
     }
 
-    fn parse_message(method: &str, params: &impl Serialize) -> Option<Result<Self, crate::Error>> {
-        if method != "session/load" {
-            return None;
+    fn parse_message(method: &str, params: &impl Serialize) -> Result<Self, crate::Error> {
+        if !Self::matches_method(method) {
+            return Err(crate::Error::method_not_found());
         }
-        Some(json_cast(params))
+        json_cast(params)
     }
 }
 
@@ -118,19 +138,23 @@ impl JrResponsePayload for LoadSessionResponse {
 // ============================================================================
 
 impl JrMessage for NewSessionRequest {
+    fn matches_method(method: &str) -> bool {
+        method == METHOD_SESSION_NEW
+    }
+
     fn method(&self) -> &str {
-        "session/new"
+        METHOD_SESSION_NEW
     }
 
     fn to_untyped_message(&self) -> Result<crate::UntypedMessage, crate::Error> {
         crate::UntypedMessage::new(self.method(), self)
     }
 
-    fn parse_message(method: &str, params: &impl Serialize) -> Option<Result<Self, crate::Error>> {
-        if method != "session/new" {
-            return None;
+    fn parse_message(method: &str, params: &impl Serialize) -> Result<Self, crate::Error> {
+        if !Self::matches_method(method) {
+            return Err(crate::Error::method_not_found());
         }
-        Some(json_cast(params))
+        json_cast(params)
     }
 }
 
@@ -153,19 +177,23 @@ impl JrResponsePayload for NewSessionResponse {
 // ============================================================================
 
 impl JrMessage for PromptRequest {
+    fn matches_method(method: &str) -> bool {
+        method == METHOD_SESSION_PROMPT
+    }
+
     fn method(&self) -> &str {
-        "session/prompt"
+        METHOD_SESSION_PROMPT
     }
 
     fn to_untyped_message(&self) -> Result<crate::UntypedMessage, crate::Error> {
         crate::UntypedMessage::new(self.method(), self)
     }
 
-    fn parse_message(method: &str, params: &impl Serialize) -> Option<Result<Self, crate::Error>> {
-        if method != "session/prompt" {
-            return None;
+    fn parse_message(method: &str, params: &impl Serialize) -> Result<Self, crate::Error> {
+        if !Self::matches_method(method) {
+            return Err(crate::Error::method_not_found());
         }
-        Some(json_cast(params))
+        json_cast(params)
     }
 }
 
@@ -188,19 +216,23 @@ impl JrResponsePayload for PromptResponse {
 // ============================================================================
 
 impl JrMessage for SetSessionModeRequest {
+    fn matches_method(method: &str) -> bool {
+        method == METHOD_SESSION_SET_MODE
+    }
+
     fn method(&self) -> &str {
-        "session/set_mode"
+        METHOD_SESSION_SET_MODE
     }
 
     fn to_untyped_message(&self) -> Result<crate::UntypedMessage, crate::Error> {
         crate::UntypedMessage::new(self.method(), self)
     }
 
-    fn parse_message(method: &str, params: &impl Serialize) -> Option<Result<Self, crate::Error>> {
-        if method != "session/set_mode" {
-            return None;
+    fn parse_message(method: &str, params: &impl Serialize) -> Result<Self, crate::Error> {
+        if !Self::matches_method(method) {
+            return Err(crate::Error::method_not_found());
         }
-        Some(json_cast(params))
+        json_cast(params)
     }
 }
 

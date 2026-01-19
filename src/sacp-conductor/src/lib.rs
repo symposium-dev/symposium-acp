@@ -83,6 +83,7 @@ mod conductor;
 mod debug_logger;
 /// MCP bridge functionality for TCP-based MCP servers
 mod mcp_bridge;
+mod snoop;
 /// Trace event types for sequence diagram viewer
 pub mod trace;
 
@@ -395,9 +396,5 @@ async fn initialize_conductor<Link: ConductorLink>(
         conductor = conductor.with_trace_writer(writer);
     }
 
-    conductor
-        .into_connection_builder()
-        .connect_to(stdio)?
-        .serve()
-        .await
+    conductor.run(stdio).await
 }

@@ -18,6 +18,11 @@ use crate::util::json_cast;
 // ============================================================================
 
 impl JrMessage for ClientRequest {
+    fn matches_method(_method: &str) -> bool {
+        // Enum types match any method - the parsing will determine if it's valid
+        true
+    }
+
     fn method(&self) -> &str {
         match self {
             ClientRequest::InitializeRequest(_) => "initialize",
@@ -35,8 +40,8 @@ impl JrMessage for ClientRequest {
         crate::UntypedMessage::new(self.method(), self)
     }
 
-    fn parse_message(method: &str, params: &impl Serialize) -> Option<Result<Self, crate::Error>> {
-        let result = match method {
+    fn parse_message(method: &str, params: &impl Serialize) -> Result<Self, crate::Error> {
+        match method {
             "initialize" => json_cast(params).map(ClientRequest::InitializeRequest),
             "authenticate" => json_cast(params).map(ClientRequest::AuthenticateRequest),
             "session/new" => json_cast(params).map(ClientRequest::NewSessionRequest),
@@ -53,12 +58,10 @@ impl JrMessage for ClientRequest {
                         ))
                     })
                 } else {
-                    return None;
+                    Err(crate::Error::method_not_found())
                 }
             }
-        };
-
-        Some(result)
+        }
     }
 }
 
@@ -67,6 +70,11 @@ impl JrRequest for ClientRequest {
 }
 
 impl JrMessage for ClientNotification {
+    fn matches_method(_method: &str) -> bool {
+        // Enum types match any method - the parsing will determine if it's valid
+        true
+    }
+
     fn method(&self) -> &str {
         match self {
             ClientNotification::CancelNotification(_) => "session/cancel",
@@ -79,8 +87,8 @@ impl JrMessage for ClientNotification {
         crate::UntypedMessage::new(self.method(), self)
     }
 
-    fn parse_message(method: &str, params: &impl Serialize) -> Option<Result<Self, crate::Error>> {
-        let result = match method {
+    fn parse_message(method: &str, params: &impl Serialize) -> Result<Self, crate::Error> {
+        match method {
             "session/cancel" => json_cast(params).map(ClientNotification::CancelNotification),
             _ => {
                 // Check for extension notifications (prefixed with underscore)
@@ -92,12 +100,10 @@ impl JrMessage for ClientNotification {
                         ))
                     })
                 } else {
-                    return None;
+                    Err(crate::Error::method_not_found())
                 }
             }
-        };
-
-        Some(result)
+        }
     }
 }
 
@@ -108,6 +114,11 @@ impl JrNotification for ClientNotification {}
 // ============================================================================
 
 impl JrMessage for AgentRequest {
+    fn matches_method(_method: &str) -> bool {
+        // Enum types match any method - the parsing will determine if it's valid
+        true
+    }
+
     fn method(&self) -> &str {
         match self {
             AgentRequest::WriteTextFileRequest(_) => "fs/write_text_file",
@@ -127,8 +138,8 @@ impl JrMessage for AgentRequest {
         crate::UntypedMessage::new(self.method(), self)
     }
 
-    fn parse_message(method: &str, params: &impl Serialize) -> Option<Result<Self, crate::Error>> {
-        let result = match method {
+    fn parse_message(method: &str, params: &impl Serialize) -> Result<Self, crate::Error> {
+        match method {
             "fs/write_text_file" => json_cast(params).map(AgentRequest::WriteTextFileRequest),
             "fs/read_text_file" => json_cast(params).map(AgentRequest::ReadTextFileRequest),
             "session/request_permission" => {
@@ -151,12 +162,10 @@ impl JrMessage for AgentRequest {
                         ))
                     })
                 } else {
-                    return None;
+                    Err(crate::Error::method_not_found())
                 }
             }
-        };
-
-        Some(result)
+        }
     }
 }
 
@@ -165,6 +174,11 @@ impl JrRequest for AgentRequest {
 }
 
 impl JrMessage for AgentNotification {
+    fn matches_method(_method: &str) -> bool {
+        // Enum types match any method - the parsing will determine if it's valid
+        true
+    }
+
     fn method(&self) -> &str {
         match self {
             AgentNotification::SessionNotification(_) => "session/update",
@@ -177,8 +191,8 @@ impl JrMessage for AgentNotification {
         crate::UntypedMessage::new(self.method(), self)
     }
 
-    fn parse_message(method: &str, params: &impl Serialize) -> Option<Result<Self, crate::Error>> {
-        let result = match method {
+    fn parse_message(method: &str, params: &impl Serialize) -> Result<Self, crate::Error> {
+        match method {
             "session/update" => json_cast(params).map(AgentNotification::SessionNotification),
             _ => {
                 // Check for extension notifications (prefixed with underscore)
@@ -190,12 +204,10 @@ impl JrMessage for AgentNotification {
                         ))
                     })
                 } else {
-                    return None;
+                    Err(crate::Error::method_not_found())
                 }
             }
-        };
-
-        Some(result)
+        }
     }
 }
 

@@ -40,6 +40,15 @@ pub fn parse_error(message: impl ToString) -> crate::Error {
     crate::Error::parse_error().data(message.to_string())
 }
 
+/// Convert a JSON-RPC id to a serde_json::Value.
+pub(crate) fn id_to_json(id: &jsonrpcmsg::Id) -> serde_json::Value {
+    match id {
+        jsonrpcmsg::Id::Number(n) => serde_json::Value::Number((*n).into()),
+        jsonrpcmsg::Id::String(s) => serde_json::Value::String(s.clone()),
+        jsonrpcmsg::Id::Null => serde_json::Value::Null,
+    }
+}
+
 pub(crate) fn instrumented_with_connection_name<F>(
     name: String,
     task: F,

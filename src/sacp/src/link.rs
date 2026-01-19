@@ -10,7 +10,7 @@ use agent_client_protocol_schema::{NewSessionRequest, NewSessionResponse, Sessio
 use crate::{
     Handled, JrConnectionCx, JrMessage, JrMessageHandler, MessageCx, UntypedMessage,
     jsonrpc::{JrConnectionBuilder, handlers::NullHandler},
-    peer::{AgentPeer, ClientPeer, ConductorPeer, JrPeer, ProxyPeer, UntypedPeer},
+    peer::{AgentPeer, ClientPeer, ConductorPeer, JrPeer, UntypedPeer},
     schema::{
         InitializeProxyRequest, InitializeRequest, METHOD_INITIALIZE_PROXY,
         METHOD_SUCCESSOR_MESSAGE, SuccessorMessage,
@@ -77,11 +77,14 @@ pub trait HasPeer<Peer: JrPeer>: JrLink {
 }
 
 /// Describes how messages are transformed when sent to a remote peer.
-#[derive(Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum RemoteStyle {
     /// Pass each message through exactly as it is.
     Counterpart,
+
+    /// Only messages not wrapped in successor.
+    Predecessor,
 
     /// Wrap messages in a [`SuccessorMessage`] envelope.
     Successor,
@@ -93,7 +96,7 @@ impl RemoteStyle {
         msg: M,
     ) -> Result<UntypedMessage, crate::Error> {
         match self {
-            RemoteStyle::Counterpart => msg.to_untyped_message(),
+            RemoteStyle::Counterpart | RemoteStyle::Predecessor => msg.to_untyped_message(),
             RemoteStyle::Successor => SuccessorMessage {
                 message: msg,
                 meta: None,
@@ -101,71 +104,128 @@ impl RemoteStyle {
             .to_untyped_message(),
         }
     }
+}
 
-    pub(crate) async fn handle_incoming_message<R: JrLink>(
-        &self,
-        message_cx: MessageCx,
-        connection_cx: JrConnectionCx<R>,
-        handle_message: impl AsyncFnOnce(
-            MessageCx,
-            JrConnectionCx<R>,
-        ) -> Result<Handled<MessageCx>, crate::Error>,
-    ) -> Result<Handled<MessageCx>, crate::Error> {
+pub(crate) async fn handle_incoming_message<Link: JrLink, Peer: JrPeer>(
+    peer: Peer,
+    message_cx: MessageCx,
+    connection_cx: JrConnectionCx<Link>,
+    handle_message: impl AsyncFnOnce(
+        MessageCx,
+        JrConnectionCx<Link>,
+    ) -> Result<Handled<MessageCx>, crate::Error>,
+) -> Result<Handled<MessageCx>, crate::Error>
+where
+    Link: HasPeer<Peer>,
+{
+    tracing::trace!(
+        method = %message_cx.method(),
+        link = std::any::type_name::<Link>(),
+        peer = ?peer,
+        ?message_cx,
+        "handle_incoming_message: enter"
+    );
+
+    // Responses are different from other messages.
+    //
+    // For normal incoming messages, mesages from non-default
+    // peers are tagged with special method names and carry
+    // special payload that have be "unwrapped".
+    //
+    // For responses, the payload is untouched. The response
+    // carries an `id` and we use this `id` to look up information
+    // on the request that was sent to determine which peer it was
+    // directed at (and therefore which peer sent us the response).
+    if let MessageCx::Response(_, response_cx) = &message_cx {
         tracing::trace!(
-            ?self,
-            method = %message_cx.method(),
-            role = std::any::type_name::<R>(),
-            "handle_incoming_message: enter"
+            response_peer = ?response_cx.peer_id(),
+            peer = ?peer.peer_id(),
+            "handle_incoming_message: response"
         );
-        match self {
-            RemoteStyle::Counterpart => {
-                tracing::trace!("handle_incoming_message: Counterpart style, passing through");
-                return handle_message(message_cx, connection_cx).await;
-            }
-            RemoteStyle::Successor => (),
-        }
 
-        let method = message_cx.method();
-        if method != METHOD_SUCCESSOR_MESSAGE {
-            tracing::trace!(
-                method,
-                expected = METHOD_SUCCESSOR_MESSAGE,
-                "handle_incoming_message: Successor style but method doesn't match, returning Handled::No"
-            );
+        if response_cx.peer_id() == peer.peer_id() {
+            return handle_message(message_cx, connection_cx).await;
+        } else {
             return Ok(Handled::No {
                 message: message_cx,
                 retry: false,
             });
         }
+    }
 
-        tracing::trace!("handle_incoming_message: Successor style, unwrapping SuccessorMessage");
-        // The outer message has method="_proxy/successor" and params containing the inner message.
-        // We need to deserialize the params (not the whole message) to extract the inner UntypedMessage.
-        let SuccessorMessage { message, meta } = json_cast(message_cx.message().params())?;
-        let successor_message_cx = message_cx.try_map_message(|_| Ok(message))?;
-        tracing::trace!(
-            unwrapped_method = %successor_message_cx.method(),
-            "handle_incoming_message: unwrapped to inner message"
-        );
-        match handle_message(successor_message_cx, connection_cx).await? {
-            Handled::Yes => {
-                tracing::trace!("handle_incoming_message: inner handler returned Handled::Yes");
-                Ok(Handled::Yes)
+    // Handle other messages by looking at the 'remote style'
+    let method = message_cx.method();
+    match <Link as HasPeer<Peer>>::remote_style(peer) {
+        RemoteStyle::Counterpart => {
+            // "Counterpart" is the default peer, no special checks required.
+            tracing::trace!("handle_incoming_message: Counterpart style, passing through");
+            return handle_message(message_cx, connection_cx).await;
+        }
+        RemoteStyle::Predecessor => {
+            // "Predecessor" is the default peer, no special checks required.
+            tracing::trace!("handle_incoming_message: Predecessor style, passing through");
+            if method != METHOD_SUCCESSOR_MESSAGE {
+                return handle_message(message_cx, connection_cx).await;
+            } else {
+                // Methods coming from the successor are not coming from
+                // our counterpart.
+                return Ok(Handled::No {
+                    message: message_cx,
+                    retry: false,
+                });
+            }
+        }
+        RemoteStyle::Successor => {
+            // Successor style means we have to look for a special method name.
+            if method != METHOD_SUCCESSOR_MESSAGE {
+                tracing::trace!(
+                    method,
+                    expected = METHOD_SUCCESSOR_MESSAGE,
+                    "handle_incoming_message: Successor style but method doesn't match, returning Handled::No"
+                );
+                return Ok(Handled::No {
+                    message: message_cx,
+                    retry: false,
+                });
             }
 
-            Handled::No {
-                message: successor_message_cx,
-                retry,
-            } => {
-                tracing::trace!(
-                    "handle_incoming_message: inner handler returned Handled::No, re-wrapping"
-                );
-                Ok(Handled::No {
-                    message: successor_message_cx.try_map_message(|message| {
-                        SuccessorMessage { message, meta }.to_untyped_message()
-                    })?,
+            tracing::trace!(
+                "handle_incoming_message: Successor style, unwrapping SuccessorMessage"
+            );
+
+            // The outer message has method="_proxy/successor" and params containing the inner message.
+            // We need to deserialize the params (not the whole message) to extract the inner UntypedMessage.
+            let untyped_message = message_cx.message().ok_or_else(|| {
+                crate::util::internal_error(
+                    "Response variant cannot be unwrapped as SuccessorMessage",
+                )
+            })?;
+            let SuccessorMessage { message, meta } = json_cast(untyped_message.params())?;
+            let successor_message_cx = message_cx.try_map_message(|_| Ok(message))?;
+            tracing::trace!(
+                unwrapped_method = %successor_message_cx.method(),
+                "handle_incoming_message: unwrapped to inner message"
+            );
+            match handle_message(successor_message_cx, connection_cx).await? {
+                Handled::Yes => {
+                    tracing::trace!("handle_incoming_message: inner handler returned Handled::Yes");
+                    Ok(Handled::Yes)
+                }
+
+                Handled::No {
+                    message: successor_message_cx,
                     retry,
-                })
+                } => {
+                    tracing::trace!(
+                        "handle_incoming_message: inner handler returned Handled::No, re-wrapping"
+                    );
+                    Ok(Handled::No {
+                        message: successor_message_cx.try_map_message(|message| {
+                            SuccessorMessage { message, meta }.to_untyped_message()
+                        })?,
+                        retry,
+                    })
+                }
             }
         }
     }
@@ -279,6 +339,10 @@ impl JrLink for ConductorToClient {
     type State = ();
 }
 
+impl HasDefaultPeer for ConductorToClient {
+    type DefaultPeer = ClientPeer;
+}
+
 impl HasPeer<ClientPeer> for ConductorToClient {
     fn remote_style(_end: ClientPeer) -> RemoteStyle {
         RemoteStyle::Counterpart
@@ -302,6 +366,12 @@ impl JrLink for ConductorToConductor {
     type State = ();
 }
 
+impl HasPeer<ConductorPeer> for ConductorToConductor {
+    fn remote_style(_end: ConductorPeer) -> RemoteStyle {
+        RemoteStyle::Counterpart
+    }
+}
+
 impl HasPeer<AgentPeer> for ConductorToConductor {
     fn remote_style(_end: AgentPeer) -> RemoteStyle {
         RemoteStyle::Successor
@@ -310,7 +380,7 @@ impl HasPeer<AgentPeer> for ConductorToConductor {
 
 impl HasPeer<ClientPeer> for ConductorToConductor {
     fn remote_style(_end: ClientPeer) -> RemoteStyle {
-        RemoteStyle::Counterpart
+        RemoteStyle::Predecessor
     }
 }
 
@@ -333,13 +403,7 @@ impl JrLink for ConductorToProxy {
 }
 
 impl HasDefaultPeer for ConductorToProxy {
-    type DefaultPeer = ProxyPeer;
-}
-
-impl HasPeer<ProxyPeer> for ConductorToProxy {
-    fn remote_style(_end: ProxyPeer) -> RemoteStyle {
-        RemoteStyle::Counterpart
-    }
+    type DefaultPeer = AgentPeer;
 }
 
 impl HasPeer<AgentPeer> for ConductorToProxy {
@@ -489,6 +553,11 @@ impl JrLink for ProxyToConductor {
                     cx.send_notification_to(AgentPeer, notif)?;
                     Ok(Handled::Yes)
                 }
+                MessageCx::Response(result, request_cx) => {
+                    // Forward response to its destination
+                    request_cx.respond_with_result(result)?;
+                    Ok(Handled::Yes)
+                }
             },
         }
     }
@@ -557,7 +626,7 @@ impl HasPeer<ConductorPeer> for ProxyToConductor {
 
 impl HasPeer<ClientPeer> for ProxyToConductor {
     fn remote_style(_end: ClientPeer) -> RemoteStyle {
-        RemoteStyle::Counterpart
+        RemoteStyle::Predecessor
     }
 }
 

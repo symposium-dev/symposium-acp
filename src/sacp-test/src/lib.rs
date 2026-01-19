@@ -19,7 +19,7 @@ impl<L: link::JrLink> Component<L> for MockTransport {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MyRequest {}
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MyResponse {
     pub status: String,
 }
@@ -29,7 +29,7 @@ pub struct ProcessRequest {
     pub data: String,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProcessResponse {
     pub result: String,
 }
@@ -42,7 +42,7 @@ pub struct AnalyzeRequest {
     pub data: String,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AnalysisStarted {
     pub job_id: u32,
 }
@@ -52,7 +52,7 @@ pub struct QueryRequest {
     pub id: u64,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct QueryResponse {
     pub data: String,
 }
@@ -62,7 +62,7 @@ pub struct ValidateRequest {
     pub data: String,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ValidateResponse {
     pub is_valid: bool,
     pub error: Option<String>,
@@ -71,7 +71,7 @@ pub struct ValidateResponse {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ExecuteRequest {}
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ExecuteResponse {
     pub result: String,
 }
@@ -79,7 +79,7 @@ pub struct ExecuteResponse {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OtherRequest {}
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OtherResponse {
     pub value: String,
 }
@@ -115,17 +115,20 @@ pub struct QueryComplete {}
 macro_rules! impl_jr_message {
     ($type:ty, $method:expr) => {
         impl JrMessage for $type {
+            fn matches_method(method: &str) -> bool {
+                method == $method
+            }
             fn method(&self) -> &str {
                 $method
             }
             fn to_untyped_message(&self) -> Result<UntypedMessage, crate::Error> {
                 UntypedMessage::new($method, self)
             }
-            fn parse_message(
-                _method: &str,
-                _params: &impl Serialize,
-            ) -> Option<Result<Self, crate::Error>> {
-                None
+            fn parse_message(method: &str, params: &impl Serialize) -> Result<Self, crate::Error> {
+                if !Self::matches_method(method) {
+                    return Err(crate::Error::method_not_found());
+                }
+                sacp::util::json_cast(params)
             }
         }
     };
@@ -166,68 +169,26 @@ impl_jr_notification!(QueryComplete, "queryComplete");
 impl_jr_notification!(ProcessStarted, "processStarted");
 
 // Implement JrResponsePayload for response types
-impl JrResponsePayload for MyResponse {
-    fn into_json(self, _method: &str) -> Result<serde_json::Value, crate::Error> {
-        Ok(serde_json::to_value(self)?)
-    }
-    fn from_value(_method: &str, value: serde_json::Value) -> Result<Self, crate::Error> {
-        Ok(serde_json::from_value(value)?)
-    }
+macro_rules! impl_jr_response_payload {
+    ($type:ty, $method:expr) => {
+        impl JrResponsePayload for $type {
+            fn into_json(self, _method: &str) -> Result<serde_json::Value, crate::Error> {
+                Ok(serde_json::to_value(self)?)
+            }
+            fn from_value(_method: &str, value: serde_json::Value) -> Result<Self, crate::Error> {
+                Ok(serde_json::from_value(value)?)
+            }
+        }
+    };
 }
 
-impl JrResponsePayload for ProcessResponse {
-    fn into_json(self, _method: &str) -> Result<serde_json::Value, crate::Error> {
-        Ok(serde_json::to_value(self)?)
-    }
-    fn from_value(_method: &str, value: serde_json::Value) -> Result<Self, crate::Error> {
-        Ok(serde_json::from_value(value)?)
-    }
-}
-
-impl JrResponsePayload for AnalysisStarted {
-    fn into_json(self, _method: &str) -> Result<serde_json::Value, crate::Error> {
-        Ok(serde_json::to_value(self)?)
-    }
-    fn from_value(_method: &str, value: serde_json::Value) -> Result<Self, crate::Error> {
-        Ok(serde_json::from_value(value)?)
-    }
-}
-
-impl JrResponsePayload for QueryResponse {
-    fn into_json(self, _method: &str) -> Result<serde_json::Value, crate::Error> {
-        Ok(serde_json::to_value(self)?)
-    }
-    fn from_value(_method: &str, value: serde_json::Value) -> Result<Self, crate::Error> {
-        Ok(serde_json::from_value(value)?)
-    }
-}
-
-impl JrResponsePayload for ValidateResponse {
-    fn into_json(self, _method: &str) -> Result<serde_json::Value, crate::Error> {
-        Ok(serde_json::to_value(self)?)
-    }
-    fn from_value(_method: &str, value: serde_json::Value) -> Result<Self, crate::Error> {
-        Ok(serde_json::from_value(value)?)
-    }
-}
-
-impl JrResponsePayload for ExecuteResponse {
-    fn into_json(self, _method: &str) -> Result<serde_json::Value, crate::Error> {
-        Ok(serde_json::to_value(self)?)
-    }
-    fn from_value(_method: &str, value: serde_json::Value) -> Result<Self, crate::Error> {
-        Ok(serde_json::from_value(value)?)
-    }
-}
-
-impl JrResponsePayload for OtherResponse {
-    fn into_json(self, _method: &str) -> Result<serde_json::Value, crate::Error> {
-        Ok(serde_json::to_value(self)?)
-    }
-    fn from_value(_method: &str, value: serde_json::Value) -> Result<Self, crate::Error> {
-        Ok(serde_json::from_value(value)?)
-    }
-}
+impl_jr_response_payload!(MyResponse, "myRequest");
+impl_jr_response_payload!(ProcessResponse, "processRequest");
+impl_jr_response_payload!(AnalysisStarted, "analyzeRequest");
+impl_jr_response_payload!(QueryResponse, "queryRequest");
+impl_jr_response_payload!(ValidateResponse, "validateRequest");
+impl_jr_response_payload!(ExecuteResponse, "executeRequest");
+impl_jr_response_payload!(OtherResponse, "otherRequest");
 
 // Mock async functions
 pub async fn expensive_analysis(_data: &str) -> Result<String, crate::Error> {

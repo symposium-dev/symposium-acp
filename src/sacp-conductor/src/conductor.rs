@@ -117,7 +117,8 @@ use futures::{
     channel::mpsc::{self},
 };
 use sacp::{
-    AgentPeer, BoxFuture, ClientPeer, Component, Error, HasPeer, JrMessage,
+    AgentPeer, BoxFuture, ClientPeer, Component, DynComponent, Error, HasPeer, JrMessage,
+    MessageCx,
     link::{
         AgentToClient, ConductorToAgent, ConductorToClient, ConductorToConductor, ConductorToProxy,
         ProxyToConductor,
@@ -132,11 +133,11 @@ use sacp::{
     },
 };
 use sacp::{
-    JrConnectionBuilder, JrConnectionCx, JrLink, JrNotification, JrPeer, JrRequest, JrRequestCx,
-    JrResponse, MessageCx, UntypedMessage,
+    JrConnectionBuilder, JrConnectionCx, JrLink, JrNotification, JrRequest, JrResponse,
+    UntypedMessage,
 };
 use sacp::{
-    JrMessageHandler, JrResponder, JrResponsePayload,
+    JrMessageHandler, JrResponder,
     schema::{InitializeProxyRequest, InitializeRequest, NewSessionRequest},
     util::MatchMessageFrom,
 };
@@ -234,10 +235,27 @@ impl<Link: ConductorLink> Conductor<Link> {
         self
     }
 
-    pub fn into_connection_builder(
+    /// Run the conductor with a transport.
+    pub async fn run(
         self,
-    ) -> JrConnectionBuilder<impl JrMessageHandler<Link = Link>, impl JrResponder<Link>> {
+        transport: impl Component<Link::ConnectsTo> + 'static,
+    ) -> Result<(), sacp::Error> {
         let (conductor_tx, conductor_rx) = mpsc::channel(128 /* chosen arbitrarily */);
+
+        // Set up tracing if enabled - spawn writer task and get handle
+        let trace_handle;
+        let trace_future: BoxFuture<'static, Result<(), sacp::Error>>;
+        match self.trace_writer.map(|w| w.spawn()) {
+            Some((h, f)) => {
+                trace_handle = Some(h);
+                trace_future = Box::pin(f);
+            }
+
+            None => {
+                trace_handle = None;
+                trace_future = Box::pin(std::future::ready(Ok(())));
+            }
+        }
 
         let responder = ConductorResponder {
             conductor_rx,
@@ -248,8 +266,7 @@ impl<Link: ConductorLink> Conductor<Link> {
             mcp_bridge_mode: self.mcp_bridge_mode,
             proxies: Default::default(),
             successor: Arc::new(sacp::util::internal_error("successor not initialized")),
-            trace_writer: self.trace_writer,
-            pending_requests: Default::default(),
+            trace_handle: trace_handle,
             link: self.link,
         };
 
@@ -259,25 +276,10 @@ impl<Link: ConductorLink> Conductor<Link> {
         })
         .name(self.name)
         .with_responder(responder)
-    }
-
-    /// Convenience method to run the conductor with a transport.
-    ///
-    /// This is equivalent to:
-    /// ```ignore
-    /// conductor.into_connection_builder()
-    ///     .connect_to(transport)
-    ///     .serve()
-    ///     .await
-    /// ```
-    pub async fn run(
-        self,
-        transport: impl Component<Link::ConnectsTo> + 'static,
-    ) -> Result<(), sacp::Error> {
-        self.into_connection_builder()
-            .connect_to(transport)?
-            .serve()
-            .await
+        .with_spawned(|_cx| trace_future)
+        .connect_to(transport)?
+        .serve()
+        .await
     }
 
     async fn incoming_message_from_client(
@@ -285,7 +287,7 @@ impl<Link: ConductorLink> Conductor<Link> {
         message: MessageCx,
     ) -> Result<(), sacp::Error> {
         conductor_tx
-            .send(ConductorMessage::ClientToAgent {
+            .send(ConductorMessage::LeftToRight {
                 target_component_index: 0,
                 message,
             })
@@ -298,7 +300,7 @@ impl<Link: ConductorLink> Conductor<Link> {
         message: MessageCx,
     ) -> Result<(), sacp::Error> {
         conductor_tx
-            .send(ConductorMessage::AgentToClient {
+            .send(ConductorMessage::RightToLeft {
                 source_component_index: SourceComponentIndex::Successor,
                 message,
             })
@@ -375,11 +377,8 @@ where
     /// Mode for the MCP bridge (determines how to spawn bridge processes).
     mcp_bridge_mode: crate::McpBridgeMode,
 
-    /// Optional trace writer for sequence diagram visualization.
-    trace_writer: Option<crate::trace::TraceWriter>,
-
-    /// Tracks pending requests for response tracing: id -> (from, to)
-    pending_requests: HashMap<String, (String, String)>,
+    /// Optional trace handle for sequence diagram visualization.
+    trace_handle: Option<crate::trace::TraceHandle>,
 
     /// Defines what sort of link we have
     link: Link,
@@ -406,170 +405,6 @@ impl<Link> ConductorResponder<Link>
 where
     Link: ConductorLink,
 {
-    /// Convert a component index to a trace-friendly name.
-    fn component_name(&self, index: usize) -> String {
-        if index == self.proxies.len() {
-            "agent".to_string()
-        } else {
-            format!("proxy:{}", index)
-        }
-    }
-
-    /// Convert a source component index to a trace-friendly name.
-    fn source_component_name(&self, index: SourceComponentIndex) -> String {
-        match index {
-            SourceComponentIndex::Successor => "agent".to_string(), // In proxy mode, successor is effectively the agent
-            SourceComponentIndex::Proxy(i) => self.component_name(i),
-        }
-    }
-
-    /// Extract the protocol and idealized method/params from a message.
-    ///
-    /// For MCP-over-ACP messages, this extracts the inner MCP message.
-    /// For regular ACP messages, returns the message as-is.
-    fn extract_trace_info<R: sacp::JrRequest, N: sacp::JrNotification>(
-        message: &sacp::MessageCx<R, N>,
-    ) -> Result<(crate::trace::Protocol, String, serde_json::Value), sacp::Error> {
-        match message {
-            sacp::MessageCx::Request(request, _) => {
-                let untyped = request.to_untyped_message()?;
-
-                // Try to parse as MCP-over-ACP request
-                if let Some(Ok(mcp_req)) = <McpOverAcpMessage<UntypedMessage>>::parse_message(
-                    &untyped.method,
-                    &untyped.params,
-                ) {
-                    return Ok((
-                        crate::trace::Protocol::Mcp,
-                        mcp_req.message.method,
-                        mcp_req.message.params,
-                    ));
-                }
-
-                // Regular ACP request
-                Ok((crate::trace::Protocol::Acp, untyped.method, untyped.params))
-            }
-            sacp::MessageCx::Notification(notification) => {
-                let untyped = notification.to_untyped_message()?;
-
-                // Try to parse as MCP-over-ACP notification
-                if let Some(Ok(mcp_notif)) = <McpOverAcpMessage<UntypedMessage>>::parse_message(
-                    &untyped.method,
-                    &untyped.params,
-                ) {
-                    return Ok((
-                        crate::trace::Protocol::Mcp,
-                        mcp_notif.message.method,
-                        mcp_notif.message.params,
-                    ));
-                }
-
-                // Regular ACP notification
-                Ok((crate::trace::Protocol::Acp, untyped.method, untyped.params))
-            }
-        }
-    }
-
-    /// Trace a client-to-agent message (request or notification).
-    fn trace_client_to_agent<R: sacp::JrRequest, N: sacp::JrNotification>(
-        &mut self,
-        target_index: usize,
-        message: &sacp::MessageCx<R, N>,
-    ) -> Result<(), sacp::Error> {
-        if self.trace_writer.is_none() {
-            return Ok(());
-        }
-
-        let from = if target_index == 0 {
-            "client".to_string()
-        } else {
-            self.component_name(target_index - 1)
-        };
-        let to = self.component_name(target_index);
-
-        let (protocol, method, params) = Self::extract_trace_info(message)?;
-
-        let writer = self.trace_writer.as_mut().unwrap();
-        match message.id() {
-            Some(id) => {
-                // Track pending request for response correlation
-                let id_key = id.to_string();
-                self.pending_requests
-                    .insert(id_key, (from.clone(), to.clone()));
-                writer.request(protocol, from, to, id, &method, None, params);
-            }
-            None => {
-                writer.notification(protocol, from, to, &method, None, params);
-            }
-        }
-        Ok(())
-    }
-
-    /// Trace an agent-to-client message (request or notification).
-    fn trace_agent_to_client<R: sacp::JrRequest, N: sacp::JrNotification>(
-        &mut self,
-        source_index: SourceComponentIndex,
-        message: &sacp::MessageCx<R, N>,
-    ) -> Result<(), sacp::Error> {
-        if self.trace_writer.is_none() {
-            return Ok(());
-        }
-
-        let from = self.source_component_name(source_index);
-        let to = match source_index {
-            SourceComponentIndex::Successor => {
-                if self.proxies.is_empty() {
-                    "client".to_string()
-                } else {
-                    self.component_name(self.proxies.len() - 1)
-                }
-            }
-            SourceComponentIndex::Proxy(0) => "client".to_string(),
-            SourceComponentIndex::Proxy(i) => self.component_name(i - 1),
-        };
-
-        let (protocol, method, params) = Self::extract_trace_info(message)?;
-
-        let writer = self.trace_writer.as_mut().unwrap();
-        match message.id() {
-            Some(id) => {
-                // Track pending request for response correlation
-                let id_key = id.to_string();
-                self.pending_requests
-                    .insert(id_key, (from.clone(), to.clone()));
-                writer.request(protocol, from, to, id, &method, None, params);
-            }
-            None => {
-                writer.notification(protocol, from, to, &method, None, params);
-            }
-        }
-        Ok(())
-    }
-
-    /// Trace a response to a previous request.
-    fn trace_response(
-        &mut self,
-        request_cx: &sacp::JrRequestCx<serde_json::Value>,
-        result: &Result<serde_json::Value, sacp::Error>,
-    ) {
-        let Some(writer) = &mut self.trace_writer else {
-            return;
-        };
-
-        let id = request_cx.id();
-        let id_key = id.to_string();
-
-        // Look up the original request's from/to (response goes in reverse)
-        if let Some((original_from, original_to)) = self.pending_requests.remove(&id_key) {
-            let (is_error, payload) = match result {
-                Ok(v) => (false, v.clone()),
-                Err(e) => (true, serde_json::json!({ "error": e.to_string() })),
-            };
-            // Response goes from original_to back to original_from
-            writer.response(&original_to, &original_from, id, is_error, payload);
-        }
-    }
-
     /// Recursively spawns components and builds the proxy chain.
     ///
     /// This function implements the recursive chain building pattern:
@@ -605,7 +440,7 @@ where
         tracing::debug!(?message, "handle_conductor_message");
 
         match message {
-            ConductorMessage::ClientToAgent {
+            ConductorMessage::LeftToRight {
                 target_component_index,
                 message,
             } => {
@@ -615,18 +450,15 @@ where
                     .await
             }
 
-            ConductorMessage::AgentToClient {
+            ConductorMessage::RightToLeft {
                 source_component_index,
                 message,
             } => {
                 tracing::debug!(
                     ?source_component_index,
-                    message_method = ?message.message().method(),
+                    message_method = ?message.method(),
                     "Conductor: AgentToClient received"
                 );
-                if let Err(e) = self.trace_agent_to_client(source_component_index, &message) {
-                    tracing::warn!("Failed to trace agent-to-client message: {e}");
-                }
                 self.send_message_to_predecessor_of(client, source_component_index, message)
             }
 
@@ -707,7 +539,6 @@ where
 
                 // We only get MCP-over-ACP requests when we are in bridging MCP for the final agent,
                 // so send them to the final proxy.
-                self.trace_agent_to_client(SourceComponentIndex::Successor, &wrapped)?;
                 self.send_message_to_predecessor_of(
                     client,
                     SourceComponentIndex::Successor,
@@ -722,14 +553,6 @@ where
 
                 self.bridge_connections.remove(&notification.connection_id);
                 self.send_notification_to_predecessor_of(client, self.proxies.len(), notification)
-            }
-
-            // Forward a response back to the original request context.
-            // This ensures responses are processed in order with notifications by
-            // going through the central conductor queue.
-            ConductorMessage::ForwardResponse { request_cx, result } => {
-                self.trace_response(&request_cx, &result);
-                request_cx.respond_with_result(result)
             }
         }
     }
@@ -761,12 +584,13 @@ where
         match message {
             MessageCx::Request(request, request_cx) => self
                 .send_request_to_predecessor_of(client, source_component_index, request)
-                .forward_response_via(&self.conductor_tx, request_cx),
+                .forward_to_request_cx(request_cx),
             MessageCx::Notification(notification) => self.send_notification_to_predecessor_of(
                 client,
                 source_component_index,
                 notification,
             ),
+            MessageCx::Response(result, response_cx) => response_cx.respond_with_result(result),
         }
     }
 
@@ -843,11 +667,6 @@ where
             .ensure_initialized(conductor_cx.clone(), message)
             .await?;
 
-        // Trace after initialization so component_name() has access to the populated proxies list.
-        if let Err(e) = self.trace_client_to_agent(target_component_index, &message) {
-            tracing::warn!("Failed to trace client-to-agent message: {e}");
-        }
-
         // In proxy mode, if the target is beyond our component chain,
         // forward to the conductor's own successor (via client connection)
         if target_component_index < self.proxies.len() {
@@ -892,72 +711,160 @@ where
         Ok(message)
     }
 
+    /// Wrap a proxy component with tracing if tracing is enabled.
+    ///
+    /// Returns the component unchanged if tracing is disabled.
+    fn trace_proxy<L: sacp::JrLink>(
+        &self,
+        proxy_index: ComponentIndex,
+        successor_index: ComponentIndex,
+        component: impl Component<L>,
+    ) -> DynComponent<L> {
+        match &self.trace_handle {
+            Some(trace_handle) => {
+                trace_handle.bridge_component(proxy_index, successor_index, component)
+            }
+            None => DynComponent::new(component),
+        }
+    }
+
     /// Spawn proxy components and add them to the proxies list.
     fn spawn_proxies(
         &mut self,
         cx: JrConnectionCx<Link>,
-        proxy_components: Vec<sacp::DynComponent<ProxyToConductor>>,
+        proxy_components: Vec<DynComponent<ProxyToConductor>>,
     ) -> Result<(), sacp::Error> {
         assert!(self.proxies.is_empty());
 
-        info!(proxy_count = proxy_components.len(), "spawn_proxies");
+        let num_proxies = proxy_components.len();
+        info!(proxy_count = num_proxies, "spawn_proxies");
 
-        // Spawn each proxy component
-        for (component_index, dyn_component) in proxy_components.into_iter().enumerate() {
-            debug!(component_index, "spawning proxy");
-
-            let proxy_cx = cx.spawn_connection(
-                ConductorToProxy::builder()
-                    .name(format!("conductor-to-component({})", component_index))
-                    // Intercept messages sent by a proxy component to its successor.
-                    .on_receive_message(
-                        {
-                            let mut conductor_tx = self.conductor_tx.clone();
-                            async move |message_cx: MessageCx<
-                                SuccessorMessage,
-                                SuccessorMessage,
-                            >,
-                                        _cx| {
-                                conductor_tx
-                                    .send(ConductorMessage::ClientToAgent {
-                                        target_component_index: component_index + 1,
-                                        message: message_cx
-                                            .map(|r, cx| (r.message, cx), |n| n.message),
-                                    })
-                                    .await
-                                    .map_err(sacp::util::internal_error)
-                            }
-                        },
-                        sacp::on_receive_message!(),
-                    )
-                    // Intercept agent-to-client messages from the proxy.
-                    .on_receive_message(
-                        {
-                            let mut conductor_tx = self.conductor_tx.clone();
-                            async move |message_cx: MessageCx<UntypedMessage, UntypedMessage>,
-                                        _cx| {
-                                conductor_tx
-                                    .send(ConductorMessage::AgentToClient {
-                                        source_component_index: SourceComponentIndex::Proxy(
-                                            component_index,
-                                        ),
-                                        message: message_cx,
-                                    })
-                                    .await
-                                    .map_err(sacp::util::internal_error)
-                            }
-                        },
-                        sacp::on_receive_message!(),
-                    )
-                    .connect_to(dyn_component)?,
-                |c| Box::pin(c.serve()),
+        // Special case: if there are no user-defined proxies
+        // but tracing is enabled, we make a dummy proxy that just
+        // passes through messages but which can trigger the
+        // tracing events.
+        if self.trace_handle.is_some() && num_proxies == 0 {
+            self.connect_to_proxy(
+                &cx,
+                0,
+                ComponentIndex::Client,
+                ComponentIndex::Agent,
+                ProxyToConductor::builder(),
             )?;
-            self.proxies.push(proxy_cx);
+        } else {
+            // Spawn each proxy component
+            for (component_index, dyn_component) in proxy_components.into_iter().enumerate() {
+                debug!(component_index, "spawning proxy");
+
+                self.connect_to_proxy(
+                    &cx,
+                    component_index,
+                    ComponentIndex::Proxy(component_index),
+                    ComponentIndex::successor_of(component_index, num_proxies),
+                    dyn_component,
+                )?;
+            }
         }
 
         info!(proxy_count = self.proxies.len(), "Proxies spawned");
 
         Ok(())
+    }
+
+    /// Create a connection to the proxy with index `component_index` implemented in `component`.
+    ///
+    /// If tracing is enabled, the proxy's index is `trace_proxy_index` and its successor is `trace_successor_index`.
+    fn connect_to_proxy(
+        &mut self,
+        cx: &JrConnectionCx<Link>,
+        component_index: usize,
+        trace_proxy_index: ComponentIndex,
+        trace_successor_index: ComponentIndex,
+        component: impl Component<ProxyToConductor>,
+    ) -> Result<(), Error> {
+        let connection_builder = self.connection_to_proxy(component_index);
+        let connect_component =
+            self.trace_proxy(trace_proxy_index, trace_successor_index, component);
+        let proxy_cx = cx
+            .spawn_connection(connection_builder.connect_to(connect_component)?, |c| {
+                Box::pin(c.serve())
+            })?;
+        self.proxies.push(proxy_cx);
+        Ok(())
+    }
+
+    /// Create the conductor's connection to the proxy with index `component_index`.
+    ///
+    /// Outgoing messages received from the proxy are sent to `self.conductor_tx` as either
+    /// left-to-right or right-to-left messages depending on whether they are wrapped
+    /// in `SuccessorMessage`.
+    fn connection_to_proxy(
+        &mut self,
+        component_index: usize,
+    ) -> JrConnectionBuilder<impl JrMessageHandler<Link = ConductorToProxy> + 'static> {
+        ConductorToProxy::builder()
+            .name(format!("conductor-to-component({})", component_index))
+            // Intercept messages sent by a proxy component to its successor.
+            .on_receive_message(
+                {
+                    let mut conductor_tx = self.conductor_tx.clone();
+                    type SuccessorMessageCx = MessageCx<SuccessorMessage, SuccessorMessage>;
+                    async move |message_cx: SuccessorMessageCx, _cx| {
+                        // Subtle point:
+                        //
+                        // `ConductorToProxy` has only a single peer, `AgentPeer`. This means that we see
+                        // "successor messages" in their "desugared form". So when we intercept an *outgoing*
+                        // message that matches `SuccessorMessage`, it could be one of three things
+                        //
+                        // - A request being sent by the proxy to its successor (hence going left->right)
+                        // - A notification being sent by the proxy to its successor (hence going left->right)
+                        // - A response to a request sent to the proxy *by* its successor. Here, the *request*
+                        //   was going right->left, but the *response* (the message we are processing now)
+                        //   is going left->right.
+                        //
+                        // So, in all cases, we forward as a left->right message.
+
+                        conductor_tx
+                            .send(ConductorMessage::LeftToRight {
+                                target_component_index: component_index + 1,
+                                message: message_cx.map(|r, cx| (r.message, cx), |n| n.message),
+                            })
+                            .await
+                            .map_err(sacp::util::internal_error)
+                    }
+                },
+                sacp::on_receive_message!(),
+            )
+            // Intercept agent-to-client messages from the proxy.
+            .on_receive_message(
+                {
+                    let mut conductor_tx = self.conductor_tx.clone();
+                    async move |message_cx: MessageCx, _cx| {
+                        // As in the previous handler:
+                        //
+                        // Messages here are seen in their "desugared form", so we are seeing
+                        // one of three things
+                        //
+                        // - A request being sent by the proxy to its predecessor (hence going right->left)
+                        // - A notification being sent by the proxy to its predecessor (hence going right->left)
+                        // - A response to a request sent to the proxy *by* its predecessor. Here, the *request*
+                        //   was going left->right, but the *response* (the message we are processing now)
+                        //   is going right->left.
+                        //
+                        // So, in all cases, we forward as a right->left message.
+
+                        let message = ConductorMessage::RightToLeft {
+                            source_component_index: SourceComponentIndex::Proxy(component_index),
+                            message: message_cx,
+                        };
+                        conductor_tx
+                            .send(message)
+                            .await
+                            .map_err(sacp::util::internal_error)
+                    }
+                },
+                sacp::on_receive_message!(),
+            )
     }
 
     async fn forward_message_to_proxy(
@@ -985,24 +892,15 @@ where
                 // request to its successor.
                 self.proxies[target_component_index]
                     .send_request(InitializeProxyRequest::from(request))
-                    .on_receiving_result({
-                        let conductor_tx = self.conductor_tx.clone();
-                        async move |result| {
-                            tracing::debug!(?result, "got initialize_proxy response from proxy");
-                            request_cx
-                                .respond_with_result_via(&conductor_tx, result)
-                                .await
-                        }
+                    .on_receiving_result(async move |result| {
+                        tracing::debug!(?result, "got initialize_proxy response from proxy");
+                        request_cx.respond_with_result(result)
                     })
             })
             .await
             .otherwise(async |message| {
                 // Otherwise, just send the message along "as is".
-                self.proxies[target_component_index].send_proxied_message_to_via(
-                    AgentPeer,
-                    &self.conductor_tx,
-                    message,
-                )
+                self.proxies[target_component_index].send_proxied_message_to(AgentPeer, message)
             })
             .await
     }
@@ -1041,7 +939,7 @@ where
 
                 agent_cx
                     .send_request(request)
-                    .forward_response_via(&self.conductor_tx, request_cx)
+                    .forward_to_request_cx(request_cx)
             })
             .await
             .if_request(
@@ -1084,9 +982,43 @@ where
             .await
             .otherwise(async |message| {
                 // Otherwise, just send the message along "as is".
-                agent_cx.send_proxied_message_to_via(AgentPeer, &self.conductor_tx, message)
+                agent_cx.send_proxied_message_to(AgentPeer, message)
             })
             .await
+    }
+}
+
+/// Identifies a component in the conductor's chain for tracing purposes.
+///
+/// Used to track message sources and destinations through the proxy chain.
+#[derive(Debug, Clone, Copy)]
+pub enum ComponentIndex {
+    /// The client (editor) at the start of the chain.
+    Client,
+
+    /// A proxy component at the given index.
+    Proxy(usize),
+
+    /// The successor (agent in agent mode, outer conductor in proxy mode).
+    Agent,
+}
+
+impl ComponentIndex {
+    /// Return the index for the predecessor of `proxy_index`, which might be `Client`.
+    pub fn predecessor_of(proxy_index: usize) -> Self {
+        match proxy_index.checked_sub(1) {
+            Some(p_i) => ComponentIndex::Proxy(p_i),
+            None => ComponentIndex::Client,
+        }
+    }
+
+    /// Return the index for the predecessor of `proxy_index`, which might be `Client`.
+    pub fn successor_of(proxy_index: usize, num_proxies: usize) -> Self {
+        if proxy_index == num_proxies {
+            ComponentIndex::Agent
+        } else {
+            ComponentIndex::Proxy(proxy_index + 1)
+        }
     }
 }
 
@@ -1097,11 +1029,11 @@ where
 /// 2. From the conductor's own successor in a larger proxy chain (when in proxy mode)
 #[derive(Debug, Clone, Copy)]
 pub enum SourceComponentIndex {
-    /// Message from the conductor's agent or successor.
-    Successor,
-
     /// Message from a specific component at the given index in the managed chain.
     Proxy(usize),
+
+    /// Message from the conductor's agent or successor.
+    Successor,
 }
 
 /// Trait for lazy proxy instantiation (proxy mode).
@@ -1118,7 +1050,7 @@ pub trait InstantiateProxies: Send {
         req: InitializeRequest,
     ) -> futures::future::BoxFuture<
         'static,
-        Result<(InitializeRequest, Vec<sacp::DynComponent<ProxyToConductor>>), sacp::Error>,
+        Result<(InitializeRequest, Vec<DynComponent<ProxyToConductor>>), sacp::Error>,
     >;
 }
 
@@ -1134,13 +1066,11 @@ where
         req: InitializeRequest,
     ) -> futures::future::BoxFuture<
         'static,
-        Result<(InitializeRequest, Vec<sacp::DynComponent<ProxyToConductor>>), sacp::Error>,
+        Result<(InitializeRequest, Vec<DynComponent<ProxyToConductor>>), sacp::Error>,
     > {
         Box::pin(async move {
-            let components: Vec<sacp::DynComponent<ProxyToConductor>> = (*self)
-                .into_iter()
-                .map(|c| sacp::DynComponent::new(c))
-                .collect();
+            let components: Vec<DynComponent<ProxyToConductor>> =
+                (*self).into_iter().map(|c| DynComponent::new(c)).collect();
             Ok((req, components))
         })
     }
@@ -1151,10 +1081,7 @@ impl<F, Fut> InstantiateProxies for F
 where
     F: FnOnce(InitializeRequest) -> Fut + Send + 'static,
     Fut: std::future::Future<
-            Output = Result<
-                (InitializeRequest, Vec<sacp::DynComponent<ProxyToConductor>>),
-                sacp::Error,
-            >,
+            Output = Result<(InitializeRequest, Vec<DynComponent<ProxyToConductor>>), sacp::Error>,
         > + Send
         + 'static,
 {
@@ -1163,7 +1090,7 @@ where
         req: InitializeRequest,
     ) -> futures::future::BoxFuture<
         'static,
-        Result<(InitializeRequest, Vec<sacp::DynComponent<ProxyToConductor>>), sacp::Error>,
+        Result<(InitializeRequest, Vec<DynComponent<ProxyToConductor>>), sacp::Error>,
     > {
         Box::pin(async move { (*self)(req).await })
     }
@@ -1187,8 +1114,8 @@ pub trait InstantiateProxiesAndAgent: Send {
         Result<
             (
                 InitializeRequest,
-                Vec<sacp::DynComponent<ProxyToConductor>>,
-                sacp::DynComponent<AgentToClient>,
+                Vec<DynComponent<ProxyToConductor>>,
+                DynComponent<AgentToClient>,
             ),
             sacp::Error,
         >,
@@ -1207,13 +1134,13 @@ impl<A: Component<AgentToClient> + 'static> InstantiateProxiesAndAgent for Agent
         Result<
             (
                 InitializeRequest,
-                Vec<sacp::DynComponent<ProxyToConductor>>,
-                sacp::DynComponent<AgentToClient>,
+                Vec<DynComponent<ProxyToConductor>>,
+                DynComponent<AgentToClient>,
             ),
             sacp::Error,
         >,
     > {
-        Box::pin(async move { Ok((req, Vec::new(), sacp::DynComponent::new(self.0))) })
+        Box::pin(async move { Ok((req, Vec::new(), DynComponent::new(self.0))) })
     }
 }
 
@@ -1226,8 +1153,8 @@ impl<A: Component<AgentToClient> + 'static> InstantiateProxiesAndAgent for Agent
 ///     .proxy(AuthProxy::new())
 /// ```
 pub struct ProxiesAndAgent {
-    proxies: Vec<sacp::DynComponent<ProxyToConductor>>,
-    agent: sacp::DynComponent<AgentToClient>,
+    proxies: Vec<DynComponent<ProxyToConductor>>,
+    agent: DynComponent<AgentToClient>,
 }
 
 impl ProxiesAndAgent {
@@ -1235,13 +1162,13 @@ impl ProxiesAndAgent {
     pub fn new(agent: impl Component<AgentToClient> + 'static) -> Self {
         Self {
             proxies: vec![],
-            agent: sacp::DynComponent::new(agent),
+            agent: DynComponent::new(agent),
         }
     }
 
     /// Add a single proxy component.
     pub fn proxy(mut self, proxy: impl Component<ProxyToConductor> + 'static) -> Self {
-        self.proxies.push(sacp::DynComponent::new(proxy));
+        self.proxies.push(DynComponent::new(proxy));
         self
     }
 
@@ -1252,7 +1179,7 @@ impl ProxiesAndAgent {
         I: IntoIterator<Item = P>,
     {
         self.proxies
-            .extend(proxies.into_iter().map(sacp::DynComponent::new));
+            .extend(proxies.into_iter().map(DynComponent::new));
         self
     }
 }
@@ -1266,8 +1193,8 @@ impl InstantiateProxiesAndAgent for ProxiesAndAgent {
         Result<
             (
                 InitializeRequest,
-                Vec<sacp::DynComponent<ProxyToConductor>>,
-                sacp::DynComponent<AgentToClient>,
+                Vec<DynComponent<ProxyToConductor>>,
+                DynComponent<AgentToClient>,
             ),
             sacp::Error,
         >,
@@ -1284,8 +1211,8 @@ where
             Output = Result<
                 (
                     InitializeRequest,
-                    Vec<sacp::DynComponent<ProxyToConductor>>,
-                    sacp::DynComponent<AgentToClient>,
+                    Vec<DynComponent<ProxyToConductor>>,
+                    DynComponent<AgentToClient>,
                 ),
                 sacp::Error,
             >,
@@ -1300,8 +1227,8 @@ where
         Result<
             (
                 InitializeRequest,
-                Vec<sacp::DynComponent<ProxyToConductor>>,
-                sacp::DynComponent<AgentToClient>,
+                Vec<DynComponent<ProxyToConductor>>,
+                DynComponent<AgentToClient>,
             ),
             sacp::Error,
         >,
@@ -1321,16 +1248,22 @@ where
 /// allowing centralized routing logic in the `serve()` loop.
 #[derive(Debug)]
 pub enum ConductorMessage {
-    /// A message (request or notification) targeting a component from its client.
-    /// This message will be forwarded "as is" to the component.
-    ClientToAgent {
+    /// If this message is a request or notification, then it is going "left-to-right"
+    /// (e.g., a component making a request of its successor).
+    ///
+    /// If this message is a response, then it is going right-to-left
+    /// (i.e., the successor answering a request made by its predecessor).
+    LeftToRight {
         target_component_index: usize,
         message: MessageCx,
     },
 
-    /// A message (request or notification) sent by a component to its client.
-    /// This message will be forwarded "as is" to its client.
-    AgentToClient {
+    /// If this message is a request or notification, then it is going "right-to-left"
+    /// (e.g., a component making a request of its predecessor).
+    ///
+    /// If this message is a response, then it is going "left-to-right"
+    /// (i.e., the predecessor answering a request made by its successor).
+    RightToLeft {
         source_component_index: SourceComponentIndex,
         message: MessageCx,
     },
@@ -1375,99 +1308,6 @@ pub enum ConductorMessage {
     McpConnectionDisconnected {
         notification: McpDisconnectNotification,
     },
-
-    /// Forward a response back to a request context.
-    ///
-    /// This variant avoids a subtle race condition by preserving the
-    /// order of responses vis-a-vis notifications and requests. Whenever a new message
-    /// from a component arrives, whether it's a new request or a notification, we route
-    /// it through the conductor's central message queue.
-    ///
-    /// The invariant we must ensure in particular is that any requests or notifications
-    /// that arrive BEFORE the response will be processed first.
-    ForwardResponse {
-        request_cx: JrRequestCx<serde_json::Value>,
-        result: Result<serde_json::Value, sacp::Error>,
-    },
-}
-
-trait JrConnectionCxExt<Link: JrLink> {
-    fn send_proxied_message_to_via<Peer: JrPeer>(
-        &self,
-        peer: Peer,
-        conductor_tx: &mpsc::Sender<ConductorMessage>,
-        message: MessageCx,
-    ) -> Result<(), sacp::Error>
-    where
-        Link: sacp::HasPeer<Peer>;
-}
-
-impl<Link: JrLink> JrConnectionCxExt<Link> for JrConnectionCx<Link> {
-    fn send_proxied_message_to_via<Peer: JrPeer>(
-        &self,
-        peer: Peer,
-        conductor_tx: &mpsc::Sender<ConductorMessage>,
-        message: MessageCx,
-    ) -> Result<(), sacp::Error>
-    where
-        Link: sacp::HasPeer<Peer>,
-    {
-        match message {
-            MessageCx::Request(request, request_cx) => self
-                .send_request_to(peer, request)
-                .forward_response_via(conductor_tx, request_cx),
-            MessageCx::Notification(notification) => self.send_notification_to(peer, notification),
-        }
-    }
-}
-
-trait JrRequestCxExt<T: JrResponsePayload> {
-    async fn respond_with_result_via(
-        self,
-        conductor_tx: &mpsc::Sender<ConductorMessage>,
-        result: Result<T, sacp::Error>,
-    ) -> Result<(), sacp::Error>;
-}
-
-impl<T: JrResponsePayload> JrRequestCxExt<T> for JrRequestCx<T> {
-    async fn respond_with_result_via(
-        self,
-        conductor_tx: &mpsc::Sender<ConductorMessage>,
-        result: Result<T, sacp::Error>,
-    ) -> Result<(), sacp::Error> {
-        let result = result.and_then(|response| response.into_json(self.method()));
-        conductor_tx
-            .clone()
-            .send(ConductorMessage::ForwardResponse {
-                request_cx: self.erase_to_json(),
-                result,
-            })
-            .await
-            .map_err(|e| sacp::util::internal_error(format!("Failed to send response: {}", e)))
-    }
-}
-
-pub trait JrResponseExt<T: JrResponsePayload> {
-    fn forward_response_via(
-        self,
-        conductor_tx: &mpsc::Sender<ConductorMessage>,
-        request_cx: JrRequestCx<T>,
-    ) -> Result<(), sacp::Error>;
-}
-
-impl<T: JrResponsePayload> JrResponseExt<T> for JrResponse<T> {
-    fn forward_response_via(
-        self,
-        conductor_tx: &mpsc::Sender<ConductorMessage>,
-        request_cx: JrRequestCx<T>,
-    ) -> Result<(), sacp::Error> {
-        let conductor_tx = conductor_tx.clone();
-        self.on_receiving_result(async move |result| {
-            request_cx
-                .respond_with_result_via(&conductor_tx, result)
-                .await
-        })
-    }
 }
 
 /// Trait implemented for the two links the conductor can use:
@@ -1522,19 +1362,19 @@ impl ConductorLink for ConductorToClient {
             message.respond_with_error(invalid_request(), client.clone())?;
             return Err(invalid_request());
         };
-        let Some(result) = InitializeRequest::parse_message(request.method(), request.params())
-        else {
+        if !InitializeRequest::matches_method(request.method()) {
             request_cx.respond_with_error(invalid_request())?;
             return Err(invalid_request());
-        };
+        }
 
-        let init_request = match result {
-            Ok(r) => r,
-            Err(error) => {
-                request_cx.respond_with_error(error)?;
-                return Err(invalid_request());
-            }
-        };
+        let init_request =
+            match InitializeRequest::parse_message(request.method(), request.params()) {
+                Ok(r) => r,
+                Err(error) => {
+                    request_cx.respond_with_error(error)?;
+                    return Err(invalid_request());
+                }
+            };
 
         // Instantiate proxies and agent
         let (modified_req, proxy_components, agent_component) = instantiator
@@ -1543,6 +1383,7 @@ impl ConductorLink for ConductorToClient {
 
         // Spawn the agent component
         debug!(?agent_component, "spawning agent");
+
         let agent_cx = client.spawn_connection(
             ConductorToAgent::builder()
                 .name("conductor-to-agent")
@@ -1552,7 +1393,7 @@ impl ConductorLink for ConductorToClient {
                         let mut conductor_tx = responder.conductor_tx.clone();
                         async move |message_cx: MessageCx, _cx| {
                             conductor_tx
-                                .send(ConductorMessage::AgentToClient {
+                                .send(ConductorMessage::RightToLeft {
                                     source_component_index: SourceComponentIndex::Successor,
                                     message: message_cx,
                                 })
@@ -1583,14 +1424,14 @@ impl ConductorLink for ConductorToClient {
         conductor_tx: &mut mpsc::Sender<ConductorMessage>,
     ) -> Result<Handled<MessageCx>, sacp::Error> {
         tracing::debug!(
-            method = ?message.message().method(),
+            method = ?message.method(),
             "ConductorToClient::handle_message"
         );
         MatchMessageFrom::new(message, &cx)
             // Any incoming messages from the client are client-to-agent messages targeting the first component.
             .if_message_from(ClientPeer, async move |message: MessageCx| {
                 tracing::debug!(
-                    method = ?message.message().method(),
+                    method = ?message.method(),
                     "ConductorToClient::handle_message - matched Client"
                 );
                 Conductor::<Self>::incoming_message_from_client(conductor_tx, message).await
@@ -1621,20 +1462,19 @@ impl ConductorLink for ConductorToConductor {
             message.respond_with_error(invalid_request(), client_cx.clone())?;
             return Err(invalid_request());
         };
-        let Some(result) =
-            InitializeProxyRequest::parse_message(request.method(), request.params())
-        else {
+        if !InitializeProxyRequest::matches_method(request.method()) {
             request_cx.respond_with_error(invalid_request())?;
             return Err(invalid_request());
-        };
+        }
 
-        let InitializeProxyRequest { initialize } = match result {
-            Ok(r) => r,
-            Err(error) => {
-                request_cx.respond_with_error(error)?;
-                return Err(invalid_request());
-            }
-        };
+        let InitializeProxyRequest { initialize } =
+            match InitializeProxyRequest::parse_message(request.method(), request.params()) {
+                Ok(r) => r,
+                Err(error) => {
+                    request_cx.respond_with_error(error)?;
+                    return Err(invalid_request());
+                }
+            };
 
         tracing::debug!("ensure_initialized: InitializeProxyRequest (proxy mode)");
 
@@ -1660,7 +1500,8 @@ impl ConductorLink for ConductorToConductor {
         conductor_tx: &mut mpsc::Sender<ConductorMessage>,
     ) -> Result<Handled<MessageCx>, sacp::Error> {
         tracing::debug!(
-            method = ?message.message().method(),
+            method = ?message.method(),
+            ?message,
             "ConductorToConductor::handle_message"
         );
         MatchMessageFrom::new(message, &cx)
@@ -1669,7 +1510,7 @@ impl ConductorLink for ConductorToConductor {
                 // (RemoteRoleStyle::Successor strips the SuccessorMessage envelope).
                 async |message: MessageCx| {
                     tracing::debug!(
-                        method = ?message.message().method(),
+                        method = ?message.method(),
                         "ConductorToConductor::handle_message - matched Agent"
                     );
                     let mut conductor_tx = conductor_tx.clone();
@@ -1680,7 +1521,7 @@ impl ConductorLink for ConductorToConductor {
             // Any incoming messages from the client are client-to-agent messages targeting the first component.
             .if_message_from(ClientPeer, async |message: MessageCx| {
                 tracing::debug!(
-                    method = ?message.message().method(),
+                    method = ?message.method(),
                     "ConductorToConductor::handle_message - matched Client"
                 );
                 let mut conductor_tx = conductor_tx.clone();
@@ -1692,6 +1533,7 @@ impl ConductorLink for ConductorToConductor {
 }
 
 pub trait ConductorSuccessor<Link: ConductorLink>: Send + Sync + 'static {
+    /// Send a message to the successor.
     fn send_message<'a>(
         &self,
         message: MessageCx,
@@ -1717,15 +1559,11 @@ impl ConductorSuccessor<ConductorToConductor> for () {
         &self,
         message: MessageCx,
         conductor_cx: JrConnectionCx<ConductorToConductor>,
-        responder: &'a mut ConductorResponder<ConductorToConductor>,
+        _responder: &'a mut ConductorResponder<ConductorToConductor>,
     ) -> BoxFuture<'a, Result<(), sacp::Error>> {
         Box::pin(async move {
             debug!("Proxy mode: forwarding successor message to conductor's successor");
-            conductor_cx.send_proxied_message_to_via(
-                AgentPeer,
-                &mut responder.conductor_tx,
-                message,
-            )
+            conductor_cx.send_proxied_message_to(AgentPeer, message)
         })
     }
 }

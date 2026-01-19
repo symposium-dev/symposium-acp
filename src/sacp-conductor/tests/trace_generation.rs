@@ -15,6 +15,11 @@ use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
 
 #[tokio::test]
 async fn test_trace_generation() -> Result<(), sacp::Error> {
+    // Enable tracing if RUST_LOG is set
+    let _ = tracing_subscriber::fmt()
+        .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
+        .with_ansi(false)
+        .try_init();
     // Create a temp file for the trace
     let trace_path = std::env::temp_dir().join(format!("trace_test_{}.jsons", std::process::id()));
 

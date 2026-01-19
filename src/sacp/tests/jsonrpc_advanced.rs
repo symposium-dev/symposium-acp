@@ -48,6 +48,10 @@ struct PingRequest {
 }
 
 impl JrMessage for PingRequest {
+    fn matches_method(method: &str) -> bool {
+        method == "ping"
+    }
+
     fn method(&self) -> &str {
         "ping"
     }
@@ -56,14 +60,11 @@ impl JrMessage for PingRequest {
         sacp::UntypedMessage::new(self.method(), self)
     }
 
-    fn parse_message(
-        method: &str,
-        params: &impl serde::Serialize,
-    ) -> Option<Result<Self, sacp::Error>> {
-        if method != "ping" {
-            return None;
+    fn parse_message(method: &str, params: &impl serde::Serialize) -> Result<Self, sacp::Error> {
+        if !Self::matches_method(method) {
+            return Err(sacp::Error::method_not_found());
         }
-        Some(sacp::util::json_cast(params))
+        sacp::util::json_cast(params)
     }
 }
 
@@ -93,6 +94,10 @@ struct SlowRequest {
 }
 
 impl JrMessage for SlowRequest {
+    fn matches_method(method: &str) -> bool {
+        method == "slow"
+    }
+
     fn method(&self) -> &str {
         "slow"
     }
@@ -101,14 +106,11 @@ impl JrMessage for SlowRequest {
         sacp::UntypedMessage::new(self.method(), self)
     }
 
-    fn parse_message(
-        method: &str,
-        params: &impl serde::Serialize,
-    ) -> Option<Result<Self, sacp::Error>> {
-        if method != "slow" {
-            return None;
+    fn parse_message(method: &str, params: &impl serde::Serialize) -> Result<Self, sacp::Error> {
+        if !Self::matches_method(method) {
+            return Err(sacp::Error::method_not_found());
         }
-        Some(sacp::util::json_cast(params))
+        sacp::util::json_cast(params)
     }
 }
 

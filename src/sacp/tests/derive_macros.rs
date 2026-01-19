@@ -13,7 +13,7 @@ struct HelloRequest {
     name: String,
 }
 
-#[derive(Debug, Serialize, Deserialize, JrResponsePayload)]
+#[derive(Debug, Clone, Serialize, Deserialize, JrResponsePayload)]
 struct HelloResponse {
     greeting: String,
 }
@@ -52,15 +52,19 @@ fn test_jr_request_parse_message() {
     };
     let untyped = original.to_untyped_message().unwrap();
 
+    // matches_method should return true for correct method
+    assert!(HelloRequest::matches_method(untyped.method()));
+    assert!(!HelloRequest::matches_method("wrong/method"));
+
     // Parse should succeed for matching method
     let parsed = HelloRequest::parse_message(untyped.method(), untyped.params());
-    assert!(parsed.is_some());
-    let parsed = parsed.unwrap().unwrap();
+    assert!(parsed.is_ok());
+    let parsed = parsed.unwrap();
     assert_eq!(parsed.name, "test");
 
-    // Parse should return None for non-matching method
+    // Parse should return Err for non-matching method
     let wrong_method = HelloRequest::parse_message("wrong/method", untyped.params());
-    assert!(wrong_method.is_none());
+    assert!(wrong_method.is_err());
 }
 
 #[test]
@@ -88,9 +92,13 @@ fn test_jr_notification_parse_message() {
     let original = PingNotification { timestamp: 99999 };
     let untyped = original.to_untyped_message().unwrap();
 
+    // matches_method should work correctly
+    assert!(PingNotification::matches_method(untyped.method()));
+    assert!(!PingNotification::matches_method("wrong/method"));
+
     let parsed = PingNotification::parse_message(untyped.method(), untyped.params());
-    assert!(parsed.is_some());
-    let parsed = parsed.unwrap().unwrap();
+    assert!(parsed.is_ok());
+    let parsed = parsed.unwrap();
     assert_eq!(parsed.timestamp, 99999);
 }
 

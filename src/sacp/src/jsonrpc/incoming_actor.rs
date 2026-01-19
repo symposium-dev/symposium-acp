@@ -13,12 +13,20 @@ use crate::UntypedMessage;
 use crate::jsonrpc::JrConnectionCx;
 use crate::jsonrpc::JrMessageHandler;
 use crate::jsonrpc::JrRequestCx;
+use crate::jsonrpc::JrResponseCx;
 use crate::jsonrpc::ReplyMessage;
 use crate::jsonrpc::dynamic_handler::DynamicHandler;
 use crate::jsonrpc::dynamic_handler::DynamicHandlerMessage;
 use crate::link::JrLink;
+use crate::peer::PeerId;
 
 use super::Handled;
+
+struct PendingReply {
+    method: String,
+    peer_id: PeerId,
+    sender: oneshot::Sender<crate::jsonrpc::ResponsePayload>,
+}
 
 /// Incoming protocol actor: The central dispatch loop for a connection.
 ///
@@ -45,21 +53,31 @@ pub(super) async fn incoming_protocol_actor<Link: JrLink>(
     let mut pending_messages: Vec<MessageCx> = vec![];
     let mut state = <Link::State>::default();
 
-    // Map from request ID to oneshot sender for response dispatch.
+    // Map from request ID to (method, sender) for response dispatch.
     // Keys are JSON values because jsonrpcmsg::Id doesn't implement Eq.
-    let mut pending_replies: HashMap<
-        serde_json::Value,
-        oneshot::Sender<crate::jsonrpc::ResponsePayload>,
-    > = HashMap::new();
+    // The method is stored to allow routing responses through typed handlers.
+    let mut pending_replies: HashMap<serde_json::Value, PendingReply> = HashMap::new();
 
     while let Some(message_result) = my_rx.next().await {
         tracing::trace!(message = ?message_result, actor = "incoming_protocol_actor");
         match message_result {
             IncomingProtocolMsg::Reply(message) => match message {
-                ReplyMessage::Subscribe(id, sender) => {
-                    tracing::trace!(?id, "incoming_actor: subscribing to response");
+                ReplyMessage::Subscribe {
+                    id,
+                    peer_id,
+                    method,
+                    sender,
+                } => {
+                    tracing::trace!(?id, %method, "incoming_actor: subscribing to response");
                     let id = serde_json::to_value(&id).unwrap();
-                    pending_replies.insert(id, sender);
+                    pending_replies.insert(
+                        id,
+                        PendingReply {
+                            method,
+                            peer_id,
+                            sender,
+                        },
+                    );
                 }
             },
 
@@ -100,9 +118,10 @@ pub(super) async fn incoming_protocol_actor<Link: JrLink>(
                 Ok(message) => match message {
                     jsonrpcmsg::Message::Request(request) => {
                         tracing::trace!(method = %request.method, id = ?request.id, "Handling request");
-                        dispatch_request(
+                        let message_cx = message_cx_from_request(json_rpc_cx, request);
+                        dispatch_message_cx(
                             json_rpc_cx,
-                            request,
+                            message_cx,
                             &mut dynamic_handlers,
                             &mut handler,
                             &mut pending_messages,
@@ -124,32 +143,19 @@ pub(super) async fn incoming_protocol_actor<Link: JrLink>(
                             };
 
                             let id_json = serde_json::to_value(&id).unwrap();
-                            if let Some(sender) = pending_replies.remove(&id_json) {
-                                // Create the ack channel
-                                let (ack_tx, ack_rx) = oneshot::channel();
-                                let send_result = sender.send(crate::jsonrpc::ResponsePayload {
-                                    result,
-                                    ack_tx: Some(ack_tx),
-                                });
-                                if send_result.is_err() {
-                                    tracing::warn!(
-                                        ?id,
-                                        "incoming_actor: failed to send response, receiver dropped"
-                                    );
-                                } else {
-                                    tracing::trace!(
-                                        ?id,
-                                        "incoming_actor: dispatched response, awaiting ack"
-                                    );
-                                    // Wait for the receiver to acknowledge processing is complete.
-                                    // This ensures ordering: the dispatch loop won't process the
-                                    // next message until the response handler has finished.
-                                    let _ = ack_rx.await;
-                                    tracing::trace!(
-                                        ?id,
-                                        "incoming_actor: received ack, continuing dispatch loop"
-                                    );
-                                }
+                            if let Some(pending_reply) = pending_replies.remove(&id_json) {
+                                // Route the response through the handler chain
+                                let message_cx =
+                                    message_cx_from_response(id, pending_reply, result);
+                                dispatch_message_cx(
+                                    json_rpc_cx,
+                                    message_cx,
+                                    &mut dynamic_handlers,
+                                    &mut handler,
+                                    &mut pending_messages,
+                                    &mut state,
+                                )
+                                .await?;
                             } else {
                                 tracing::warn!(
                                     ?id,
@@ -179,18 +185,13 @@ enum IncomingProtocolMsg<Link: JrLink> {
 
 /// Dispatches a JSON-RPC request to the handler.
 /// Report an error back to the server if it does not get handled.
-async fn dispatch_request<Link: JrLink>(
+fn message_cx_from_request<Link: JrLink>(
     json_rpc_cx: &JrConnectionCx<Link>,
     request: jsonrpcmsg::Request,
-    dynamic_handlers: &mut FxHashMap<Uuid, Box<dyn DynamicHandler<Link>>>,
-    handler: &mut impl JrMessageHandler<Link = Link>,
-    pending_messages: &mut Vec<MessageCx>,
-    state: &mut Link::State,
-) -> Result<(), crate::Error> {
+) -> MessageCx {
     let message = UntypedMessage::new(&request.method, &request.params).expect("well-formed JSON");
 
-    let mut retry_any = false;
-    let mut message_cx = match &request.id {
+    let message_cx = match &request.id {
         Some(id) => MessageCx::Request(
             message,
             JrRequestCx::new(
@@ -202,18 +203,63 @@ async fn dispatch_request<Link: JrLink>(
         None => MessageCx::Notification(message),
     };
 
+    message_cx
+}
+
+/// Dispatches a JSON-RPC response through the handler chain.
+///
+/// This allows handlers to intercept and process responses before they reach
+/// the awaiting code. The default behavior is to forward the response to the
+/// local awaiter via the oneshot channel.
+fn message_cx_from_response(
+    id: jsonrpcmsg::Id,
+    pending_reply: PendingReply,
+    result: Result<serde_json::Value, crate::Error>,
+) -> MessageCx {
+    let PendingReply {
+        method,
+        peer_id,
+        sender,
+    } = pending_reply;
+
+    // Create a MessageCx::Response with a JrResponseCx that routes to the oneshot
+    let response_cx = JrResponseCx::new(method.clone(), id.clone(), peer_id, sender);
+    MessageCx::Response(result, response_cx)
+}
+
+#[tracing::instrument(
+    skip(json_rpc_cx, message_cx, dynamic_handlers, handler, pending_messages, state),
+    fields(method = message_cx.method()),
+    level = "trace",
+)]
+async fn dispatch_message_cx<Link: JrLink>(
+    json_rpc_cx: &JrConnectionCx<Link>,
+    mut message_cx: MessageCx,
+    dynamic_handlers: &mut FxHashMap<Uuid, Box<dyn DynamicHandler<Link>>>,
+    handler: &mut impl JrMessageHandler<Link = Link>,
+    pending_messages: &mut Vec<MessageCx>,
+    state: &mut Link::State,
+) -> Result<(), crate::Error> {
+    tracing::trace!(?message_cx, "dispatch_message_cx");
+
+    let mut retry_any = false;
+
+    let id = message_cx.id();
+    let method = message_cx.method().to_string();
+
     // First, apply the handlers given by the user.
+    tracing::trace!(handler = ?handler.describe_chain(), "Attempting handler chain");
     match handler
         .handle_message(message_cx, json_rpc_cx.clone())
         .await?
     {
         Handled::Yes => {
-            tracing::trace!(method = request.method, ?request.id, handler = ?handler.describe_chain(), "Handled successfully");
+            tracing::trace!(?method, ?id, handler = ?handler.describe_chain(), "Handler accepted message");
             return Ok(());
         }
 
         Handled::No { message: m, retry } => {
-            tracing::trace!(method = ?request.method, ?request.id, handler = ?handler.describe_chain(), "Handler declined message");
+            tracing::trace!(?method, ?id, handler = ?handler.describe_chain(), "Handler declined message");
             message_cx = m;
             retry_any |= retry;
         }
@@ -221,17 +267,18 @@ async fn dispatch_request<Link: JrLink>(
 
     // Next, apply any dynamic handlers.
     for dynamic_handler in dynamic_handlers.values_mut() {
+        tracing::trace!(handler = ?dynamic_handler.dyn_describe_chain(), "Attempting dynamic handler");
         match dynamic_handler
             .dyn_handle_message(message_cx, json_rpc_cx.clone())
             .await?
         {
             Handled::Yes => {
-                tracing::trace!(method = request.method, ?request.id, handler = ?dynamic_handler.dyn_describe_chain(), "Message handled");
+                tracing::trace!(?method, ?id, handler = ?dynamic_handler.dyn_describe_chain(), "Dynamic handler accepted message");
                 return Ok(());
             }
 
             Handled::No { message: m, retry } => {
-                tracing::trace!(method = ?request.method, ?request.id, handler = ?dynamic_handler.dyn_describe_chain(),  "Handler declined message");
+                tracing::trace!(?method, ?id, handler = ?dynamic_handler.dyn_describe_chain(),  "Dynamic handler declined message");
                 retry_any |= retry;
                 message_cx = m;
             }
@@ -239,13 +286,14 @@ async fn dispatch_request<Link: JrLink>(
     }
 
     // Finally, apply the default handler for the role.
+    tracing::trace!(Link = ?Link::default(), "Attempting Link");
     match Link::default_message_handler(message_cx, json_rpc_cx.clone(), state).await? {
         Handled::Yes => {
-            tracing::trace!(method = ?request.method, handler = "default", "Handled successfully");
+            tracing::trace!(?method, handler = "default", "Link accepted message");
             return Ok(());
         }
         Handled::No { message: m, retry } => {
-            tracing::trace!(method = ?request.method, handler = "default", "Not handled");
+            tracing::trace!(?method, handler = "default", "Link declined message");
             message_cx = m;
             retry_any |= retry;
         }
@@ -254,15 +302,26 @@ async fn dispatch_request<Link: JrLink>(
     // If the message was never handled, check whether the retry flag was set.
     // If so, enqueue it for later processing. Else, reject it.
     if retry_any {
-        tracing::debug!(method = ?request.method, "Retrying message as new dynamic handlers are added");
+        tracing::debug!(
+            ?method,
+            "Retrying message as new dynamic handlers are added"
+        );
         pending_messages.push(message_cx);
         Ok(())
     } else {
-        tracing::debug!(method = ?request.method, "Rejecting message");
-        let method = message_cx.method().to_string();
-        message_cx.respond_with_error(
-            crate::Error::method_not_found().data(method),
-            json_rpc_cx.clone(),
-        )
+        match message_cx {
+            MessageCx::Request(..) | MessageCx::Notification(_) => {
+                tracing::info!(?method, "Rejecting message with error, no handler");
+                let method = message_cx.method().to_string();
+                message_cx.respond_with_error(
+                    crate::Error::method_not_found().data(method),
+                    json_rpc_cx.clone(),
+                )
+            }
+            MessageCx::Response(result, response_cx) => {
+                tracing::trace!(?method, "Forwarding response");
+                response_cx.respond_with_result(result)
+            }
+        }
     }
 }

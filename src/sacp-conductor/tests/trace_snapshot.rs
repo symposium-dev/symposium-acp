@@ -120,10 +120,7 @@ impl EventNormalizer {
                     n.params = self.normalize_json(n.params);
                     TraceEvent::Notification(n)
                 }
-                TraceEvent::Trace(mut t) => {
-                    t.ts = 0.0;
-                    TraceEvent::Trace(t)
-                }
+                _ => panic!("unknown trace event type"),
             })
             .collect()
     }
@@ -184,31 +181,10 @@ async fn test_trace_snapshot() -> Result<(), sacp::Error> {
                 RequestEvent {
                     ts: 0.0,
                     protocol: Acp,
-                    from: "client",
-                    to: "proxy:0",
+                    from: "Client",
+                    to: "Proxy(0)",
                     id: String("id:0"),
-                    method: "initialize",
-                    session: None,
-                    params: Object {
-                        "clientCapabilities": Object {
-                            "fs": Object {
-                                "readTextFile": Bool(false),
-                                "writeTextFile": Bool(false),
-                            },
-                            "terminal": Bool(false),
-                        },
-                        "protocolVersion": Number(1),
-                    },
-                },
-            ),
-            Request(
-                RequestEvent {
-                    ts: 0.0,
-                    protocol: Acp,
-                    from: "proxy:0",
-                    to: "agent",
-                    id: String("id:1"),
-                    method: "initialize",
+                    method: "_proxy/initialize",
                     session: None,
                     params: Object {
                         "clientCapabilities": Object {
@@ -225,34 +201,8 @@ async fn test_trace_snapshot() -> Result<(), sacp::Error> {
             Response(
                 ResponseEvent {
                     ts: 0.0,
-                    from: "agent",
-                    to: "proxy:0",
-                    id: String("id:1"),
-                    is_error: false,
-                    payload: Object {
-                        "agentCapabilities": Object {
-                            "loadSession": Bool(false),
-                            "mcpCapabilities": Object {
-                                "http": Bool(false),
-                                "sse": Bool(false),
-                            },
-                            "promptCapabilities": Object {
-                                "audio": Bool(false),
-                                "embeddedContext": Bool(false),
-                                "image": Bool(false),
-                            },
-                            "sessionCapabilities": Object {},
-                        },
-                        "authMethods": Array [],
-                        "protocolVersion": Number(1),
-                    },
-                },
-            ),
-            Response(
-                ResponseEvent {
-                    ts: 0.0,
-                    from: "proxy:0",
-                    to: "client",
+                    from: "Proxy(0)",
+                    to: "Client",
                     id: String("id:0"),
                     is_error: false,
                     payload: Object {
@@ -278,24 +228,9 @@ async fn test_trace_snapshot() -> Result<(), sacp::Error> {
                 RequestEvent {
                     ts: 0.0,
                     protocol: Acp,
-                    from: "client",
-                    to: "proxy:0",
-                    id: String("id:2"),
-                    method: "session/new",
-                    session: None,
-                    params: Object {
-                        "cwd": String("."),
-                        "mcpServers": Array [],
-                    },
-                },
-            ),
-            Request(
-                RequestEvent {
-                    ts: 0.0,
-                    protocol: Acp,
-                    from: "proxy:0",
-                    to: "agent",
-                    id: String("id:3"),
+                    from: "Client",
+                    to: "Proxy(0)",
+                    id: String("id:1"),
                     method: "session/new",
                     session: None,
                     params: Object {
@@ -307,54 +242,22 @@ async fn test_trace_snapshot() -> Result<(), sacp::Error> {
             Response(
                 ResponseEvent {
                     ts: 0.0,
-                    from: "agent",
-                    to: "proxy:0",
-                    id: String("id:3"),
+                    from: "Proxy(0)",
+                    to: "Client",
+                    id: String("id:1"),
                     is_error: false,
                     payload: Object {
                         "sessionId": String("session:0"),
                     },
                 },
             ),
-            Response(
-                ResponseEvent {
+            Request(
+                RequestEvent {
                     ts: 0.0,
-                    from: "proxy:0",
-                    to: "client",
+                    protocol: Acp,
+                    from: "Client",
+                    to: "Proxy(0)",
                     id: String("id:2"),
-                    is_error: false,
-                    payload: Object {
-                        "sessionId": String("session:0"),
-                    },
-                },
-            ),
-            Request(
-                RequestEvent {
-                    ts: 0.0,
-                    protocol: Acp,
-                    from: "client",
-                    to: "proxy:0",
-                    id: String("id:4"),
-                    method: "session/prompt",
-                    session: None,
-                    params: Object {
-                        "prompt": Array [
-                            Object {
-                                "text": String("Hello"),
-                                "type": String("text"),
-                            },
-                        ],
-                        "sessionId": String("session:0"),
-                    },
-                },
-            ),
-            Request(
-                RequestEvent {
-                    ts: 0.0,
-                    protocol: Acp,
-                    from: "proxy:0",
-                    to: "agent",
-                    id: String("id:5"),
                     method: "session/prompt",
                     session: None,
                     params: Object {
@@ -372,8 +275,8 @@ async fn test_trace_snapshot() -> Result<(), sacp::Error> {
                 NotificationEvent {
                     ts: 0.0,
                     protocol: Acp,
-                    from: "agent",
-                    to: "proxy:0",
+                    from: "Proxy(1)",
+                    to: "Proxy(0)",
                     method: "session/update",
                     session: None,
                     params: Object {
@@ -391,41 +294,9 @@ async fn test_trace_snapshot() -> Result<(), sacp::Error> {
             Response(
                 ResponseEvent {
                     ts: 0.0,
-                    from: "agent",
-                    to: "proxy:0",
-                    id: String("id:5"),
-                    is_error: false,
-                    payload: Object {
-                        "stopReason": String("end_turn"),
-                    },
-                },
-            ),
-            Notification(
-                NotificationEvent {
-                    ts: 0.0,
-                    protocol: Acp,
-                    from: "proxy:0",
-                    to: "client",
-                    method: "session/update",
-                    session: None,
-                    params: Object {
-                        "sessionId": String("session:0"),
-                        "update": Object {
-                            "content": Object {
-                                "text": String(">How do you do. Please state your problem."),
-                                "type": String("text"),
-                            },
-                            "sessionUpdate": String("agent_message_chunk"),
-                        },
-                    },
-                },
-            ),
-            Response(
-                ResponseEvent {
-                    ts: 0.0,
-                    from: "proxy:0",
-                    to: "client",
-                    id: String("id:4"),
+                    from: "Proxy(0)",
+                    to: "Client",
+                    id: String("id:2"),
                     is_error: false,
                     payload: Object {
                         "stopReason": String("end_turn"),

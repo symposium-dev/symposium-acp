@@ -11,6 +11,10 @@ struct EchoRequestResponse {
 }
 
 impl JrMessage for EchoRequestResponse {
+    fn matches_method(method: &str) -> bool {
+        method == "echo"
+    }
+
     fn method(&self) -> &str {
         "echo"
     }
@@ -22,15 +26,11 @@ impl JrMessage for EchoRequestResponse {
         })
     }
 
-    fn parse_message(
-        method: &str,
-        params: &impl serde::Serialize,
-    ) -> Option<Result<Self, sacp::Error>> {
-        if method == "echo" {
-            Some(sacp::util::json_cast(params))
-        } else {
-            None
+    fn parse_message(method: &str, params: &impl serde::Serialize) -> Result<Self, sacp::Error> {
+        if !<Self as JrMessage>::matches_method(method) {
+            return Err(sacp::Error::method_not_found());
         }
+        sacp::util::json_cast(params)
     }
 }
 

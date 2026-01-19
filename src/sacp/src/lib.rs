@@ -116,14 +116,14 @@ pub mod jsonrpcmsg {
 
 pub use jsonrpc::{
     ByteStreams, Channel, Handled, IntoHandled, JrConnection, JrConnectionBuilder, JrConnectionCx,
-    JrMessage, JrMessageHandler, JrNotification, JrRequest, JrRequestCx, JrResponse,
+    JrMessage, JrMessageHandler, JrNotification, JrRequest, JrRequestCx, JrResponse, JrResponseCx,
     JrResponsePayload, Lines, MessageCx, NullHandler, UntypedMessage,
     responder::{ChainResponder, JrResponder, NullResponder},
 };
 
 pub use link::{AgentToClient, ClientToAgent, HasDefaultPeer, HasPeer, JrLink, ProxyToConductor};
 
-pub use peer::{AgentPeer, ClientPeer, ConductorPeer, JrPeer};
+pub use peer::{AgentPeer, ClientPeer, ConductorPeer, JrPeer, PeerId};
 
 pub use component::{Component, DynComponent};
 

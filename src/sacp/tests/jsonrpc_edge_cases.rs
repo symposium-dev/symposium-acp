@@ -47,6 +47,10 @@ fn setup_test_streams() -> (
 struct EmptyRequest;
 
 impl JrMessage for EmptyRequest {
+    fn matches_method(method: &str) -> bool {
+        method == "empty_method"
+    }
+
     fn method(&self) -> &str {
         "empty_method"
     }
@@ -55,14 +59,11 @@ impl JrMessage for EmptyRequest {
         sacp::UntypedMessage::new(self.method(), self)
     }
 
-    fn parse_message(
-        method: &str,
-        _params: &impl serde::Serialize,
-    ) -> Option<Result<Self, sacp::Error>> {
-        if method != "empty_method" {
-            return None;
+    fn parse_message(method: &str, _params: &impl serde::Serialize) -> Result<Self, sacp::Error> {
+        if !Self::matches_method(method) {
+            return Err(sacp::Error::method_not_found());
         }
-        Some(Ok(EmptyRequest))
+        Ok(EmptyRequest)
     }
 }
 
@@ -77,6 +78,10 @@ struct OptionalParamsRequest {
 }
 
 impl JrMessage for OptionalParamsRequest {
+    fn matches_method(method: &str) -> bool {
+        method == "optional_params_method"
+    }
+
     fn method(&self) -> &str {
         "optional_params_method"
     }
@@ -85,14 +90,11 @@ impl JrMessage for OptionalParamsRequest {
         sacp::UntypedMessage::new(self.method(), self)
     }
 
-    fn parse_message(
-        method: &str,
-        params: &impl serde::Serialize,
-    ) -> Option<Result<Self, sacp::Error>> {
-        if method != "optional_params_method" {
-            return None;
+    fn parse_message(method: &str, params: &impl serde::Serialize) -> Result<Self, sacp::Error> {
+        if !Self::matches_method(method) {
+            return Err(sacp::Error::method_not_found());
         }
-        Some(sacp::util::json_cast(params))
+        sacp::util::json_cast(params)
     }
 }
 

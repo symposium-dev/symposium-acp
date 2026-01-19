@@ -17,20 +17,26 @@ use crate::util::json_cast;
 // RequestPermissionRequest
 // ============================================================================
 
+const METHOD_REQUEST_PERMISSION: &str = "session/request_permission";
+
 impl JrMessage for RequestPermissionRequest {
+    fn matches_method(method: &str) -> bool {
+        method == METHOD_REQUEST_PERMISSION
+    }
+
     fn method(&self) -> &str {
-        "session/request_permission"
+        METHOD_REQUEST_PERMISSION
     }
 
     fn to_untyped_message(&self) -> Result<crate::UntypedMessage, crate::Error> {
         crate::UntypedMessage::new(self.method(), self)
     }
 
-    fn parse_message(method: &str, params: &impl Serialize) -> Option<Result<Self, crate::Error>> {
-        if method != "session/request_permission" {
-            return None;
+    fn parse_message(method: &str, params: &impl Serialize) -> Result<Self, crate::Error> {
+        if method != METHOD_REQUEST_PERMISSION {
+            return Err(crate::Error::method_not_found());
         }
-        Some(json_cast(params))
+        json_cast(params)
     }
 }
 
@@ -52,20 +58,26 @@ impl JrResponsePayload for RequestPermissionResponse {
 // WriteTextFileRequest
 // ============================================================================
 
+const METHOD_WRITE_TEXT_FILE: &str = "fs/write_text_file";
+
 impl JrMessage for WriteTextFileRequest {
+    fn matches_method(method: &str) -> bool {
+        method == METHOD_WRITE_TEXT_FILE
+    }
+
     fn method(&self) -> &str {
-        "fs/write_text_file"
+        METHOD_WRITE_TEXT_FILE
     }
 
     fn to_untyped_message(&self) -> Result<crate::UntypedMessage, crate::Error> {
         crate::UntypedMessage::new(self.method(), self)
     }
 
-    fn parse_message(method: &str, params: &impl Serialize) -> Option<Result<Self, crate::Error>> {
-        if method != "fs/write_text_file" {
-            return None;
+    fn parse_message(method: &str, params: &impl Serialize) -> Result<Self, crate::Error> {
+        if method != METHOD_WRITE_TEXT_FILE {
+            return Err(crate::Error::method_not_found());
         }
-        Some(json_cast(params))
+        json_cast(params)
     }
 }
 
@@ -87,20 +99,26 @@ impl JrResponsePayload for WriteTextFileResponse {
 // ReadTextFileRequest
 // ============================================================================
 
+const METHOD_READ_TEXT_FILE: &str = "fs/read_text_file";
+
 impl JrMessage for ReadTextFileRequest {
+    fn matches_method(method: &str) -> bool {
+        method == METHOD_READ_TEXT_FILE
+    }
+
     fn method(&self) -> &str {
-        "fs/read_text_file"
+        METHOD_READ_TEXT_FILE
     }
 
     fn to_untyped_message(&self) -> Result<crate::UntypedMessage, crate::Error> {
         crate::UntypedMessage::new(self.method(), self)
     }
 
-    fn parse_message(method: &str, params: &impl Serialize) -> Option<Result<Self, crate::Error>> {
-        if method != "fs/read_text_file" {
-            return None;
+    fn parse_message(method: &str, params: &impl Serialize) -> Result<Self, crate::Error> {
+        if method != METHOD_READ_TEXT_FILE {
+            return Err(crate::Error::method_not_found());
         }
-        Some(json_cast(params))
+        json_cast(params)
     }
 }
 
@@ -122,20 +140,26 @@ impl JrResponsePayload for ReadTextFileResponse {
 // CreateTerminalRequest
 // ============================================================================
 
+const METHOD_CREATE_TERMINAL: &str = "terminal/create";
+
 impl JrMessage for CreateTerminalRequest {
+    fn matches_method(method: &str) -> bool {
+        method == METHOD_CREATE_TERMINAL
+    }
+
     fn method(&self) -> &str {
-        "terminal/create"
+        METHOD_CREATE_TERMINAL
     }
 
     fn to_untyped_message(&self) -> Result<crate::UntypedMessage, crate::Error> {
         crate::UntypedMessage::new(self.method(), self)
     }
 
-    fn parse_message(method: &str, params: &impl Serialize) -> Option<Result<Self, crate::Error>> {
-        if method != "terminal/create" {
-            return None;
+    fn parse_message(method: &str, params: &impl Serialize) -> Result<Self, crate::Error> {
+        if method != METHOD_CREATE_TERMINAL {
+            return Err(crate::Error::method_not_found());
         }
-        Some(json_cast(params))
+        json_cast(params)
     }
 }
 
@@ -157,20 +181,26 @@ impl JrResponsePayload for CreateTerminalResponse {
 // TerminalOutputRequest
 // ============================================================================
 
+const METHOD_TERMINAL_OUTPUT: &str = "terminal/output";
+
 impl JrMessage for TerminalOutputRequest {
+    fn matches_method(method: &str) -> bool {
+        method == METHOD_TERMINAL_OUTPUT
+    }
+
     fn method(&self) -> &str {
-        "terminal/output"
+        METHOD_TERMINAL_OUTPUT
     }
 
     fn to_untyped_message(&self) -> Result<crate::UntypedMessage, crate::Error> {
         crate::UntypedMessage::new(self.method(), self)
     }
 
-    fn parse_message(method: &str, params: &impl Serialize) -> Option<Result<Self, crate::Error>> {
-        if method != "terminal/output" {
-            return None;
+    fn parse_message(method: &str, params: &impl Serialize) -> Result<Self, crate::Error> {
+        if method != METHOD_TERMINAL_OUTPUT {
+            return Err(crate::Error::method_not_found());
         }
-        Some(json_cast(params))
+        json_cast(params)
     }
 }
 
@@ -192,20 +222,26 @@ impl JrResponsePayload for TerminalOutputResponse {
 // ReleaseTerminalRequest
 // ============================================================================
 
+const METHOD_RELEASE_TERMINAL: &str = "terminal/release";
+
 impl JrMessage for ReleaseTerminalRequest {
+    fn matches_method(method: &str) -> bool {
+        method == METHOD_RELEASE_TERMINAL
+    }
+
     fn method(&self) -> &str {
-        "terminal/release"
+        METHOD_RELEASE_TERMINAL
     }
 
     fn to_untyped_message(&self) -> Result<crate::UntypedMessage, crate::Error> {
         crate::UntypedMessage::new(self.method(), self)
     }
 
-    fn parse_message(method: &str, params: &impl Serialize) -> Option<Result<Self, crate::Error>> {
-        if method != "terminal/release" {
-            return None;
+    fn parse_message(method: &str, params: &impl Serialize) -> Result<Self, crate::Error> {
+        if method != METHOD_RELEASE_TERMINAL {
+            return Err(crate::Error::method_not_found());
         }
-        Some(json_cast(params))
+        json_cast(params)
     }
 }
 
@@ -227,20 +263,26 @@ impl JrResponsePayload for ReleaseTerminalResponse {
 // WaitForTerminalExitRequest
 // ============================================================================
 
+const METHOD_WAIT_FOR_TERMINAL_EXIT: &str = "terminal/wait_for_exit";
+
 impl JrMessage for WaitForTerminalExitRequest {
+    fn matches_method(method: &str) -> bool {
+        method == METHOD_WAIT_FOR_TERMINAL_EXIT
+    }
+
     fn method(&self) -> &str {
-        "terminal/wait_for_exit"
+        METHOD_WAIT_FOR_TERMINAL_EXIT
     }
 
     fn to_untyped_message(&self) -> Result<crate::UntypedMessage, crate::Error> {
         crate::UntypedMessage::new(self.method(), self)
     }
 
-    fn parse_message(method: &str, params: &impl Serialize) -> Option<Result<Self, crate::Error>> {
-        if method != "terminal/wait_for_exit" {
-            return None;
+    fn parse_message(method: &str, params: &impl Serialize) -> Result<Self, crate::Error> {
+        if method != METHOD_WAIT_FOR_TERMINAL_EXIT {
+            return Err(crate::Error::method_not_found());
         }
-        Some(json_cast(params))
+        json_cast(params)
     }
 }
 
@@ -262,20 +304,26 @@ impl JrResponsePayload for WaitForTerminalExitResponse {
 // KillTerminalCommandRequest
 // ============================================================================
 
+const METHOD_KILL_TERMINAL: &str = "terminal/kill";
+
 impl JrMessage for KillTerminalCommandRequest {
+    fn matches_method(method: &str) -> bool {
+        method == METHOD_KILL_TERMINAL
+    }
+
     fn method(&self) -> &str {
-        "terminal/kill"
+        METHOD_KILL_TERMINAL
     }
 
     fn to_untyped_message(&self) -> Result<crate::UntypedMessage, crate::Error> {
         crate::UntypedMessage::new(self.method(), self)
     }
 
-    fn parse_message(method: &str, params: &impl Serialize) -> Option<Result<Self, crate::Error>> {
-        if method != "terminal/kill" {
-            return None;
+    fn parse_message(method: &str, params: &impl Serialize) -> Result<Self, crate::Error> {
+        if method != METHOD_KILL_TERMINAL {
+            return Err(crate::Error::method_not_found());
         }
-        Some(json_cast(params))
+        json_cast(params)
     }
 }
 

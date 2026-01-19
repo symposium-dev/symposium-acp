@@ -51,6 +51,10 @@ struct SimpleRequest {
 }
 
 impl JrMessage for SimpleRequest {
+    fn matches_method(method: &str) -> bool {
+        method == "simple_method"
+    }
+
     fn method(&self) -> &str {
         "simple_method"
     }
@@ -59,14 +63,11 @@ impl JrMessage for SimpleRequest {
         sacp::UntypedMessage::new(self.method(), self)
     }
 
-    fn parse_message(
-        method: &str,
-        params: &impl serde::Serialize,
-    ) -> Option<Result<Self, sacp::Error>> {
-        if method != "simple_method" {
-            return None;
+    fn parse_message(method: &str, params: &impl serde::Serialize) -> Result<Self, sacp::Error> {
+        if !Self::matches_method(method) {
+            return Err(sacp::Error::method_not_found());
         }
-        Some(sacp::util::json_cast(params))
+        sacp::util::json_cast(params)
     }
 }
 
@@ -233,6 +234,10 @@ struct ErrorRequest {
 }
 
 impl JrMessage for ErrorRequest {
+    fn matches_method(method: &str) -> bool {
+        method == "error_method"
+    }
+
     fn method(&self) -> &str {
         "error_method"
     }
@@ -241,14 +246,11 @@ impl JrMessage for ErrorRequest {
         sacp::UntypedMessage::new(self.method(), self)
     }
 
-    fn parse_message(
-        method: &str,
-        params: &impl serde::Serialize,
-    ) -> Option<Result<Self, sacp::Error>> {
-        if method != "error_method" {
-            return None;
+    fn parse_message(method: &str, params: &impl serde::Serialize) -> Result<Self, sacp::Error> {
+        if !Self::matches_method(method) {
+            return Err(sacp::Error::method_not_found());
         }
-        Some(sacp::util::json_cast(params))
+        sacp::util::json_cast(params)
     }
 }
 
@@ -314,6 +316,10 @@ async fn test_handler_returns_error() {
 struct EmptyRequest;
 
 impl JrMessage for EmptyRequest {
+    fn matches_method(method: &str) -> bool {
+        method == "strict_method"
+    }
+
     fn method(&self) -> &str {
         "strict_method"
     }
@@ -322,14 +328,11 @@ impl JrMessage for EmptyRequest {
         sacp::UntypedMessage::new(self.method(), self)
     }
 
-    fn parse_message(
-        method: &str,
-        _params: &impl serde::Serialize,
-    ) -> Option<Result<Self, sacp::Error>> {
-        if method != "strict_method" {
-            return None;
+    fn parse_message(method: &str, _params: &impl serde::Serialize) -> Result<Self, sacp::Error> {
+        if !Self::matches_method(method) {
+            return Err(sacp::Error::method_not_found());
         }
-        Some(Ok(EmptyRequest))
+        Ok(EmptyRequest)
     }
 }
 
